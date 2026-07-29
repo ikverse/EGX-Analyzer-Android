@@ -47,12 +47,21 @@ import androidx.window.layout.WindowLayoutInfo
 
 internal enum class WindowWidth { COMPACT, MEDIUM, EXPANDED }
 
+/**
+ * Width at which the layout switches to its wide form.
+ *
+ * Below Material's 840dp expanded breakpoint on purpose: a Fold 7 unfolded in portrait is roughly
+ * 750dp, so an 840dp threshold would leave the largest screen the app runs on using the compact
+ * layout.
+ */
+internal const val WIDE_LAYOUT_DP = 700f
+
 @Composable
 fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
     val density = LocalDensity.current
     val width = with(density) { LocalWindowInfo.current.containerSize.width.toDp().value }
     val windowWidth = when {
-        width >= 840 -> WindowWidth.EXPANDED
+        width >= WIDE_LAYOUT_DP -> WindowWidth.EXPANDED
         width >= 600 -> WindowWidth.MEDIUM
         else -> WindowWidth.COMPACT
     }

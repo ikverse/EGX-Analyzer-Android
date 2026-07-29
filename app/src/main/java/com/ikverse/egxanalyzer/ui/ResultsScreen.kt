@@ -30,6 +30,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SavedAnalysis
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
+import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 
 @Composable
 internal fun ResultsScreen(activity: Activity, appState: AppState) {
@@ -107,8 +111,16 @@ private fun ResultDetail(saved: SavedAnalysis) {
     // Analyses saved before the consolidated contract have no nested occurrences, so fall back
     // to the flattened rows rather than showing an empty detail pane.
     if (saved.result.consolidated.isNotEmpty()) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            saved.result.consolidated.forEach { stock -> RecommendationCard(stock) }
+        val density = LocalDensity.current
+        val widthDp = with(density) { LocalWindowInfo.current.containerSize.width.toDp().value }
+        var detail by remember { mutableStateOf<Pair<ConsolidatedRecommendation, RecommendationDataPoint>?>(null) }
+        RecommendationTable(
+            stocks = saved.result.consolidated,
+            wide = widthDp >= WIDE_LAYOUT_DP,
+            onSelectPoint = { stock, point -> detail = stock to point },
+        )
+        detail?.let { (stock, point) ->
+            OccurrenceSheet(stock, point, onDismiss = { detail = null })
         }
     } else {
         saved.result.recommendations.forEach { recommendation -> LegacyDetail(recommendation) }
