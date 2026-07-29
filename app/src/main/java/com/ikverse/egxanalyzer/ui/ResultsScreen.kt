@@ -39,6 +39,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.AnalysisReport
+import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.RecommendationResult
@@ -177,6 +178,7 @@ private fun shareReport(activity: Activity, report: AnalysisReport) {
 private fun ResultDetail(saved: SavedAnalysis) {
     var detail by remember { mutableStateOf<Pair<ConsolidatedRecommendation, RecommendationDataPoint>?>(null) }
     var showTrace by remember { mutableStateOf(false) }
+    var openImage by remember { mutableStateOf<Int?>(null) }
     // The model cites sources by Telegram id; the channel name lives on the stored trace.
     val channelNames = remember(saved.id) {
         saved.result.sources
@@ -191,6 +193,8 @@ private fun ResultDetail(saved: SavedAnalysis) {
             RecommendationTable(
                 stocks = saved.result.consolidated,
                 channelFor = { messageId -> channelNames[messageId] },
+                imagePathFor = { ref -> saved.result.imagePathFor(ref) },
+                onOpenImage = { ref -> openImage = ref },
                 onSelectPoint = { stock, point -> detail = stock to point },
             )
         } else {
@@ -204,7 +208,15 @@ private fun ResultDetail(saved: SavedAnalysis) {
     }
 
     detail?.let { (stock, point) ->
-        OccurrenceSheet(stock, point, onDismiss = { detail = null })
+        OccurrenceSheet(
+            stock = stock,
+            point = point,
+            imagePath = saved.result.imagePathFor(point.sourceImageRef),
+            onDismiss = { detail = null },
+        )
+    }
+    openImage?.let { ref ->
+        SourceImageViewer(saved.result.imagePathFor(ref), ref, onDismiss = { openImage = null })
     }
 }
 
@@ -278,3 +290,7 @@ private fun LegacyDetail(recommendation: RecommendationResult) {
 }
 
 private val COMPLETED_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm")
+
+/** IMAGE_REF is one-based over the images sent with the request. */
+private fun AnalysisResult.imagePathFor(reference: Int?): String? =
+    reference?.let { imagePaths.getOrNull(it - 1) }

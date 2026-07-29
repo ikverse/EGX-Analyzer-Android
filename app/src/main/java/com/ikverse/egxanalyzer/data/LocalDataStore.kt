@@ -151,6 +151,7 @@ class LocalDataStore(context: Context) :
                 }
             })
         })
+        put("imagePaths", JSONArray(imagePaths))
         put("rawResponse", rawResponse)
         put("completedAt", completedAt.toString())
         put("recommendations", JSONArray().apply {
@@ -217,6 +218,7 @@ class LocalDataStore(context: Context) :
                 }.orEmpty(),
             )
         } ?: AnalysisDiagnostics(),
+        imagePaths = optJSONArray("imagePaths")?.strings().orEmpty(),
         rawResponse = optString("rawResponse"),
         // Rebuilt from the stored response rather than persisted separately, so the nested
         // occurrences can never drift from the response they came from - and analyses saved before

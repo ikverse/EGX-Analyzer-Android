@@ -12,6 +12,10 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -29,8 +33,10 @@ import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 internal fun OccurrenceSheet(
     stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
+    imagePath: String? = null,
     onDismiss: () -> Unit,
 ) {
+    var viewingImage by remember { mutableStateOf(false) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -83,6 +89,14 @@ internal fun OccurrenceSheet(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (imagePath != null) {
+                SourceImageThumbnail(
+                    path = imagePath,
+                    reference = point.sourceImageRef,
+                    size = 88.dp,
+                    onOpen = { viewingImage = true },
+                )
+            }
             point.recommendationEvidence?.let {
                 Text("“$it”", style = MaterialTheme.typography.bodyMedium)
             }
@@ -98,6 +112,9 @@ internal fun OccurrenceSheet(
                 )
             }
         }
+    }
+    if (viewingImage) {
+        SourceImageViewer(imagePath, point.sourceImageRef, onDismiss = { viewingImage = false })
     }
 }
 

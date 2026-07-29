@@ -154,6 +154,11 @@ data class AnalysisResult(
     val recommendations: List<RecommendationResult>,
     /** Full consolidated extraction; `recommendations` is a flattened view of the same data. */
     val consolidated: List<ConsolidatedRecommendation> = emptyList(),
+    /**
+     * Image sources in the order they were sent, so index + 1 is the IMAGE_REF the model cites.
+     * Paths point into Telegram's own storage and may disappear when it prunes its cache.
+     */
+    val imagePaths: List<String> = emptyList(),
     val inquiryReplyCount: Int,
     val analysisMode: AnalysisMode = AnalysisMode.NEXT_DAY,
     val recommendationTargetDate: LocalDate? = null,

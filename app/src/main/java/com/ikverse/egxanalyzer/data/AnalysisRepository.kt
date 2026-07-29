@@ -325,6 +325,8 @@ class CloudAnalysisRepository(
         return AnalysisResult(
             requestId = request.requestId,
             consolidated = consolidated,
+            // Same order the request used, so IMAGE_REF n resolves to entry n - 1.
+            imagePaths = request.inputs.filterIsInstance<AnalysisInput.Image>().map { it.uri.toString() },
             recommendations = ConsolidatedParser.flatten(
                 consolidated, request.sourceTraces, request.targetDate,
             ),

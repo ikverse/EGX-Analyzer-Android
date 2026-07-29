@@ -43,6 +43,8 @@ import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 internal fun RecommendationTable(
     stocks: List<ConsolidatedRecommendation>,
     channelFor: (String?) -> String?,
+    imagePathFor: (Int?) -> String?,
+    onOpenImage: (Int?) -> Unit,
     onSelectPoint: (ConsolidatedRecommendation, RecommendationDataPoint) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -57,7 +59,8 @@ internal fun RecommendationTable(
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
-        val columns = if (maxWidth >= WideTableMinWidth) WideColumns else CompactColumns
+        val columns = (if (maxWidth >= WideTableMinWidth) WideColumns else CompactColumns) +
+            imageColumn(imagePathFor, onOpenImage)
         Column {
             HeaderRow(columns, scroll)
             stocks.forEach { stock ->
@@ -264,9 +267,6 @@ private val CompactColumns: List<TableColumn> = listOf(
     TableColumn("Resistance", 88.dp, TextAlign.End) { p ->
         TextCell(number(p.resistance), 88.dp, TextAlign.End)
     },
-    TableColumn("Image", 68.dp, TextAlign.Start) { p ->
-        TextCell(p.sourceImageRef?.let { "#$it" }, 68.dp)
-    },
 )
 
 /** Unfolded: every desktop column, in the desktop's order, with notes inline. */
@@ -274,9 +274,6 @@ private val WideColumns: List<TableColumn> = listOf(
     TableColumn("Target date", 104.dp, TextAlign.Start) { p -> TextCell(p.date?.toString(), 104.dp) },
     TableColumn("Source date", 108.dp, TextAlign.Start) { p -> TextCell(p.visibleSourceDate, 108.dp) },
     TableColumn("Timing", 96.dp, TextAlign.Start) { p -> TextCell(timing(p), 96.dp) },
-    TableColumn("Source image", 92.dp, TextAlign.Start) { p ->
-        TextCell(p.sourceImageRef?.let { "Image $it" }, 92.dp)
-    },
     TableColumn("Entry", 116.dp, TextAlign.End) { p ->
         TextCell(entry(p), 116.dp, TextAlign.End, MaterialTheme.colorScheme.primary, emphasis = true)
     },
@@ -299,4 +296,20 @@ private val WideColumns: List<TableColumn> = listOf(
     TableColumn("Resistance", 92.dp, TextAlign.End) { p -> TextCell(number(p.resistance), 92.dp, TextAlign.End) },
     TableColumn("Risk %", 76.dp, TextAlign.End) { p -> TextCell(percent(p.riskPct), 76.dp, TextAlign.End) },
     TableColumn("Notes", 260.dp, TextAlign.End) { p -> TextCell(p.notesArabic, 260.dp, TextAlign.End) },
+)
+
+/** Trailing column so the thumbnail is beside the numbers it came from, in both column sets. */
+private fun imageColumn(
+    imagePathFor: (Int?) -> String?,
+    onOpenImage: (Int?) -> Unit,
+): List<TableColumn> = listOf(
+    TableColumn("Source image", 72.dp, TextAlign.Start) { point ->
+        Box(Modifier.width(72.dp).padding(horizontal = 8.dp, vertical = 6.dp)) {
+            SourceImageThumbnail(
+                path = imagePathFor(point.sourceImageRef),
+                reference = point.sourceImageRef,
+                onOpen = { onOpenImage(point.sourceImageRef) },
+            )
+        }
+    },
 )
