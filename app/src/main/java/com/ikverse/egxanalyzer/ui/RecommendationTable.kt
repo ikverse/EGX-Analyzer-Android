@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,35 +42,42 @@ import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 @Composable
 internal fun RecommendationTable(
     stocks: List<ConsolidatedRecommendation>,
-    wide: Boolean,
+    channelFor: (String?) -> String?,
     onSelectPoint: (ConsolidatedRecommendation, RecommendationDataPoint) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (stocks.isEmpty()) return
     val scroll = rememberScrollState()
-    val columns = if (wide) WideColumns else CompactColumns
 
-    Column(
+    // Measured here rather than from the window: the table sits inside a pane that is narrower than
+    // the screen, so window width would promise room the table does not have.
+    BoxWithConstraints(
         modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
-        HeaderRow(columns, scroll)
-        stocks.forEach { stock ->
-            StockHeadingRow(stock)
-            stock.dataPoints.forEach { point ->
-                SourceRow(
-                    stock = stock,
-                    point = point,
-                    columns = columns,
-                    scroll = scroll,
-                    onClick = { onSelectPoint(stock, point) },
-                )
+        val columns = if (maxWidth >= WideTableMinWidth) WideColumns else CompactColumns
+        Column {
+            HeaderRow(columns, scroll)
+            stocks.forEach { stock ->
+                StockHeadingRow(stock)
+                stock.dataPoints.forEach { point ->
+                    SourceRow(
+                        point = point,
+                        pinned = channelFor(point.sourceMessageId) ?: point.sourceMessageId,
+                        columns = columns,
+                        scroll = scroll,
+                        onClick = { onSelectPoint(stock, point) },
+                    )
+                }
             }
         }
     }
 }
+
+/** Enough room for the full desktop column set without the pinned column crowding it. */
+private val WideTableMinWidth = 620.dp
 
 @Composable
 private fun HeaderRow(columns: List<TableColumn>, scroll: androidx.compose.foundation.ScrollState) {
@@ -80,7 +88,7 @@ private fun HeaderRow(columns: List<TableColumn>, scroll: androidx.compose.found
             .heightIn(min = 44.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        HeaderCell("Stock", PinnedWidth, TextAlign.Start)
+        HeaderCell("Source", PinnedWidth, TextAlign.Start)
         VerticalRule()
         Row(Modifier.horizontalScroll(scroll), verticalAlignment = Alignment.CenterVertically) {
             columns.forEach { column ->
@@ -125,8 +133,8 @@ private fun StockHeadingRow(stock: ConsolidatedRecommendation) {
 
 @Composable
 private fun SourceRow(
-    stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
+    pinned: String?,
     columns: List<TableColumn>,
     scroll: androidx.compose.foundation.ScrollState,
     onClick: () -> Unit,
@@ -140,9 +148,9 @@ private fun SourceRow(
     ) {
         Box(Modifier.width(PinnedWidth).padding(horizontal = 10.dp)) {
             Text(
-                stock.stockCode,
+                pinned ?: "—",
                 style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -224,7 +232,7 @@ private fun timing(point: RecommendationDataPoint): String? = when {
     else -> point.effectiveDateBasis
 }
 
-private val PinnedWidth = 74.dp
+private val PinnedWidth = 116.dp
 
 /** Folded: the six fields that decide a trade. The rest stay reachable by scrolling. */
 private val CompactColumns: List<TableColumn> = listOf(
@@ -256,14 +264,13 @@ private val CompactColumns: List<TableColumn> = listOf(
     TableColumn("Resistance", 88.dp, TextAlign.End) { p ->
         TextCell(number(p.resistance), 88.dp, TextAlign.End)
     },
-    TableColumn("Image", 64.dp, TextAlign.Start) { p ->
-        TextCell(p.sourceImageRef?.toString(), 64.dp)
+    TableColumn("Image", 68.dp, TextAlign.Start) { p ->
+        TextCell(p.sourceImageRef?.let { "#$it" }, 68.dp)
     },
 )
 
 /** Unfolded: every desktop column, in the desktop's order, with notes inline. */
 private val WideColumns: List<TableColumn> = listOf(
-    TableColumn("Source", 120.dp, TextAlign.Start) { p -> TextCell(p.sourceMessageId, 120.dp) },
     TableColumn("Target date", 104.dp, TextAlign.Start) { p -> TextCell(p.date?.toString(), 104.dp) },
     TableColumn("Source date", 108.dp, TextAlign.Start) { p -> TextCell(p.visibleSourceDate, 108.dp) },
     TableColumn("Timing", 96.dp, TextAlign.Start) { p -> TextCell(timing(p), 96.dp) },

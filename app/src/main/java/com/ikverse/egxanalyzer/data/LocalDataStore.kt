@@ -216,6 +216,11 @@ class LocalDataStore(context: Context) :
             )
         } ?: AnalysisDiagnostics(),
         rawResponse = optString("rawResponse"),
+        // Rebuilt from the stored response rather than persisted separately, so the nested
+        // occurrences can never drift from the response they came from - and analyses saved before
+        // this existed still gain them. Responses predating the consolidated contract yield none.
+        consolidated = runCatching { ConsolidatedParser.parse(optString("rawResponse")) }
+            .getOrDefault(emptyList()),
         completedAt = Instant.parse(getString("completedAt")),
         recommendations = getJSONArray("recommendations").objects().map { item ->
             RecommendationResult(

@@ -2,22 +2,30 @@ package com.ikverse.egxanalyzer.ui
 
 import android.app.Activity
 import android.content.Intent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Assessment
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -25,77 +33,138 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import com.ikverse.egxanalyzer.model.RecommendationResult
-import com.ikverse.egxanalyzer.model.SavedAnalysis
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
+import com.ikverse.egxanalyzer.model.RecommendationResult
+import com.ikverse.egxanalyzer.model.SavedAnalysis
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @Composable
 internal fun ResultsScreen(activity: Activity, appState: AppState) {
-    var reportResultId by remember { mutableStateOf<Long?>(null) }
     Screen(
         title = "Results",
         subtitle = "Saved recommendations and their exact source traces remain on this device.",
     ) {
         if (appState.savedResults.isEmpty()) {
-            Text("No saved results yet.")
+            EmptyState(
+                icon = Icons.Outlined.Assessment,
+                title = "No saved results yet",
+                detail = "Run an analysis and it will be stored here with the sources behind it.",
+            )
         } else {
             appState.savedResults.forEach { saved ->
-                OutlinedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            "${saved.result.recommendations.size} recommendations",
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text("${saved.provider.displayName} · ${saved.model}")
-                        Text(
-                            "Recommendation target: " +
-                                (saved.result.recommendationTargetDate?.toString() ?: "Not recorded"),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(saved.result.completedAt.toString())
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Button(onClick = { appState.selectResult(saved) }) { Text("View details") }
-                            OutlinedButton(onClick = {
-                                reportResultId = if (reportResultId == saved.id) null else saved.id
-                            }) {
-                                Icon(Icons.Outlined.Description, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Report")
-                            }
-                            OutlinedButton(onClick = {
-                                shareReport(activity, appState.reportFor(saved))
-                            }) {
-                                Text("Share")
-                            }
-                            TextButton(onClick = { appState.deleteResult(saved) }) { Text("Delete") }
-                        }
-                        if (appState.selectedResult?.id == saved.id) ResultDetail(saved)
-                        if (reportResultId == saved.id) {
-                            val report = appState.reportFor(saved)
-                            HorizontalDivider()
-                            Text(report.title, fontWeight = FontWeight.Bold)
-                            Text(report.markdown, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
+                SavedAnalysisCard(
+                    saved = saved,
+                    // Expanding also selects, so the companion pane follows what is open.
+                    onExpand = { appState.selectResult(saved) },
+                    onShare = { shareReport(activity, appState.reportFor(saved)) },
+                    onDelete = { appState.deleteResult(saved) },
+                    report = { appState.reportFor(saved) },
+                )
             }
         }
     }
 }
 
-private fun shareReport(
-    activity: Activity,
-    report: com.ikverse.egxanalyzer.model.AnalysisReport,
+@Composable
+private fun SavedAnalysisCard(
+    saved: SavedAnalysis,
+    onExpand: () -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit,
+    report: () -> AnalysisReport,
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
+    var showReport by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(false) }
+    val stockCount = saved.result.consolidated.size.takeIf { it > 0 }
+        ?: saved.result.recommendations.map(RecommendationResult::ticker).distinct().size
+
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        saved.result.recommendationTargetDate?.toString() ?: "Target not recorded",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        "${saved.provider.displayName} · ${saved.model}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Outlined.MoreVert, contentDescription = "More actions")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(if (showReport) "Hide report" else "Show report") },
+                            leadingIcon = { Icon(Icons.Outlined.Description, contentDescription = null) },
+                            onClick = { showReport = !showReport; menuOpen = false },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Share") },
+                            leadingIcon = { Icon(Icons.Outlined.Share, contentDescription = null) },
+                            onClick = { menuOpen = false; onShare() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete") },
+                            leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
+                            onClick = { menuOpen = false; onDelete() },
+                        )
+                    }
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                StatTile(stockCount.toString(), "stocks", tone = MaterialTheme.colorScheme.primary)
+                StatTile(saved.result.sources.size.toString(), "sources")
+                StatTile("${saved.result.diagnostics.durationMilliseconds / 1000}s", "took")
+            }
+
+            Text(
+                saved.result.completedAt.atZone(ZoneId.systemDefault()).format(COMPLETED_FORMAT),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            FilledTonalButton(
+                onClick = {
+                    expanded = !expanded
+                    if (expanded) onExpand()
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (expanded) "Hide recommendations" else "View recommendations")
+            }
+
+            AnimatedVisibility(showReport) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    HorizontalDivider()
+                    Text(report().title, style = MaterialTheme.typography.titleSmall)
+                    Text(report().markdown, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+
+            AnimatedVisibility(expanded) { ResultDetail(saved) }
+        }
+    }
+}
+
+private fun shareReport(activity: Activity, report: AnalysisReport) {
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "text/markdown"
         putExtra(Intent.EXTRA_SUBJECT, report.title)
@@ -104,45 +173,74 @@ private fun shareReport(
     activity.startActivity(Intent.createChooser(intent, "Share EGX analysis report"))
 }
 
-
 @Composable
 private fun ResultDetail(saved: SavedAnalysis) {
-    HorizontalDivider()
-    // Analyses saved before the consolidated contract have no nested occurrences, so fall back
-    // to the flattened rows rather than showing an empty detail pane.
-    if (saved.result.consolidated.isNotEmpty()) {
-        val density = LocalDensity.current
-        val widthDp = with(density) { LocalWindowInfo.current.containerSize.width.toDp().value }
-        var detail by remember { mutableStateOf<Pair<ConsolidatedRecommendation, RecommendationDataPoint>?>(null) }
-        RecommendationTable(
-            stocks = saved.result.consolidated,
-            wide = widthDp >= WIDE_LAYOUT_DP,
-            onSelectPoint = { stock, point -> detail = stock to point },
-        )
-        detail?.let { (stock, point) ->
-            OccurrenceSheet(stock, point, onDismiss = { detail = null })
+    var detail by remember { mutableStateOf<Pair<ConsolidatedRecommendation, RecommendationDataPoint>?>(null) }
+    var showTrace by remember { mutableStateOf(false) }
+    // The model cites sources by Telegram id; the channel name lives on the stored trace.
+    val channelNames = remember(saved.id) {
+        saved.result.sources
+            .filter { it.messageId != null }
+            .associate { it.messageId.toString() to it.channelName }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Analyses saved before the consolidated contract have no nested occurrences, so they fall
+        // back to a flat list rather than showing an empty table.
+        if (saved.result.consolidated.isNotEmpty()) {
+            RecommendationTable(
+                stocks = saved.result.consolidated,
+                channelFor = { messageId -> channelNames[messageId] },
+                onSelectPoint = { stock, point -> detail = stock to point },
+            )
+        } else {
+            saved.result.recommendations.forEach { LegacyDetail(it) }
         }
-    } else {
-        saved.result.recommendations.forEach { recommendation -> LegacyDetail(recommendation) }
+
+        TextButton(onClick = { showTrace = !showTrace }) {
+            Text(if (showTrace) "Hide source trace" else "Source trace and diagnostics")
+        }
+        AnimatedVisibility(showTrace) { TraceAndDiagnostics(saved) }
     }
-    Text("Source trace", fontWeight = FontWeight.Bold)
-    saved.result.sources.forEach { source ->
-        Text("${source.sourceId} · ${source.channelName} · ${source.contentType} · ${source.preview}")
+
+    detail?.let { (stock, point) ->
+        OccurrenceSheet(stock, point, onDismiss = { detail = null })
     }
-    HorizontalDivider()
-    Text("Diagnostics", fontWeight = FontWeight.Bold)
+}
+
+/** The raw trace, kept collapsed because it is for checking the app rather than reading results. */
+@Composable
+private fun TraceAndDiagnostics(saved: SavedAnalysis) {
     val diagnostics = saved.result.diagnostics
-    Text("Source window: ${diagnostics.sourceWindowStart ?: "Not recorded"} — ${diagnostics.sourceWindowEnd ?: "Not recorded"}")
-    Text("${diagnostics.acceptedInputCount}/${diagnostics.inputCount} inputs accepted")
-    Text("${diagnostics.excludedSources.size} sources filtered before analysis")
-    Text("${diagnostics.validationWarnings.size} validation warnings")
-    Text("Correction attempted: ${if (diagnostics.correctionAttempted) "Yes" else "No"}")
-    Text("Cloud analysis duration: ${diagnostics.durationMilliseconds} ms")
-    diagnostics.excludedSources.forEach {
-        Text("Excluded ${it.sourceId}: ${it.reason}", style = MaterialTheme.typography.bodySmall)
-    }
-    diagnostics.validationWarnings.forEach {
-        Text("Warning: $it", color = MaterialTheme.colorScheme.error)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Sources", style = MaterialTheme.typography.titleSmall)
+        saved.result.sources.forEach { source ->
+            Text(
+                "${source.channelName} · ${source.contentType} · ${source.preview.take(60)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(4.dp))
+        Text("Diagnostics", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "${diagnostics.acceptedInputCount}/${diagnostics.inputCount} inputs accepted · " +
+                "${diagnostics.excludedSources.size} filtered · " +
+                "${diagnostics.validationWarnings.size} warnings · " +
+                "${diagnostics.durationMilliseconds} ms",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        diagnostics.excludedSources.forEach {
+            Text(
+                "Excluded ${it.sourceId}: ${it.reason}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        diagnostics.validationWarnings.forEach {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
     }
 }
 
@@ -150,30 +248,33 @@ private fun ResultDetail(saved: SavedAnalysis) {
 @Composable
 private fun LegacyDetail(recommendation: RecommendationResult) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(
+            "${recommendation.ticker} · ${recommendation.companyName}",
+            style = MaterialTheme.typography.titleSmall,
+        )
+        Text(
+            "${recommendation.signal}" +
+                (recommendation.confidence?.let { " · ${"%.0f".format(it * 100)}%" } ?: ""),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        recommendation.entryLow?.let {
             Text(
-                "${recommendation.ticker} · ${recommendation.companyName}",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
+                "Entry $it – ${recommendation.entryHigh ?: it}",
+                style = MaterialTheme.typography.bodySmall,
             )
-            Text("Source: ${recommendation.sourceName}")
-            Text(
-                "Signal: ${recommendation.signal}" +
-                    (recommendation.confidence?.let { " · ${"%.0f".format(it * 100)}%" } ?: ""),
-                color = MaterialTheme.colorScheme.primary,
-            )
-            recommendation.riskLevel?.let { Text("Risk: $it") }
-            recommendation.timeHorizon?.let { Text("Horizon: $it") }
-            if (recommendation.indicators.isNotEmpty()) {
-                Text("Indicators: ${recommendation.indicators.joinToString()}")
-            }
-            recommendation.entryLow?.let { Text("Entry: $it – ${recommendation.entryHigh ?: it}") }
-            recommendation.takeProfit1?.let { Text("Take profit: $it") }
-            recommendation.stopLoss?.let { Text("Stop loss: $it") }
-            recommendation.notesArabic?.let { Text(it) }
-            Text(
-                "Evidence: ${recommendation.sourceIds.joinToString().ifBlank { "No source cited" }}",
-                color = MaterialTheme.colorScheme.primary,
-            )
+        }
+        recommendation.takeProfit1?.let {
+            Text("Target $it", style = MaterialTheme.typography.bodySmall)
+        }
+        recommendation.stopLoss?.let {
+            Text("Stop $it", style = MaterialTheme.typography.bodySmall)
+        }
+        recommendation.notesArabic?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall)
+        }
     }
     HorizontalDivider()
 }
+
+private val COMPLETED_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm")

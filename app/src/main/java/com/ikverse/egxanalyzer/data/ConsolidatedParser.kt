@@ -73,7 +73,6 @@ object ConsolidatedParser {
                     signal = signal,
                     confidence = confidence,
                     riskLevel = point.riskPct?.let { "$it%" },
-                    timeHorizon = point.visibleSourceDate,
                 )
             }
         }
