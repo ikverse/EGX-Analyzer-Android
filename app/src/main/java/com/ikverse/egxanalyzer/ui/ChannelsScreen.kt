@@ -30,6 +30,16 @@ import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import kotlinx.coroutines.launch
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.selection.selectable
 
 @Composable
 internal fun ChannelsScreen(appState: AppState) {
@@ -116,6 +126,43 @@ internal fun ChannelsScreen(appState: AppState) {
                 Text("Open this link in Telegram on an already signed-in device.")
             }
             TelegramAuthStep.READY -> {
+                val selectedCount = appState.channels.count(ChannelSelection::selected)
+                SectionCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StatTile(
+                            value = selectedCount.toString(),
+                            label = "selected",
+                            tone = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatTile(
+                            value = appState.channels.size.toString(),
+                            label = "chats",
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatusPill(
+                            appState.recommendationTargetDate.toString(),
+                            StatusTone.GOOD,
+                        )
+                    }
+                    Text(
+                        if (appState.analysisMode == AnalysisMode.NEXT_DAY) {
+                            "Current / next EGX session"
+                        } else {
+                            "Historical analysis"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(
+                        onClick = { scope.launch { appState.syncTelegramSources() } },
+                        enabled = selectedCount > 0,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Load analysis source window") }
+                    appState.telegramSyncMessage?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -127,27 +174,15 @@ internal fun ChannelsScreen(appState: AppState) {
                         scope.launch { appState.logoutTelegram() }
                     }) { Text("Sign out") }
                 }
-                Text(
-                    "Target: ${appState.recommendationTargetDate} · " +
-                        if (appState.analysisMode == AnalysisMode.NEXT_DAY) {
-                            "current / next EGX session"
-                        } else {
-                            "historical analysis"
-                        },
-                    color = MaterialTheme.colorScheme.primary,
-                )
                 if (appState.channels.isEmpty()) {
-                    Text("No Telegram chats loaded yet.")
+                    EmptyState(
+                        icon = Icons.Outlined.Forum,
+                        title = "No chats loaded",
+                        detail = "Refresh to pull your Telegram chat list onto this device.",
+                    )
                 } else {
                     appState.channels.forEach { channel -> ChannelCard(channel, appState) }
                 }
-                Button(
-                    onClick = {
-                        scope.launch { appState.syncTelegramSources() }
-                    },
-                    enabled = appState.channels.any(ChannelSelection::selected),
-                ) { Text("Load analysis source window") }
-                appState.telegramSyncMessage?.let { Text(it) }
             }
             TelegramAuthStep.INITIALIZING,
             TelegramAuthStep.LOGGING_OUT,
@@ -158,12 +193,7 @@ internal fun ChannelsScreen(appState: AppState) {
 
 @Composable
 private fun AuthCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, fontWeight = FontWeight.Bold)
-            content()
-        }
-    }
+    SectionCard(title = title, content = content)
 }
 
 @Composable
@@ -187,18 +217,48 @@ private fun AuthField(
 
 @Composable
 private fun ChannelCard(channel: ChannelSelection, appState: AppState) {
-    OutlinedCard(Modifier.fillMaxWidth()) {
+    // The whole row toggles, not just the checkbox, and a selected chat is tinted so the chosen
+    // set is readable at a glance in a long list.
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .selectable(
+                selected = channel.selected,
+                role = Role.Checkbox,
+                onClick = { appState.toggleChannel(channel) },
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = if (channel.selected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
+            },
+        ),
+        shape = MaterialTheme.shapes.medium,
+    ) {
         Row(
-            Modifier.padding(12.dp),
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Checkbox(
-                checked = channel.selected,
-                onCheckedChange = { appState.toggleChannel(channel) },
-            )
-            Column {
-                Text(channel.name, fontWeight = FontWeight.Bold)
-                Text(channel.id.toString(), style = MaterialTheme.typography.bodySmall)
+            Checkbox(checked = channel.selected, onCheckedChange = null)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    channel.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    channel.id.toString(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (channel.selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
             }
         }
     }

@@ -1,28 +1,112 @@
 package com.ikverse.egxanalyzer.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.model.ThemeMode
 
+/**
+ * Fixed palette rather than a wallpaper-derived one.
+ *
+ * These screens carry financial signals, so green must mean target and red must mean stop on every
+ * device. A dynamic scheme would reassign those roles to whatever the wallpaper suggests, which is
+ * the one thing this app cannot let vary.
+ */
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFF67C7D8),
-    onPrimary = Color(0xFF002F36),
-    secondary = Color(0xFF9A82F4),
+    primary = Color(0xFF5DD4E8),
+    onPrimary = Color(0xFF00363F),
+    primaryContainer = Color(0xFF004E5A),
+    onPrimaryContainer = Color(0xFFB3ECF8),
+    secondary = Color(0xFFA894F5),
+    onSecondary = Color(0xFF2A1A5E),
+    secondaryContainer = Color(0xFF3F2E7A),
+    onSecondaryContainer = Color(0xFFE7DEFF),
+    tertiary = Color(0xFF6BDD9A),
+    onTertiary = Color(0xFF00391F),
+    tertiaryContainer = Color(0xFF11512F),
+    onTertiaryContainer = Color(0xFF89FAB5),
+    error = Color(0xFFFF8A80),
+    onError = Color(0xFF4E0002),
+    errorContainer = Color(0xFF6E1512),
+    onErrorContainer = Color(0xFFFFDAD5),
     background = Color(0xFF0B0F14),
-    surface = Color(0xFF151A21),
-    surfaceVariant = Color(0xFF202731),
+    onBackground = Color(0xFFE2E6EB),
+    surface = Color(0xFF0B0F14),
+    onSurface = Color(0xFFE2E6EB),
+    surfaceVariant = Color(0xFF1E262F),
+    onSurfaceVariant = Color(0xFFB6C0CC),
+    surfaceContainerLowest = Color(0xFF070A0E),
+    surfaceContainerLow = Color(0xFF11161C),
+    surfaceContainer = Color(0xFF151A21),
+    surfaceContainerHigh = Color(0xFF1B222A),
+    surfaceContainerHighest = Color(0xFF222A34),
+    outline = Color(0xFF6B7684),
+    outlineVariant = Color(0xFF2C353F),
 )
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF006879),
-    secondary = Color(0xFF6650A4),
-    background = Color(0xFFF6F8FA),
-    surface = Color.White,
+    primary = Color(0xFF00697A),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFB0ECFB),
+    onPrimaryContainer = Color(0xFF001F26),
+    secondary = Color(0xFF5B4AA8),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFE5DEFF),
+    onSecondaryContainer = Color(0xFF190066),
+    tertiary = Color(0xFF13683D),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFF9DF6BC),
+    onTertiaryContainer = Color(0xFF00210F),
+    error = Color(0xFFB3261E),
+    onError = Color.White,
+    errorContainer = Color(0xFFF9DEDC),
+    onErrorContainer = Color(0xFF410E0B),
+    background = Color(0xFFF7F9FB),
+    onBackground = Color(0xFF181C20),
+    surface = Color(0xFFF7F9FB),
+    onSurface = Color(0xFF181C20),
+    surfaceVariant = Color(0xFFDCE4EC),
+    onSurfaceVariant = Color(0xFF41484F),
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFF1F4F8),
+    surfaceContainer = Color(0xFFEBEFF4),
+    surfaceContainerHigh = Color(0xFFE5EAF0),
+    surfaceContainerHighest = Color(0xFFDFE5EC),
+    outline = Color(0xFF71787E),
+    outlineVariant = Color(0xFFC1C7CE),
 )
+
+/** Rounder than the M3 default; these screens are card-dense and softer corners keep them calm. */
+private val AppShapes = Shapes(
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(30.dp),
+)
+
+private val AppTypography = Typography().run {
+    copy(
+        displaySmall = displaySmall.copy(fontWeight = FontWeight.Bold),
+        headlineLarge = headlineLarge.copy(fontWeight = FontWeight.Bold),
+        headlineMedium = headlineMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp),
+        headlineSmall = headlineSmall.copy(fontWeight = FontWeight.SemiBold),
+        titleLarge = titleLarge.copy(fontWeight = FontWeight.SemiBold),
+        titleMedium = titleMedium.copy(fontWeight = FontWeight.SemiBold),
+        labelLarge = labelLarge.copy(fontWeight = FontWeight.SemiBold),
+        labelSmall = TextStyle(fontWeight = FontWeight.Bold, fontSize = 11.sp, letterSpacing = 0.6.sp),
+    )
+}
 
 @Composable
 fun EgxAnalyzerTheme(
@@ -36,6 +120,8 @@ fun EgxAnalyzerTheme(
     }
     MaterialTheme(
         colorScheme = if (darkTheme) DarkColors else LightColors,
+        shapes = AppShapes,
+        typography = AppTypography,
         content = content,
     )
 }
