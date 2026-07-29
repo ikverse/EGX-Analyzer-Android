@@ -83,7 +83,9 @@ class AppState(
         private set
     var modelListMessage by mutableStateOf<String?>(null)
         private set
-    var channels by mutableStateOf(localDataStore.channels())
+    // Starts empty: the chat list belongs to the Telegram session, so nothing from a previous run
+    // is shown before Telegram reports what actually exists now.
+    var channels by mutableStateOf(emptyList<ChannelSelection>())
         private set
     var telegramAuthState by mutableStateOf(TelegramAuthState())
         private set
@@ -113,12 +115,12 @@ class AppState(
         }
         appScope.launch {
             telegramRepository.chats.collect { telegramChats ->
-                val saved = localDataStore.channels().associateBy(ChannelSelection::id)
+                val selected = localDataStore.selectedChannelIds()
                 channels = telegramChats.map { chat ->
                     ChannelSelection(
                         id = chat.id,
                         name = chat.title,
-                        selected = saved[chat.id]?.selected ?: false,
+                        selected = chat.id in selected,
                     )
                 }
                 if (activeSourceChannelId == null) {
@@ -295,8 +297,11 @@ class AppState(
     fun addChannel(idText: String, name: String): Boolean {
         val id = idText.trim().toLongOrNull()
         if (id == null || name.isBlank()) return false
-        localDataStore.saveChannel(ChannelSelection(id, name.trim()))
-        channels = localDataStore.channels()
+        val added = ChannelSelection(id, name.trim(), selected = true)
+        localDataStore.setChannelSelected(added)
+        // Added to the live list rather than reloading from storage, which would drop every chat
+        // Telegram reported this session.
+        channels = (channels.filterNot { it.id == id } + added).sortedBy { it.name.lowercase() }
         return true
     }
 
@@ -376,7 +381,7 @@ class AppState(
 
     fun toggleChannel(channel: ChannelSelection) {
         val updated = channel.copy(selected = !channel.selected)
-        localDataStore.saveChannel(updated)
+        localDataStore.setChannelSelected(updated)
         channels = channels.map { if (it.id == channel.id) updated else it }
         if (activeSourceChannelId !in channels.filter { it.selected }.map { it.id }) {
             activeSourceChannelId = channels.firstOrNull { it.selected }?.id
@@ -385,7 +390,7 @@ class AppState(
 
     fun removeChannel(channel: ChannelSelection) {
         localDataStore.removeChannel(channel.id)
-        channels = localDataStore.channels()
+        channels = channels.filterNot { it.id == channel.id }
         if (activeSourceChannelId == channel.id) {
             activeSourceChannelId = channels.firstOrNull { it.selected }?.id
         }

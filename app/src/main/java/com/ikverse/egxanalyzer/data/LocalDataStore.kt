@@ -44,39 +44,41 @@ class LocalDataStore(context: Context) :
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
 
-    fun channels(): List<ChannelSelection> = readableDatabase.query(
+    /**
+     * Which chats the user has picked.
+     *
+     * Only the choice is kept, never the chat list itself - Telegram is the authority on which
+     * chats exist, so a stored list would go stale the moment one is left or renamed.
+     */
+    fun selectedChannelIds(): Set<Long> = readableDatabase.query(
         "channels",
-        arrayOf("id", "name", "selected"),
+        arrayOf("id"),
+        "selected != 0",
         null,
         null,
         null,
         null,
-        "name COLLATE NOCASE",
     ).use { cursor ->
-        buildList {
-            while (cursor.moveToNext()) {
-                add(
-                    ChannelSelection(
-                        id = cursor.getLong(0),
-                        name = cursor.getString(1),
-                        selected = cursor.getInt(2) != 0,
-                    ),
-                )
-            }
+        buildSet {
+            while (cursor.moveToNext()) add(cursor.getLong(0))
         }
     }
 
-    fun saveChannel(channel: ChannelSelection) {
-        writableDatabase.insertWithOnConflict(
-            "channels",
-            null,
-            ContentValues().apply {
-                put("id", channel.id)
-                put("name", channel.name.trim())
-                put("selected", if (channel.selected) 1 else 0)
-            },
-            SQLiteDatabase.CONFLICT_REPLACE,
-        )
+    fun setChannelSelected(channel: ChannelSelection) {
+        if (channel.selected) {
+            writableDatabase.insertWithOnConflict(
+                "channels",
+                null,
+                ContentValues().apply {
+                    put("id", channel.id)
+                    put("name", channel.name.trim())
+                    put("selected", 1)
+                },
+                SQLiteDatabase.CONFLICT_REPLACE,
+            )
+        } else {
+            removeChannel(channel.id)
+        }
     }
 
     fun removeChannel(id: Long) {

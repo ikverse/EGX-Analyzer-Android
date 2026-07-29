@@ -244,12 +244,9 @@ private fun ChannelCard(channel: ChannelSelection, appState: AppState) {
             Checkbox(checked = channel.selected, onCheckedChange = null)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    channel.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // Not truncated: chats can differ only by a trailing emoji, so cutting the name
+                // short can make two different chats look identical.
+                Text(channel.name, style = MaterialTheme.typography.titleSmall)
                 Text(
                     channel.id.toString(),
                     style = MaterialTheme.typography.bodySmall,
