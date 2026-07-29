@@ -99,13 +99,8 @@ internal fun SettingsScreen(appState: AppState) {
         title = "Settings",
         subtitle = "Cloud models only. No Ollama or local-model runtime is included.",
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            shape = MaterialTheme.shapes.large,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("AI analysis", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        ExpandableSection("AI analysis") {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Box {
                     TextButton(onClick = { providerMenuOpen = true }) {
                         Text("Provider: ${appState.cloudConfiguration.provider.displayName}")
@@ -193,21 +188,8 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            shape = MaterialTheme.shapes.large,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Tune, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Prompt and validation",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+        ExpandableSection("Prompt and validation") {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     "Leave the system prompt blank to use the protected evidence-backed default.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -307,13 +289,8 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            shape = MaterialTheme.shapes.large,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("Appearance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        ExpandableSection("Appearance") {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Box {
                     OutlinedButton(onClick = { themeMenuOpen = true }) {
                         Text("Theme: ${appState.appPreferences.themeMode.displayName}")
@@ -340,17 +317,8 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            shape = MaterialTheme.shapes.large,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "Analysis defaults",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
+        ExpandableSection("Analysis defaults") {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box {
                     OutlinedButton(onClick = { languageMenuOpen = true }) {
                         Text("Output language: ${appState.appPreferences.analysisLanguage.displayName}")
@@ -413,13 +381,8 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            shape = MaterialTheme.shapes.large,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Telegram", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        ExpandableSection("Telegram") {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(appState.telegramAuthState.message)
                 Text("${appState.channels.count(ChannelSelection::selected)} chats selected")
                 if (appState.telegramAuthState.step == TelegramAuthStep.READY) {
@@ -442,17 +405,8 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            shape = MaterialTheme.shapes.large,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "Saved data and privacy",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
+        ExpandableSection("Saved data and privacy") {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("${appState.savedResults.size} analyses saved on this device")
                 Text(
                     "Provider keys and the Telegram database key are encrypted using Android Keystore. " +
