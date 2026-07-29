@@ -179,4 +179,28 @@ data class ChannelSelection(
     val id: Long,
     val name: String,
     val selected: Boolean = true,
-)
+    /** Telegram broadcast channel, as opposed to a group, private chat or service account. */
+    val isChannel: Boolean = true,
+) {
+    /**
+     * Title without emoji.
+     *
+     * Channel names here often end in decorative emoji that differ between a channel and its
+     * linked discussion group, which makes two unrelated rows look like one repeated entry.
+     */
+    val displayName: String get() = name.withoutEmoji().ifBlank { name.ifBlank { "Untitled chat" } }
+}
+
+private fun String.withoutEmoji(): String = buildString {
+    var index = 0
+    while (index < this@withoutEmoji.length) {
+        val codePoint = this@withoutEmoji.codePointAt(index)
+        val type = Character.getType(codePoint)
+        val decorative = type == Character.OTHER_SYMBOL.toInt() ||
+            type == Character.SURROGATE.toInt() ||
+            codePoint == 0xFE0F || codePoint == 0x200D ||
+            codePoint in 0x1F000..0x1FAFF || codePoint in 0x2600..0x27BF
+        if (!decorative) appendCodePoint(codePoint)
+        index += Character.charCount(codePoint)
+    }
+}.trim()

@@ -126,7 +126,7 @@ internal fun ChannelsScreen(appState: AppState) {
                 Text("Open this link in Telegram on an already signed-in device.")
             }
             TelegramAuthStep.READY -> {
-                val selectedCount = appState.channels.count(ChannelSelection::selected)
+                val selectedCount = appState.channels.count { it.isChannel && it.selected }
                 val busy = appState.busyLabel != null
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -138,7 +138,10 @@ internal fun ChannelsScreen(appState: AppState) {
                             scope.launch {
                                 appState.runAction(
                                     label = "Refreshing chats",
-                                    success = { "Chat list updated: ${appState.channels.size} chats." },
+                                    success = {
+                                        val found = appState.channels.count(ChannelSelection::isChannel)
+                                        "Chat list updated: $found channels found."
+                                    },
                                 ) { appState.refreshTelegramChats() }
                             }
                         },
@@ -158,15 +161,30 @@ internal fun ChannelsScreen(appState: AppState) {
 
                 // The chats come first, then the action that uses them, so the screen reads in the
                 // order the task is done.
-                if (appState.channels.isEmpty()) {
+                // Only broadcast channels: private chats, groups and the Telegram service
+                // account are not sources of published recommendations.
+                val broadcastChannels = appState.channels.filter(ChannelSelection::isChannel)
+                val hidden = appState.channels.size - broadcastChannels.size
+                if (broadcastChannels.isEmpty()) {
                     EmptyState(
                         icon = Icons.Outlined.Forum,
-                        title = "No chats loaded",
-                        detail = "Refresh to pull your Telegram chat list onto this device.",
+                        title = if (appState.channels.isEmpty()) "No chats loaded" else "No channels found",
+                        detail = if (appState.channels.isEmpty()) {
+                            "Refresh to pull your Telegram chat list onto this device."
+                        } else {
+                            "None of your $hidden chats are broadcast channels."
+                        },
                     )
                 } else {
-                    appState.channels.forEach { channel ->
-                        ChannelCard(channel, appState, appState.channels)
+                    if (hidden > 0) {
+                        Text(
+                            "$hidden group or private chat${if (hidden == 1) "" else "s"} hidden",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    broadcastChannels.forEach { channel ->
+                        ChannelCard(channel, appState, broadcastChannels)
                     }
                 }
 
@@ -179,8 +197,8 @@ internal fun ChannelsScreen(appState: AppState) {
                             modifier = Modifier.weight(1f),
                         )
                         StatTile(
-                            value = appState.channels.size.toString(),
-                            label = "chats",
+                            value = appState.channels.count(ChannelSelection::isChannel).toString(),
+                            label = "channels",
                             modifier = Modifier.weight(1f),
                         )
                         StatusPill(appState.recommendationTargetDate.toString(), StatusTone.GOOD)
@@ -279,10 +297,7 @@ private fun ChannelCard(
             Column(Modifier.weight(1f)) {
                 // Not truncated: chats can differ only by a trailing emoji, so cutting the name
                 // short can make two different chats look identical.
-                Text(
-                    channel.name.ifBlank { "Untitled chat" },
-                    style = MaterialTheme.typography.titleSmall,
-                )
+                Text(channel.displayName, style = MaterialTheme.typography.titleSmall)
                 Text(
                     channel.id.toString(),
                     style = if (ambiguous) {
@@ -310,4 +325,4 @@ private fun ChannelCard(
 
 /** Name reduced to its letters and digits, so emoji and punctuation do not hide a clash. */
 private fun ChannelSelection.baseName(): String =
-    name.filter(Char::isLetterOrDigit).lowercase()
+    displayName.filter(Char::isLetterOrDigit).lowercase()

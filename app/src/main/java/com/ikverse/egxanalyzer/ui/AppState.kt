@@ -160,6 +160,7 @@ class AppState(
                         id = chat.id,
                         name = chat.title,
                         selected = chat.id in selected,
+                        isChannel = chat.isChannel,
                     )
                 }
                 if (activeSourceChannelId == null) {
