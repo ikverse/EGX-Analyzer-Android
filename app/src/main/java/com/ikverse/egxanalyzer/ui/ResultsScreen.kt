@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 
 @Composable
@@ -103,8 +104,40 @@ private fun shareReport(
 @Composable
 private fun ResultDetail(saved: SavedAnalysis) {
     HorizontalDivider()
-    saved.result.recommendations.forEach { recommendation ->
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+    // Analyses saved before the consolidated contract have no nested occurrences, so fall back
+    // to the flattened rows rather than showing an empty detail pane.
+    if (saved.result.consolidated.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            saved.result.consolidated.forEach { stock -> RecommendationCard(stock) }
+        }
+    } else {
+        saved.result.recommendations.forEach { recommendation -> LegacyDetail(recommendation) }
+    }
+    Text("Source trace", fontWeight = FontWeight.Bold)
+    saved.result.sources.forEach { source ->
+        Text("${source.sourceId} · ${source.channelName} · ${source.contentType} · ${source.preview}")
+    }
+    HorizontalDivider()
+    Text("Diagnostics", fontWeight = FontWeight.Bold)
+    val diagnostics = saved.result.diagnostics
+    Text("Source window: ${diagnostics.sourceWindowStart ?: "Not recorded"} — ${diagnostics.sourceWindowEnd ?: "Not recorded"}")
+    Text("${diagnostics.acceptedInputCount}/${diagnostics.inputCount} inputs accepted")
+    Text("${diagnostics.excludedSources.size} sources filtered before analysis")
+    Text("${diagnostics.validationWarnings.size} validation warnings")
+    Text("Correction attempted: ${if (diagnostics.correctionAttempted) "Yes" else "No"}")
+    Text("Cloud analysis duration: ${diagnostics.durationMilliseconds} ms")
+    diagnostics.excludedSources.forEach {
+        Text("Excluded ${it.sourceId}: ${it.reason}", style = MaterialTheme.typography.bodySmall)
+    }
+    diagnostics.validationWarnings.forEach {
+        Text("Warning: $it", color = MaterialTheme.colorScheme.error)
+    }
+}
+
+/** Detail for analyses saved before the consolidated contract existed. */
+@Composable
+private fun LegacyDetail(recommendation: RecommendationResult) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
                 "${recommendation.ticker} · ${recommendation.companyName}",
                 style = MaterialTheme.typography.titleMedium,
@@ -129,26 +162,6 @@ private fun ResultDetail(saved: SavedAnalysis) {
                 "Evidence: ${recommendation.sourceIds.joinToString().ifBlank { "No source cited" }}",
                 color = MaterialTheme.colorScheme.primary,
             )
-        }
-        HorizontalDivider()
-    }
-    Text("Source trace", fontWeight = FontWeight.Bold)
-    saved.result.sources.forEach { source ->
-        Text("${source.sourceId} · ${source.channelName} · ${source.contentType} · ${source.preview}")
     }
     HorizontalDivider()
-    Text("Diagnostics", fontWeight = FontWeight.Bold)
-    val diagnostics = saved.result.diagnostics
-    Text("Source window: ${diagnostics.sourceWindowStart ?: "Not recorded"} — ${diagnostics.sourceWindowEnd ?: "Not recorded"}")
-    Text("${diagnostics.acceptedInputCount}/${diagnostics.inputCount} inputs accepted")
-    Text("${diagnostics.excludedSources.size} sources filtered before analysis")
-    Text("${diagnostics.validationWarnings.size} validation warnings")
-    Text("Correction attempted: ${if (diagnostics.correctionAttempted) "Yes" else "No"}")
-    Text("Cloud analysis duration: ${diagnostics.durationMilliseconds} ms")
-    diagnostics.excludedSources.forEach {
-        Text("Excluded ${it.sourceId}: ${it.reason}", style = MaterialTheme.typography.bodySmall)
-    }
-    diagnostics.validationWarnings.forEach {
-        Text("Warning: $it", color = MaterialTheme.colorScheme.error)
-    }
 }
