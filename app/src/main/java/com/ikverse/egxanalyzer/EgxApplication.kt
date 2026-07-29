@@ -1,0 +1,30 @@
+package com.ikverse.egxanalyzer
+
+import android.app.Application
+import com.ikverse.egxanalyzer.data.AndroidKeystoreCredentialStore
+import com.ikverse.egxanalyzer.data.CloudAnalysisRepository
+import com.ikverse.egxanalyzer.data.LocalDataStore
+import com.ikverse.egxanalyzer.data.SettingsRepository
+import com.ikverse.egxanalyzer.data.TelegramRepository
+import com.ikverse.egxanalyzer.ui.AppState
+
+class EgxApplication : Application() {
+    val appState: AppState by lazy {
+        val credentialStore = AndroidKeystoreCredentialStore(this)
+        val settingsRepository = SettingsRepository(this, credentialStore)
+        val telegramRepository = TelegramRepository(this, credentialStore)
+        lateinit var state: AppState
+        val analysisRepository = CloudAnalysisRepository(
+            contentResolver = contentResolver,
+            credentialStore = credentialStore,
+            configuration = { state.cloudConfiguration },
+            preferences = { state.appPreferences },
+        )
+        AppState(
+            settingsRepository = settingsRepository,
+            analysisRepository = analysisRepository,
+            localDataStore = LocalDataStore(this),
+            telegramRepository = telegramRepository,
+        ).also { state = it }
+    }
+}
