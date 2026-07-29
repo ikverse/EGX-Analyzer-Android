@@ -26,7 +26,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -98,7 +99,11 @@ internal fun SettingsScreen(appState: AppState) {
         title = "Settings",
         subtitle = "Cloud models only. No Ollama or local-model runtime is included.",
     ) {
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.large,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("AI analysis", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Box {
@@ -188,7 +193,11 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.large,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.Tune, contentDescription = null)
@@ -298,7 +307,11 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.large,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("Appearance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Box {
@@ -327,7 +340,11 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.large,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     "Analysis defaults",
@@ -396,7 +413,11 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.large,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Telegram", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(appState.telegramAuthState.message)
@@ -421,7 +442,11 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.large,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     "Saved data and privacy",

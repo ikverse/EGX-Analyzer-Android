@@ -15,7 +15,8 @@ import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,7 +38,11 @@ internal fun InsightsScreen(appState: AppState) {
         title = "Insights",
         subtitle = "Search saved evidence, compare consensus, and inspect validation diagnostics.",
     ) {
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.large,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.Search, contentDescription = null)
@@ -53,7 +58,11 @@ internal fun InsightsScreen(appState: AppState) {
                 )
                 if (query.length >= 2 && hits.isEmpty()) Text("No matching saved evidence.")
                 hits.take(20).forEach { hit ->
-                    OutlinedCard(Modifier.fillMaxWidth()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                        shape = MaterialTheme.shapes.medium,
+                    ) {
                         Column(Modifier.padding(12.dp)) {
                             Text("${hit.ticker} · ${hit.companyName}", fontWeight = FontWeight.Bold)
                             Text("Target: ${hit.targetDate ?: "Not recorded"}")
@@ -64,7 +73,11 @@ internal fun InsightsScreen(appState: AppState) {
             }
         }
 
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.large,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.Insights, contentDescription = null)
@@ -89,7 +102,11 @@ internal fun InsightsScreen(appState: AppState) {
             }
         }
 
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.large,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.WarningAmber, contentDescription = null)

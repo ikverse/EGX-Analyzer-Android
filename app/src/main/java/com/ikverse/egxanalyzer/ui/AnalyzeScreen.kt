@@ -37,7 +37,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -84,7 +85,11 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         subtitle = "Send selected text, images, and voice-message content to " +
             appState.cloudConfiguration.provider.displayName + ".",
     ) {
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.large,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Content types", fontWeight = FontWeight.Bold)
                 ContentTypeToggle("Text messages", AnalysisContentType.TEXT, appState)
@@ -92,7 +97,11 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 ContentTypeToggle("Voice messages", AnalysisContentType.AUDIO, appState)
             }
         }
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.large,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.CalendarMonth, contentDescription = null)
@@ -191,7 +200,11 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         appState.inputs.forEach { input ->
             SourceCard(input, onRemove = { appState.removeInput(input.sourceId) })
         }
-        OutlinedCard(Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.large,
+        ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.SmartToy, contentDescription = null)
@@ -318,7 +331,11 @@ private fun persistReadPermission(activity: Activity, uri: Uri) {
 
 @Composable
 private fun SourceCard(input: AnalysisInput, onRemove: () -> Unit) {
-    OutlinedCard(Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        shape = MaterialTheme.shapes.large,
+    ) {
         Column(Modifier.padding(12.dp)) {
             Text(
                 when (input) {
