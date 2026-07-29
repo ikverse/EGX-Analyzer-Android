@@ -54,5 +54,7 @@ dependencies {
     implementation(libs.tdl.coroutines.android)
 
     testImplementation(libs.junit)
+    // android.jar stubs org.json in local unit tests, so supply a real implementation.
+    testImplementation(libs.json)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

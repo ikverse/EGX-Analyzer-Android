@@ -90,6 +90,49 @@ data class RecommendationResult(
     val indicators: List<String> = emptyList(),
 )
 
+/**
+ * One extracted occurrence of a stock, matching the desktop `data_points` contract.
+ *
+ * A stock can appear in several independent sections of one image, so every occurrence keeps
+ * its own date, evidence, and levels rather than being merged during extraction.
+ */
+data class RecommendationDataPoint(
+    val date: LocalDate?,
+    val effectiveDateBasis: String?,
+    val visibleSourceDate: String?,
+    val dateEvidence: String?,
+    val timingEvidence: String?,
+    val sourceMessageId: String?,
+    val sourceImageRef: Int?,
+    val recommendationEvidence: String?,
+    val recommendationType: String?,
+    val buyPrice: Double?,
+    val buyPriceLow: Double?,
+    val buyPriceHigh: Double?,
+    val target1: Double?,
+    val returnTp1Pct: Double?,
+    val target2: Double?,
+    val returnTp2Pct: Double?,
+    val stopLoss: Double?,
+    val support: Double?,
+    val resistance: Double?,
+    val riskPct: Double?,
+    val notesArabic: String?,
+) {
+    val isWatching: Boolean get() = effectiveDateBasis == "watching"
+}
+
+/** One consolidated stock from `top_consolidated_recommendations`. */
+data class ConsolidatedRecommendation(
+    val stockCode: String,
+    val stockNameEnglish: String?,
+    val stockNameArabic: String?,
+    val mentionCount: Int,
+    val rank: Int,
+    val notesSummary: String?,
+    val dataPoints: List<RecommendationDataPoint> = emptyList(),
+)
+
 data class ExcludedSource(
     val sourceId: String,
     val reason: String,
@@ -109,6 +152,8 @@ data class AnalysisDiagnostics(
 data class AnalysisResult(
     val requestId: String,
     val recommendations: List<RecommendationResult>,
+    /** Full consolidated extraction; `recommendations` is a flattened view of the same data. */
+    val consolidated: List<ConsolidatedRecommendation> = emptyList(),
     val inquiryReplyCount: Int,
     val analysisMode: AnalysisMode = AnalysisMode.NEXT_DAY,
     val recommendationTargetDate: LocalDate? = null,

@@ -40,6 +40,7 @@ interface AnalysisRepository {
 class CloudAnalysisRepository(
     private val contentResolver: ContentResolver,
     private val credentialStore: CredentialStore,
+    private val promptStore: PromptStore,
     private val configuration: () -> CloudConfiguration,
     private val preferences: () -> AppPreferences,
 ) : AnalysisRepository {
@@ -196,7 +197,7 @@ class CloudAnalysisRepository(
                 put("role", "system")
                 put(
                     "content",
-                    preferences.customSystemPrompt.trim().ifBlank { SYSTEM_PROMPT },
+                    preferences.customSystemPrompt.trim().ifBlank { promptStore.consolidatedPrompt() },
                 )
             })
             put(JSONObject().apply {
@@ -210,29 +211,50 @@ class CloudAnalysisRepository(
                                 correctionInstructions.orEmpty(),
                         ),
                     )
+                    var imageRef = 0
                     inputs.forEach { input ->
                         coroutineContext.ensureActive()
+                        val telegramId = telegramIdFor(input.sourceId)
                         when (input) {
                             is AnalysisInput.Text -> put(
                                 JSONObject().put("type", "text").put(
                                     "text",
-                                    "[source:${input.sourceId}] ${input.value}",
+                                    "--- MESSAGE | TELEGRAM_ID: $telegramId ---\n${input.value}",
                                 ),
                             )
-                            is AnalysisInput.Image -> put(
-                                JSONObject().put("type", "image_url").put(
-                                    "image_url",
-                                    JSONObject().put("url", input.dataUrl()),
-                                ),
-                            )
-                            is AnalysisInput.Voice -> put(
-                                JSONObject().put("type", "input_audio").put(
-                                    "input_audio",
-                                    JSONObject()
-                                        .put("data", input.base64())
-                                        .put("format", input.audioFormat()),
-                                ),
-                            )
+                            is AnalysisInput.Image -> {
+                                imageRef += 1
+                                // The prompt cites images by IMAGE_REF, so each one is announced
+                                // before its bytes and tied back to its own message.
+                                put(
+                                    JSONObject().put("type", "text").put(
+                                        "text",
+                                        "IMAGE_REF $imageRef | TELEGRAM_ID: $telegramId",
+                                    ),
+                                )
+                                put(
+                                    JSONObject().put("type", "image_url").put(
+                                        "image_url",
+                                        JSONObject().put("url", input.dataUrl()),
+                                    ),
+                                )
+                            }
+                            is AnalysisInput.Voice -> {
+                                put(
+                                    JSONObject().put("type", "text").put(
+                                        "text",
+                                        "--- VOICE | TELEGRAM_ID: $telegramId ---",
+                                    ),
+                                )
+                                put(
+                                    JSONObject().put("type", "input_audio").put(
+                                        "input_audio",
+                                        JSONObject()
+                                            .put("data", input.base64())
+                                            .put("format", input.audioFormat()),
+                                    ),
+                                )
+                            }
                         }
                     }
                 })
@@ -240,14 +262,25 @@ class CloudAnalysisRepository(
         })
     }
 
-    private fun AnalysisRequest.requestPrompt(): String =
-        "Analyze the supplied EGX sources for the exact recommendation target date $targetDate. " +
-            "The selected date mode is ${mode.name}. Set targetDate to $targetDate on every recommendation. " +
-            "Source window: $sourceWindowStart through $sourceWindowEnd. " +
-            "Every recommendation must cite one or more exact source IDs. " +
-            "Source mapping: ${sourceTraces.joinToString { "${it.sourceId}=${it.channelName}" }}. " +
-            "Return only JSON using this shape: " +
-            """{"recommendations":[{"ticker":"","companyName":"","companyNameArabic":null,"sourceName":"","targetDate":null,"signal":"BUY|SELL|HOLD","confidence":0.0,"riskLevel":null,"timeHorizon":null,"indicators":[],"timing":null,"entryLow":null,"entryHigh":null,"takeProfit1":null,"takeProfit2":null,"stopLoss":null,"notesArabic":null,"sourceIds":[]}],"inquiryReplyCount":0}"""
+    /**
+     * Runtime context for the canonical prompt.
+     *
+     * The prompt defines the output contract itself, so this supplies only the values it refers
+     * to - TARGET_DATE and the per-source TELEGRAM_ID / IMAGE_REF labels - in the same shape the
+     * desktop assembles, so both clients present sources identically.
+     */
+    private fun AnalysisRequest.requestPrompt(): String = buildString {
+        appendLine("RUNTIME CONTEXT")
+        appendLine("ANALYSIS_PERIOD: $sourceWindowStart through $sourceWindowEnd")
+        appendLine("TARGET_DATE: $targetDate")
+        appendLine("SOURCE ITEMS FOLLOW. Apply the canonical prompt independently to each item.")
+        sourceTraces.forEach { trace ->
+            appendLine(
+                "--- MESSAGE | CHANNEL: ${trace.channelName} | DATE: ${trace.timestamp} | " +
+                    "TELEGRAM_ID: ${trace.messageId ?: trace.sourceId} ---",
+            )
+        }
+    }
 
     private fun customizationPrompt(value: AppPreferences): String = buildString {
         if (value.includePhrases.isNotBlank()) {
@@ -284,53 +317,22 @@ class CloudAnalysisRepository(
         val envelope = JSONObject(response)
         val content = envelope.getJSONArray("choices").getJSONObject(0)
             .getJSONObject("message").getString("content")
-        val clean = content.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-        val parsed = JSONObject(clean)
-        val recommendations = parsed.optJSONArray("recommendations") ?: JSONArray()
+        val consolidated = ConsolidatedParser.parse(content)
+        val inquiries = runCatching {
+            JSONObject(content.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim())
+                .optJSONArray("client_inquiry_responses")?.length() ?: 0
+        }.getOrDefault(0)
         return AnalysisResult(
             requestId = request.requestId,
-            inquiryReplyCount = parsed.optInt("inquiryReplyCount"),
+            consolidated = consolidated,
+            recommendations = ConsolidatedParser.flatten(
+                consolidated, request.sourceTraces, request.targetDate,
+            ),
+            inquiryReplyCount = inquiries,
             analysisMode = request.mode,
             recommendationTargetDate = request.targetDate,
             rawResponse = content,
             completedAt = Instant.now(),
-            recommendations = buildList {
-                for (index in 0 until recommendations.length()) {
-                    val item = recommendations.getJSONObject(index)
-                    add(
-                        RecommendationResult(
-                            ticker = item.optString("ticker"),
-                            companyName = item.optString("companyName"),
-                            companyNameArabic = item.optNullableString("companyNameArabic"),
-                            sourceName = item.optString("sourceName"),
-                            targetDate = request.targetDate ?: item.optNullableString("targetDate")?.let {
-                                runCatching { LocalDate.parse(it) }.getOrNull()
-                            },
-                            timing = item.optNullableString("timing"),
-                            entryLow = item.optNullableDouble("entryLow"),
-                            entryHigh = item.optNullableDouble("entryHigh"),
-                            takeProfit1 = item.optNullableDouble("takeProfit1"),
-                            takeProfit2 = item.optNullableDouble("takeProfit2"),
-                            stopLoss = item.optNullableDouble("stopLoss"),
-                            notesArabic = item.optNullableString("notesArabic"),
-                            sourceIds = item.optJSONArray("sourceIds")?.let { ids ->
-                                buildList {
-                                    for (i in 0 until ids.length()) add(ids.getString(i))
-                                }
-                            }.orEmpty(),
-                            signal = item.optString("signal", "HOLD").uppercase(),
-                            confidence = item.optNullableDouble("confidence"),
-                            riskLevel = item.optNullableString("riskLevel"),
-                            timeHorizon = item.optNullableString("timeHorizon"),
-                            indicators = item.optJSONArray("indicators")?.let { values ->
-                                buildList {
-                                    for (i in 0 until values.length()) add(values.optString(i))
-                                }
-                            }.orEmpty(),
-                        ),
-                    )
-                }
-            },
             sources = request.sourceTraces,
         )
     }
@@ -345,6 +347,8 @@ class CloudAnalysisRepository(
         request: AnalysisRequest,
         values: List<RecommendationResult>,
     ): Pair<List<RecommendationResult>, List<String>> {
+        // flatten() resolves citations from source_message_id, so an unresolved row is one whose
+        // TELEGRAM_ID did not belong to any supplied source.
         val knownSources = request.sourceTraces.mapTo(mutableSetOf(), SourceTrace::sourceId)
         val warnings = mutableListOf<String>()
         val accepted = values.mapNotNull { recommendation ->
@@ -377,11 +381,11 @@ class CloudAnalysisRepository(
         return accepted to warnings
     }
 
+    private fun AnalysisRequest.telegramIdFor(sourceId: String): String =
+        sourceTraces.firstOrNull { it.sourceId == sourceId }?.messageId?.toString() ?: sourceId
+
     private companion object {
         const val CONNECT_TIMEOUT_MS = 30_000
-        const val SYSTEM_PROMPT =
-            "You extract evidence-backed Egyptian Exchange recommendations. Never invent values. " +
-                "Preserve Arabic notes. Cite only supplied source IDs and return strict JSON."
     }
 }
 

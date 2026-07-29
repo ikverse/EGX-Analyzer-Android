@@ -4,6 +4,7 @@ import android.app.Application
 import com.ikverse.egxanalyzer.data.AndroidKeystoreCredentialStore
 import com.ikverse.egxanalyzer.data.CloudAnalysisRepository
 import com.ikverse.egxanalyzer.data.LocalDataStore
+import com.ikverse.egxanalyzer.data.PromptStore
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.TelegramRepository
 import com.ikverse.egxanalyzer.ui.AppState
@@ -17,6 +18,7 @@ class EgxApplication : Application() {
         val analysisRepository = CloudAnalysisRepository(
             contentResolver = contentResolver,
             credentialStore = credentialStore,
+            promptStore = PromptStore(assets),
             configuration = { state.cloudConfiguration },
             preferences = { state.appPreferences },
         )
