@@ -7,17 +7,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.AutoGraph
@@ -29,17 +24,24 @@ import androidx.compose.material.icons.outlined.AutoGraph
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
@@ -91,31 +93,34 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
             }
         },
     ) {
-        AppContent(
-            activity = activity,
-            appState = appState,
-            showCompanionPane = windowWidth == WindowWidth.EXPANDED ||
-                separatingFold?.orientation == FoldingFeature.Orientation.VERTICAL,
-            hingeWidth = separatingFold?.bounds?.width()?.let { with(density) { it.toDp() } } ?: 0.dp,
-        )
+        AppContent(activity, appState)
     }
 }
 
 @Composable
-private fun AppContent(
-    activity: Activity,
-    appState: AppState,
-    showCompanionPane: Boolean,
-    hingeWidth: Dp,
-) {
-    // The navigation suite draws edge to edge, so the panes take responsibility for keeping their
-    // own content clear of the status bar and any cutout.
-    Row(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-        Box(
-            Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(if (showCompanionPane) 0.62f else 1f),
-        ) {
+private fun AppContent(activity: Activity, appState: AppState) {
+    val snackbarHost = remember { SnackbarHostState() }
+
+    // Actions report their outcome once, in plain language, then the message is cleared so it
+    // cannot reappear on the next recomposition.
+    LaunchedEffect(appState.statusMessage) {
+        appState.statusMessage?.let { message ->
+            snackbarHost.showSnackbar(message.text, withDismissAction = true)
+            appState.consumeStatusMessage()
+        }
+    }
+
+    Scaffold(
+        // The navigation suite draws edge to edge, so the content keeps itself clear of the status
+        // bar and any cutout.
+        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
+        containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHost) },
+    ) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize()) {
+            appState.busyLabel?.let { label ->
+                BusyBar(label)
+            }
             // Screens cross-fade and rise slightly, so changing destination reads as moving
             // somewhere rather than the content being swapped underneath.
             AnimatedContent(
@@ -136,10 +141,20 @@ private fun AppContent(
                 }
             }
         }
-        if (showCompanionPane) {
-            Spacer(Modifier.width(hingeWidth))
-            CompanionPane(appState, Modifier.fillMaxSize().padding(end = 4.dp))
-        }
+    }
+}
+
+/** Names the running action rather than showing a bare spinner, so a slow step is explainable. */
+@Composable
+private fun BusyBar(label: String) {
+    Column(Modifier.fillMaxWidth()) {
+        LinearProgressIndicator(Modifier.fillMaxWidth())
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+        )
     }
 }
 

@@ -127,6 +127,49 @@ internal fun ChannelsScreen(appState: AppState) {
             }
             TelegramAuthStep.READY -> {
                 val selectedCount = appState.channels.count(ChannelSelection::selected)
+                val busy = appState.busyLabel != null
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        enabled = !busy,
+                        onClick = {
+                            scope.launch {
+                                appState.runAction(
+                                    label = "Refreshing chats",
+                                    success = { "Chat list updated: ${appState.channels.size} chats." },
+                                ) { appState.refreshTelegramChats() }
+                            }
+                        },
+                    ) { Text("Refresh chats") }
+                    TextButton(
+                        enabled = !busy,
+                        onClick = {
+                            scope.launch {
+                                appState.runAction(
+                                    label = "Signing out",
+                                    success = { "Signed out of Telegram." },
+                                ) { appState.logoutTelegram() }
+                            }
+                        },
+                    ) { Text("Sign out") }
+                }
+
+                // The chats come first, then the action that uses them, so the screen reads in the
+                // order the task is done.
+                if (appState.channels.isEmpty()) {
+                    EmptyState(
+                        icon = Icons.Outlined.Forum,
+                        title = "No chats loaded",
+                        detail = "Refresh to pull your Telegram chat list onto this device.",
+                    )
+                } else {
+                    appState.channels.forEach { channel ->
+                        ChannelCard(channel, appState, appState.channels)
+                    }
+                }
+
                 SectionCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         StatTile(
@@ -140,10 +183,7 @@ internal fun ChannelsScreen(appState: AppState) {
                             label = "chats",
                             modifier = Modifier.weight(1f),
                         )
-                        StatusPill(
-                            appState.recommendationTargetDate.toString(),
-                            StatusTone.GOOD,
-                        )
+                        StatusPill(appState.recommendationTargetDate.toString(), StatusTone.GOOD)
                     }
                     Text(
                         if (appState.analysisMode == AnalysisMode.NEXT_DAY) {
@@ -155,33 +195,17 @@ internal fun ChannelsScreen(appState: AppState) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Button(
-                        onClick = { scope.launch { appState.syncTelegramSources() } },
-                        enabled = selectedCount > 0,
+                        onClick = {
+                            scope.launch {
+                                appState.runAction(
+                                    label = "Loading sources from Telegram",
+                                    success = { "Loaded ${appState.inputs.size} sources ready to analyze." },
+                                ) { appState.syncTelegramSources() }
+                            }
+                        },
+                        enabled = selectedCount > 0 && !busy,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Load analysis source window") }
-                    appState.telegramSyncMessage?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(onClick = {
-                        scope.launch { appState.refreshTelegramChats() }
-                    }) { Text("Refresh chats") }
-                    TextButton(onClick = {
-                        scope.launch { appState.logoutTelegram() }
-                    }) { Text("Sign out") }
-                }
-                if (appState.channels.isEmpty()) {
-                    EmptyState(
-                        icon = Icons.Outlined.Forum,
-                        title = "No chats loaded",
-                        detail = "Refresh to pull your Telegram chat list onto this device.",
-                    )
-                } else {
-                    appState.channels.forEach { channel -> ChannelCard(channel, appState) }
                 }
             }
             TelegramAuthStep.INITIALIZING,
@@ -216,9 +240,18 @@ private fun AuthField(
 }
 
 @Composable
-private fun ChannelCard(channel: ChannelSelection, appState: AppState) {
-    // The whole row toggles, not just the checkbox, and a selected chat is tinted so the chosen
-    // set is readable at a glance in a long list.
+private fun ChannelCard(
+    channel: ChannelSelection,
+    appState: AppState,
+    allChannels: List<ChannelSelection>,
+) {
+    // Two chats can carry the same words and differ only by a trailing emoji, which reads as a
+    // duplicate. When that happens the id is promoted so the difference is visible.
+    val ambiguous = remember(allChannels, channel.id) {
+        // A chat with no title has nothing to confuse, so blank names never count as a clash.
+        channel.baseName().isNotBlank() &&
+            allChannels.count { it.baseName() == channel.baseName() } > 1
+    }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -246,17 +279,35 @@ private fun ChannelCard(channel: ChannelSelection, appState: AppState) {
             Column(Modifier.weight(1f)) {
                 // Not truncated: chats can differ only by a trailing emoji, so cutting the name
                 // short can make two different chats look identical.
-                Text(channel.name, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    channel.name.ifBlank { "Untitled chat" },
+                    style = MaterialTheme.typography.titleSmall,
+                )
                 Text(
                     channel.id.toString(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (channel.selected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                    style = if (ambiguous) {
+                        MaterialTheme.typography.labelLarge
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        MaterialTheme.typography.bodySmall
+                    },
+                    color = when {
+                        ambiguous -> MaterialTheme.colorScheme.tertiary
+                        channel.selected -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
+                if (ambiguous) {
+                    Text(
+                        "Another chat has the same name",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
             }
         }
     }
 }
+
+/** Name reduced to its letters and digits, so emoji and punctuation do not hide a clash. */
+private fun ChannelSelection.baseName(): String =
+    name.filter(Char::isLetterOrDigit).lowercase()

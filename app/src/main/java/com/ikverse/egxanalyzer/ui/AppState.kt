@@ -93,6 +93,45 @@ class AppState(
         private set
     var telegramSyncMessage by mutableStateOf<String?>(null)
         private set
+
+    /** One-shot banner text for an action that has just finished. */
+    var statusMessage by mutableStateOf<StatusMessage?>(null)
+
+    /** Non-null while a named action is running, so the shell can show progress. */
+    var busyLabel by mutableStateOf<String?>(null)
+        private set
+
+    fun consumeStatusMessage() {
+        statusMessage = null
+    }
+
+    /**
+     * Runs a user-triggered action with progress and a plain-language outcome.
+     *
+     * Failures surface the provider's own message where there is one, since "no credit" or
+     * "wrong key" is far more use than a generic failure.
+     */
+    suspend fun <T> runAction(
+        label: String,
+        success: (T) -> String,
+        block: suspend () -> T,
+    ) {
+        busyLabel = label
+        statusMessage = null
+        try {
+            val outcome = block()
+            statusMessage = StatusMessage(success(outcome), succeeded = true)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            statusMessage = StatusMessage(
+                error.message?.takeIf(String::isNotBlank) ?: "$label failed.",
+                succeeded = false,
+            )
+        } finally {
+            busyLabel = null
+        }
+    }
     var inputs by mutableStateOf<List<AnalysisInput>>(emptyList())
         private set
     var activeSourceChannelId by mutableStateOf(channels.firstOrNull { it.selected }?.id)
@@ -643,3 +682,6 @@ class AppState(
         )
     }
 }
+
+/** Outcome of a finished action, shown once and dismissed. */
+data class StatusMessage(val text: String, val succeeded: Boolean)
