@@ -110,6 +110,7 @@ internal fun SectionCard(
 @Composable
 internal fun ExpandableSection(
     title: String,
+    icon: ImageVector? = null,
     modifier: Modifier = Modifier,
     initiallyExpanded: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
@@ -128,6 +129,15 @@ internal fun ExpandableSection(
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (icon != null) {
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                }
                 Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 Icon(
                     if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -85,6 +86,35 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         subtitle = "Send selected text, images, and voice-message content to " +
             appState.cloudConfiguration.provider.displayName + ".",
     ) {
+        Box {
+            val activeChannel = appState.channels.firstOrNull {
+                it.id == appState.activeSourceChannelId
+            }
+            TextButton(onClick = { channelMenuOpen = true }) {
+                Text("Source channel: ${activeChannel?.name ?: "On-device import"}")
+            }
+            DropdownMenu(
+                expanded = channelMenuOpen,
+                onDismissRequest = { channelMenuOpen = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("On-device import") },
+                    onClick = {
+                        appState.selectSourceChannel(null)
+                        channelMenuOpen = false
+                    },
+                )
+                appState.channels.filter(ChannelSelection::selected).forEach { channel ->
+                    DropdownMenuItem(
+                        text = { Text(channel.name) },
+                        onClick = {
+                            appState.selectSourceChannel(channel.id)
+                            channelMenuOpen = false
+                        },
+                    )
+                }
+            }
+        }
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -138,38 +168,9 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 }
             }
         }
-        Box {
-            val activeChannel = appState.channels.firstOrNull {
-                it.id == appState.activeSourceChannelId
-            }
-            TextButton(onClick = { channelMenuOpen = true }) {
-                Text("Source channel: ${activeChannel?.name ?: "On-device import"}")
-            }
-            DropdownMenu(
-                expanded = channelMenuOpen,
-                onDismissRequest = { channelMenuOpen = false },
-            ) {
-                DropdownMenuItem(
-                    text = { Text("On-device import") },
-                    onClick = {
-                        appState.selectSourceChannel(null)
-                        channelMenuOpen = false
-                    },
-                )
-                appState.channels.filter(ChannelSelection::selected).forEach { channel ->
-                    DropdownMenuItem(
-                        text = { Text(channel.name) },
-                        onClick = {
-                            appState.selectSourceChannel(channel.id)
-                            channelMenuOpen = false
-                        },
-                    )
-                }
-            }
-        }
         // Collapsed by default: the usual route is loading sources from Telegram, and adding one
         // by hand is the exception.
-        ExpandableSection("Advanced selection") {
+        ExpandableSection("Advanced selection", Icons.Outlined.Tune) {
             OutlinedTextField(
                 value = textSource,
                 onValueChange = { textSource = it },
@@ -204,17 +205,8 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         appState.inputs.forEach { input ->
             SourceCard(input, onRemove = { appState.removeInput(input.sourceId) })
         }
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            shape = MaterialTheme.shapes.large,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.SmartToy, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Cloud model", fontWeight = FontWeight.Bold)
-                }
+        ExpandableSection("Cloud model", Icons.Outlined.SmartToy) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     appState.cloudConfiguration.provider.displayName,
                     color = MaterialTheme.colorScheme.primary,
