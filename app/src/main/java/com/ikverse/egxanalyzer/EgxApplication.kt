@@ -6,6 +6,7 @@ import com.ikverse.egxanalyzer.data.CloudAnalysisRepository
 import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.PromptStore
+import com.ikverse.egxanalyzer.data.SymbolMap
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.TelegramRepository
 import com.ikverse.egxanalyzer.ui.AppState
@@ -29,7 +30,7 @@ class EgxApplication : Application() {
             analysisRepository = analysisRepository,
             localDataStore = localDataStore,
             telegramRepository = telegramRepository,
-            priceRepository = PriceRepository(localDataStore),
+            priceRepository = PriceRepository(localDataStore, SymbolMap(assets)),
         ).also { state = it }
     }
 }

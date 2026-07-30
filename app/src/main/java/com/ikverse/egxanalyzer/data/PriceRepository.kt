@@ -33,6 +33,7 @@ data class PriceRefresh(
  */
 class PriceRepository(
     private val localDataStore: LocalDataStore,
+    private val symbolMap: SymbolMap,
     private val endpointTemplate: String = YAHOO_CHART_URL,
 ) {
     /**
@@ -51,7 +52,7 @@ class PriceRepository(
         val fetched = normalized
             .map { ticker ->
                 val range = if (ticker in known) RECENT_RANGE else FULL_RANGE
-                async { ticker to limit.withPermit { fetch(ticker, range) } }
+                async { ticker to limit.withPermit { fetchAllFeeds(ticker, range) } }
             }
             .map { it.await() }
 
@@ -69,10 +70,29 @@ class PriceRepository(
         )
     }
 
-    private suspend fun fetch(ticker: String, range: String): List<DailySession> =
+    /**
+     * Reads every feed that carries this stock and merges them under the exchange's own code.
+     *
+     * Yahoo split each EGX listing across two symbols on 2026-07-30, so one alone is always
+     * missing either the history or everything recent. Where both report the same session the
+     * newer feed wins, since the legacy one froze mid-migration.
+     */
+    private suspend fun fetchAllFeeds(ticker: String, range: String): List<DailySession> {
+        val merged = LinkedHashMap<java.time.LocalDate, DailySession>()
+        // Reversed so the live feed, listed first, overwrites the legacy rows rather than the
+        // other way round.
+        for (symbol in symbolMap.feedsFor(ticker).asReversed()) {
+            for (session in fetch(symbol, ticker, range)) {
+                merged[session.date] = session
+            }
+        }
+        return merged.values.sortedBy(DailySession::date)
+    }
+
+    private suspend fun fetch(symbol: String, ticker: String, range: String): List<DailySession> =
         withContext(Dispatchers.IO) {
             runCatching {
-                val url = URL("${endpointTemplate.format(ticker)}?interval=1d&range=$range")
+                val url = URL("${endpointTemplate.format(symbol)}?interval=1d&range=$range")
                 val connection = url.openConnection() as HttpURLConnection
                 try {
                     connection.requestMethod = "GET"
@@ -133,7 +153,7 @@ class PriceRepository(
     fun earliestSession(): LocalDate? = localDataStore.earliestSessionDate()
 
     private companion object {
-        const val YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/%s.CA"
+        const val YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/%s"
 
         /** A stock with no stored history: a year of daily sessions, which is what the feed offers
          *  at daily granularity. Asking for `max` returns monthly buckets instead. */
