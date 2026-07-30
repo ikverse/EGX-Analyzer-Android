@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -116,20 +117,41 @@ private fun StockHeadingRow(stock: ConsolidatedRecommendation) {
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary,
         )
-        Text(
-            "  ${stock.stockNameArabic ?: stock.stockNameEnglish.orEmpty()}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        Column(Modifier.weight(1f).padding(start = 8.dp)) {
+            stock.stockNameArabic?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // Dimmer than the Arabic name because the model supplies it from its own knowledge
+            // rather than reading it from the source, and it is regularly wrong.
+            stock.stockNameEnglish?.takeIf { it != stock.stockCode }?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         if (stock.dataPoints.any(RecommendationDataPoint::isWatching)) {
-            Text(
-                "WATCHING",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.tertiary,
-            )
+            // The source flagged this stock as one to watch rather than dating a buy, so it is
+            // labelled rather than left as a bare word floating beside the name.
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                shape = MaterialTheme.shapes.small,
+            ) {
+                Text(
+                    "Watch list",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                )
+            }
         }
     }
 }
