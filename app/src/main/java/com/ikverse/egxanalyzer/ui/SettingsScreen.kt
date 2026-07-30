@@ -440,7 +440,7 @@ internal fun SettingsScreen(appState: AppState) {
                         }) { Text("Sign out") }
                     }
                 } else {
-                    Button(onClick = { appState.navigate(AppDestination.CHANNELS) }) {
+                    Button(onClick = { appState.navigate(AppDestination.ANALYZE) }) {
                         Text("Open Telegram sign-in")
                     }
                 }

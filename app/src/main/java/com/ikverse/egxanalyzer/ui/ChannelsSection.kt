@@ -42,14 +42,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.selection.selectable
 
 @Composable
-internal fun ChannelsScreen(appState: AppState) {
+internal fun ColumnScope.ChannelsSection(appState: AppState) {
     val scope = rememberCoroutineScope()
     var firstValue by remember(appState.telegramAuthState.step) { mutableStateOf("") }
     var secondValue by remember(appState.telegramAuthState.step) { mutableStateOf("") }
-    Screen(
-        title = "Channels",
-        subtitle = "Select chats; the target-date rules determine the exact Cairo source window.",
-    ) {
         Text(
             appState.telegramAuthState.message,
             color = if (appState.telegramAuthState.step == TelegramAuthStep.ERROR) {
@@ -126,7 +122,7 @@ internal fun ChannelsScreen(appState: AppState) {
                 Text("Open this link in Telegram on an already signed-in device.")
             }
             TelegramAuthStep.READY -> {
-                val selectedCount = appState.channels.count { it.isChannel && it.selected }
+                val selectedCount = appState.channels.count(ChannelSelection::selected)
                 val busy = appState.busyLabel != null
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -139,7 +135,7 @@ internal fun ChannelsScreen(appState: AppState) {
                                 appState.runAction(
                                     label = "Refreshing chats",
                                     success = {
-                                        val found = appState.channels.count(ChannelSelection::isChannel)
+                                        val found = appState.channels.size
                                         "Chat list updated: $found channels found."
                                     },
                                 ) { appState.refreshTelegramChats() }
@@ -161,31 +157,18 @@ internal fun ChannelsScreen(appState: AppState) {
 
                 // The chats come first, then the action that uses them, so the screen reads in the
                 // order the task is done.
-                // Only broadcast channels: private chats, groups and the Telegram service
-                // account are not sources of published recommendations.
-                val broadcastChannels = appState.channels.filter(ChannelSelection::isChannel)
-                val hidden = appState.channels.size - broadcastChannels.size
-                if (broadcastChannels.isEmpty()) {
+                // Every chat is offered, broadcast channel or not: recommendations also arrive
+                // in groups and direct messages, and hiding those decided for the user which
+                // sources were worth reading.
+                val chats = appState.channels
+                if (chats.isEmpty()) {
                     EmptyState(
                         icon = Icons.Outlined.Forum,
-                        title = if (appState.channels.isEmpty()) "No chats loaded" else "No channels found",
-                        detail = if (appState.channels.isEmpty()) {
-                            "Refresh to pull your Telegram chat list onto this device."
-                        } else {
-                            "None of your $hidden chats are broadcast channels."
-                        },
+                        title = "No chats loaded",
+                        detail = "Refresh to pull your Telegram chat list onto this device.",
                     )
                 } else {
-                    if (hidden > 0) {
-                        Text(
-                            "$hidden group or private chat${if (hidden == 1) "" else "s"} hidden",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    broadcastChannels.forEach { channel ->
-                        ChannelCard(channel, appState, broadcastChannels)
-                    }
+                    chats.forEach { chat -> ChannelCard(chat, appState, chats) }
                 }
 
                 SectionCard {
@@ -197,8 +180,8 @@ internal fun ChannelsScreen(appState: AppState) {
                             modifier = Modifier.weight(1f),
                         )
                         StatTile(
-                            value = appState.channels.count(ChannelSelection::isChannel).toString(),
-                            label = "channels",
+                            value = appState.channels.size.toString(),
+                            label = "chats",
                             modifier = Modifier.weight(1f),
                         )
                         StatusPill(appState.recommendationTargetDate.toString(), StatusTone.GOOD)
@@ -231,7 +214,6 @@ internal fun ChannelsScreen(appState: AppState) {
             TelegramAuthStep.ERROR -> Unit
         }
     }
-}
 
 @Composable
 private fun AuthCard(title: String, content: @Composable ColumnScope.() -> Unit) {
@@ -311,6 +293,13 @@ private fun ChannelCard(
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
+                if (!channel.isChannel) {
+                    Text(
+                        "Group or private chat",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (ambiguous) {
                     Text(
                         "Another chat has the same name",

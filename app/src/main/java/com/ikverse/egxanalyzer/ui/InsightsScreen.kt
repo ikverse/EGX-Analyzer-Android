@@ -219,7 +219,7 @@ private fun Headline(report: PerformanceReport) {
 
 @Composable
 private fun OutcomeBreakdown(report: PerformanceReport) {
-    SectionCard(title = "Outcomes", icon = Icons.Outlined.Timeline) {
+    ExpandableSection(title = "Outcomes", icon = Icons.Outlined.Timeline) {
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -270,7 +270,7 @@ private fun OutcomeLabel(outcome: Outcome) {
 @Composable
 private fun ChannelRanking(channels: List<ChannelScore>) {
     if (channels.isEmpty()) return
-    SectionCard(title = "Sources ranked", icon = Icons.Outlined.Leaderboard) {
+    ExpandableSection(title = "Sources ranked", icon = Icons.Outlined.Leaderboard) {
         channels.forEachIndexed { index, channel ->
             if (index > 0) HorizontalDivider()
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -315,7 +315,9 @@ private fun RunCard(run: ScoredRun, windowSessions: Int) {
             .withZone(ZoneId.systemDefault())
             .format(run.completedAt)
     }
-    SectionCard(title = stamp, icon = Icons.Outlined.Assessment) {
+    // Closed by default: a run is a summary line until asked for, so a page of them stays
+    // readable however many analyses have been saved.
+    ExpandableSection(title = stamp, icon = Icons.Outlined.Assessment) {
         Text(
             "${run.calls.size} ${if (run.calls.size == 1) "recommendation" else "recommendations"} · " +
                 "${run.fullHits} full · ${run.partialHits} partial · ${run.stopped} stopped · " +

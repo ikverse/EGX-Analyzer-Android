@@ -25,10 +25,16 @@ data class TelegramAuthState(
 data class TelegramChat(
     val id: Long,
     val title: String,
-    val isChannel: Boolean,
-)
+    val kind: ChatKind,
+) {
+    /** Broadcast channel, as opposed to a group or a private chat. */
+    val isChannel: Boolean get() = kind == ChatKind.CHANNEL
+}
 
 data class TelegramSourceBatch(
     val inputs: List<AnalysisInput>,
     val traces: List<SourceTrace>,
 )
+
+/** How the desktop classifies a dialog, so both apps hide the same chats. */
+enum class ChatKind { CHANNEL, GROUP, DIRECT }

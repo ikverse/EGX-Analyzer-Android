@@ -11,6 +11,7 @@ import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredRun
 import com.ikverse.egxanalyzer.model.round
+import java.time.Instant
 import java.time.LocalDate
 
 /**
@@ -115,33 +116,34 @@ object PerformanceCalculator {
     /**
      * One entry per call, not per time a call was written down.
      *
-     * Re-running the analysis on the same day saves another result listing the same
+     * Re-running an analysis for the same session saves another result listing the same
      * recommendations, so the raw rows count a single call once per run. Left alone that inflates
-     * every total and quietly gives extra weight to whichever channel happened to be analysed most
-     * often. Calls are therefore keyed by stock, channel and date, keeping whichever copy states
-     * the most price levels, since runs differ mainly in how much of the message the model read.
+     * every total and quietly gives extra weight to whichever channel was analysed most often.
+     *
+     * Calls are keyed by stock, channel and target session, and the most recent run wins. A later
+     * run is the considered view - it read the same sources with whatever was fixed since - so a
+     * re-run replaces its predecessor rather than competing with it.
      */
     private fun uniqueCalls(
         analyses: List<SavedAnalysis>,
         since: LocalDate,
         owner: MutableMap<Triple<String, String, LocalDate>, Long>,
     ): List<ScoredCall> {
-        val best = linkedMapOf<Triple<String, String, LocalDate>, Pair<Int, ScoredCall>>()
+        val best = linkedMapOf<Triple<String, String, LocalDate>, Pair<Instant, ScoredCall>>()
         analyses.forEach { saved ->
             val channelNames = saved.result.sources
                 .filter { it.messageId != null }
                 .associate { it.messageId.toString() to it.channelName }
+            val targetDate = saved.result.recommendationTargetDate
+            val ranAt = saved.result.completedAt
             saved.result.consolidated.forEach { stock ->
                 stock.dataPoints.forEach { point ->
-                    val call = point.toCall(stock, channelNames) ?: return@forEach
+                    val call = point.toCall(stock, channelNames, targetDate) ?: return@forEach
                     if (call.openedOn < since) return@forEach
-                    val levels = listOf(
-                        call.entryLow, call.entryHigh, call.target1, call.target2, call.stopLoss,
-                    ).count { it != null }
                     val key = Triple(call.ticker, call.channel, call.openedOn)
                     val existing = best[key]
-                    if (existing == null || levels > existing.first) {
-                        best[key] = levels to call
+                    if (existing == null || ranAt >= existing.first) {
+                        best[key] = ranAt to call
                         owner[key] = saved.id
                     }
                 }
@@ -153,10 +155,13 @@ object PerformanceCalculator {
     private fun RecommendationDataPoint.toCall(
         stock: ConsolidatedRecommendation,
         channelNames: Map<String, String>,
+        targetDate: LocalDate?,
     ): ScoredCall? {
         val ticker = Scoring.normalizeTicker(stock.stockCode)
-        // A call with no date cannot be scored: there is nothing to say which session it starts at.
-        val openedOn = date ?: visibleSourceDate?.let { value ->
+        // The session the run was aimed at, which is the one the recommendation is for. Reading the
+        // date off the extraction instead put a back-dated analysis under whatever day its sources
+        // happened to be printed with, so scoring started from the wrong session.
+        val openedOn = targetDate ?: date ?: visibleSourceDate?.let { value ->
             runCatching { LocalDate.parse(value.trim().take(10)) }.getOrNull()
         } ?: return null
         if (ticker.isBlank()) return null

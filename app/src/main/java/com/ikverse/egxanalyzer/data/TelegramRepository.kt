@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Build
 import android.util.Base64
 import com.ikverse.egxanalyzer.model.AnalysisContentType
+import com.ikverse.egxanalyzer.model.ChatKind
+import com.ikverse.egxanalyzer.model.cleanChannelName
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.TelegramAuthState
@@ -28,6 +30,7 @@ import dev.g000sha256.tdl.dto.AuthorizationStateWaitRegistration
 import dev.g000sha256.tdl.dto.AuthorizationStateWaitTdlibParameters
 import dev.g000sha256.tdl.dto.Chat
 import dev.g000sha256.tdl.dto.ChatListMain
+import dev.g000sha256.tdl.dto.ChatTypeBasicGroup
 import dev.g000sha256.tdl.dto.ChatTypeSupergroup
 import dev.g000sha256.tdl.dto.EmailAddressAuthenticationCode
 import dev.g000sha256.tdl.dto.Message
@@ -171,10 +174,18 @@ class TelegramRepository(
         _chats.value = emptyList()
     }
 
+    /**
+     * Loads the chat list, as the desktop's `get_dialogs()` does.
+     *
+     * The ceiling is high rather than paged: asking TDLib for successive pages dropped two chats
+     * that a single large request returns, and losing a channel the user had selected is far worse
+     * than fetching a few more than needed.
+     */
     suspend fun refreshChats() {
         if (_authState.value.step != TelegramAuthStep.READY) return
-        client.loadChats(ChatListMain(), CHAT_LIMIT)
-        val chatIds = client.getChats(ChatListMain(), CHAT_LIMIT).requireValue<dev.g000sha256.tdl.dto.Chats>()
+        client.loadChats(ChatListMain(), MAX_CHATS)
+        val chatIds = client.getChats(ChatListMain(), MAX_CHATS)
+            .requireValue<dev.g000sha256.tdl.dto.Chats>()
         chatIds.chatIds.forEach { id ->
             val chat = client.getChat(id).requireValue<Chat>()
             chatCache[id] = chat
@@ -273,7 +284,7 @@ class TelegramRepository(
             traces += SourceTrace(
                 sourceId = sourceId,
                 channelId = chat.id,
-                channelName = chat.title,
+                channelName = cleanChannelName(chat.title),
                 messageId = message.id,
                 timestamp = Instant.ofEpochSecond(message.date.toLong()),
                 contentType = when (content) {
@@ -405,10 +416,16 @@ class TelegramRepository(
 
     private fun publishChats() {
         _chats.value = chatCache.values.map { chat ->
+            val supergroup = chat.type as? ChatTypeSupergroup
             TelegramChat(
                 id = chat.id,
-                title = chat.title,
-                isChannel = (chat.type as? ChatTypeSupergroup)?.isChannel == true,
+                // Cleaned here so every screen and every saved analysis sees one label per chat.
+                title = cleanChannelName(chat.title, fallback = chat.id.toString()),
+                kind = when {
+                    supergroup?.isChannel == true -> ChatKind.CHANNEL
+                    supergroup != null || chat.type is ChatTypeBasicGroup -> ChatKind.GROUP
+                    else -> ChatKind.DIRECT
+                },
             )
         }.sortedBy(TelegramChat::title)
     }
@@ -435,7 +452,8 @@ class TelegramRepository(
         const val KEY_API_ID = "telegram_api_id"
         const val KEY_API_HASH = "telegram_api_hash"
         const val KEY_DATABASE_ENCRYPTION = "telegram_database_encryption"
-        const val CHAT_LIMIT = 200
+        /** The desktop applies no limit; this is high enough to be one in name only. */
+        const val MAX_CHATS = 1_000
         const val HISTORY_PAGE_SIZE = 100
         const val CLIENT_CLOSE_TIMEOUT_MS = 10_000L
     }

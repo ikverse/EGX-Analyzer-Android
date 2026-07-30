@@ -47,7 +47,6 @@ import java.time.ZoneId
 import java.util.UUID
 
 enum class AppDestination(val label: String, val shortLabel: String) {
-    CHANNELS("Channels", "CH"),
     ANALYZE("Analyze", "AI"),
     RESULTS("Results", "RS"),
     INSIGHTS("Insights", "IN"),
@@ -64,7 +63,7 @@ class AppState(
     private val priceRepository: PriceRepository,
 ) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    var destination by mutableStateOf(AppDestination.CHANNELS)
+    var destination by mutableStateOf(AppDestination.ANALYZE)
         private set
     var cloudConfiguration by mutableStateOf(settingsRepository.load())
         private set
@@ -180,18 +179,22 @@ class AppState(
         appScope.launch {
             telegramRepository.authState.collect { telegramAuthState = it }
         }
+        // Nothing about a previous session carries into this one: a restart starts from the
+        // chat list Telegram reports now, with nothing selected.
+        localDataStore.forgetChannelSelections()
         appScope.launch {
             telegramRepository.chats.collect { telegramChats ->
-                val selected = localDataStore.selectedChannelIds()
+                val stillSelected = channels.filter(ChannelSelection::selected).map(ChannelSelection::id)
                 channels = telegramChats.map { chat ->
                     ChannelSelection(
                         id = chat.id,
                         name = chat.title,
-                        selected = chat.id in selected,
+                        // Kept across a refresh within the session, but never across a restart.
+                        selected = chat.id in stillSelected,
                         isChannel = chat.isChannel,
                     )
                 }
-                if (activeSourceChannelId == null) {
+                if (activeSourceChannelId !in channels.map(ChannelSelection::id)) {
                     activeSourceChannelId = channels.firstOrNull { it.selected }?.id
                 }
             }
@@ -496,7 +499,6 @@ class AppState(
         val id = idText.trim().toLongOrNull()
         if (id == null || name.isBlank()) return false
         val added = ChannelSelection(id, name.trim(), selected = true)
-        localDataStore.setChannelSelected(added)
         // Added to the live list rather than reloading from storage, which would drop every chat
         // Telegram reported this session.
         channels = (channels.filterNot { it.id == id } + added).sortedBy { it.name.lowercase() }
@@ -579,7 +581,6 @@ class AppState(
 
     fun toggleChannel(channel: ChannelSelection) {
         val updated = channel.copy(selected = !channel.selected)
-        localDataStore.setChannelSelected(updated)
         channels = channels.map { if (it.id == channel.id) updated else it }
         if (activeSourceChannelId !in channels.filter { it.selected }.map { it.id }) {
             activeSourceChannelId = channels.firstOrNull { it.selected }?.id
@@ -587,7 +588,6 @@ class AppState(
     }
 
     fun removeChannel(channel: ChannelSelection) {
-        localDataStore.removeChannel(channel.id)
         channels = channels.filterNot { it.id == channel.id }
         if (activeSourceChannelId == channel.id) {
             activeSourceChannelId = channels.firstOrNull { it.selected }?.id
@@ -698,7 +698,7 @@ class AppState(
                 SourceTrace(
                     sourceId = input.sourceId,
                     channelId = channel?.id,
-                    channelName = channel?.name ?: "On-device import",
+                    channelName = channel?.displayName ?: "On-device import",
                     messageId = null,
                     timestamp = Instant.now(),
                     contentType = when (input) {

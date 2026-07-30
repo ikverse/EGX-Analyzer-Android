@@ -133,7 +133,6 @@ private fun AppContent(activity: Activity, appState: AppState) {
                 label = "destination",
             ) { destination ->
                 when (destination) {
-                    AppDestination.CHANNELS -> ChannelsScreen(appState)
                     AppDestination.ANALYZE -> AnalyzeScreen(activity, appState)
                     AppDestination.RESULTS -> ResultsScreen(activity, appState)
                     AppDestination.INSIGHTS -> InsightsScreen(appState)
@@ -160,7 +159,6 @@ private fun BusyBar(label: String) {
 
 private val AppDestination.icon: ImageVector
     get() = when (this) {
-        AppDestination.CHANNELS -> Icons.Outlined.Forum
         AppDestination.ANALYZE -> Icons.Outlined.AutoGraph
         AppDestination.RESULTS -> Icons.Outlined.Assessment
         AppDestination.INSIGHTS -> Icons.Outlined.Insights
@@ -169,7 +167,6 @@ private val AppDestination.icon: ImageVector
 
 private val AppDestination.selectedIcon: ImageVector
     get() = when (this) {
-        AppDestination.CHANNELS -> Icons.Filled.Forum
         AppDestination.ANALYZE -> Icons.Filled.AutoGraph
         AppDestination.RESULTS -> Icons.Filled.Assessment
         AppDestination.INSIGHTS -> Icons.Filled.Insights

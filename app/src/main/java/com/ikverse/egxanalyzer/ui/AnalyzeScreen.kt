@@ -86,6 +86,8 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         subtitle = "Send selected text, images, and voice-message content to " +
             appState.cloudConfiguration.provider.displayName + ".",
     ) {
+        // Chat selection leads, because choosing sources is the first step of a run.
+        ChannelsSection(appState)
         Box {
             val activeChannel = appState.channels.firstOrNull {
                 it.id == appState.activeSourceChannelId
@@ -293,11 +295,12 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
             analyzeDisabledReason?.let {
                 Text(it, color = MaterialTheme.colorScheme.error)
                 if (appState.inputs.isEmpty()) {
-                    TextButton(onClick = { appState.navigate(AppDestination.CHANNELS) }) {
-                        Icon(Icons.Outlined.Forum, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Go to Channels to load sources")
-                    }
+                    // The chat list now sits at the top of this screen, so there is nowhere to send
+                    // the user - only somewhere to point them.
+                    Text(
+                        "Select chats at the top of this screen and load the source window.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
             if (analyzeDisabledReason == null && appState.inputs.isEmpty()) {

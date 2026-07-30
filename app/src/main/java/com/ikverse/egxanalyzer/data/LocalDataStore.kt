@@ -11,6 +11,7 @@ import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.AnalysisDiagnostics
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.CloudProvider
+import com.ikverse.egxanalyzer.model.cleanChannelName
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.ExcludedSource
@@ -206,44 +207,14 @@ class LocalDataStore(context: Context) :
     }
 
     /**
-     * Which chats the user has picked.
+     * Drops every remembered chat selection.
      *
-     * Only the choice is kept, never the chat list itself - Telegram is the authority on which
-     * chats exist, so a stored list would go stale the moment one is left or renamed.
+     * Selections used to survive a restart, so a chat picked days ago could still be feeding an
+     * analysis without appearing to. They now last only as long as the app is open, and this
+     * clears anything a previous version stored.
      */
-    fun selectedChannelIds(): Set<Long> = readableDatabase.query(
-        "channels",
-        arrayOf("id"),
-        "selected != 0",
-        null,
-        null,
-        null,
-        null,
-    ).use { cursor ->
-        buildSet {
-            while (cursor.moveToNext()) add(cursor.getLong(0))
-        }
-    }
-
-    fun setChannelSelected(channel: ChannelSelection) {
-        if (channel.selected) {
-            writableDatabase.insertWithOnConflict(
-                "channels",
-                null,
-                ContentValues().apply {
-                    put("id", channel.id)
-                    put("name", channel.name.trim())
-                    put("selected", 1)
-                },
-                SQLiteDatabase.CONFLICT_REPLACE,
-            )
-        } else {
-            removeChannel(channel.id)
-        }
-    }
-
-    fun removeChannel(id: Long) {
-        writableDatabase.delete("channels", "id = ?", arrayOf(id.toString()))
+    fun forgetChannelSelections() {
+        writableDatabase.delete("channels", null, null)
     }
 
     fun saveResult(result: AnalysisResult, provider: CloudProvider, model: String): Long =
@@ -413,7 +384,9 @@ class LocalDataStore(context: Context) :
             SourceTrace(
                 sourceId = item.getString("sourceId"),
                 channelId = item.nullableLong("channelId"),
-                channelName = item.getString("channelName"),
+                // Folded on read as well as on write: analyses saved before this carry the raw title, and
+                // would otherwise keep counting as a separate source forever.
+                channelName = cleanChannelName(item.getString("channelName")),
                 messageId = item.nullableLong("messageId"),
                 timestamp = Instant.parse(item.getString("timestamp")),
                 contentType = AnalysisContentType.valueOf(item.getString("contentType")),
