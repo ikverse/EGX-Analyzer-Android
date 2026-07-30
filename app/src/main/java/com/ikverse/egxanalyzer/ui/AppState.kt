@@ -20,12 +20,10 @@ import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.AnalysisRequest
 import com.ikverse.egxanalyzer.model.AnalysisReport
-import com.ikverse.egxanalyzer.model.AnalysisSearchHit
 import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudProvider
-import com.ikverse.egxanalyzer.model.ConsensusItem
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.SavedAnalysis
@@ -738,57 +736,6 @@ class AppState(
         settingsMessage = "All saved analyses deleted."
         appScope.launch { recomputePerformance() }
     }
-
-    fun searchAnalyses(query: String): List<AnalysisSearchHit> {
-        val normalized = query.trim().lowercase()
-        if (normalized.length < 2) return emptyList()
-        return savedResults.flatMap { saved ->
-            saved.result.recommendations.mapNotNull { recommendation ->
-                val sourceNames = saved.result.sources
-                    .filter { it.sourceId in recommendation.sourceIds }
-                    .map(SourceTrace::channelName)
-                    .distinct()
-                val searchable = listOf(
-                    recommendation.ticker,
-                    recommendation.companyName,
-                    recommendation.companyNameArabic.orEmpty(),
-                    recommendation.notesArabic.orEmpty(),
-                    sourceNames.joinToString(" "),
-                ).joinToString(" ").lowercase()
-                if (normalized in searchable) {
-                    AnalysisSearchHit(
-                        resultId = saved.id,
-                        ticker = recommendation.ticker,
-                        companyName = recommendation.companyName,
-                        targetDate = recommendation.targetDate,
-                        sourceNames = sourceNames,
-                    )
-                } else null
-            }
-        }
-    }
-
-    fun consensus(): List<ConsensusItem> =
-        savedResults.flatMap { it.result.recommendations }
-            .groupBy { it.ticker.uppercase() }
-            .map { (ticker, values) ->
-                ConsensusItem(
-                    ticker = ticker,
-                    companyName = values.firstOrNull()?.companyName.orEmpty(),
-                    recommendationCount = values.size,
-                    sourceCount = values.flatMap { it.sourceIds }.distinct().size,
-                    buyCount = values.count { it.signal == "BUY" },
-                    sellCount = values.count { it.signal == "SELL" },
-                    holdCount = values.count { it.signal !in setOf("BUY", "SELL") },
-                    averageConfidence = values.mapNotNull { it.confidence }
-                        .takeIf(List<Double>::isNotEmpty)?.average(),
-                    latestTargetDate = values.mapNotNull { it.targetDate }.maxOrNull(),
-                )
-            }
-            .sortedWith(
-                compareByDescending<ConsensusItem>(ConsensusItem::recommendationCount)
-                    .thenBy(ConsensusItem::ticker),
-            )
 
     fun reportFor(saved: SavedAnalysis): AnalysisReport {
         val result = saved.result
