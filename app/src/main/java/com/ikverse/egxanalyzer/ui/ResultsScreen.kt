@@ -28,6 +28,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +74,7 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                     // Expanding also selects, so the companion pane follows what is open.
                     onExpand = { appState.selectResult(saved) },
                     highlighted = saved.id == appState.pendingResultId,
+                    onHighlightShown = { appState.consumePendingResult() },
                     onShare = { shareReport(activity, appState.reportFor(saved)) },
                     onDelete = { appState.deleteResult(saved) },
                     report = { appState.reportFor(saved) },
@@ -78,8 +87,9 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
 @Composable
 private fun SavedAnalysisCard(
     saved: SavedAnalysis,
-    /** Opened from a notification: it starts expanded and stands out until touched. */
+    /** Opened from a notification: it starts expanded and its edge flashes briefly. */
     highlighted: Boolean = false,
+    onHighlightShown: () -> Unit = {},
     onExpand: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit,
@@ -91,15 +101,30 @@ private fun SavedAnalysisCard(
     val stockCount = saved.result.consolidated.size.takeIf { it > 0 }
         ?: saved.result.recommendations.map(RecommendationResult::ticker).distinct().size
 
+    // A flash rather than a permanent tint: it answers "which one" on arrival and then gets out
+    // of the way, instead of leaving a card looking special long after the reason has passed.
+    val flash = rememberInfiniteTransition(label = "arrival")
+    val edge by flash.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(FlashHalfCycleMs), RepeatMode.Reverse),
+        label = "edge",
+    )
+    LaunchedEffect(highlighted) {
+        if (highlighted) {
+            delay(FlashDurationMs)
+            onHighlightShown()
+        }
+    }
+
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (highlighted) {
-                MaterialTheme.colorScheme.tertiaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainer
-            },
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = if (highlighted) {
+            BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = edge))
+        } else {
+            null
+        },
         shape = MaterialTheme.shapes.large,
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -303,3 +328,7 @@ private val COMPLETED_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("d
 /** IMAGE_REF is one-based over the images sent with the request. */
 private fun AnalysisResult.imagePathFor(reference: Int?): String? =
     reference?.let { imagePaths.getOrNull(it - 1) }
+
+/** Long enough to catch the eye on arrival, short enough not to become decoration. */
+private const val FlashHalfCycleMs = 420
+private const val FlashDurationMs = 2_400L
