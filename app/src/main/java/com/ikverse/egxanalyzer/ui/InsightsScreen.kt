@@ -368,8 +368,8 @@ private fun ScoredCallRow(call: ScoredCall, windowSessions: Int) {
                 Figure("Stop", call.stopLoss.orDash(), Modifier.weight(1f))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Figure("High since", call.peakHigh.orDash(), Modifier.weight(1f))
-                Figure("Low since", call.troughLow.orDash(), Modifier.weight(1f))
+                Figure("High since", call.peakHigh.orDash(), Modifier.weight(1f), on = call.peakOn)
+                Figure("Low since", call.troughLow.orDash(), Modifier.weight(1f), on = call.troughOn)
                 Figure("Sessions", call.sessionsElapsed.toString(), Modifier.weight(1f))
                 Figure(
                     "Return",
@@ -461,6 +461,8 @@ private fun Figure(
     value: String,
     modifier: Modifier = Modifier,
     tone: Color = MaterialTheme.colorScheme.onSurface,
+    /** The session a high or low was set on: a price without its date says half of it. */
+    on: java.time.LocalDate? = null,
 ) {
     Column(modifier) {
         Text(
@@ -469,6 +471,13 @@ private fun Figure(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(value, style = MaterialTheme.typography.bodyMedium, color = tone, textAlign = TextAlign.Start)
+        if (on != null) {
+            Text(
+                on.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

@@ -22,9 +22,11 @@ data class ScoredCall(
     val stopLoss: Double?,
     val outcome: Outcome,
     val settledOn: LocalDate?,
-    /** Highest and lowest the stock traded since the call, across the scoring window. */
+    /** Highest and lowest the stock traded since the call, and the session that set each. */
     val peakHigh: Double?,
+    val peakOn: LocalDate? = null,
     val troughLow: Double?,
+    val troughOn: LocalDate? = null,
     val returnPct: Double?,
     val sessionsElapsed: Int,
     /** The first target was banked and the stop was reached afterwards. */

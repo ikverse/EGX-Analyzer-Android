@@ -51,7 +51,7 @@ object Scoring {
     ): Scored {
         val window = clampWindow(windowSessions)
         val considered = sessions.take(window)
-        if (considered.isEmpty()) return Scored(Outcome.UNPRICED, null, null, 0, null, null, null)
+        if (considered.isEmpty()) return Scored(Outcome.UNPRICED, null, null, 0, null, null, null, null, null)
 
         // A call quoting only one target has nothing further to reach, so that target is the full
         // one rather than a partial step toward a second that was never named.
@@ -61,13 +61,28 @@ object Scoring {
         var entered = entryLow == null && entryHigh == null
         var peak: Double? = null
         var trough: Double? = null
+        // Which session set each extreme, so the figure can be placed rather than just quoted.
+        var peakOn: LocalDate? = null
+        var troughOn: LocalDate? = null
         var partialOn: LocalDate? = null
         var partialElapsed = 0
 
         considered.forEachIndexed { zeroBased, day ->
             val elapsed = zeroBased + 1
-            day.high?.let { high -> peak = peak?.coerceAtLeast(high) ?: high }
-            day.low?.let { low -> trough = trough?.coerceAtMost(low) ?: low }
+            day.high?.let { high ->
+                val best = peak
+                if (best == null || high > best) {
+                    peak = high
+                    peakOn = day.date
+                }
+            }
+            day.low?.let { low ->
+                val worst = trough
+                if (worst == null || low < worst) {
+                    trough = low
+                    troughOn = day.date
+                }
+            }
             val enteredHere = !entered && day.touchedEntry(entryLow, entryHigh)
             if (enteredHere) entered = true
             if (entered) {
@@ -79,12 +94,12 @@ object Scoring {
                 // Nothing has settled yet, so an unorderable session cannot be resolved either way.
                 if (partialOn == null && hitAnyTarget) {
                     if (hitStop) {
-                        return Scored(Outcome.AMBIGUOUS, day.date, null, elapsed, peak, trough, null)
+                        return Scored(Outcome.AMBIGUOUS, day.date, null, elapsed, peak, peakOn, trough, troughOn, null)
                     }
                     // The entry first became available on the same session a target was reached.
                     // Only the open can order those, since it precedes every other price of the day.
                     if (enteredHere && !day.buyableAtOpen(entryLow, entryHigh)) {
-                        return Scored(Outcome.AMBIGUOUS, day.date, null, elapsed, peak, trough, null)
+                        return Scored(Outcome.AMBIGUOUS, day.date, null, elapsed, peak, peakOn, trough, troughOn, null)
                     }
                 }
 
@@ -93,12 +108,13 @@ object Scoring {
                     // cannot be ordered against it, so the partial stands rather than being
                     // promoted on a guess.
                     if (partialOn != null && hitStop) {
-                        return partial(partialTarget, partialOn, partialElapsed, peak, trough,
-                            entryLow, entryHigh, stoppedAfter = true, windowComplete = true)
+                        return partial(partialTarget, partialOn, partialElapsed, peak, peakOn,
+                            trough, troughOn, entryLow, entryHigh, stoppedAfter = true,
+                            windowComplete = true)
                     }
                     return Scored(
-                        Outcome.FULL_HIT, day.date, fullTarget, elapsed, peak, trough,
-                        returnPct(entryLow, entryHigh, fullTarget),
+                        Outcome.FULL_HIT, day.date, fullTarget, elapsed, peak, peakOn, trough,
+                        troughOn, returnPct(entryLow, entryHigh, fullTarget),
                     )
                 }
                 if (hitPartial && partialOn == null) {
@@ -108,12 +124,13 @@ object Scoring {
                 if (hitStop) {
                     // The first target was already banked, so the call is not simply a loss.
                     if (partialOn != null) {
-                        return partial(partialTarget, partialOn, partialElapsed, peak, trough,
-                            entryLow, entryHigh, stoppedAfter = true, windowComplete = true)
+                        return partial(partialTarget, partialOn, partialElapsed, peak, peakOn,
+                            trough, troughOn, entryLow, entryHigh, stoppedAfter = true,
+                            windowComplete = true)
                     }
                     return Scored(
-                        Outcome.STOPPED, day.date, stopLoss, elapsed, peak, trough,
-                        returnPct(entryLow, entryHigh, stopLoss),
+                        Outcome.STOPPED, day.date, stopLoss, elapsed, peak, peakOn, trough,
+                        troughOn, returnPct(entryLow, entryHigh, stopLoss),
                     )
                 }
             }
@@ -122,11 +139,12 @@ object Scoring {
         val complete = considered.size >= window
         return when {
             !entered ->
-                Scored(Outcome.ENTRY_NOT_REACHED, null, null, considered.size, peak, trough, null)
-            partialOn != null -> partial(partialTarget, partialOn, partialElapsed, peak, trough,
-                entryLow, entryHigh, stoppedAfter = false, windowComplete = complete)
-            complete -> Scored(Outcome.EXPIRED, null, null, considered.size, peak, trough, null)
-            else -> Scored(Outcome.OPEN, null, null, considered.size, peak, trough, null)
+                Scored(Outcome.ENTRY_NOT_REACHED, null, null, considered.size, peak, peakOn, trough, troughOn, null)
+            partialOn != null -> partial(partialTarget, partialOn, partialElapsed, peak, peakOn,
+                trough, troughOn, entryLow, entryHigh, stoppedAfter = false,
+                windowComplete = complete)
+            complete -> Scored(Outcome.EXPIRED, null, null, considered.size, peak, peakOn, trough, troughOn, null)
+            else -> Scored(Outcome.OPEN, null, null, considered.size, peak, peakOn, trough, troughOn, null)
         }
     }
 
@@ -135,7 +153,9 @@ object Scoring {
         on: LocalDate?,
         elapsed: Int,
         peak: Double?,
+        peakOn: LocalDate?,
         trough: Double?,
+        troughOn: LocalDate?,
         entryLow: Double?,
         entryHigh: Double?,
         stoppedAfter: Boolean,
@@ -146,7 +166,9 @@ object Scoring {
         priceAtSettlement = target,
         sessionsElapsed = elapsed,
         peakHigh = peak,
+        peakOn = peakOn,
         troughLow = trough,
+        troughOn = troughOn,
         returnPct = returnPct(entryLow, entryHigh, target),
         stoppedAfterPartial = stoppedAfter,
         windowComplete = windowComplete,
@@ -231,9 +253,11 @@ data class Scored(
     val settledOn: LocalDate?,
     val priceAtSettlement: Double?,
     val sessionsElapsed: Int,
-    /** Highest and lowest the stock traded across the window, so the card can show the swing. */
+    /** Highest and lowest the stock traded across the window, with the session that set each. */
     val peakHigh: Double?,
+    val peakOn: LocalDate?,
     val troughLow: Double?,
+    val troughOn: LocalDate?,
     val returnPct: Double?,
     /** The first target was banked and the stop was reached afterwards. */
     val stoppedAfterPartial: Boolean = false,

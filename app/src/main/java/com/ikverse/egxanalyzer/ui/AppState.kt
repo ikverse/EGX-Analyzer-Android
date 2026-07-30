@@ -40,6 +40,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -62,6 +63,12 @@ class AppState(
     private val localDataStore: LocalDataStore,
     private val telegramRepository: TelegramRepository,
     private val priceRepository: PriceRepository,
+    /** Announces a run that has started; supplied by the app so this class stays testable. */
+    private val analysisRunning: (sources: Int, model: String) -> Unit = { _, _ -> },
+    /** Announces a finished run and the analysis it saved. */
+    private val analysisFinished: (resultId: Long?, recommendations: Int) -> Unit = { _, _ -> },
+    /** Withdraws the running announcement, with a reason when it failed. */
+    private val analysisStopped: (reason: String?) -> Unit = {},
 ) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     var destination by mutableStateOf(AppDestination.ANALYZE)
@@ -160,6 +167,32 @@ class AppState(
     var analysisMessage by mutableStateOf<String?>(null)
         private set
     private var activeRequestId: String? = null
+    private var analysisJob: Job? = null
+
+    /** A saved analysis the user asked to open from a notification, cleared once shown. */
+    var pendingResultId by mutableStateOf<Long?>(null)
+        private set
+
+    fun openSavedResult(id: Long) {
+        pendingResultId = id
+        destination = AppDestination.RESULTS
+    }
+
+    fun consumePendingResult() {
+        pendingResultId = null
+    }
+
+    /**
+     * Runs an analysis on the application scope rather than the caller's.
+     *
+     * It used to be launched from the Analyze screen's own scope, so navigating away cancelled a
+     * request that had already been paid for. This outlives any screen, and the service keeps the
+     * process alive while the user is elsewhere.
+     */
+    fun startAnalysis() {
+        if (analysisJob?.isActive == true) return
+        analysisJob = appScope.launch { analyze() }
+    }
 
     /** How every saved call turned out, recomputed whenever the analyses or the window change. */
     var performance by mutableStateOf(
@@ -217,6 +250,24 @@ class AppState(
     fun toggleContentType(type: AnalysisContentType) {
         selectedContentTypes = if (type in selectedContentTypes) selectedContentTypes - type
         else selectedContentTypes + type
+        dropLoadedTelegramSources()
+    }
+
+    /**
+     * Forgets sources fetched for settings that no longer apply.
+     *
+     * Analysis only collects when nothing is loaded, so a batch left over from an earlier window
+     * would be analysed under the new target date without being refetched - the wrong messages
+     * under the right heading. Anything added by hand survives: that is the user's own work, not a
+     * cache of a query.
+     */
+    private fun dropLoadedTelegramSources() {
+        if (telegramTraces.isEmpty()) return
+        val fetched = telegramTraces.keys
+        inputs = inputs.filterNot { it.sourceId in fetched }
+        sourceChannelIds = sourceChannelIds - fetched
+        telegramTraces = emptyMap()
+        telegramSyncMessage = null
     }
 
     fun selectProvider(provider: CloudProvider) {
@@ -553,11 +604,13 @@ class AppState(
         if (mode == AnalysisMode.NEXT_DAY) {
             recommendationTargetDate = egxTargetSession()
         }
+        dropLoadedTelegramSources()
     }
 
     fun updateRecommendationTargetDate(date: LocalDate) {
         analysisMode = AnalysisMode.SPECIFIC_DATE
         recommendationTargetDate = date
+        dropLoadedTelegramSources()
     }
 
     suspend fun syncTelegramSources() {
@@ -590,6 +643,7 @@ class AppState(
     fun toggleChannel(channel: ChannelSelection) {
         val updated = channel.copy(selected = !channel.selected)
         channels = channels.map { if (it.id == channel.id) updated else it }
+        dropLoadedTelegramSources()
         if (activeSourceChannelId !in channels.filter { it.selected }.map { it.id }) {
             activeSourceChannelId = channels.firstOrNull { it.selected }?.id
         }
@@ -597,6 +651,7 @@ class AppState(
 
     fun removeChannel(channel: ChannelSelection) {
         channels = channels.filterNot { it.id == channel.id }
+        dropLoadedTelegramSources()
         if (activeSourceChannelId == channel.id) {
             activeSourceChannelId = channels.firstOrNull { it.selected }?.id
         }
@@ -726,6 +781,7 @@ class AppState(
         activeRequestId = request.requestId
         analysisStatus = AnalysisStatus.RUNNING
         analysisMessage = "Sending ${selectedInputs.size} sources to ${cloudConfiguration.provider.displayName}…"
+        analysisRunning(selectedInputs.size, cloudConfiguration.model)
         try {
             val result = analysisRepository.analyze(request)
             localDataStore.saveResult(result, cloudConfiguration.provider, cloudConfiguration.model)
@@ -734,14 +790,17 @@ class AppState(
             analysisStatus = AnalysisStatus.COMPLETED
             analysisMessage = "Saved ${result.recommendations.size} recommendations."
             recomputePerformance()
+            analysisFinished(savedResults.firstOrNull()?.id, result.recommendations.size)
             destination = AppDestination.RESULTS
         } catch (_: CancellationException) {
             analysisStatus = AnalysisStatus.CANCELLED
             analysisMessage = "Analysis cancelled."
+            analysisStopped(null)
         } catch (error: Exception) {
             if (analysisStatus != AnalysisStatus.CANCELLED) {
                 analysisStatus = AnalysisStatus.FAILED
                 analysisMessage = error.message ?: "Analysis failed."
+                analysisStopped(analysisMessage)
             }
         } finally {
             activeRequestId = null
@@ -750,8 +809,10 @@ class AppState(
 
     suspend fun cancelAnalysis() {
         activeRequestId?.let { analysisRepository.cancel(it) }
+        analysisJob?.cancel()
         analysisStatus = AnalysisStatus.CANCELLED
         analysisMessage = "Analysis cancelled."
+        analysisStopped(null)
     }
 
     fun selectResult(result: SavedAnalysis) {

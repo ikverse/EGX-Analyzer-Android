@@ -293,7 +293,8 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
             }
         } else {
             Button(
-                onClick = { scope.launch { appState.analyze() } },
+                // Started rather than awaited: the run outlives this screen now.
+                onClick = { appState.startAnalysis() },
                 enabled = analyzeDisabledReason == null,
             ) {
                 Icon(Icons.Outlined.AutoGraph, contentDescription = null)

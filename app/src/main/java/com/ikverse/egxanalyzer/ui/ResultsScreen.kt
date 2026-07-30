@@ -65,6 +65,7 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                     saved = saved,
                     // Expanding also selects, so the companion pane follows what is open.
                     onExpand = { appState.selectResult(saved) },
+                    highlighted = saved.id == appState.pendingResultId,
                     onShare = { shareReport(activity, appState.reportFor(saved)) },
                     onDelete = { appState.deleteResult(saved) },
                     report = { appState.reportFor(saved) },
@@ -77,6 +78,8 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
 @Composable
 private fun SavedAnalysisCard(
     saved: SavedAnalysis,
+    /** Opened from a notification: it starts expanded and stands out until touched. */
+    highlighted: Boolean = false,
     onExpand: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit,
@@ -84,13 +87,19 @@ private fun SavedAnalysisCard(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var showReport by remember { mutableStateOf(false) }
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(highlighted) }
     val stockCount = saved.result.consolidated.size.takeIf { it > 0 }
         ?: saved.result.recommendations.map(RecommendationResult::ticker).distinct().size
 
     Card(
         Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        colors = CardDefaults.cardColors(
+            containerColor = if (highlighted) {
+                MaterialTheme.colorScheme.tertiaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainer
+            },
+        ),
         shape = MaterialTheme.shapes.large,
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {

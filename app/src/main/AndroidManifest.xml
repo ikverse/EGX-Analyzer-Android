@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Analyses run past the moment the app leaves the foreground, and say so. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:name=".EgxApplication"
@@ -15,11 +19,18 @@
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:exported="true"
+            android:launchMode="singleTask"
             android:resizeableActivity="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Holds the process open for the length of a run; it owns no state of its own. -->
+        <service
+            android:name=".data.AnalysisService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>
