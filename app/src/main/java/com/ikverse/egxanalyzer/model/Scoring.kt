@@ -32,11 +32,13 @@ object Scoring {
         value.orEmpty().trim().uppercase().removeSuffix(".CA")
 
     /**
-     * Walks forward one session at a time and returns the first outcome that settles.
+     * Walks the whole window and reports how far the call got.
      *
-     * A session whose high reaches the target and whose low reaches the stop is reported as
-     * ambiguous: daily figures cannot say which came first, and picking the favourable one would
-     * quietly inflate every hit rate built on this.
+     * Reaching the first target no longer ends the call: it is a partial hit that keeps running,
+     * because the second target may still arrive before the window closes. A session whose high
+     * reaches a target and whose low reaches the stop is reported as ambiguous - daily figures
+     * cannot say which came first, and picking the favourable one would inflate every rate built
+     * on this.
      */
     fun score(
         sessions: List<DailySession>,
@@ -49,50 +51,106 @@ object Scoring {
     ): Scored {
         val window = clampWindow(windowSessions)
         val considered = sessions.take(window)
-        if (considered.isEmpty()) return Scored(Outcome.UNPRICED, null, null, 0, null, null)
+        if (considered.isEmpty()) return Scored(Outcome.UNPRICED, null, null, 0, null, null, null)
+
+        // A call quoting only one target has nothing further to reach, so that target is the full
+        // one rather than a partial step toward a second that was never named.
+        val fullTarget = target2 ?: target1
+        val partialTarget = target1.takeIf { target2 != null }
 
         var entered = entryLow == null && entryHigh == null
         var peak: Double? = null
+        var trough: Double? = null
+        var partialOn: LocalDate? = null
+        var partialElapsed = 0
+
         considered.forEachIndexed { zeroBased, day ->
             val elapsed = zeroBased + 1
             day.high?.let { high -> peak = peak?.coerceAtLeast(high) ?: high }
+            day.low?.let { low -> trough = trough?.coerceAtMost(low) ?: low }
             val enteredHere = !entered && day.touchedEntry(entryLow, entryHigh)
             if (enteredHere) entered = true
             if (entered) {
-                val hitTarget = reached(day.high, target2) || reached(day.high, target1)
+                val hitFull = reached(day.high, fullTarget)
+                val hitPartial = partialTarget != null && reached(day.high, partialTarget)
                 val hitStop = day.low != null && stopLoss != null && day.low <= stopLoss
-                when {
-                    hitTarget && hitStop ->
-                        return Scored(Outcome.AMBIGUOUS, day.date, null, elapsed, peak, null)
-                    // The entry first became available on the same session the target was reached.
-                    // Daily figures cannot say which came first, so this only counts when the
-                    // session opened where the entry was already buyable - otherwise the stock may
-                    // have run to the target and only fallen back into the band afterwards.
-                    enteredHere && hitTarget && !day.buyableAtOpen(entryLow, entryHigh) ->
-                        return Scored(Outcome.AMBIGUOUS, day.date, null, elapsed, peak, null)
-                    reached(day.high, target2) -> return Scored(
-                        Outcome.TARGET_2, day.date, target2, elapsed, peak,
-                        returnPct(entryLow, entryHigh, target2),
+                val hitAnyTarget = hitFull || hitPartial
+
+                // Nothing has settled yet, so an unorderable session cannot be resolved either way.
+                if (partialOn == null && hitAnyTarget) {
+                    if (hitStop) {
+                        return Scored(Outcome.AMBIGUOUS, day.date, null, elapsed, peak, trough, null)
+                    }
+                    // The entry first became available on the same session a target was reached.
+                    // Only the open can order those, since it precedes every other price of the day.
+                    if (enteredHere && !day.buyableAtOpen(entryLow, entryHigh)) {
+                        return Scored(Outcome.AMBIGUOUS, day.date, null, elapsed, peak, trough, null)
+                    }
+                }
+
+                if (hitFull) {
+                    // Already a partial hit and this session also reached the stop: the upgrade
+                    // cannot be ordered against it, so the partial stands rather than being
+                    // promoted on a guess.
+                    if (partialOn != null && hitStop) {
+                        return partial(partialTarget, partialOn, partialElapsed, peak, trough,
+                            entryLow, entryHigh, stoppedAfter = true, windowComplete = true)
+                    }
+                    return Scored(
+                        Outcome.FULL_HIT, day.date, fullTarget, elapsed, peak, trough,
+                        returnPct(entryLow, entryHigh, fullTarget),
                     )
-                    reached(day.high, target1) -> return Scored(
-                        Outcome.TARGET_1, day.date, target1, elapsed, peak,
-                        returnPct(entryLow, entryHigh, target1),
-                    )
-                    hitStop -> return Scored(
-                        Outcome.STOPPED, day.date, stopLoss, elapsed, peak,
+                }
+                if (hitPartial && partialOn == null) {
+                    partialOn = day.date
+                    partialElapsed = elapsed
+                }
+                if (hitStop) {
+                    // The first target was already banked, so the call is not simply a loss.
+                    if (partialOn != null) {
+                        return partial(partialTarget, partialOn, partialElapsed, peak, trough,
+                            entryLow, entryHigh, stoppedAfter = true, windowComplete = true)
+                    }
+                    return Scored(
+                        Outcome.STOPPED, day.date, stopLoss, elapsed, peak, trough,
                         returnPct(entryLow, entryHigh, stopLoss),
                     )
                 }
             }
         }
 
+        val complete = considered.size >= window
         return when {
-            !entered -> Scored(Outcome.ENTRY_NOT_REACHED, null, null, considered.size, peak, null)
-            considered.size >= window ->
-                Scored(Outcome.EXPIRED, null, null, considered.size, peak, null)
-            else -> Scored(Outcome.OPEN, null, null, considered.size, peak, null)
+            !entered ->
+                Scored(Outcome.ENTRY_NOT_REACHED, null, null, considered.size, peak, trough, null)
+            partialOn != null -> partial(partialTarget, partialOn, partialElapsed, peak, trough,
+                entryLow, entryHigh, stoppedAfter = false, windowComplete = complete)
+            complete -> Scored(Outcome.EXPIRED, null, null, considered.size, peak, trough, null)
+            else -> Scored(Outcome.OPEN, null, null, considered.size, peak, trough, null)
         }
     }
+
+    private fun partial(
+        target: Double?,
+        on: LocalDate?,
+        elapsed: Int,
+        peak: Double?,
+        trough: Double?,
+        entryLow: Double?,
+        entryHigh: Double?,
+        stoppedAfter: Boolean,
+        windowComplete: Boolean,
+    ) = Scored(
+        outcome = Outcome.PARTIAL_HIT,
+        settledOn = on,
+        priceAtSettlement = target,
+        sessionsElapsed = elapsed,
+        peakHigh = peak,
+        troughLow = trough,
+        returnPct = returnPct(entryLow, entryHigh, target),
+        stoppedAfterPartial = stoppedAfter,
+        windowComplete = windowComplete,
+    )
 
     /** The session traded through the entry band at some point. */
     private fun DailySession.touchedEntry(low: Double?, high: Double?): Boolean {
@@ -133,8 +191,11 @@ object Scoring {
 
 /** How a recommendation turned out, or why it cannot be judged. */
 enum class Outcome(val label: String, val judged: Boolean) {
-    TARGET_1("Target 1 hit", judged = true),
-    TARGET_2("Target 2 hit", judged = true),
+    /** The second target was reached - or the only target, for a call that named just one. */
+    FULL_HIT("Full hit", judged = true),
+
+    /** The first target was reached; the second was not, at least not yet. */
+    PARTIAL_HIT("Partial hit", judged = true),
     STOPPED("Stopped out", judged = true),
     EXPIRED("Expired", judged = true),
 
@@ -146,7 +207,11 @@ enum class Outcome(val label: String, val judged: Boolean) {
     UNPRICED("No price data", judged = false),
     ;
 
-    val isHit: Boolean get() = this == TARGET_1 || this == TARGET_2
+    /** Reached the second target. */
+    val isFullHit: Boolean get() = this == FULL_HIT
+
+    /** Reached at least the first target. */
+    val reachedATarget: Boolean get() = this == FULL_HIT || this == PARTIAL_HIT
 }
 
 /** One trading session as the price feed reported it. */
@@ -166,8 +231,14 @@ data class Scored(
     val settledOn: LocalDate?,
     val priceAtSettlement: Double?,
     val sessionsElapsed: Int,
+    /** Highest and lowest the stock traded across the window, so the card can show the swing. */
     val peakHigh: Double?,
+    val troughLow: Double?,
     val returnPct: Double?,
+    /** The first target was banked and the stop was reached afterwards. */
+    val stoppedAfterPartial: Boolean = false,
+    /** False while the window is still running, so a partial hit may still become a full one. */
+    val windowComplete: Boolean = false,
 )
 
 /** Prices come off the feed at full float precision, which reads as noise rather than a price. */

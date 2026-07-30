@@ -1,5 +1,8 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -8,8 +11,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Leaderboard
 import androidx.compose.material.icons.outlined.Refresh
@@ -25,10 +30,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -39,11 +46,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.ChannelScore
+import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.ScoredCall
+import com.ikverse.egxanalyzer.model.ScoredRun
 import com.ikverse.egxanalyzer.model.Scoring
 import kotlinx.coroutines.launch
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /**
  * How every saved recommendation actually turned out.
@@ -86,7 +97,7 @@ internal fun InsightsScreen(appState: AppState) {
         Headline(report)
         OutcomeBreakdown(report)
         ChannelRanking(report.channels)
-        ScoredCallList(report.calls)
+        report.runs.forEach { run -> RunCard(run, report.windowSessions) }
     }
 }
 
@@ -149,8 +160,8 @@ private fun Headline(report: PerformanceReport) {
             // squeezed until the figures truncate.
             val perRow = if (maxWidth >= WideHeadlineWidth) 4 else 2
             val tiles = listOf(
-                report.hitRate?.let { "$it%" }.orDash() to "Hit rate",
-                report.hits.toString() to "Targets reached",
+                report.fullHitRate?.let { "$it%" }.orDash() to "Reached target 2",
+                report.anyTargetRate?.let { "$it%" }.orDash() to "Reached target 1+",
                 report.judged.toString() to "Calls judged",
                 report.tracked.toString() to "Calls tracked",
             )
@@ -162,7 +173,7 @@ private fun Headline(report: PerformanceReport) {
                                 value = value,
                                 label = label,
                                 modifier = Modifier.weight(1f),
-                                tone = if (label == "Hit rate") {
+                                tone = if (label.startsWith("Reached")) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
                                     MaterialTheme.colorScheme.onSurface
@@ -186,14 +197,21 @@ private fun Headline(report: PerformanceReport) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        // Two different reasons a call reads as unpriced, and only one of them is worth acting on.
         if (report.unpricedStocks > 0) {
-            // Without this the page just reads "No price data" with nothing saying the prices are
-            // simply missing rather than the calls being unjudgeable.
             StatusPill(
                 "${report.unpricedStocks} " +
                     (if (report.unpricedStocks == 1) "stock has" else "stocks have") +
                     " no stored prices — refresh to score them",
                 StatusTone.BAD,
+            )
+        }
+        if (report.awaitingSessions > 0) {
+            StatusPill(
+                "${report.awaitingSessions} " +
+                    (if (report.awaitingSessions == 1) "call is" else "calls are") +
+                    " waiting for the exchange to publish their sessions",
+                StatusTone.NEUTRAL,
             )
         }
     }
@@ -263,14 +281,15 @@ private fun ChannelRanking(channels: List<ChannelScore>) {
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        channel.hitRate?.let { "$it%" }.orDash(),
+                        channel.anyTargetRate?.let { "$it%" }.orDash(),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = channel.hitRate.rateTone(),
+                        color = channel.anyTargetRate.rateTone(),
                     )
                 }
                 Text(
-                    "${channel.hits} of ${channel.judged} judged · ${channel.calls} calls · " +
+                    "${channel.fullHits} full · ${channel.partialHits} partial of " +
+                        "${channel.judged} judged · ${channel.calls} calls · " +
                         "avg ${channel.averageReturn.signedPercent()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -278,7 +297,8 @@ private fun ChannelRanking(channels: List<ChannelScore>) {
                 Text(
                     "${channel.stopped} stopped · ${channel.expired} expired · " +
                         "${channel.notTradable} not tradable · " +
-                        "median ${channel.medianSessionsToHit?.trimZero().orDash()} sessions to hit",
+                        "target 2 rate ${channel.fullHitRate?.let { "$it%" }.orDash()} · " +
+                        "median ${channel.medianSessionsToHit?.trimZero().orDash()} sessions to a target",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -287,25 +307,34 @@ private fun ChannelRanking(channels: List<ChannelScore>) {
     }
 }
 
+/** One analysis run: what it recommended and how each call turned out. */
 @Composable
-private fun ScoredCallList(calls: List<ScoredCall>) {
-    if (calls.isEmpty()) return
-    SectionCard(title = "Scored calls", icon = Icons.Outlined.Insights) {
-        // Capped rather than paged: the list is ordered newest first, and everything past this is
-        // older than any window would still be scoring.
-        calls.take(MaxListedCalls).forEach { call -> ScoredCallRow(call) }
-        if (calls.size > MaxListedCalls) {
-            Text(
-                "Showing the ${MaxListedCalls} most recent of ${calls.size} scored calls.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+private fun RunCard(run: ScoredRun, windowSessions: Int) {
+    val stamp = remember(run.completedAt) {
+        DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm")
+            .withZone(ZoneId.systemDefault())
+            .format(run.completedAt)
+    }
+    SectionCard(title = stamp, icon = Icons.Outlined.Assessment) {
+        Text(
+            "${run.calls.size} ${if (run.calls.size == 1) "recommendation" else "recommendations"} · " +
+                "${run.fullHits} full · ${run.partialHits} partial · ${run.stopped} stopped · " +
+                "${run.pending} not yet judgeable",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            run.model,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        run.calls.forEach { call -> ScoredCallRow(call, windowSessions) }
     }
 }
 
 @Composable
-private fun ScoredCallRow(call: ScoredCall) {
+private fun ScoredCallRow(call: ScoredCall, windowSessions: Int) {
+    var expanded by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -339,10 +368,23 @@ private fun ScoredCallRow(call: ScoredCall) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            call.qualifier(windowSessions)?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Figure("Entry", call.entryRange(), Modifier.weight(1f))
-                Figure("Target", call.target1.orDash(), Modifier.weight(1f))
-                Figure("Peak", call.peakHigh.orDash(), Modifier.weight(1f))
+                Figure("Target 1", call.target1.orDash(), Modifier.weight(1f))
+                Figure("Target 2", call.target2.orDash(), Modifier.weight(1f))
+                Figure("Stop", call.stopLoss.orDash(), Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Figure("High since", call.peakHigh.orDash(), Modifier.weight(1f))
+                Figure("Low since", call.troughLow.orDash(), Modifier.weight(1f))
+                Figure("Sessions", call.sessionsElapsed.toString(), Modifier.weight(1f))
                 Figure(
                     "Return",
                     call.returnPct.signedPercent(),
@@ -350,8 +392,81 @@ private fun ScoredCallRow(call: ScoredCall) {
                     tone = call.returnPct.returnTone(),
                 )
             }
+            if (call.sessions.isNotEmpty()) {
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text(
+                        if (expanded) {
+                            "Hide sessions"
+                        } else {
+                            "${call.sessions.size} " +
+                                (if (call.sessions.size == 1) "session" else "sessions") +
+                                " from the price feed"
+                        },
+                    )
+                }
+                AnimatedVisibility(expanded) { SessionTable(call.sessions) }
+            }
         }
     }
+}
+
+/** Exactly what the price feed reported for each session the call was judged on. */
+@Composable
+private fun SessionTable(sessions: List<DailySession>) {
+    val scroll = rememberScrollState()
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.horizontalScroll(scroll)) {
+            Column {
+                SessionRow("Date", "Open", "High", "Low", "Close", "Volume", header = true)
+                sessions.forEach {
+                    SessionRow(
+                        it.date.toString(),
+                        it.open.orDash(),
+                        it.high.orDash(),
+                        it.low.orDash(),
+                        it.close.orDash(),
+                        it.volume?.toLong()?.toString().orDash(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionRow(
+    date: String,
+    open: String,
+    high: String,
+    low: String,
+    close: String,
+    volume: String,
+    header: Boolean = false,
+) {
+    val style = if (header) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall
+    val tone = if (header) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+    Row(Modifier.padding(vertical = 3.dp)) {
+        listOf(date to 96.dp, open to 68.dp, high to 68.dp, low to 68.dp, close to 68.dp, volume to 88.dp)
+            .forEach { (value, width) ->
+                Text(
+                    value,
+                    style = style,
+                    color = tone,
+                    modifier = Modifier.width(width),
+                    textAlign = if (value === date) TextAlign.Start else TextAlign.End,
+                )
+            }
+    }
+}
+
+/** The one-line caveat a card needs, or nothing when the outcome speaks for itself. */
+private fun ScoredCall.qualifier(windowSessions: Int): String? = when {
+    stoppedAfterPartial -> "Reached target 1, then fell back to the stop."
+    outcome == Outcome.PARTIAL_HIT && !windowComplete ->
+        "May still reach target 2 within the $windowSessions-session window."
+    outcome == Outcome.AMBIGUOUS ->
+        "The session's own figures cannot say which level was reached first."
+    else -> null
 }
 
 @Composable
@@ -373,7 +488,7 @@ private fun Figure(
 
 @Composable
 private fun Outcome.container(): Color = when (this) {
-    Outcome.TARGET_1, Outcome.TARGET_2 -> MaterialTheme.colorScheme.tertiaryContainer
+    Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> MaterialTheme.colorScheme.tertiaryContainer
     Outcome.STOPPED -> MaterialTheme.colorScheme.errorContainer
     Outcome.EXPIRED -> MaterialTheme.colorScheme.secondaryContainer
     else -> MaterialTheme.colorScheme.surfaceContainerHighest
@@ -381,7 +496,7 @@ private fun Outcome.container(): Color = when (this) {
 
 @Composable
 private fun Outcome.onContainer(): Color = when (this) {
-    Outcome.TARGET_1, Outcome.TARGET_2 -> MaterialTheme.colorScheme.onTertiaryContainer
+    Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> MaterialTheme.colorScheme.onTertiaryContainer
     Outcome.STOPPED -> MaterialTheme.colorScheme.onErrorContainer
     Outcome.EXPIRED -> MaterialTheme.colorScheme.onSecondaryContainer
     else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -418,5 +533,4 @@ private fun Any?.orDash(): String = this?.toString() ?: Dash
 
 /** Four headline tiles fit across only once the pane is wider than a phone in portrait. */
 private val WideHeadlineWidth = 520.dp
-private const val MaxListedCalls = 60
 private const val Dash = "—"

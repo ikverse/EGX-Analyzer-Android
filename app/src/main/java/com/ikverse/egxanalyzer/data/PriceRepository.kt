@@ -35,17 +35,24 @@ class PriceRepository(
     private val localDataStore: LocalDataStore,
     private val endpointTemplate: String = YAHOO_CHART_URL,
 ) {
-    suspend fun refresh(
-        tickers: Collection<String>,
-        sessions: Int = Scoring.MAX_WINDOW_SESSIONS,
-    ): PriceRefresh = coroutineScope {
-        val wanted = Scoring.clampWindow(sessions)
+    /**
+     * Brings stored prices up to date.
+     *
+     * A closed session never changes, so anything already stored is left alone. A stock with no
+     * history yet is fetched in full; one that already has history only needs the days since, and
+     * a short range covers those without asking for a year of prices that are already on disk.
+     */
+    suspend fun refresh(tickers: Collection<String>): PriceRefresh = coroutineScope {
         val normalized = tickers.map(Scoring::normalizeTicker).filter(String::isNotBlank).distinct()
+        val known = withContext(Dispatchers.IO) { localDataStore.pricedTickers() }
         // A few at a time rather than all at once: this is an undocumented public endpoint and
         // hammering it from a phone would be both rude and likely to get throttled.
         val limit = Semaphore(CONCURRENCY)
         val fetched = normalized
-            .map { ticker -> async { ticker to limit.withPermit { fetch(ticker, wanted) } } }
+            .map { ticker ->
+                val range = if (ticker in known) RECENT_RANGE else FULL_RANGE
+                async { ticker to limit.withPermit { fetch(ticker, range) } }
+            }
             .map { it.await() }
 
         val stored = fetched.flatMap { (_, days) -> days }
@@ -62,12 +69,10 @@ class PriceRepository(
         )
     }
 
-    private suspend fun fetch(ticker: String, wanted: Int): List<DailySession> =
+    private suspend fun fetch(ticker: String, range: String): List<DailySession> =
         withContext(Dispatchers.IO) {
             runCatching {
-                // A month of calendar days covers the longest window once weekends and market
-                // holidays are removed.
-                val url = URL("${endpointTemplate.format(ticker)}?interval=1d&range=1mo")
+                val url = URL("${endpointTemplate.format(ticker)}?interval=1d&range=$range")
                 val connection = url.openConnection() as HttpURLConnection
                 try {
                     connection.requestMethod = "GET"
@@ -77,14 +82,14 @@ class PriceRepository(
                     connection.setRequestProperty("User-Agent", USER_AGENT)
                     if (connection.responseCode !in 200..299) return@runCatching emptyList()
                     val payload = connection.inputStream.bufferedReader().use { it.readText() }
-                    parseChart(ticker, payload, wanted)
+                    parseChart(ticker, payload)
                 } finally {
                     connection.disconnect()
                 }
             }.getOrDefault(emptyList())
         }
 
-    private fun parseChart(ticker: String, payload: String, wanted: Int): List<DailySession> {
+    private fun parseChart(ticker: String, payload: String): List<DailySession> {
         val result = JSONObject(payload)
             .optJSONObject("chart")
             ?.optJSONArray("result")
@@ -122,13 +127,20 @@ class PriceRepository(
                 )
             }
         }
-        return days.takeLast(wanted)
+        return days
     }
 
     fun earliestSession(): LocalDate? = localDataStore.earliestSessionDate()
 
     private companion object {
         const val YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/%s.CA"
+
+        /** A stock with no stored history: a year of daily sessions, which is what the feed offers
+         *  at daily granularity. Asking for `max` returns monthly buckets instead. */
+        const val FULL_RANGE = "1y"
+
+        /** A stock already on disk: only the sessions since, with slack for weekends and holidays. */
+        const val RECENT_RANGE = "5d"
         const val USER_AGENT = "Mozilla/5.0 (compatible; EGX-Analyzer)"
         const val SOURCE = "Yahoo Finance"
         const val CONCURRENCY = 4

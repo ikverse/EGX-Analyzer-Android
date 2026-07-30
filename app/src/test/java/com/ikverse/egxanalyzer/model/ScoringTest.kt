@@ -16,30 +16,88 @@ class ScoringTest {
         }
 
     @Test
-    fun `reaching the first target settles the call`() {
+    fun `reaching only the first of two targets is a partial hit`() {
         val scored = Scoring.score(
             sessions = sessions(10.0 to 9.5, 11.0 to 10.0, 12.5 to 11.5),
             entryLow = 9.8, entryHigh = 10.0,
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = 10,
         )
-        assertEquals(Outcome.TARGET_1, scored.outcome)
+        assertEquals(Outcome.PARTIAL_HIT, scored.outcome)
         assertEquals(start.plusDays(2), scored.settledOn)
-        assertEquals(3, scored.sessionsElapsed)
-        // Measured from the middle of the 9.8-10.0 band, not from the peak and not from the
-        // bottom of the band.
+        // Measured to target 1, from the middle of the 9.8-10.0 band.
         assertEquals(21.21, scored.returnPct!!, 0.01)
     }
 
     @Test
-    fun `the further target wins when one session reaches both`() {
+    fun `reaching the second target is a full hit`() {
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 11.0 to 10.0, 14.5 to 11.5),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+        assertEquals(Outcome.FULL_HIT, scored.outcome)
+        assertEquals(41.41, scored.returnPct!!, 0.01)
+    }
+
+    @Test
+    fun `a call quoting one target is a full hit when it reaches it`() {
+        // There is nothing further to reach, so calling it partial forever would be wrong.
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 12.5 to 11.0),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = null, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+        assertEquals(Outcome.FULL_HIT, scored.outcome)
+    }
+
+    @Test
+    fun `a partial hit that later reaches the stop stays a partial hit`() {
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 12.5 to 11.0, 11.0 to 8.5),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+        assertEquals(Outcome.PARTIAL_HIT, scored.outcome)
+        assertEquals(true, scored.stoppedAfterPartial)
+    }
+
+    @Test
+    fun `a partial hit inside a live window is not final`() {
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 12.5 to 11.0),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+        assertEquals(Outcome.PARTIAL_HIT, scored.outcome)
+        assertEquals(false, scored.windowComplete)
+    }
+
+    @Test
+    fun `the swing across the window is reported both ways`() {
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 10.6 to 8.9, 10.2 to 9.4),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 15.0, target2 = null, stopLoss = 8.0,
+            windowSessions = 10,
+        )
+        assertEquals(10.6, scored.peakHigh!!, 0.001)
+        assertEquals(8.9, scored.troughLow!!, 0.001)
+    }
+
+    @Test
+    fun `one session clearing both targets is a full hit`() {
         val scored = Scoring.score(
             sessions = sessions(10.0 to 9.5, 15.0 to 10.0),
             entryLow = 9.8, entryHigh = 10.0,
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = 10,
         )
-        assertEquals(Outcome.TARGET_2, scored.outcome)
+        assertEquals(Outcome.FULL_HIT, scored.outcome)
     }
 
     @Test
@@ -76,7 +134,7 @@ class ScoringTest {
         )
         val long = Scoring.score(walk, 9.8, 10.0, 12.0, null, 8.0, windowSessions = 10)
         val short = Scoring.score(walk, 9.8, 10.0, 12.0, null, 8.0, windowSessions = 3)
-        assertEquals(Outcome.TARGET_1, long.outcome)
+        assertEquals(Outcome.FULL_HIT, long.outcome)
         assertEquals(Outcome.EXPIRED, short.outcome)
     }
 
@@ -106,7 +164,7 @@ class ScoringTest {
             DailySession("TEST", start, high = 12.5, low = 9.5, close = 12.0, volume = 1.0, open = 9.9),
         )
         val scored = Scoring.score(session, 9.8, 10.0, 12.0, null, 9.0, windowSessions = 10)
-        assertEquals(Outcome.TARGET_1, scored.outcome)
+        assertEquals(Outcome.FULL_HIT, scored.outcome)
     }
 
     @Test
@@ -133,7 +191,7 @@ class ScoringTest {
     fun `entering on an earlier session leaves a later target unaffected`() {
         val walk = sessions(10.0 to 9.5, 12.5 to 11.0)
         val scored = Scoring.score(walk, 9.8, 10.0, 12.0, null, 9.0, windowSessions = 10)
-        assertEquals(Outcome.TARGET_1, scored.outcome)
+        assertEquals(Outcome.FULL_HIT, scored.outcome)
         assertEquals(2, scored.sessionsElapsed)
     }
 
@@ -142,7 +200,7 @@ class ScoringTest {
         // Measuring from the bottom assumed the best price in the band was filled every time.
         val walk = sessions(10.0 to 9.5, 11.0 to 10.0, 12.5 to 11.5)
         val scored = Scoring.score(walk, 9.0, 11.0, 12.0, null, 8.0, windowSessions = 10)
-        assertEquals(Outcome.TARGET_1, scored.outcome)
+        assertEquals(Outcome.FULL_HIT, scored.outcome)
         assertEquals(20.0, scored.returnPct!!, 0.01)   // from 10.0, not from 9.0
     }
 

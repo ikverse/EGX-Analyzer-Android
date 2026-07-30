@@ -33,7 +33,9 @@ class PerformanceCalculatorTest {
 
         assertEquals(1, report.tracked)
         assertEquals(1, report.judged)
-        assertEquals(100.0, report.hitRate!!, 0.001)
+        // The fixture reaches target 1 of two, so it counts toward the any-target rate only.
+        assertEquals(100.0, report.anyTargetRate!!, 0.001)
+        assertEquals(0.0, report.fullHitRate!!, 0.001)
     }
 
     @Test
@@ -48,9 +50,9 @@ class PerformanceCalculatorTest {
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
-        assertEquals(1, report.calls.size)
-        assertEquals(9.8, report.calls.single().entryLow!!, 0.001)
-        assertEquals(9.0, report.calls.single().stopLoss!!, 0.001)
+        assertEquals(1, report.runs.sumOf { it.calls.size })
+        assertEquals(9.8, report.runs.flatMap { it.calls }.single().entryLow!!, 0.001)
+        assertEquals(9.0, report.runs.flatMap { it.calls }.single().stopLoss!!, 0.001)
     }
 
     @Test
@@ -105,9 +107,41 @@ class PerformanceCalculatorTest {
 
         assertEquals(1, report.tracked)
         assertEquals(0, report.judged)
-        assertNull(report.hitRate)
+        assertNull(report.fullHitRate)
         assertEquals(1, report.byOutcome[Outcome.UNPRICED])
-        assertNull(report.channels.single().hitRate)
+        assertNull(report.channels.single().fullHitRate)
+    }
+
+    @Test
+    fun `a scored call carries the sessions it was judged on`() {
+        // The run card expands to show these, so they travel with the call rather than costing
+        // another query per row.
+        val report = PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1)),
+            pricesFrom = called,
+            windowSessions = 10,
+            sessionsFor = { _, _ -> sessions(12.5) },
+        )
+
+        val call = report.runs.flatMap { it.calls }.single()
+        assertEquals(1, call.sessions.size)
+        assertEquals(called, call.sessions.single().date)
+        assertEquals(9.9, call.sessions.single().open!!, 0.001)
+    }
+
+    @Test
+    fun `a run keeps the model and time that produced it`() {
+        val report = PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 7)),
+            pricesFrom = called,
+            windowSessions = 10,
+            sessionsFor = { _, _ -> sessions(12.5) },
+        )
+
+        val run = report.runs.single()
+        assertEquals(7L, run.analysisId)
+        assertEquals("test-model", run.model)
+        assertEquals(1, run.calls.size)
     }
 
     @Test
@@ -119,7 +153,7 @@ class PerformanceCalculatorTest {
             sessionsFor = { _, _ -> sessions(12.869998931884766) },
         )
 
-        assertEquals(12.87, report.calls.single().peakHigh!!, 0.0001)
+        assertEquals(12.87, report.runs.flatMap { it.calls }.single().peakHigh!!, 0.0001)
     }
 
     private fun sessions(high: Double) = listOf(

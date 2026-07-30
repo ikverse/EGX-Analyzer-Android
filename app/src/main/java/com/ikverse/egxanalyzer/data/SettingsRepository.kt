@@ -101,6 +101,17 @@ class SettingsRepository(
             .apply()
     }
 
+    /**
+     * The day prices were last fetched.
+     *
+     * A closed session's prices never change, so one fetch a day is all the feed can usefully give.
+     */
+    fun lastPriceRefreshDay(): String? = preferences.getString(KEY_LAST_PRICE_REFRESH, null)
+
+    fun recordPriceRefreshDay(day: String) {
+        preferences.edit().putString(KEY_LAST_PRICE_REFRESH, day).apply()
+    }
+
     fun promptHistory(): List<PromptSnapshot> {
         val raw = preferences.getString(KEY_PROMPT_HISTORY, "[]").orEmpty()
         return runCatching {
@@ -165,6 +176,7 @@ class SettingsRepository(
         const val KEY_CORRECTION_RETRIES = "correction_retries"
         const val KEY_CATALOG_ENRICHMENT = "catalog_enrichment"
         const val KEY_SCORING_WINDOW = "scoring_window_sessions"
+        const val KEY_LAST_PRICE_REFRESH = "last_price_refresh_day"
         const val KEY_PROMPT_HISTORY = "prompt_history"
     }
 }

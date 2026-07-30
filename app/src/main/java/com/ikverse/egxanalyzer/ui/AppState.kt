@@ -166,7 +166,10 @@ class AppState(
         private set
 
     init {
-        appScope.launch { recomputePerformance() }
+        appScope.launch {
+            recomputePerformance()
+            refreshPricesIfStale()
+        }
         appScope.launch {
             val stored = localDataStore.stocks()
             EgxCatalog.restore(stored)
@@ -411,34 +414,58 @@ class AppState(
      * Only those are worth pricing: the rest cannot be scored, and each one costs a request to an
      * undocumented public endpoint.
      */
-    suspend fun refreshPrices() {
+    /**
+     * Fetches prices on the first launch of each day.
+     *
+     * A session's prices are settled once the market closes, so refetching within the same day
+     * only costs requests against an undocumented public endpoint. Runs quietly in the background
+     * and never blocks the app: a failure leaves yesterday's prices in place.
+     */
+    private suspend fun refreshPricesIfStale() {
+        val today = LocalDate.now(ZoneId.of(EGX_ZONE)).toString()
+        if (settingsRepository.lastPriceRefreshDay() == today) return
+        if (savedResults.recommendedTickers().isEmpty()) return
+        refreshPrices(announce = false)
+        settingsRepository.recordPriceRefreshDay(today)
+    }
+
+    suspend fun refreshPrices(announce: Boolean = true) {
         if (pricesRefreshing) return
         val tickers = savedResults.recommendedTickers()
         if (tickers.isEmpty()) {
-            statusMessage = StatusMessage("No saved analysis names a stock to price.", false)
+            if (announce) {
+                statusMessage = StatusMessage("No saved analysis names a stock to price.", false)
+            }
             return
         }
         pricesRefreshing = true
-        busyLabel = "Fetching prices"
+        busyLabel = if (announce) "Fetching prices" else null
         try {
-            // Fetches exactly the window being scored, as the desktop does. Reaching further back
-            // would move the scoring start date earlier than the release this feature began at.
-            val refresh = priceRepository.refresh(tickers, appPreferences.scoringWindowSessions)
+            // A stock with no history is fetched in full; one already stored only needs the
+            // sessions since, so a daily refresh stays small however long the history grows.
+            val refresh = priceRepository.refresh(tickers)
+            settingsRepository.recordPriceRefreshDay(
+                LocalDate.now(ZoneId.of(EGX_ZONE)).toString(),
+            )
             recomputePerformance()
             val missing = refresh.unpriced.size
-            statusMessage = StatusMessage(
-                "Priced ${refresh.priced} of ${refresh.requested} stocks " +
-                    "over ${refresh.sessionsStored} sessions" +
-                    if (missing > 0) " · $missing have no price history." else ".",
-                succeeded = missing == 0,
-            )
+            if (announce) {
+                statusMessage = StatusMessage(
+                    "Priced ${refresh.priced} of ${refresh.requested} stocks " +
+                        "over ${refresh.sessionsStored} sessions" +
+                        if (missing > 0) " · $missing have no price history." else ".",
+                    succeeded = missing == 0,
+                )
+            }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
-            statusMessage = StatusMessage(
-                error.message?.takeIf(String::isNotBlank) ?: "Could not fetch prices.",
-                succeeded = false,
-            )
+            if (announce) {
+                statusMessage = StatusMessage(
+                    error.message?.takeIf(String::isNotBlank) ?: "Could not fetch prices.",
+                    succeeded = false,
+                )
+            }
         } finally {
             pricesRefreshing = false
             busyLabel = null
@@ -454,6 +481,7 @@ class AppState(
                 pricesFrom = localDataStore.earliestSessionDate(),
                 windowSessions = window,
                 sessionsFor = localDataStore::sessionsFrom,
+                pricedTickers = localDataStore.pricedTickers(),
             )
         }
     }
@@ -765,6 +793,9 @@ class AppState(
         )
     }
 }
+
+/** Cairo, so "today" turns over with the exchange rather than with the device's timezone. */
+private const val EGX_ZONE = "Africa/Cairo"
 
 /** Outcome of a finished action, shown once and dismissed. */
 data class StatusMessage(val text: String, val succeeded: Boolean)
