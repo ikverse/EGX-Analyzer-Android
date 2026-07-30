@@ -404,23 +404,27 @@ internal fun SettingsScreen(appState: AppState) {
         }
 
         ExpandableSection("Scoring") {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                val window = appState.appPreferences.scoringWindowSessions
-                Text("Scoring window: $window trading ${if (window == 1) "session" else "sessions"}")
-                Slider(
-                    value = window.toFloat(),
-                    onValueChange = { appState.updateScoringWindow(it.roundToInt()) },
-                    valueRange = Scoring.MIN_WINDOW_SESSIONS.toFloat()..
-                        Scoring.MAX_WINDOW_SESSIONS.toFloat(),
-                    steps = Scoring.MAX_WINDOW_SESSIONS - Scoring.MIN_WINDOW_SESSIONS - 1,
-                )
+            val window = appState.appPreferences.scoringWindowSessions
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Scoring window", modifier = Modifier.weight(1f))
                 Text(
-                    "How long a recommendation stays open on the Insights page before it counts as " +
-                        "expired rather than missed. Counted in trading sessions, so weekends and " +
-                        "market holidays do not shorten it.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    "$window ${if (window == 1) "session" else "sessions"}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
+            Slider(
+                value = window.toFloat(),
+                onValueChange = { appState.updateScoringWindow(it.roundToInt()) },
+                valueRange = Scoring.MIN_WINDOW_SESSIONS.toFloat()..
+                    Scoring.MAX_WINDOW_SESSIONS.toFloat(),
+                steps = Scoring.MAX_WINDOW_SESSIONS - Scoring.MIN_WINDOW_SESSIONS - 1,
+            )
+            Text(
+                "Trading sessions a recommendation has to reach its target. Re-scores everything.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         ExpandableSection("Telegram") {

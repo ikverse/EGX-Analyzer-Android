@@ -22,6 +22,7 @@ import com.ikverse.egxanalyzer.model.AnalysisRequest
 import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.ChannelSelection
+import com.ikverse.egxanalyzer.model.ChatKind
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.PerformanceReport
@@ -185,15 +186,19 @@ class AppState(
         appScope.launch {
             telegramRepository.chats.collect { telegramChats ->
                 val stillSelected = channels.filter(ChannelSelection::selected).map(ChannelSelection::id)
-                channels = telegramChats.map { chat ->
-                    ChannelSelection(
-                        id = chat.id,
-                        name = chat.title,
-                        // Kept across a refresh within the session, but never across a restart.
-                        selected = chat.id in stillSelected,
-                        kind = chat.kind,
-                    )
-                }
+                channels = telegramChats
+                    // Private chats are conversations, not published sources: the service account
+                    // and one-to-one threads can only add noise to a recommendation run.
+                    .filterNot { it.kind == ChatKind.DIRECT }
+                    .map { chat ->
+                        ChannelSelection(
+                            id = chat.id,
+                            name = chat.title,
+                            // Kept across a refresh within the session, never across a restart.
+                            selected = chat.id in stillSelected,
+                            kind = chat.kind,
+                        )
+                    }
                 if (activeSourceChannelId !in channels.map(ChannelSelection::id)) {
                     activeSourceChannelId = channels.firstOrNull { it.selected }?.id
                 }

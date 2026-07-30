@@ -19,7 +19,6 @@ import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Leaderboard
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Timeline
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -27,14 +26,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -51,7 +47,6 @@ import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredRun
-import com.ikverse.egxanalyzer.model.Scoring
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -72,10 +67,9 @@ internal fun InsightsScreen(appState: AppState) {
         title = "Insights",
         subtitle = "How every saved recommendation turned out, judged against the sessions that followed it.",
     ) {
-        ScoringWindowCard(
+        PricesBar(
             windowSessions = report.windowSessions,
             refreshing = appState.pricesRefreshing,
-            onWindowChange = appState::updateScoringWindow,
             onRefreshPrices = { scope.launch { appState.refreshPrices() } },
         )
 
@@ -102,52 +96,42 @@ internal fun InsightsScreen(appState: AppState) {
 }
 
 @Composable
-private fun ScoringWindowCard(
-    windowSessions: Int,
-    refreshing: Boolean,
-    onWindowChange: (Int) -> Unit,
-    onRefreshPrices: () -> Unit,
-) {
-    // Held locally while dragging: committing on every pixel would re-score every saved call
-    // dozens of times per swipe.
-    var dragging by remember { mutableFloatStateOf(windowSessions.toFloat()) }
-    LaunchedEffect(windowSessions) { dragging = windowSessions.toFloat() }
-    val pending = dragging.toInt()
-
-    SectionCard(title = "Scoring window", icon = Icons.Outlined.Tune) {
-        Text(
-            "$pending trading ${if (pending == 1) "session" else "sessions"}",
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Slider(
-            value = dragging,
-            onValueChange = { dragging = it },
-            onValueChangeFinished = { onWindowChange(pending) },
-            valueRange = Scoring.MIN_WINDOW_SESSIONS.toFloat()..Scoring.MAX_WINDOW_SESSIONS.toFloat(),
-            steps = Scoring.MAX_WINDOW_SESSIONS - Scoring.MIN_WINDOW_SESSIONS - 1,
-            enabled = !refreshing,
-        )
-        Text(
-            "How long a recommendation stays open before it counts as expired. Weekends and market " +
-                "holidays are not counted, and changing this re-scores everything.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Button(onClick = onRefreshPrices, enabled = !refreshing, modifier = Modifier.fillMaxWidth()) {
-            if (refreshing) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary,
+private fun PricesBar(windowSessions: Int, refreshing: Boolean, onRefreshPrices: () -> Unit) {
+    // The window itself lives in Settings; here it is only context for the figures, so one line is
+    // enough and the space goes to the results.
+    SectionCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "$windowSessions trading ${if (windowSessions == 1) "session" else "sessions"}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
                 )
-            } else {
-                Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(
+                    "Scoring window · change it in Settings",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Text(
-                if (refreshing) "Fetching prices…" else "Refresh prices",
-                modifier = Modifier.padding(start = 8.dp),
-            )
+            Button(onClick = onRefreshPrices, enabled = !refreshing) {
+                if (refreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Icon(
+                        Icons.Outlined.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                Text(
+                    if (refreshing) "Fetching…" else "Refresh prices",
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
         }
     }
 }
