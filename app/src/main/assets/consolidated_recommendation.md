@@ -49,7 +49,14 @@ Also exclude:
 - `أهم القطاعات`
 - `أنشط القطاعات`
 - `أهم سهم لكل قطاع`
+- `مؤشر قطاع`
+- `مؤشرات القطاعات`
+- `أداء القطاعات`
 - Clear semantic equivalents of these sector-ranking headings
+
+A sector is not a stock. Exclude any section whose heading names a sector index, a sector ranking, or sector performance, and never return a sector code, sector index, or sector name in `stock_code`, `stock_name_en`, or `stock_name_ar`. This holds even when the section lists prices, percentages, targets, support, resistance, or a table shaped like a recommendation.
+
+A sector named inside an otherwise valid stock recommendation, describing which sector that stock belongs to, does not make the recommendation sector content.
 
 `أهم الأسهم اليوم` is not a sector-ranking heading and remains eligible under the Main recommendation rule.
 
