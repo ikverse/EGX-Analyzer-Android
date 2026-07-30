@@ -67,6 +67,14 @@ object EgxCatalog {
 
     fun size(): Int = stocks.size
 
+    fun entries(): List<EgxStock> = stocks
+
+    /** Restores a previously downloaded catalog so a refresh is not needed on every launch. */
+    fun restore(saved: List<EgxStock>) {
+        if (saved.isEmpty()) return
+        stocks = (seedStocks + saved).associateBy(EgxStock::ticker).values.sortedBy(EgxStock::ticker)
+    }
+
     suspend fun refresh(
         endpoint: String = "https://demo.borsa.ashh.me/v1/stocks",
     ): Int = withContext(Dispatchers.IO) {
@@ -97,7 +105,10 @@ object EgxCatalog {
             JSONArray(trimmed)
         } else {
             val root = JSONObject(trimmed)
-            root.optJSONArray("stocks")
+            // "symbols" is what the configured catalog actually returns; without it every
+            // refresh parsed nothing and the app silently kept its seed list.
+            root.optJSONArray("symbols")
+                ?: root.optJSONArray("stocks")
                 ?: root.optJSONArray("data")
                 ?: root.optJSONArray("results")
                 ?: JSONArray()

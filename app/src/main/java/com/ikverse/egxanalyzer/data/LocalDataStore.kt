@@ -31,6 +31,13 @@ class LocalDataStore(context: Context) :
             )""",
         )
         db.execSQL(
+            """CREATE TABLE stocks (
+                ticker TEXT PRIMARY KEY,
+                name_en TEXT NOT NULL,
+                name_ar TEXT
+            )""",
+        )
+        db.execSQL(
             """CREATE TABLE analyses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 request_id TEXT NOT NULL UNIQUE,
@@ -42,7 +49,53 @@ class LocalDataStore(context: Context) :
         )
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS stocks (
+                ticker TEXT PRIMARY KEY,
+                name_en TEXT NOT NULL,
+                name_ar TEXT
+            )""",
+        )
+    }
+
+    /** The downloaded EGX catalog, so correct company names survive a restart. */
+    fun stocks(): List<EgxStock> = readableDatabase
+        .query("stocks", arrayOf("ticker", "name_en", "name_ar"), null, null, null, null, "ticker")
+        .use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        EgxStock(
+                            ticker = cursor.getString(0),
+                            nameEnglish = cursor.getString(1),
+                            nameArabic = cursor.getString(2),
+                        ),
+                    )
+                }
+            }
+        }
+
+    fun saveStocks(stocks: List<EgxStock>) {
+        writableDatabase.beginTransaction()
+        try {
+            stocks.forEach { stock ->
+                writableDatabase.insertWithOnConflict(
+                    "stocks",
+                    null,
+                    ContentValues().apply {
+                        put("ticker", stock.ticker)
+                        put("name_en", stock.nameEnglish)
+                        put("name_ar", stock.nameArabic)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            }
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
 
     /**
      * Which chats the user has picked.
@@ -284,6 +337,6 @@ class LocalDataStore(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
-        const val DATABASE_VERSION = 1
+        const val DATABASE_VERSION = 2
     }
 }

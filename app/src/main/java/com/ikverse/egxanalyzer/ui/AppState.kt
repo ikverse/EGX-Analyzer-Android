@@ -150,6 +150,13 @@ class AppState(
 
     init {
         appScope.launch {
+            val stored = localDataStore.stocks()
+            EgxCatalog.restore(stored)
+            catalogMessage = "${EgxCatalog.size()} stocks available offline."
+            // Only when nothing has been downloaded yet, so a launch never waits on the network.
+            if (stored.isEmpty()) refreshEgxCatalog()
+        }
+        appScope.launch {
             telegramRepository.authState.collect { telegramAuthState = it }
         }
         appScope.launch {
@@ -321,6 +328,9 @@ class AppState(
         catalogMessage = "Refreshing the public EGX catalog…"
         catalogMessage = try {
             val downloaded = EgxCatalog.refresh()
+            // Stored so correct company names survive a restart instead of falling back to the
+            // seed list, which covers only a handful of large caps.
+            localDataStore.saveStocks(EgxCatalog.entries())
             "${EgxCatalog.size()} stocks available; $downloaded entries downloaded."
         } catch (error: Exception) {
             "Catalog refresh failed; ${EgxCatalog.size()} offline seed stocks remain available. " +
