@@ -169,7 +169,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         }
         // Collapsed by default: the usual route is loading sources from Telegram, and adding one
         // by hand is the exception.
-        ExpandableSection("Add a source manually") {
+        ExpandableSection("Advanced selection") {
             OutlinedTextField(
                 value = textSource,
                 onValueChange = { textSource = it },

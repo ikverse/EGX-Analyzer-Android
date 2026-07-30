@@ -53,10 +53,10 @@ internal fun Screen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp)
-            .padding(top = 20.dp, bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+            .padding(top = 16.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.headlineLarge)
             Text(
                 subtitle,
@@ -81,7 +81,7 @@ internal fun SectionCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = MaterialTheme.shapes.large,
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (title != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (icon != null) {
@@ -125,7 +125,7 @@ internal fun ExpandableSection(
                 Modifier
                     .fillMaxWidth()
                     .clickable { expanded = !expanded }
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -137,8 +137,8 @@ internal fun ExpandableSection(
             }
             AnimatedVisibility(expanded) {
                 Column(
-                    Modifier.padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                     content = content,
                 )
             }
@@ -198,7 +198,7 @@ internal fun EmptyState(icon: ImageVector, title: String, detail: String) {
         shape = MaterialTheme.shapes.large,
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(vertical = 40.dp, horizontal = 24.dp),
+            Modifier.fillMaxWidth().padding(vertical = 32.dp, horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
