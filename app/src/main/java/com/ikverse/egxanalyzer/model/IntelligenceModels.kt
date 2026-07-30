@@ -42,8 +42,15 @@ data class ChannelScore(
 
 data class PerformanceReport(
     val windowSessions: Int,
-    /** The first session with a stored price, which is where scoring can begin. */
+    /**
+     * The earliest call actually scored, not the earliest stored price.
+     *
+     * Reporting the price history's start claimed a month of coverage that no saved call came
+     * anywhere near, which read as though the figures rested on far more than they did.
+     */
     val scoringSince: LocalDate? = null,
+    /** Calls naming a stock with no stored price at all, so a refresh is the missing step. */
+    val unpricedStocks: Int = 0,
     val tracked: Int = 0,
     val judged: Int = 0,
     val hits: Int = 0,

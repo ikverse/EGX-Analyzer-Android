@@ -451,7 +451,7 @@ class AppState(
         performance = withContext(Dispatchers.IO) {
             PerformanceCalculator.report(
                 analyses = analyses,
-                scoringSince = localDataStore.earliestSessionDate(),
+                pricesFrom = localDataStore.earliestSessionDate(),
                 windowSessions = window,
                 sessionsFor = localDataStore::sessionsFrom,
             )

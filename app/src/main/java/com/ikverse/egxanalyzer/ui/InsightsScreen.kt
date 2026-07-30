@@ -177,11 +177,7 @@ private fun Headline(report: PerformanceReport) {
         HorizontalDivider()
         Text(
             buildString {
-                append(
-                    report.scoringSince
-                        ?.let { "Scored from $it, the first session with stored prices. " }
-                        .orEmpty(),
-                )
+                append(report.scoringSince?.let { "Oldest call scored: $it. " }.orEmpty())
                 append(
                     "Only calls that could be judged count toward the hit rate: a stock with no " +
                         "price history, or one whose entry never traded, counts for nobody.",
@@ -190,6 +186,16 @@ private fun Headline(report: PerformanceReport) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (report.unpricedStocks > 0) {
+            // Without this the page just reads "No price data" with nothing saying the prices are
+            // simply missing rather than the calls being unjudgeable.
+            StatusPill(
+                "${report.unpricedStocks} " +
+                    (if (report.unpricedStocks == 1) "stock has" else "stocks have") +
+                    " no stored prices — refresh to score them",
+                StatusTone.BAD,
+            )
+        }
     }
 }
 

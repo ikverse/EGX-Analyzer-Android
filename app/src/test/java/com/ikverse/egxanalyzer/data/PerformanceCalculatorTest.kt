@@ -26,7 +26,7 @@ class PerformanceCalculatorTest {
 
         val report = PerformanceCalculator.report(
             analyses = analyses,
-            scoringSince = called,
+            pricesFrom = called,
             windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
@@ -43,7 +43,7 @@ class PerformanceCalculatorTest {
 
         val report = PerformanceCalculator.report(
             analyses = listOf(sparse, complete),
-            scoringSince = called,
+            pricesFrom = called,
             windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
@@ -57,7 +57,7 @@ class PerformanceCalculatorTest {
     fun `the same stock from two channels stays two calls`() {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1), analysis(id = 2, channel = "Second channel")),
-            scoringSince = called,
+            pricesFrom = called,
             windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
@@ -72,7 +72,7 @@ class PerformanceCalculatorTest {
         // unpriced would count it against a channel for something it could not have known.
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1)),
-            scoringSince = called.plusDays(5),
+            pricesFrom = called.plusDays(5),
             windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
@@ -84,7 +84,7 @@ class PerformanceCalculatorTest {
     fun `nothing is scored until prices exist`() {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1)),
-            scoringSince = null,
+            pricesFrom = null,
             windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
@@ -98,7 +98,7 @@ class PerformanceCalculatorTest {
     fun `a stock with no stored price does not move the hit rate`() {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1)),
-            scoringSince = called,
+            pricesFrom = called,
             windowSessions = 10,
             sessionsFor = { _, _ -> emptyList() },
         )
@@ -114,7 +114,7 @@ class PerformanceCalculatorTest {
     fun `prices are reported the way they are quoted`() {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1)),
-            scoringSince = called,
+            pricesFrom = called,
             windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.869998931884766) },
         )
@@ -123,7 +123,7 @@ class PerformanceCalculatorTest {
     }
 
     private fun sessions(high: Double) = listOf(
-        DailySession("AMOC", called, high = high, low = 9.9, close = high, volume = 1000.0),
+        DailySession("AMOC", called, high = high, low = 9.9, close = high, volume = 1000.0, open = 9.9),
     )
 
     private fun analysis(

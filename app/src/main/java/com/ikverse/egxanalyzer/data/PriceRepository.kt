@@ -95,6 +95,7 @@ class PriceRepository(
             ?.optJSONArray("quote")
             ?.optJSONObject(0)
             ?: return emptyList()
+        val opens = quote.optJSONArray("open")
         val highs = quote.optJSONArray("high")
         val lows = quote.optJSONArray("low")
         val closes = quote.optJSONArray("close")
@@ -116,6 +117,7 @@ class PriceRepository(
                         low = low,
                         close = closes?.optDouble(index)?.takeUnless(Double::isNaN),
                         volume = volumes?.optDouble(index)?.takeUnless(Double::isNaN),
+                        open = opens?.optDouble(index)?.takeUnless(Double::isNaN),
                     ),
                 )
             }

@@ -10,7 +10,9 @@ class ScoringTest {
 
     private fun sessions(vararg highLow: Pair<Double, Double>): List<DailySession> =
         highLow.mapIndexed { index, (high, low) ->
-            DailySession("TEST", start.plusDays(index.toLong()), high, low, high, 1000.0)
+            // Opens at the session low unless a test says otherwise, so the entry is buyable at the
+            // open and cases that are not about entry ordering stay unaffected.
+            DailySession("TEST", start.plusDays(index.toLong()), high, low, high, 1000.0, open = low)
         }
 
     @Test
@@ -24,8 +26,9 @@ class ScoringTest {
         assertEquals(Outcome.TARGET_1, scored.outcome)
         assertEquals(start.plusDays(2), scored.settledOn)
         assertEquals(3, scored.sessionsElapsed)
-        // Return is measured from the entry actually offered, not from the peak.
-        assertEquals(22.45, scored.returnPct!!, 0.01)
+        // Measured from the middle of the 9.8-10.0 band, not from the peak and not from the
+        // bottom of the band.
+        assertEquals(21.21, scored.returnPct!!, 0.01)
     }
 
     @Test
@@ -93,6 +96,54 @@ class ScoringTest {
         val scored = Scoring.score(emptyList(), 9.8, 10.0, 12.0, null, 8.0, windowSessions = 10)
         assertEquals(Outcome.UNPRICED, scored.outcome)
         assertEquals(false, scored.outcome.judged)
+    }
+
+    @Test
+    fun `entry and target in one session count when the session opened inside the band`() {
+        // The open precedes every other price of the day, so an open at or below the band means the
+        // entry was available before the high that reached the target.
+        val session = listOf(
+            DailySession("TEST", start, high = 12.5, low = 9.5, close = 12.0, volume = 1.0, open = 9.9),
+        )
+        val scored = Scoring.score(session, 9.8, 10.0, 12.0, null, 9.0, windowSessions = 10)
+        assertEquals(Outcome.TARGET_1, scored.outcome)
+    }
+
+    @Test
+    fun `entry and target in one session are ambiguous when the session opened above the band`() {
+        // The stock may have run to the target first and only fallen back into the band afterwards.
+        val session = listOf(
+            DailySession("TEST", start, high = 12.5, low = 9.5, close = 12.0, volume = 1.0, open = 11.5),
+        )
+        val scored = Scoring.score(session, 9.8, 10.0, 12.0, null, 9.0, windowSessions = 10)
+        assertEquals(Outcome.AMBIGUOUS, scored.outcome)
+        assertEquals(false, scored.outcome.judged)
+    }
+
+    @Test
+    fun `a session with no recorded open is not assumed favourable`() {
+        val session = listOf(
+            DailySession("TEST", start, high = 12.5, low = 9.5, close = 12.0, volume = 1.0, open = null),
+        )
+        val scored = Scoring.score(session, 9.8, 10.0, 12.0, null, 9.0, windowSessions = 10)
+        assertEquals(Outcome.AMBIGUOUS, scored.outcome)
+    }
+
+    @Test
+    fun `entering on an earlier session leaves a later target unaffected`() {
+        val walk = sessions(10.0 to 9.5, 12.5 to 11.0)
+        val scored = Scoring.score(walk, 9.8, 10.0, 12.0, null, 9.0, windowSessions = 10)
+        assertEquals(Outcome.TARGET_1, scored.outcome)
+        assertEquals(2, scored.sessionsElapsed)
+    }
+
+    @Test
+    fun `return is measured from the middle of the entry band`() {
+        // Measuring from the bottom assumed the best price in the band was filled every time.
+        val walk = sessions(10.0 to 9.5, 11.0 to 10.0, 12.5 to 11.5)
+        val scored = Scoring.score(walk, 9.0, 11.0, 12.0, null, 8.0, windowSessions = 10)
+        assertEquals(Outcome.TARGET_1, scored.outcome)
+        assertEquals(20.0, scored.returnPct!!, 0.01)   // from 10.0, not from 9.0
     }
 
     @Test

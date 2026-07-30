@@ -61,6 +61,7 @@ class LocalDataStore(context: Context) :
             )""",
         )
         db.createDailyPrices()
+        db.addOpenColumn()
     }
 
     private fun SQLiteDatabase.createDailyPrices() = execSQL(
@@ -69,6 +70,7 @@ class LocalDataStore(context: Context) :
         """CREATE TABLE IF NOT EXISTS daily_prices (
             ticker TEXT NOT NULL,
             session_date TEXT NOT NULL,
+            open REAL,
             high REAL,
             low REAL,
             close REAL,
@@ -78,10 +80,23 @@ class LocalDataStore(context: Context) :
         )""",
     )
 
+    /**
+     * The open is what settles a session that both offered the entry and reached the target: it
+     * precedes every other price of the day. Sessions stored before this keep a null open and are
+     * treated as unknown until the next price refresh rewrites them.
+     */
+    private fun SQLiteDatabase.addOpenColumn() {
+        val hasOpen = rawQuery("PRAGMA table_info(daily_prices)", null).use { cursor ->
+            generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }
+                .any { it == "open" }
+        }
+        if (!hasOpen) execSQL("ALTER TABLE daily_prices ADD COLUMN open REAL")
+    }
+
     /** Sessions for one stock from the day a call was made onward, oldest first. */
     fun sessionsFrom(ticker: String, from: LocalDate): List<DailySession> = readableDatabase.query(
         "daily_prices",
-        arrayOf("ticker", "session_date", "high", "low", "close", "volume"),
+        arrayOf("ticker", "session_date", "high", "low", "close", "volume", "open"),
         "ticker = ? AND session_date >= ?",
         arrayOf(ticker, from.toString()),
         null,
@@ -98,6 +113,7 @@ class LocalDataStore(context: Context) :
                         low = cursor.nullableDouble(3),
                         close = cursor.nullableDouble(4),
                         volume = cursor.nullableDouble(5),
+                        open = cursor.nullableDouble(6),
                     ),
                 )
             }
@@ -132,6 +148,7 @@ class LocalDataStore(context: Context) :
                     ContentValues().apply {
                         put("ticker", session.ticker)
                         put("session_date", session.date.toString())
+                        put("open", session.open)
                         put("high", session.high)
                         put("low", session.low)
                         put("close", session.close)
@@ -428,6 +445,6 @@ class LocalDataStore(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
-        const val DATABASE_VERSION = 3
+        const val DATABASE_VERSION = 4
     }
 }

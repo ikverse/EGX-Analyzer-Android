@@ -22,14 +22,14 @@ object PerformanceCalculator {
 
     fun report(
         analyses: List<SavedAnalysis>,
-        scoringSince: LocalDate?,
+        pricesFrom: LocalDate?,
         windowSessions: Int,
         sessionsFor: (ticker: String, from: LocalDate) -> List<DailySession>,
     ): PerformanceReport {
         val window = Scoring.clampWindow(windowSessions)
-        if (scoringSince == null) return PerformanceReport(windowSessions = window)
+        if (pricesFrom == null) return PerformanceReport(windowSessions = window)
 
-        val calls = uniqueCalls(analyses, scoringSince).map { call ->
+        val calls = uniqueCalls(analyses, pricesFrom).map { call ->
             val scored = Scoring.score(
                 sessions = sessionsFor(call.ticker, call.openedOn),
                 entryLow = call.entryLow,
@@ -52,7 +52,13 @@ object PerformanceCalculator {
         val hits = calls.count { it.outcome.isHit }
         return PerformanceReport(
             windowSessions = window,
-            scoringSince = scoringSince,
+            // The earliest call that was actually scored, so the figure describes the calls rather
+            // than how far back the price history happens to reach.
+            scoringSince = calls.minOfOrNull(ScoredCall::openedOn),
+            unpricedStocks = calls.filter { it.outcome == Outcome.UNPRICED }
+                .map(ScoredCall::ticker)
+                .distinct()
+                .size,
             tracked = calls.size,
             judged = judged,
             hits = hits,
