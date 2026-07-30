@@ -179,9 +179,11 @@ data class ChannelSelection(
     val id: Long,
     val name: String,
     val selected: Boolean = true,
-    /** Telegram broadcast channel, as opposed to a group, private chat or service account. */
-    val isChannel: Boolean = true,
+    /** What Telegram calls this chat, shown so a group is not mistaken for a channel. */
+    val kind: ChatKind = ChatKind.CHANNEL,
 ) {
+    val isChannel: Boolean get() = kind == ChatKind.CHANNEL
+
     /** The label used everywhere; identity stays with [id]. See [cleanChannelName]. */
     val displayName: String get() = cleanChannelName(name, fallback = "Untitled chat")
 }

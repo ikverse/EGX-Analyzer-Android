@@ -191,7 +191,7 @@ class AppState(
                         name = chat.title,
                         // Kept across a refresh within the session, but never across a restart.
                         selected = chat.id in stillSelected,
-                        isChannel = chat.isChannel,
+                        kind = chat.kind,
                     )
                 }
                 if (activeSourceChannelId !in channels.map(ChannelSelection::id)) {

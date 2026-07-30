@@ -295,7 +295,7 @@ private fun ChannelCard(
                 )
                 if (!channel.isChannel) {
                     Text(
-                        "Group or private chat",
+                        channel.kind.label,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -37,4 +37,9 @@ data class TelegramSourceBatch(
 )
 
 /** How the desktop classifies a dialog, so both apps hide the same chats. */
-enum class ChatKind { CHANNEL, GROUP, DIRECT }
+enum class ChatKind(val label: String) {
+    CHANNEL("Channel"),
+    SUPERGROUP("Supergroup"),
+    GROUP("Group"),
+    DIRECT("Private chat"),
+}

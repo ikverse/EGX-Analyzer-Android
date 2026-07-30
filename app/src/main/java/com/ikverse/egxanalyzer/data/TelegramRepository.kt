@@ -175,20 +175,22 @@ class TelegramRepository(
     }
 
     /**
-     * Loads the chat list, as the desktop's `get_dialogs()` does.
+     * Loads the whole chat list.
      *
-     * The ceiling is high rather than paged: asking TDLib for successive pages dropped two chats
-     * that a single large request returns, and losing a channel the user had selected is far worse
-     * than fetching a few more than needed.
+     * `loadChats` pulls one batch from the server and answers 404 once there is nothing left, so a
+     * single call returns only whatever was already cached - which quietly dropped groups the user
+     * really is in. Looping until that 404 is how TDLib expects the list to be exhausted.
      */
     suspend fun refreshChats() {
         if (_authState.value.step != TelegramAuthStep.READY) return
-        client.loadChats(ChatListMain(), MAX_CHATS)
+        while (true) {
+            val more = client.loadChats(ChatListMain(), CHAT_PAGE_SIZE)
+            if (more is TdlResult.Failure) break
+        }
         val chatIds = client.getChats(ChatListMain(), MAX_CHATS)
             .requireValue<dev.g000sha256.tdl.dto.Chats>()
         chatIds.chatIds.forEach { id ->
-            val chat = client.getChat(id).requireValue<Chat>()
-            chatCache[id] = chat
+            chatCache[id] = client.getChat(id).requireValue<Chat>()
         }
         publishChats()
     }
@@ -415,20 +417,38 @@ class TelegramRepository(
     }
 
     private fun publishChats() {
-        _chats.value = chatCache.values.map { chat ->
-            val supergroup = chat.type as? ChatTypeSupergroup
-            TelegramChat(
-                id = chat.id,
-                // Cleaned here so every screen and every saved analysis sees one label per chat.
-                title = cleanChannelName(chat.title, fallback = chat.id.toString()),
-                kind = when {
+        _chats.value = chatCache.values
+            // TDLib caches chats the client no longer shows - ones left, archived, or hidden like a
+            // channel's linked discussion group. Only a non-zero order in the main list means the
+            // chat is really there, which is the same list the user sees in Telegram.
+            .mapNotNull { chat -> mainListOrder(chat)?.let { order -> chat to order } }
+            .sortedByDescending { (_, order) -> order }
+            .map { (chat, _) ->
+                val supergroup = chat.type as? ChatTypeSupergroup
+                val kind = when {
                     supergroup?.isChannel == true -> ChatKind.CHANNEL
-                    supergroup != null || chat.type is ChatTypeBasicGroup -> ChatKind.GROUP
+                    supergroup != null -> ChatKind.SUPERGROUP
+                    chat.type is ChatTypeBasicGroup -> ChatKind.GROUP
                     else -> ChatKind.DIRECT
-                },
-            )
-        }.sortedBy(TelegramChat::title)
+                }
+                TelegramChat(
+                    id = chat.id,
+                    // Cleaned here so every screen and every saved analysis sees one label per chat.
+                    // Telegram leaves the title empty once an account is deleted and labels it in
+                    // its own client, so the raw id is not what the user is looking for.
+                    title = cleanChannelName(
+                        chat.title,
+                        fallback = if (kind == ChatKind.DIRECT) "Deleted account" else chat.id.toString(),
+                    ),
+                    kind = kind,
+                )
+            }
     }
+
+    /** Where the chat sits in the main list, or null when it is not in it at all. */
+    private fun mainListOrder(chat: Chat): Long? = chat.positions
+        .firstOrNull { it.list is ChatListMain && it.order != 0L }
+        ?.order
 
     private fun setState(step: TelegramAuthStep, message: String) {
         _authState.value = TelegramAuthState(step, message)
@@ -452,6 +472,9 @@ class TelegramRepository(
         const val KEY_API_ID = "telegram_api_id"
         const val KEY_API_HASH = "telegram_api_hash"
         const val KEY_DATABASE_ENCRYPTION = "telegram_database_encryption"
+        /** How many chats each `loadChats` call pulls from the server. */
+        const val CHAT_PAGE_SIZE = 100
+
         /** The desktop applies no limit; this is high enough to be one in name only. */
         const val MAX_CHATS = 1_000
         const val HISTORY_PAGE_SIZE = 100
