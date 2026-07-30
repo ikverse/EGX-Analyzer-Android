@@ -23,6 +23,11 @@ data class AppPreferences(
     val excludePhrases: String = "",
     val correctionRetries: Int = 1,
     val catalogEnrichmentEnabled: Boolean = true,
+    /**
+     * Trading sessions a recommendation stays open before it counts as expired rather than missed.
+     * Adjustable because it depends on how long the user actually holds a position.
+     */
+    val scoringWindowSessions: Int = Scoring.DEFAULT_WINDOW_SESSIONS,
 )
 
 data class PromptSnapshot(

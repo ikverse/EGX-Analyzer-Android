@@ -8,6 +8,7 @@ import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.ThemeMode
 import com.ikverse.egxanalyzer.model.PromptSnapshot
+import com.ikverse.egxanalyzer.model.Scoring
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -76,6 +77,9 @@ class SettingsRepository(
         excludePhrases = preferences.getString(KEY_EXCLUDE_PHRASES, "").orEmpty(),
         correctionRetries = preferences.getInt(KEY_CORRECTION_RETRIES, 1).coerceIn(0, 2),
         catalogEnrichmentEnabled = preferences.getBoolean(KEY_CATALOG_ENRICHMENT, true),
+        scoringWindowSessions = Scoring.clampWindow(
+            preferences.getInt(KEY_SCORING_WINDOW, Scoring.DEFAULT_WINDOW_SESSIONS),
+        ),
     )
 
     fun savePreferences(value: AppPreferences) {
@@ -93,6 +97,7 @@ class SettingsRepository(
             .putString(KEY_EXCLUDE_PHRASES, value.excludePhrases)
             .putInt(KEY_CORRECTION_RETRIES, value.correctionRetries.coerceIn(0, 2))
             .putBoolean(KEY_CATALOG_ENRICHMENT, value.catalogEnrichmentEnabled)
+            .putInt(KEY_SCORING_WINDOW, Scoring.clampWindow(value.scoringWindowSessions))
             .apply()
     }
 
@@ -159,6 +164,7 @@ class SettingsRepository(
         const val KEY_EXCLUDE_PHRASES = "analysis_exclude_phrases"
         const val KEY_CORRECTION_RETRIES = "correction_retries"
         const val KEY_CATALOG_ENRICHMENT = "catalog_enrichment"
+        const val KEY_SCORING_WINDOW = "scoring_window_sessions"
         const val KEY_PROMPT_HISTORY = "prompt_history"
     }
 }

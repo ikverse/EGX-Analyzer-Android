@@ -47,6 +47,7 @@ import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.CloudProvider
+import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import com.ikverse.egxanalyzer.model.ThemeMode
 import kotlinx.coroutines.launch
@@ -398,6 +399,26 @@ internal fun SettingsScreen(appState: AppState) {
                     },
                     valueRange = 30f..300f,
                     steps = 8,
+                )
+            }
+        }
+
+        ExpandableSection("Scoring") {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                val window = appState.appPreferences.scoringWindowSessions
+                Text("Scoring window: $window trading ${if (window == 1) "session" else "sessions"}")
+                Slider(
+                    value = window.toFloat(),
+                    onValueChange = { appState.updateScoringWindow(it.roundToInt()) },
+                    valueRange = Scoring.MIN_WINDOW_SESSIONS.toFloat()..
+                        Scoring.MAX_WINDOW_SESSIONS.toFloat(),
+                    steps = Scoring.MAX_WINDOW_SESSIONS - Scoring.MIN_WINDOW_SESSIONS - 1,
+                )
+                Text(
+                    "How long a recommendation stays open on the Insights page before it counts as " +
+                        "expired rather than missed. Counted in trading sessions, so weekends and " +
+                        "market holidays do not shorten it.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

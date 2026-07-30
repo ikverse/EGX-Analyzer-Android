@@ -9,7 +9,10 @@ import com.ikverse.egxanalyzer.data.AnalysisPolicy
 import com.ikverse.egxanalyzer.data.EndpointPolicy
 import com.ikverse.egxanalyzer.data.EgxCatalog
 import com.ikverse.egxanalyzer.data.LocalDataStore
+import com.ikverse.egxanalyzer.data.PerformanceCalculator
+import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.SettingsRepository
+import com.ikverse.egxanalyzer.data.recommendedTickers
 import com.ikverse.egxanalyzer.data.TelegramRepository
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
@@ -23,8 +26,10 @@ import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.ConsensusItem
+import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.SavedAnalysis
+import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.TelegramAuthState
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
@@ -37,6 +42,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -57,6 +63,7 @@ class AppState(
     private val analysisRepository: AnalysisRepository,
     private val localDataStore: LocalDataStore,
     private val telegramRepository: TelegramRepository,
+    private val priceRepository: PriceRepository,
 ) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     var destination by mutableStateOf(AppDestination.CHANNELS)
@@ -152,7 +159,16 @@ class AppState(
         private set
     private var activeRequestId: String? = null
 
+    /** How every saved call turned out, recomputed whenever the analyses or the window change. */
+    var performance by mutableStateOf(
+        PerformanceReport(windowSessions = appPreferences.scoringWindowSessions),
+    )
+        private set
+    var pricesRefreshing by mutableStateOf(false)
+        private set
+
     init {
+        appScope.launch { recomputePerformance() }
         appScope.launch {
             val stored = localDataStore.stocks()
             EgxCatalog.restore(stored)
@@ -374,6 +390,73 @@ class AppState(
         } catch (error: Exception) {
             "Catalog refresh failed; ${EgxCatalog.size()} offline seed stocks remain available. " +
                 (error.message ?: "")
+        }
+    }
+
+    /**
+     * Changes how long a call stays open before it counts as expired.
+     *
+     * Takes effect on everything already scored, not only future analyses: the outcome of a past
+     * call under a shorter window is a fact about that call, so re-scoring is the honest answer.
+     */
+    fun updateScoringWindow(sessions: Int) {
+        val clamped = Scoring.clampWindow(sessions)
+        if (clamped == appPreferences.scoringWindowSessions) return
+        settingsRepository.savePreferences(appPreferences.copy(scoringWindowSessions = clamped))
+        appPreferences = settingsRepository.loadPreferences()
+        appScope.launch { recomputePerformance() }
+    }
+
+    /**
+     * Fetches recent sessions for every stock any analysis has named.
+     *
+     * Only those are worth pricing: the rest cannot be scored, and each one costs a request to an
+     * undocumented public endpoint.
+     */
+    suspend fun refreshPrices() {
+        if (pricesRefreshing) return
+        val tickers = savedResults.recommendedTickers()
+        if (tickers.isEmpty()) {
+            statusMessage = StatusMessage("No saved analysis names a stock to price.", false)
+            return
+        }
+        pricesRefreshing = true
+        busyLabel = "Fetching prices"
+        try {
+            // Fetches exactly the window being scored, as the desktop does. Reaching further back
+            // would move the scoring start date earlier than the release this feature began at.
+            val refresh = priceRepository.refresh(tickers, appPreferences.scoringWindowSessions)
+            recomputePerformance()
+            val missing = refresh.unpriced.size
+            statusMessage = StatusMessage(
+                "Priced ${refresh.priced} of ${refresh.requested} stocks " +
+                    "over ${refresh.sessionsStored} sessions" +
+                    if (missing > 0) " · $missing have no price history." else ".",
+                succeeded = missing == 0,
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            statusMessage = StatusMessage(
+                error.message?.takeIf(String::isNotBlank) ?: "Could not fetch prices.",
+                succeeded = false,
+            )
+        } finally {
+            pricesRefreshing = false
+            busyLabel = null
+        }
+    }
+
+    private suspend fun recomputePerformance() {
+        val analyses = savedResults
+        val window = appPreferences.scoringWindowSessions
+        performance = withContext(Dispatchers.IO) {
+            PerformanceCalculator.report(
+                analyses = analyses,
+                scoringSince = localDataStore.earliestSessionDate(),
+                windowSessions = window,
+                sessionsFor = localDataStore::sessionsFrom,
+            )
         }
     }
 
@@ -616,6 +699,7 @@ class AppState(
             selectedResult = savedResults.firstOrNull()
             analysisStatus = AnalysisStatus.COMPLETED
             analysisMessage = "Saved ${result.recommendations.size} recommendations."
+            recomputePerformance()
             destination = AppDestination.RESULTS
         } catch (_: CancellationException) {
             analysisStatus = AnalysisStatus.CANCELLED
@@ -644,6 +728,7 @@ class AppState(
         localDataStore.deleteResult(result.id)
         savedResults = localDataStore.results()
         selectedResult = savedResults.firstOrNull()
+        appScope.launch { recomputePerformance() }
     }
 
     fun deleteAllResults() {
@@ -651,6 +736,7 @@ class AppState(
         savedResults = emptyList()
         selectedResult = null
         settingsMessage = "All saved analyses deleted."
+        appScope.launch { recomputePerformance() }
     }
 
     fun searchAnalyses(query: String): List<AnalysisSearchHit> {

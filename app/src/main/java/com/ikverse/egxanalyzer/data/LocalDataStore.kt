@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.data
 
 import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.ikverse.egxanalyzer.model.AnalysisContentType
@@ -10,6 +11,7 @@ import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.AnalysisDiagnostics
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.CloudProvider
+import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.ExcludedSource
 import com.ikverse.egxanalyzer.model.SavedAnalysis
@@ -47,6 +49,7 @@ class LocalDataStore(context: Context) :
                 payload TEXT NOT NULL
             )""",
         )
+        db.createDailyPrices()
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -57,7 +60,95 @@ class LocalDataStore(context: Context) :
                 name_ar TEXT
             )""",
         )
+        db.createDailyPrices()
     }
+
+    private fun SQLiteDatabase.createDailyPrices() = execSQL(
+        // One row per stock per session. The unique key lets a refresh re-fetch the same days
+        // without ever creating a second copy of a session that already exists.
+        """CREATE TABLE IF NOT EXISTS daily_prices (
+            ticker TEXT NOT NULL,
+            session_date TEXT NOT NULL,
+            high REAL,
+            low REAL,
+            close REAL,
+            volume REAL,
+            source TEXT,
+            PRIMARY KEY (ticker, session_date)
+        )""",
+    )
+
+    /** Sessions for one stock from the day a call was made onward, oldest first. */
+    fun sessionsFrom(ticker: String, from: LocalDate): List<DailySession> = readableDatabase.query(
+        "daily_prices",
+        arrayOf("ticker", "session_date", "high", "low", "close", "volume"),
+        "ticker = ? AND session_date >= ?",
+        arrayOf(ticker, from.toString()),
+        null,
+        null,
+        "session_date",
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) {
+                add(
+                    DailySession(
+                        ticker = cursor.getString(0),
+                        date = LocalDate.parse(cursor.getString(1)),
+                        high = cursor.nullableDouble(2),
+                        low = cursor.nullableDouble(3),
+                        close = cursor.nullableDouble(4),
+                        volume = cursor.nullableDouble(5),
+                    ),
+                )
+            }
+        }
+    }
+
+    /**
+     * The first session ever stored.
+     *
+     * Using the price history as the starting line means scoring covers exactly what it can
+     * actually judge, with no date to configure and nothing counted from before it existed.
+     */
+    fun earliestSessionDate(): LocalDate? = readableDatabase
+        .rawQuery("SELECT MIN(session_date) FROM daily_prices", null)
+        .use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) {
+                runCatching { LocalDate.parse(cursor.getString(0)) }.getOrNull()
+            } else null
+        }
+
+    fun pricedTickers(): Set<String> = readableDatabase
+        .rawQuery("SELECT DISTINCT ticker FROM daily_prices", null)
+        .use { cursor -> buildSet { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+
+    fun saveSessions(sessions: List<DailySession>, source: String) {
+        writableDatabase.beginTransaction()
+        try {
+            sessions.forEach { session ->
+                writableDatabase.insertWithOnConflict(
+                    "daily_prices",
+                    null,
+                    ContentValues().apply {
+                        put("ticker", session.ticker)
+                        put("session_date", session.date.toString())
+                        put("high", session.high)
+                        put("low", session.low)
+                        put("close", session.close)
+                        put("volume", session.volume)
+                        put("source", source)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            }
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    private fun Cursor.nullableDouble(index: Int): Double? =
+        if (isNull(index)) null else getDouble(index)
 
     /** The downloaded EGX catalog, so correct company names survive a restart. */
     fun stocks(): List<EgxStock> = readableDatabase
@@ -337,6 +428,6 @@ class LocalDataStore(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
-        const val DATABASE_VERSION = 2
+        const val DATABASE_VERSION = 3
     }
 }

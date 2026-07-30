@@ -4,6 +4,7 @@ import android.app.Application
 import com.ikverse.egxanalyzer.data.AndroidKeystoreCredentialStore
 import com.ikverse.egxanalyzer.data.CloudAnalysisRepository
 import com.ikverse.egxanalyzer.data.LocalDataStore
+import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.PromptStore
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.TelegramRepository
@@ -22,11 +23,13 @@ class EgxApplication : Application() {
             configuration = { state.cloudConfiguration },
             preferences = { state.appPreferences },
         )
+        val localDataStore = LocalDataStore(this)
         AppState(
             settingsRepository = settingsRepository,
             analysisRepository = analysisRepository,
-            localDataStore = LocalDataStore(this),
+            localDataStore = localDataStore,
             telegramRepository = telegramRepository,
+            priceRepository = PriceRepository(localDataStore),
         ).also { state = it }
     }
 }
