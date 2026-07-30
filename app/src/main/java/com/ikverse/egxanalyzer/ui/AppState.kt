@@ -73,6 +73,10 @@ class AppState(
         private set
     var settingsMessage by mutableStateOf<String?>(null)
         private set
+
+    /** True once the provider has accepted the key, false once it has rejected it, null untested. */
+    var credentialVerified by mutableStateOf<Boolean?>(null)
+        private set
     var promptHistory by mutableStateOf(settingsRepository.promptHistory())
         private set
     var catalogMessage by mutableStateOf("${EgxCatalog.size()} seed stocks available offline.")
@@ -203,7 +207,7 @@ class AppState(
         cloudConfiguration = cloudConfiguration.copy(model = model)
     }
 
-    fun saveSettings(credential: String) {
+    suspend fun saveSettings(credential: String) {
         EndpointPolicy.validate(cloudConfiguration.endpoint)?.let {
             settingsMessage = it
             return
@@ -215,10 +219,44 @@ class AppState(
             chars?.fill('\u0000')
         }
         cloudConfiguration = settingsRepository.load()
-        settingsMessage = if (cloudConfiguration.model.isBlank()) {
-            "Connection saved. Load or enter a model before analysis."
-        } else {
-            "Cloud settings saved securely on this device."
+        if (!cloudConfiguration.hasCredential) {
+            credentialVerified = null
+            settingsMessage = "Connection saved. Enter the provider API key to finish."
+            return
+        }
+        verifyCredential()
+    }
+
+    /** Stores the endpoint and model without touching the credential or its verified state. */
+    fun persistModelChoice() {
+        settingsRepository.save(cloudConfiguration, null)
+        cloudConfiguration = settingsRepository.load()
+    }
+
+    /**
+     * Asks the provider whether the stored key actually works.
+     *
+     * Storing a key only proves it reached the device. Reporting it as saved without checking made
+     * a rejected key look like a working one, and the failure only surfaced later at analysis time.
+     * The model list is the cheapest call the providers offer, so this costs nothing meaningful.
+     */
+    suspend fun verifyCredential() {
+        busyLabel = "Verifying API key"
+        try {
+            val models = analysisRepository.listModels()
+            credentialVerified = true
+            availableModels = models
+            settingsMessage = "API key verified. ${models.size} models available."
+            statusMessage = StatusMessage(settingsMessage!!, succeeded = true)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            credentialVerified = false
+            settingsMessage = error.message?.takeIf(String::isNotBlank)
+                ?: "The provider rejected this API key."
+            statusMessage = StatusMessage(settingsMessage!!, succeeded = false)
+        } finally {
+            busyLabel = null
         }
     }
 
@@ -251,6 +289,7 @@ class AppState(
     fun removeCredential() {
         settingsRepository.removeCredential(cloudConfiguration.provider)
         cloudConfiguration = settingsRepository.configurationFor(cloudConfiguration.provider)
+        credentialVerified = null
         settingsMessage = "Saved credential removed."
     }
 

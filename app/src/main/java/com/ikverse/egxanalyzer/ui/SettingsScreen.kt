@@ -171,10 +171,14 @@ internal fun SettingsScreen(appState: AppState) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Button(onClick = {
-                        appState.saveSettings(credential)
-                        credential = ""
-                    }) { Text("Save settings") }
+                    Button(
+                        enabled = appState.busyLabel == null,
+                        onClick = {
+                            val entered = credential
+                            credential = ""
+                            scope.launch { appState.saveSettings(entered) }
+                        },
+                    ) { Text("Save and verify") }
                     OutlinedButton(onClick = appState::resetProviderConfiguration) {
                         Text("Reset provider")
                     }
@@ -184,7 +188,24 @@ internal fun SettingsScreen(appState: AppState) {
                         }
                     }
                 }
-                appState.settingsMessage?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+                when (appState.credentialVerified) {
+                    true -> StatusPill("API key verified", StatusTone.GOOD)
+                    false -> StatusPill("API key rejected", StatusTone.BAD)
+                    null -> if (appState.cloudConfiguration.hasCredential) {
+                        StatusPill("API key not verified yet", StatusTone.NEUTRAL)
+                    }
+                }
+                appState.settingsMessage?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (appState.credentialVerified == false) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
             }
         }
 

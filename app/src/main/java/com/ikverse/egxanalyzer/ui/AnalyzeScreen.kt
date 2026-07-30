@@ -246,7 +246,9 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                                         text = { Text(model) },
                                         onClick = {
                                             appState.updateModel(model)
-                                            appState.saveSettings("")
+                                            // Picking a model does not change the key, so this
+                                            // persists the choice without re-verifying.
+                                            appState.persistModelChoice()
                                             modelMenuOpen = false
                                         },
                                     )
