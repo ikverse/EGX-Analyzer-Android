@@ -212,7 +212,7 @@ class AppState(
             settingsMessage = it
             return
         }
-        val chars = credential.trim().takeIf(String::isNotBlank)?.toCharArray()
+        val chars = credential.sanitizedCredential().takeIf(String::isNotEmpty)?.toCharArray()
         try {
             settingsRepository.save(cloudConfiguration, chars)
         } finally {
@@ -735,3 +735,14 @@ class AppState(
 
 /** Outcome of a finished action, shown once and dismissed. */
 data class StatusMessage(val text: String, val succeeded: Boolean)
+
+/**
+ * Strips everything an API key cannot contain.
+ *
+ * trim() only removes recognised whitespace, so a zero-width space or non-breaking space picked up
+ * while pasting on a phone survives into the key and the provider rejects it - with an "incorrect
+ * API key" message that gives no hint the key merely has an invisible character in it. Provider
+ * keys are printable ASCII, so anything outside that range is not part of the key.
+ */
+internal fun String.sanitizedCredential(): String =
+    filter { it.code in 0x21..0x7E }
