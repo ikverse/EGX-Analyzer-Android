@@ -167,34 +167,38 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 }
             }
         }
-        OutlinedTextField(
-            value = textSource,
-            onValueChange = { textSource = it },
-            label = { Text("Message text") },
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 3,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Button(onClick = {
-                appState.addText(textSource)
-                textSource = ""
-            }) {
-                Icon(Icons.Outlined.TextFields, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Add text")
-            }
-            OutlinedButton(onClick = { images.launch(arrayOf("image/*")) }) {
-                Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Add images")
-            }
-            OutlinedButton(onClick = { voice.launch(arrayOf("audio/*")) }) {
-                Icon(Icons.Outlined.Mic, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Add voice")
+        // Collapsed by default: the usual route is loading sources from Telegram, and adding one
+        // by hand is the exception.
+        ExpandableSection("Add a source manually") {
+            OutlinedTextField(
+                value = textSource,
+                onValueChange = { textSource = it },
+                label = { Text("Message text") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(onClick = {
+                    appState.addText(textSource)
+                    textSource = ""
+                }) {
+                    Icon(Icons.Outlined.TextFields, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Add text")
+                }
+                OutlinedButton(onClick = { images.launch(arrayOf("image/*")) }) {
+                    Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Add images")
+                }
+                OutlinedButton(onClick = { voice.launch(arrayOf("audio/*")) }) {
+                    Icon(Icons.Outlined.Mic, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Add voice")
+                }
             }
         }
         appState.inputs.forEach { input ->
