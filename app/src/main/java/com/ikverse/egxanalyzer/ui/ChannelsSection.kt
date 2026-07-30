@@ -1,9 +1,12 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -168,7 +171,16 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                         detail = "Refresh to pull your Telegram chat list onto this device.",
                     )
                 } else {
-                    chats.forEach { chat -> ChannelCard(chat, appState, chats) }
+                    // Bounded and scrolled in place: a long chat list otherwise pushes the whole
+                    // run out of reach, and this screen is now the whole flow.
+                    Column(
+                        Modifier
+                            .heightIn(max = ChatListMaxHeight)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        chats.forEach { chat -> ChannelCard(chat, appState, chats) }
+                    }
                 }
 
                 SectionCard {
@@ -195,18 +207,6 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                appState.runAction(
-                                    label = "Loading sources from Telegram",
-                                    success = { "Loaded ${appState.inputs.size} sources ready to analyze." },
-                                ) { appState.syncTelegramSources() }
-                            }
-                        },
-                        enabled = selectedCount > 0 && !busy,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Load analysis source window") }
                 }
             }
             TelegramAuthStep.INITIALIZING,
@@ -315,3 +315,6 @@ private fun ChannelCard(
 /** Name reduced to its letters and digits, so emoji and punctuation do not hide a clash. */
 private fun ChannelSelection.baseName(): String =
     displayName.filter(Char::isLetterOrDigit).lowercase()
+
+/** Tall enough to browse, short enough that the run stays on screen. */
+private val ChatListMaxHeight = 320.dp

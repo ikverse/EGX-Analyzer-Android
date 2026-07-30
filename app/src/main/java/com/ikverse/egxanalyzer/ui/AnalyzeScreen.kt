@@ -10,6 +10,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.outlined.Preview
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -170,6 +174,10 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 }
             }
         }
+        // Sits below the target date and content types because it reads both. Above them it
+        // fetched against whatever they were before the user had set them.
+        SourcePreview(appState, scope)
+
         // Collapsed by default: the usual route is loading sources from Telegram, and adding one
         // by hand is the exception.
         ExpandableSection("Advanced selection", Icons.Outlined.Tune) {
@@ -406,3 +414,71 @@ private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState
         Text(label)
     }
 }
+
+/**
+ * What would be sent, before it is sent.
+ *
+ * Analysis loads its own sources, so this is not a required step - it is here so the size of a
+ * paid request can be seen first, and so the window can be sanity-checked against the chats.
+ */
+@Composable
+private fun SourcePreview(appState: AppState, scope: kotlinx.coroutines.CoroutineScope) {
+    val selected = appState.channels.count(ChannelSelection::selected)
+    val sources = appState.telegramSources
+    SectionCard(title = "Source preview", icon = Icons.Outlined.Preview) {
+        Text(
+            appState.telegramSyncMessage
+                ?: "Check which messages the target date and content types actually select.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedButton(
+            onClick = {
+                scope.launch {
+                    appState.runAction(
+                        label = "Loading sources from Telegram",
+                        success = { "Loaded ${appState.inputs.size} sources ready to analyze." },
+                    ) { appState.syncTelegramSources() }
+                }
+            },
+            enabled = selected > 0 && appState.busyLabel == null,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(if (sources.isEmpty()) "Preview sources" else "Refresh preview") }
+
+        if (sources.isNotEmpty()) {
+            // Bounded like the chat list, so a busy day does not bury the Analyze button.
+            Column(
+                Modifier
+                    .heightIn(max = SourceListMaxHeight)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                sources.forEach { source ->
+                    Column {
+                        Text(
+                            "${source.channelName} · ${source.contentType.name.lowercase()}",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        Text(
+                            source.timestamp.atZone(java.time.ZoneId.systemDefault())
+                                .format(java.time.format.DateTimeFormatter.ofPattern("d MMM HH:mm")),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        source.preview.takeIf(String::isNotBlank)?.let {
+                            Text(
+                                it.take(120),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        HorizontalDivider()
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Enough to scan the window without pushing the run off the screen. */
+private val SourceListMaxHeight = 260.dp

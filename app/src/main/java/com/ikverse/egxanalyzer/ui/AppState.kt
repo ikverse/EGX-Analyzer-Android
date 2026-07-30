@@ -147,6 +147,10 @@ class AppState(
         private set
     private var sourceChannelIds by mutableStateOf<Map<String, Long?>>(emptyMap())
     private var telegramTraces by mutableStateOf<Map<String, SourceTrace>>(emptyMap())
+
+    /** What the last preview pulled from Telegram, newest first, so it can be shown before paying. */
+    val telegramSources: List<SourceTrace>
+        get() = telegramTraces.values.sortedByDescending(SourceTrace::timestamp)
     var savedResults by mutableStateOf(localDataStore.results())
         private set
     var selectedResult by mutableStateOf<SavedAnalysis?>(savedResults.firstOrNull())
@@ -578,7 +582,6 @@ class AppState(
             sourceChannelIds = batch.traces.associate { it.sourceId to it.channelId }
             telegramSyncMessage =
                 "Loaded ${batch.traces.size} Telegram messages (${batch.inputs.size} model inputs)."
-            destination = AppDestination.ANALYZE
         } catch (error: Exception) {
             telegramSyncMessage = error.message ?: "Telegram synchronization failed."
         }
