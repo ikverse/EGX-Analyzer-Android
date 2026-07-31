@@ -165,6 +165,23 @@ data class AnalysisDiagnostics(
     val validationWarnings: List<String> = emptyList(),
     val correctionAttempted: Boolean = false,
     val durationMilliseconds: Long = 0,
+    /** Model calls a run took: one per source chunk, one to consolidate, plus any retries. */
+    val requestCount: Int = 0,
+    val imagesSent: Int = 0,
+    val unaccountedImages: List<UnaccountedImage> = emptyList(),
+)
+
+/**
+ * An image the model was given and never mentioned - neither recommended nor excluded.
+ *
+ * Silence used to be indistinguishable from a considered rejection. It cost a card captioned
+ * `اهم الاسهم غدا`, headed with the target session, that simply never appeared in a report and left
+ * nothing behind to say so.
+ */
+data class UnaccountedImage(
+    val reference: Int,
+    val sourceId: String?,
+    val caption: String?,
 )
 
 /** A chat a run was pointed at, whether or not it turned out to have anything to say. */

@@ -10,6 +10,7 @@ import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SourceTrace
+import com.ikverse.egxanalyzer.model.UnaccountedImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -46,6 +47,13 @@ class CloudAnalysisRepository(
 ) : AnalysisRepository {
     private val activeConnections = ConcurrentHashMap<String, HttpURLConnection>()
 
+    /**
+     * Reads the sources in chunks, then consolidates what came back.
+     *
+     * One request per run made the model lose track of which image it was describing, so the split
+     * exists to keep IMAGE_REF small rather than to spread the work. Extraction judges sources;
+     * consolidation ranks the occurrences and never sees an image.
+     */
     override suspend fun analyze(request: AnalysisRequest): AnalysisResult = withContext(Dispatchers.IO) {
         val startedAt = System.nanoTime()
         val config = configuration()
@@ -55,17 +63,14 @@ class CloudAnalysisRepository(
         val credential = credentialStore.read(config.provider)
             ?: error("No credential is saved for ${config.provider.displayName}.")
         try {
+            val harvest = extract(request, config, appPreferences, credential)
             var attempt = 0
             var correctionInstructions: String? = null
             while (true) {
-                val response = executeCompletion(
-                    request = request,
-                    config = config,
-                    appPreferences = appPreferences,
-                    credential = credential,
-                    correctionInstructions = correctionInstructions,
+                val document = consolidate(
+                    request, harvest, config, appPreferences, credential, correctionInstructions,
                 )
-                val parsed = parseResponse(request, response)
+                val parsed = parseResponse(request, document)
                 val (recommendations, warnings) =
                     validateRecommendations(request, parsed.recommendations)
                 if (warnings.isEmpty() || attempt >= appPreferences.correctionRetries) {
@@ -79,9 +84,12 @@ class CloudAnalysisRepository(
                             inputCount = request.inputs.size + request.excludedSources.size,
                             acceptedInputCount = request.inputs.size,
                             excludedSources = request.excludedSources,
-                            validationWarnings = warnings,
-                            correctionAttempted = attempt > 0,
+                            validationWarnings = harvest.warnings + warnings,
+                            correctionAttempted = attempt > 0 || harvest.retried,
                             durationMilliseconds = (System.nanoTime() - startedAt) / 1_000_000,
+                            requestCount = harvest.requestCount + attempt + 1,
+                            imagesSent = harvest.imagesSent,
+                            unaccountedImages = harvest.unaccounted,
                         ),
                     )
                 }
@@ -99,12 +107,206 @@ class CloudAnalysisRepository(
         }
     }
 
-    private suspend fun executeCompletion(
+    /**
+     * What every extraction request together said, with references translated to the run's numbering.
+     *
+     * A chunk answers in its own IMAGE_REF space, so the mapping back is done here where it is a
+     * lookup rather than something the model has to remember.
+     */
+    private class Harvest {
+        val extracted = JSONArray()
+        val excluded = JSONArray()
+        val inquiries = JSONArray()
+        val unaccounted = mutableListOf<UnaccountedImage>()
+        val warnings = mutableListOf<String>()
+        var requestCount = 0
+        var imagesSent = 0
+        var retried = false
+    }
+
+    private suspend fun extract(
         request: AnalysisRequest,
         config: CloudConfiguration,
         appPreferences: AppPreferences,
         credential: CharArray,
+    ): Harvest {
+        val harvest = Harvest()
+        var globalRef = 0
+        for (chunk in AnalysisChunking.chunk(request.inputs)) {
+            coroutineContext.ensureActive()
+            // The run's reference for each image this chunk holds, in the order it sends them.
+            val globalRefs = chunk.filterIsInstance<AnalysisInput.Image>().map { globalRef += 1; globalRef }
+            harvest.imagesSent += globalRefs.size
+            var answer = readChunk(request, chunk, globalRefs, harvest, config, appPreferences, credential, null)
+            val missing = (1..globalRefs.size).filterNot(answer.cited::contains)
+            if (missing.isNotEmpty()) {
+                // Retry this chunk alone rather than the run: eight images, not thirty-two. The
+                // second answer replaces the first rather than joining it, or a chunk that merely
+                // forgot one image would contribute every other row twice.
+                harvest.retried = true
+                val second = readChunk(
+                    request, chunk, globalRefs, harvest, config, appPreferences, credential,
+                    "Your previous response left IMAGE_REF ${missing.joinToString(", ")} out of both " +
+                        "`extracted` and `excluded`. Return the full response again, accounting for " +
+                        "every IMAGE_REF supplied.",
+                )
+                if (second.cited.size > answer.cited.size) answer = second
+            }
+            harvest.adopt(answer)
+            (1..globalRefs.size).filterNot(answer.cited::contains).forEach { local ->
+                val trace = request.traceForImage(chunk, local)
+                harvest.unaccounted += UnaccountedImage(
+                    reference = globalRefs[local - 1],
+                    sourceId = trace?.sourceId,
+                    caption = trace?.preview,
+                )
+            }
+        }
+        if (harvest.unaccounted.isNotEmpty()) {
+            harvest.warnings += "${harvest.unaccounted.size} image(s) were neither recommended nor excluded."
+        }
+        return harvest
+    }
+
+    /** One chunk's answer, held apart from the run until it is known to be the one to keep. */
+    private class ChunkAnswer {
+        val extracted = JSONArray()
+        val excluded = JSONArray()
+        val inquiries = JSONArray()
+        val cited = mutableSetOf<Int>()
+    }
+
+    private fun Harvest.adopt(answer: ChunkAnswer) {
+        answer.extracted.forEachObject(extracted::put)
+        answer.excluded.forEachObject(excluded::put)
+        answer.inquiries.forEachObject(inquiries::put)
+    }
+
+    private inline fun JSONArray.forEachObject(action: (JSONObject) -> Unit) {
+        for (index in 0 until length()) optJSONObject(index)?.let(action)
+    }
+
+    /**
+     * Sends one chunk and reads its answer, with references translated to the run's numbering.
+     *
+     * A reference outside the chunk's own range names an image this request never carried, so it is
+     * dropped rather than translated into whatever global image happens to sit at that number.
+     */
+    private suspend fun readChunk(
+        request: AnalysisRequest,
+        chunk: List<AnalysisInput>,
+        globalRefs: List<Int>,
+        harvest: Harvest,
+        config: CloudConfiguration,
+        appPreferences: AppPreferences,
+        credential: CharArray,
         correctionInstructions: String?,
+    ): ChunkAnswer {
+        val body = request.extractionBody(chunk, config.model, appPreferences, correctionInstructions)
+        val response = executeCompletion(request.requestId, body, config, appPreferences, credential)
+        harvest.requestCount += 1
+        val answer = ChunkAnswer()
+        val payload = runCatching { JSONObject(stripCodeFence(contentOf(response))) }.getOrNull()
+        if (payload == null) {
+            harvest.warnings += "A source chunk returned no readable JSON."
+            return answer
+        }
+        payload.optJSONArray("extracted").adopt(answer.extracted, globalRefs, answer.cited, harvest.warnings)
+        payload.optJSONArray("excluded").adopt(answer.excluded, globalRefs, answer.cited, harvest.warnings)
+        payload.optJSONArray("client_inquiry_responses")
+            .adopt(answer.inquiries, globalRefs, answer.cited, harvest.warnings)
+        return answer
+    }
+
+    /**
+     * Moves one chunk's rows into the run, rewriting `source_image_ref` from chunk-local to global.
+     */
+    private fun JSONArray?.adopt(
+        destination: JSONArray,
+        globalRefs: List<Int>,
+        cited: MutableSet<Int>,
+        warnings: MutableList<String>,
+    ) {
+        if (this == null) return
+        for (index in 0 until length()) {
+            val row = optJSONObject(index) ?: continue
+            val local = if (row.isNull("source_image_ref")) null else row.optInt("source_image_ref", 0)
+            when {
+                local == null || local == 0 -> Unit
+                local in 1..globalRefs.size -> {
+                    cited += local
+                    row.put("source_image_ref", globalRefs[local - 1])
+                }
+                else -> {
+                    warnings += "Dropped a citation of IMAGE_REF $local, which was not in that request."
+                    row.put("source_image_ref", JSONObject.NULL)
+                }
+            }
+            destination.put(row)
+        }
+    }
+
+    /**
+     * Ranks what extraction found, then rebuilds the document the rest of the app already reads.
+     *
+     * Exclusions and inquiry replies are per-source judgements that extraction has already made, so
+     * they are carried across rather than asked for again.
+     */
+    private suspend fun consolidate(
+        request: AnalysisRequest,
+        harvest: Harvest,
+        config: CloudConfiguration,
+        appPreferences: AppPreferences,
+        credential: CharArray,
+        correctionInstructions: String?,
+    ): String {
+        val ranked = if (harvest.extracted.length() == 0) {
+            JSONObject().put("top_consolidated_recommendations", JSONArray())
+        } else {
+            val body = request.consolidationBody(
+                harvest.extracted, config.model, appPreferences, correctionInstructions,
+            )
+            val response = executeCompletion(request.requestId, body, config, appPreferences, credential)
+            runCatching { JSONObject(stripCodeFence(contentOf(response))) }.getOrElse {
+                harvest.warnings += "Consolidation returned no readable JSON."
+                JSONObject().put("top_consolidated_recommendations", JSONArray())
+            }
+        }
+        return JSONObject().apply {
+            put("analysis_period", "${request.sourceWindowStart} through ${request.sourceWindowEnd}")
+            put(
+                "top_consolidated_recommendations",
+                ranked.optJSONArray("top_consolidated_recommendations") ?: JSONArray(),
+            )
+            put("achieved_targets", JSONArray())
+            put("excluded", harvest.excluded)
+            put("client_inquiry_responses", harvest.inquiries)
+            put(
+                "text_based_categories",
+                ranked.optJSONObject("text_based_categories") ?: JSONObject(),
+            )
+            put("daily_breakdown", JSONObject())
+        }.toString()
+    }
+
+    private fun contentOf(response: String): String = JSONObject(response)
+        .getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+
+    private fun stripCodeFence(value: String): String = value.trim()
+        .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+
+    /** The trace behind the chunk's nth image, for naming an image the model never mentioned. */
+    private fun AnalysisRequest.traceForImage(chunk: List<AnalysisInput>, local: Int): SourceTrace? {
+        val sourceId = chunk.filterIsInstance<AnalysisInput.Image>().getOrNull(local - 1)?.sourceId
+        return sourceTraces.firstOrNull { it.sourceId == sourceId }
+    }
+
+    private suspend fun executeCompletion(
+        requestId: String,
+        body: JSONObject,
+        config: CloudConfiguration,
+        appPreferences: AppPreferences,
+        credential: CharArray,
     ): String {
         coroutineContext.ensureActive()
         val url = URL("${config.endpoint.trimEnd('/')}/chat/completions")
@@ -116,14 +318,9 @@ class CloudAnalysisRepository(
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Authorization", "Bearer ${String(credential)}")
         }
-        activeConnections[request.requestId] = connection
+        activeConnections[requestId] = connection
         try {
-            val body = request.toRequestJson(
-                config.model,
-                appPreferences,
-                correctionInstructions,
-            ).toString().toByteArray()
-            connection.outputStream.use { it.write(body) }
+            connection.outputStream.use { it.write(body.toString().toByteArray()) }
             coroutineContext.ensureActive()
             val status = connection.responseCode
             val response = (if (status in 200..299) connection.inputStream else connection.errorStream)
@@ -139,7 +336,7 @@ class CloudAnalysisRepository(
             }
             return response
         } finally {
-            activeConnections.remove(request.requestId, connection)
+            activeConnections.remove(requestId, connection)
             connection.disconnect()
         }
     }
@@ -185,7 +382,8 @@ class CloudAnalysisRepository(
         }
     }
 
-    private suspend fun AnalysisRequest.toRequestJson(
+    private suspend fun AnalysisRequest.extractionBody(
+        chunk: List<AnalysisInput>,
         modelName: String,
         preferences: AppPreferences,
         correctionInstructions: String? = null,
@@ -210,13 +408,13 @@ class CloudAnalysisRepository(
                     put(
                         JSONObject().put("type", "text").put(
                             "text",
-                            "${requestPrompt()} ${preferences.analysisLanguage.promptInstruction} " +
+                            "${requestPrompt(chunk)} ${preferences.analysisLanguage.promptInstruction} " +
                                 customizationPrompt(preferences) +
                                 correctionInstructions.orEmpty(),
                         ),
                     )
                     var imageRef = 0
-                    inputs.forEach { input ->
+                    chunk.forEach { input ->
                         coroutineContext.ensureActive()
                         val telegramId = telegramIdFor(input.sourceId)
                         when (input) {
@@ -267,23 +465,65 @@ class CloudAnalysisRepository(
     }
 
     /**
-     * Runtime context for the canonical prompt.
+     * Runtime context for one extraction request.
      *
-     * The prompt defines the output contract itself, so this supplies only the values it refers
-     * to - TARGET_DATE and the per-source TELEGRAM_ID / IMAGE_REF labels - in the same shape the
-     * desktop assembles, so both clients present sources identically.
+     * Only this chunk's messages are listed. Naming the whole run's sources would offer the model
+     * TELEGRAM_IDs for images it was not given, which is the citation it cannot check and we
+     * cannot either.
      */
-    private fun AnalysisRequest.requestPrompt(): String = buildString {
+    private fun AnalysisRequest.requestPrompt(chunk: List<AnalysisInput>): String = buildString {
+        val sourceIds = chunk.mapTo(LinkedHashSet(), AnalysisInput::sourceId)
+        val images = chunk.count { it is AnalysisInput.Image }
         appendLine("RUNTIME CONTEXT")
         appendLine("ANALYSIS_PERIOD: $sourceWindowStart through $sourceWindowEnd")
         appendLine("TARGET_DATE: $targetDate")
+        if (images > 0) appendLine("IMAGE_REF values in this request run 1 to $images.")
         appendLine("SOURCE ITEMS FOLLOW. Apply the canonical prompt independently to each item.")
-        sourceTraces.forEach { trace ->
+        sourceTraces.filter { it.sourceId in sourceIds }.forEach { trace ->
             appendLine(
                 "--- MESSAGE | CHANNEL: ${trace.channelName} | DATE: ${trace.timestamp} | " +
                     "TELEGRAM_ID: ${trace.messageId ?: trace.sourceId} ---",
             )
         }
+    }
+
+    /**
+     * The consolidation request: every occurrence as text, and no images at all.
+     *
+     * This is the cheapest call in a run and the one that needs the whole picture, which is why the
+     * two jobs are separated - ranking wants everything in view, reading a card wants as little as
+     * possible.
+     */
+    private fun AnalysisRequest.consolidationBody(
+        extracted: JSONArray,
+        modelName: String,
+        preferences: AppPreferences,
+        correctionInstructions: String?,
+    ) = JSONObject().apply {
+        put("model", modelName)
+        put("temperature", 0.0)
+        put("messages", JSONArray().apply {
+            put(
+                JSONObject().put("role", "system")
+                    .put("content", promptStore.consolidationPrompt()),
+            )
+            put(
+                JSONObject().put("role", "user").put(
+                    "content",
+                    buildString {
+                        appendLine("RUNTIME CONTEXT")
+                        appendLine("ANALYSIS_PERIOD: $sourceWindowStart through $sourceWindowEnd")
+                        appendLine("TARGET_DATE: $targetDate")
+                        append(preferences.analysisLanguage.promptInstruction)
+                        correctionInstructions?.let { appendLine(it) }
+                        appendLine()
+                        appendLine("EXTRACTED OCCURRENCES:")
+                        append(extracted.toString())
+                    },
+                ),
+            )
+        })
+        put("response_format", JSONObject().put("type", "json_object"))
     }
 
     private fun customizationPrompt(value: AppPreferences): String = buildString {
@@ -317,14 +557,11 @@ class CloudAnalysisRepository(
         else -> "ogg"
     }
 
-    private fun parseResponse(request: AnalysisRequest, response: String): AnalysisResult {
-        val envelope = JSONObject(response)
-        val content = envelope.getJSONArray("choices").getJSONObject(0)
-            .getJSONObject("message").getString("content")
-        val consolidated = ConsolidatedParser.parse(content)
+    private fun parseResponse(request: AnalysisRequest, content: String): AnalysisResult {
+        // The gate needs the session to compare against; without it every re-posted card passes.
+        val consolidated = ConsolidatedParser.parse(content, request.targetDate)
         val inquiries = runCatching {
-            JSONObject(content.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim())
-                .optJSONArray("client_inquiry_responses")?.length() ?: 0
+            JSONObject(stripCodeFence(content)).optJSONArray("client_inquiry_responses")?.length() ?: 0
         }.getOrDefault(0)
         return AnalysisResult(
             requestId = request.requestId,

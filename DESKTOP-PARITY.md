@@ -82,6 +82,27 @@ earlier run scored (`data/PerformanceCalculator.kt`).
 Android also warns before a duplicate run — same target date and same channels only — and merges
 the delta rather than replacing the card.
 
+## 6. Chunked extraction and a separate consolidation pass
+
+The desktop sends one request per run with every image in it, the arrangement that made the model
+lose track of which image it was describing: in a 32-image run it cited IMAGE_REF 4 for a card that
+was image 15, and 13 of 37 exclusions named an image other than the one they described. Desktop is
+exposed to exactly this, in `app/ai/service.py`.
+
+Android now splits a run into extraction requests of 8 images (`data/AnalysisChunking.kt`), maps
+chunk-local references back to the run's numbering, and finishes with one text-only consolidation
+request that ranks the occurrences (`assets/consolidation.md`). Prompt schema 5.
+
+It also reconciles every image sent against the response, so an image the model never mentioned is
+reported rather than silently missing.
+
+## 7. Apply the source date gate to parsed output
+
+Android's `SourceDateGate` existed for a day without being reachable: `ConsolidatedParser.parse`
+was called without a target date, which makes the gate accept everything. Worth checking that
+whatever the desktop grows in its place is actually wired to a date, since the failure is silent
+and looks exactly like a gate that works.
+
 ## Not portable
 
 Background analysis, the foreground service and notification deep-linking are Android platform

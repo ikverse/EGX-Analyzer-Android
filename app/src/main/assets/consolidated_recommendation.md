@@ -1,7 +1,11 @@
-<!-- EGX_PROMPT_SCHEMA: 4 -->
-# EGX consolidated recommendation analysis
+<!-- EGX_PROMPT_SCHEMA: 5 -->
+# EGX recommendation extraction
 
-Analyze the supplied Egyptian stock-market Telegram sources as one Results run.
+Extract from the supplied Egyptian stock-market Telegram sources.
+
+This request carries one slice of a larger run. Read only what is here: do not rank stocks, count
+mentions, or write a per-stock summary, and never mention a source you were not given. A second
+pass consolidates every slice once they are all read.
 
 Images, ordinary text messages, and voice-note transcripts are equally valid source modalities. Apply the following gates independently to every source item before extracting stock identities or values.
 
@@ -200,7 +204,9 @@ Do not return general stock mentions or image observations in consolidated analy
 
 - `source_message_id` must exactly equal the supporting `TELEGRAM_ID`.
 - Do not return a channel name; the application restores it locally.
-- For image evidence, `source_image_ref` must equal the immutable `IMAGE_REF` associated with that exact image.
+- For image evidence, `source_image_ref` must equal the immutable `IMAGE_REF` announced immediately before that exact image, in this request.
+- `IMAGE_REF` numbering restarts at 1 in every request. Cite only the numbers announced here; a number outside that range belongs to an image you were not given.
+- Every `IMAGE_REF` announced in this request must appear at least once, in `extracted` or in `excluded`. An image you decide against is excluded with a reason, never left out.
 - For text-only or voice-only evidence, `source_image_ref` must be null.
 - `recommendation_evidence` must be a short, exact actionable cue from that same source.
 - Never copy an image reference, stock identity, evidence phrase, date, or value from a neighboring source, image, section, or stock row.
@@ -251,65 +257,52 @@ A current or closing price is not an entry unless the source explicitly presents
 
 ## 7. Arabic Notes
 
-First complete all exclusions, date checks, and row isolation.
-
-Then group accepted occurrences by exact `stock_code` and write `notes_summary`.
+Write `notes_ar` for one occurrence from that occurrence alone.
 
 Requirements:
 
-- Write exactly one concise, factual Arabic summary per stock.
-- Use only accepted `data_points` for that stock.
-- Preserve useful and genuinely different insights.
-- Merge duplicate or semantically equivalent meanings.
-- Mention each meaning once.
+- Keep it concise, factual, and specific to this source.
 - Do not include rejected dates, excluded sources, excluded sections, neighboring stocks, or deleted rows.
 - Do not paste full messages, captions, tables, or image text.
-- Keep source-specific evidence and values in `data_points`.
-- Keep the summary under 60 Arabic words.
+- Do not summarise across occurrences or across stocks. The consolidation pass does that from what
+  you return here, and it can only work with occurrences you kept separate.
 
 ## 8. JSON contract
 
-Return only one JSON object using this structure:
+Return only one JSON object using this structure. One `extracted` entry is one occurrence in one
+source: a stock named twice in two images is two entries, not one merged entry.
 
 ```json
 {
-  "analysis_period": "string",
-  "top_consolidated_recommendations": [
+  "extracted": [
     {
       "stock_code": "English EGX ticker",
       "stock_name_en": "string",
       "stock_name_ar": "string or null",
-      "mention_count": "integer",
-      "rank": "integer",
-      "notes_summary": "concise Arabic string",
-      "data_points": [
-        {
-          "date": "YYYY-MM-DD, the session the source is for",
-          "effective_date_basis": "explicit_date or watching",
-          "visible_source_date": "string or null",
-          "date_evidence": "string or null",
-          "timing_evidence": "string or null",
-          "source_message_id": "exact TELEGRAM_ID",
-          "source_image_ref": "integer or null",
-          "recommendation_evidence": "exact same-source cue",
-          "recommendation_type": "buy or sell",
-          "buy_price": "number or null",
-          "buy_price_low": "number or null",
-          "buy_price_high": "number or null",
-          "target_1": "number or null",
-          "return_tp1_pct": "number or null",
-          "target_2": "number or null",
-          "return_tp2_pct": "number or null",
-          "stop_loss": "number or null",
-          "support": "number or null",
-          "resistance": "number or null",
-          "risk_pct": "number or null",
-          "notes_ar": "concise Arabic string or null"
-        }
-      ]
+      "date": "YYYY-MM-DD, the session the source is for",
+      "effective_date_basis": "explicit_date or watching",
+      "visible_source_date": "string or null",
+      "date_evidence": "string or null",
+      "timing_evidence": "string or null",
+      "source_message_id": "exact TELEGRAM_ID",
+      "source_image_ref": "integer or null",
+      "recommendation_evidence": "exact same-source cue",
+      "recommendation_type": "buy or sell",
+      "destination": "main or watching",
+      "buy_price": "number or null",
+      "buy_price_low": "number or null",
+      "buy_price_high": "number or null",
+      "target_1": "number or null",
+      "return_tp1_pct": "number or null",
+      "target_2": "number or null",
+      "return_tp2_pct": "number or null",
+      "stop_loss": "number or null",
+      "support": "number or null",
+      "resistance": "number or null",
+      "risk_pct": "number or null",
+      "notes_ar": "concise Arabic string or null"
     }
   ],
-  "achieved_targets": [],
   "excluded": [
     {
       "stock_code": "English EGX ticker or null",
@@ -343,24 +336,14 @@ Return only one JSON object using this structure:
       "advice_ar": "string or null",
       "alternate_scenario_ar": "string or null"
     }
-  ],
-  "text_based_categories": {
-    "most_important_stocks": [],
-    "trading_stocks": [],
-    "watchlist_stocks": []
-  },
-  "daily_breakdown": {}
+  ]
 }
 ```
 
 Additional contract rules:
 
-- `mention_count` equals the number of independently extracted `data_points`. The application recalculates it after exact same-image consolidation.
-- Rank accepted stocks consecutively starting from 1.
-- Do not leave rank gaps after exclusions.
-- Populate categories only with stock codes present in final accepted recommendation rows.
-- `watchlist_stocks` contains only accepted rows classified as Watching.
-- `achieved_targets` remains empty because previous and target-hit content is excluded.
+- `destination` is `watching` for a stock classified as Watching and `main` otherwise.
+- Do not merge two occurrences of one stock, even from the same image. Consolidation needs them apart.
 - Everything excluded appears in `excluded`, with the date you read and why it was dropped.
 
 ## 9. Final invariants
@@ -370,7 +353,7 @@ Before returning JSON, delete every row that fails any of these checks:
 - It is not news or another excluded content type.
 - It is not from a sector-ranking section.
 - Its Telegram ID belongs to its exact source.
-- Its image reference belongs to that Telegram message.
+- Its image reference is one announced in this request, and belongs to that Telegram message.
 - It has an identifiable EGX stock.
 - It has explicit recommendation context or exact same-stock Watching context.
 - Its visible or stated source date equals `TARGET_DATE`.

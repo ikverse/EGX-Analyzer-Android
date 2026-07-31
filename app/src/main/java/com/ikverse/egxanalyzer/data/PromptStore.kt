@@ -11,11 +11,21 @@ import android.content.res.AssetManager
  */
 class PromptStore(private val assets: AssetManager) {
 
-    private val cached: String by lazy {
-        assets.open(CONSOLIDATED_PROMPT).bufferedReader().use { it.readText() }
-    }
+    private val cached: String by lazy { read(CONSOLIDATED_PROMPT) }
+
+    private val consolidation: String by lazy { read(CONSOLIDATION_PROMPT) }
 
     fun consolidatedPrompt(): String = cached
+
+    /**
+     * The second pass, which sees the occurrences every extraction request returned but none of the
+     * images. Ranking and per-stock summaries need the whole run in view; extraction deliberately
+     * does not have it.
+     */
+    fun consolidationPrompt(): String = consolidation
+
+    private fun read(name: String): String =
+        assets.open(name).bufferedReader().use { it.readText() }
 
     /**
      * The prompt's contract version. The desktop refuses a downloaded prompt whose schema does not
@@ -25,6 +35,7 @@ class PromptStore(private val assets: AssetManager) {
 
     private companion object {
         const val CONSOLIDATED_PROMPT = "consolidated_recommendation.md"
+        const val CONSOLIDATION_PROMPT = "consolidation.md"
         val SCHEMA_MARKER = Regex("""<!--\s*EGX_PROMPT_SCHEMA:\s*(\d+)\s*-->""")
     }
 }

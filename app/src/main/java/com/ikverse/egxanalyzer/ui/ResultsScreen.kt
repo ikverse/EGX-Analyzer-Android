@@ -284,6 +284,19 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis) {
                 )
             }
         }
+        if (diagnostics.unaccountedImages.isNotEmpty()) {
+            Spacer(Modifier.width(4.dp))
+            // Neither kept nor rejected. The gap is shown because its absence is what let a card
+            // headed with the target session disappear from a report without a word.
+            Text("Images the model never mentioned", style = MaterialTheme.typography.titleSmall)
+            diagnostics.unaccountedImages.forEach { missing ->
+                Text(
+                    "Image ${missing.reference}: ${missing.caption?.take(80) ?: "no caption"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Spacer(Modifier.width(4.dp))
         Text("Diagnostics", style = MaterialTheme.typography.titleSmall)
         Text(
@@ -294,6 +307,14 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (diagnostics.requestCount > 0) {
+            Text(
+                "${diagnostics.requestCount} model requests · ${diagnostics.imagesSent} images sent · " +
+                    "${diagnostics.unaccountedImages.size} unaccounted",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         diagnostics.excludedSources.forEach {
             Text(
                 "Excluded ${it.sourceId}: ${it.reason}",

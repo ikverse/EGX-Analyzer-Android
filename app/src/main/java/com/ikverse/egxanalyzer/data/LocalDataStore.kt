@@ -10,6 +10,7 @@ import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.AnalysedChannel
 import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.AnalysisDiagnostics
+import com.ikverse.egxanalyzer.model.UnaccountedImage
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.cleanChannelName
@@ -283,6 +284,19 @@ class LocalDataStore(context: Context) :
                     put(JSONObject().put("sourceId", it.sourceId).put("reason", it.reason))
                 }
             })
+            put("requestCount", diagnostics.requestCount)
+            put("imagesSent", diagnostics.imagesSent)
+            put("unaccountedImages", JSONArray().apply {
+                diagnostics.unaccountedImages.forEach {
+                    put(
+                        JSONObject().apply {
+                            put("reference", it.reference)
+                            putNullable("sourceId", it.sourceId)
+                            putNullable("caption", it.caption)
+                        },
+                    )
+                }
+            })
         })
         put("imagePaths", JSONArray(imagePaths))
         put("rawResponse", rawResponse)
@@ -353,6 +367,15 @@ class LocalDataStore(context: Context) :
                 validationWarnings = value.optJSONArray("validationWarnings")?.strings().orEmpty(),
                 excludedSources = value.optJSONArray("excludedSources")?.objects()?.map {
                     ExcludedSource(it.optString("sourceId"), it.optString("reason"))
+                }.orEmpty(),
+                requestCount = value.optInt("requestCount"),
+                imagesSent = value.optInt("imagesSent"),
+                unaccountedImages = value.optJSONArray("unaccountedImages")?.objects()?.map {
+                    UnaccountedImage(
+                        reference = it.optInt("reference"),
+                        sourceId = it.nullableString("sourceId"),
+                        caption = it.nullableString("caption"),
+                    )
                 }.orEmpty(),
             )
         } ?: AnalysisDiagnostics(),
