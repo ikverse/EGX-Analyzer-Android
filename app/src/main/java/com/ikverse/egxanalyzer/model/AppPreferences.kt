@@ -15,7 +15,6 @@ enum class AnalysisLanguage(val displayName: String, val promptInstruction: Stri
 data class AppPreferences(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val analysisLanguage: AnalysisLanguage = AnalysisLanguage.BILINGUAL,
-    val temperature: Double = 0.1,
     val responseTimeoutSeconds: Int = 180,
     val defaultContentTypes: Set<AnalysisContentType> = AnalysisContentType.entries.toSet(),
     val customSystemPrompt: String = "",

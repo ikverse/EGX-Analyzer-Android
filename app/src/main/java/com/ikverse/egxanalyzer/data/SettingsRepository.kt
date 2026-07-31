@@ -64,7 +64,6 @@ class SettingsRepository(
     fun loadPreferences(): AppPreferences = AppPreferences(
         themeMode = enumPreference(KEY_THEME_MODE, ThemeMode.SYSTEM),
         analysisLanguage = enumPreference(KEY_ANALYSIS_LANGUAGE, AnalysisLanguage.BILINGUAL),
-        temperature = preferences.getFloat(KEY_TEMPERATURE, 0.1f).toDouble().coerceIn(0.0, 1.0),
         responseTimeoutSeconds = preferences.getInt(KEY_RESPONSE_TIMEOUT, 180).coerceIn(30, 300),
         defaultContentTypes = preferences.getStringSet(
             KEY_DEFAULT_CONTENT_TYPES,
@@ -86,7 +85,6 @@ class SettingsRepository(
         preferences.edit()
             .putString(KEY_THEME_MODE, value.themeMode.name)
             .putString(KEY_ANALYSIS_LANGUAGE, value.analysisLanguage.name)
-            .putFloat(KEY_TEMPERATURE, value.temperature.coerceIn(0.0, 1.0).toFloat())
             .putInt(KEY_RESPONSE_TIMEOUT, value.responseTimeoutSeconds.coerceIn(30, 300))
             .putStringSet(
                 KEY_DEFAULT_CONTENT_TYPES,
@@ -167,7 +165,6 @@ class SettingsRepository(
         const val KEY_PROVIDER = "provider"
         const val KEY_THEME_MODE = "theme_mode"
         const val KEY_ANALYSIS_LANGUAGE = "analysis_language"
-        const val KEY_TEMPERATURE = "temperature"
         const val KEY_RESPONSE_TIMEOUT = "response_timeout"
         const val KEY_DEFAULT_CONTENT_TYPES = "default_content_types"
         const val KEY_CUSTOM_PROMPT = "custom_system_prompt"

@@ -392,17 +392,6 @@ internal fun SettingsScreen(appState: AppState) {
                         )
                     }
                 }
-                Text("Model temperature: ${"%.1f".format(appState.appPreferences.temperature)}")
-                Slider(
-                    value = appState.appPreferences.temperature.toFloat(),
-                    onValueChange = { appState.updateTemperature(it.toDouble()) },
-                    valueRange = 0f..1f,
-                    steps = 9,
-                )
-                Text(
-                    "Lower values keep extraction more deterministic.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 Text("Cloud response timeout: ${appState.appPreferences.responseTimeoutSeconds} seconds")
                 Slider(
                     value = appState.appPreferences.responseTimeoutSeconds.toFloat(),

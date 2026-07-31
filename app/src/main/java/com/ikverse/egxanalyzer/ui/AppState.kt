@@ -432,9 +432,6 @@ class AppState(
         saveAppPreferences(appPreferences.copy(analysisLanguage = value))
     }
 
-    fun updateTemperature(value: Double) {
-        saveAppPreferences(appPreferences.copy(temperature = value.coerceIn(0.0, 1.0)))
-    }
 
     fun updateResponseTimeout(value: Int) {
         saveAppPreferences(appPreferences.copy(responseTimeoutSeconds = value.coerceIn(30, 300)))
