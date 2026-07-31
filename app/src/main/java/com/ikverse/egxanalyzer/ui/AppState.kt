@@ -159,6 +159,16 @@ class AppState(
     /** What the last preview pulled from Telegram, newest first, so it can be shown before paying. */
     val telegramSources: List<SourceTrace>
         get() = telegramTraces.values.sortedByDescending(SourceTrace::timestamp)
+
+    /**
+     * Sources added by hand, which are the only ones worth listing individually.
+     *
+     * Telegram's are shown by the source preview and can be changed by choosing different chats or
+     * a different window; listing them again only invited removing one at a time from a set the
+     * next load would rebuild anyway.
+     */
+    val manualInputs: List<AnalysisInput>
+        get() = inputs.filterNot { it.sourceId in telegramTraces.keys }
     var savedResults by mutableStateOf(localDataStore.results())
         private set
     var selectedResult by mutableStateOf<SavedAnalysis?>(savedResults.firstOrNull())

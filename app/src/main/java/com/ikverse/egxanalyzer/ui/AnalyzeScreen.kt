@@ -216,9 +216,12 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                     Text("Add voice")
                 }
             }
-        }
-        appState.inputs.forEach { input ->
-            SourceCard(input, onRemove = { appState.removeInput(input.sourceId) })
+            // Only what was added by hand: the source preview above already shows everything
+            // loaded from Telegram, and removing one of those individually would be undone by the
+            // next load.
+            appState.manualInputs.forEach { input ->
+                SourceCard(input, onRemove = { appState.removeInput(input.sourceId) })
+            }
         }
         ExpandableSection("Cloud model", Icons.Outlined.SmartToy) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
