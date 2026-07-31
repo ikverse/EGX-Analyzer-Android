@@ -41,9 +41,19 @@ class SourceDateGateTest {
     }
 
     @Test
-    fun `a date later than the target is left alone`() {
-        // Not this rule's business: the model's own date gate covers a card from the future.
-        assertTrue(SourceDateGate.accepts("31/7/2026", target))
+    fun `a card for a later session is rejected`() {
+        // These channels publish tomorrow's card in the afternoon, so it sits inside today's
+        // window while belonging to tomorrow's analysis.
+        assertFalse(SourceDateGate.accepts("30 JULY 2026", LocalDate.of(2026, 7, 29)))
+        assertFalse(SourceDateGate.accepts("31/7/2026", target))
+    }
+
+    @Test
+    fun `a card printed over the weekend counts for the session that follows it`() {
+        // Sunday 2 August opens after a Friday and Saturday the exchange does not trade.
+        val sunday = LocalDate.of(2026, 8, 2)
+        assertTrue(SourceDateGate.accepts("31/7/2026", sunday))
+        assertTrue(SourceDateGate.accepts("1/8/2026", sunday))
     }
 
     @Test

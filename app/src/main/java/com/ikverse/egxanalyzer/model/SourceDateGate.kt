@@ -11,18 +11,22 @@ import java.time.LocalDate
  * prompt forbids exactly that and was ignored twice, so the check is arithmetic here rather than an
  * instruction there.
  *
- * The session before the target is allowed, because that is where a genuine call for it is
- * published: cards headed `T+1` or `اسهم مرشحه` are printed during one session for the next. Only
- * dates older than that are rejected, which is what a re-post looks like.
+ * A source belongs to the session it names. Two dates qualify: the target itself, and the session
+ * before it - that is where a genuine call is published, on cards headed `T+1` or `اسهم مرشحه`
+ * printed during one session for the next. The days between them are non-trading ones, so a card
+ * printed over a weekend for Sunday's open still counts.
+ *
+ * Both directions are rejected. Older is a re-post of a stale card. Later is next session's card,
+ * published in the afternoon once today has closed - it sits inside today's window and belongs to
+ * tomorrow's analysis, where it also appears.
  */
 object SourceDateGate {
 
     fun accepts(visibleSourceDate: String?, targetDate: LocalDate?): Boolean {
         if (targetDate == null) return true
-        // An unreadable date is not evidence of staleness; the model's own gate covers the rest.
+        // An unreadable date is not evidence of anything; the model's own gate covers the rest.
         val printed = parse(visibleSourceDate) ?: return true
-        if (printed > targetDate) return true
-        return printed >= previousTradingSession(targetDate)
+        return printed in previousTradingSession(targetDate)..targetDate
     }
 
     /** The exchange trades Sunday to Thursday, so Friday and Saturday are skipped going back. */
