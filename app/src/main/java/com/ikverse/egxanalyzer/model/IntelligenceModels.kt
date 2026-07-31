@@ -40,6 +40,9 @@ data class ScoredCall(
 /** One saved analysis with everything it recommended, scored. */
 data class ScoredRun(
     val analysisId: Long,
+    /** The session the run was aimed at - what the card is about. */
+    val targetDate: LocalDate?,
+    /** When the run happened, which is bookkeeping rather than the subject. */
     val completedAt: Instant,
     val model: String,
     val calls: List<ScoredCall>,

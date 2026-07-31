@@ -307,15 +307,17 @@ private fun ChannelRanking(channels: List<ChannelScore>) {
 /** One analysis run: what it recommended and how each call turned out. */
 @Composable
 private fun RunCard(run: ScoredRun, windowSessions: Int) {
-    val stamp = remember(run.completedAt) {
+    val ranAt = remember(run.completedAt) {
         DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm")
             .withZone(ZoneId.systemDefault())
             .format(run.completedAt)
     }
     // Closed by default: a run is a summary line until asked for, so a page of them stays
     // readable however many analyses have been saved.
+    // Titled by the session it is about. The run's own timestamp is bookkeeping: two runs of the
+    // same session are the same subject, and the date being judged is what the reader is after.
     ExpandableSection(
-        title = stamp,
+        title = run.targetDate?.toString() ?: "Target not recorded",
         icon = Icons.Outlined.Assessment,
         summary = "${run.calls.size} ${if (run.calls.size == 1) "call" else "calls"} · " +
             "${run.fullHits} full · ${run.partialHits} partial · ${run.stopped} stopped" +
@@ -323,7 +325,7 @@ private fun RunCard(run: ScoredRun, windowSessions: Int) {
         summaryTone = if (run.fullHits > 0) MaterialTheme.colorScheme.primary else null,
     ) {
         Text(
-            run.model,
+            "Run $ranAt · ${run.model}",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

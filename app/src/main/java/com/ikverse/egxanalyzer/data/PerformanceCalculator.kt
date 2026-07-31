@@ -88,7 +88,11 @@ object PerformanceCalculator {
             anyTargetRate = judged.takeIf { it > 0 }?.let { (any.toDouble() / it * 100).round(1) },
             byOutcome = calls.groupingBy(ScoredCall::outcome).eachCount(),
             channels = channelScores(calls),
-            runs = scoredRuns.sortedByDescending { it.completedAt },
+            // Ordered by the session each run is about, newest first; the run time only
+            // separates several runs aimed at the same session.
+            runs = scoredRuns.sortedWith(
+                compareByDescending<ScoredRun> { it.targetDate }.thenByDescending { it.completedAt },
+            ),
         )
     }
 
@@ -108,6 +112,7 @@ object PerformanceCalculator {
             val calls = byRun[saved.id] ?: return@mapNotNull null
             ScoredRun(
                 analysisId = saved.id,
+                targetDate = saved.result.recommendationTargetDate,
                 completedAt = saved.result.completedAt,
                 model = saved.model,
                 calls = emptyList(),
