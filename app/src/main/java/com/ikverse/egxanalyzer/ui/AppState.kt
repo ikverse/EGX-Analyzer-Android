@@ -14,6 +14,7 @@ import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.recommendedTickers
 import com.ikverse.egxanalyzer.data.TelegramRepository
+import com.ikverse.egxanalyzer.model.AnalysedChannel
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.AnalysisInput
@@ -182,6 +183,27 @@ class AppState(
         pendingResultId = null
     }
 
+    /** A saved analysis covering exactly this session and these chats, awaiting a decision. */
+    var duplicateOfSelection by mutableStateOf<SavedAnalysis?>(null)
+        private set
+
+    fun dismissDuplicateWarning() {
+        duplicateOfSelection = null
+    }
+
+    /**
+     * A saved analysis of the same session with the same chats.
+     *
+     * Only an exact match counts. A run over different chats answers a different question even on
+     * the same day, so warning about it would train the user to dismiss the warning.
+     */
+    private fun duplicateOf(targetDate: LocalDate, chosen: Set<Long>): SavedAnalysis? =
+        savedResults.firstOrNull { saved ->
+            saved.result.recommendationTargetDate == targetDate &&
+                saved.result.selectedChannels.isNotEmpty() &&
+                saved.result.selectedChannels.map(AnalysedChannel::id).toSet() == chosen
+        }
+
     /**
      * Runs an analysis on the application scope rather than the caller's.
      *
@@ -189,8 +211,21 @@ class AppState(
      * request that had already been paid for. This outlives any screen, and the service keeps the
      * process alive while the user is elsewhere.
      */
-    fun startAnalysis() {
+    fun startAnalysis(confirmed: Boolean = false) {
         if (analysisJob?.isActive == true) return
+        if (!confirmed) {
+            val target = if (analysisMode == AnalysisMode.NEXT_DAY) {
+                egxTargetSession()
+            } else {
+                recommendationTargetDate
+            }
+            val chosen = channels.filter(ChannelSelection::selected).map(ChannelSelection::id).toSet()
+            duplicateOf(target, chosen)?.let {
+                duplicateOfSelection = it
+                return
+            }
+        }
+        duplicateOfSelection = null
         analysisJob = appScope.launch { analyze() }
     }
 
@@ -746,6 +781,8 @@ class AppState(
         recommendationTargetDate = window.targetDate
         val request = AnalysisRequest(
             channelIds = channels.filter(ChannelSelection::selected).map(ChannelSelection::id),
+            selectedChannels = channels.filter(ChannelSelection::selected)
+                .map { AnalysedChannel(it.id, it.displayName) },
             contentTypes = selectedContentTypes,
             inputs = selectedInputs,
             mode = analysisMode,

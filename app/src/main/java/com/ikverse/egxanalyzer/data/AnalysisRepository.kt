@@ -336,6 +336,7 @@ class CloudAnalysisRepository(
             rawResponse = content,
             completedAt = Instant.now(),
             sources = request.sourceTraces,
+            selectedChannels = request.selectedChannels,
         )
     }
 

@@ -47,6 +47,8 @@ sealed interface AnalysisInput {
 data class AnalysisRequest(
     val requestId: String = UUID.randomUUID().toString(),
     val channelIds: List<Long>,
+    /** The chats behind [channelIds], carried so the saved analysis can name its coverage. */
+    val selectedChannels: List<AnalysedChannel> = emptyList(),
     val contentTypes: Set<AnalysisContentType>,
     val inputs: List<AnalysisInput>,
     val mode: AnalysisMode = AnalysisMode.NEXT_DAY,
@@ -149,6 +151,9 @@ data class AnalysisDiagnostics(
     val durationMilliseconds: Long = 0,
 )
 
+/** A chat a run was pointed at, whether or not it turned out to have anything to say. */
+data class AnalysedChannel(val id: Long, val name: String)
+
 data class AnalysisResult(
     val requestId: String,
     val recommendations: List<RecommendationResult>,
@@ -164,6 +169,14 @@ data class AnalysisResult(
     val recommendationTargetDate: LocalDate? = null,
     val diagnostics: AnalysisDiagnostics = AnalysisDiagnostics(),
     val sources: List<SourceTrace> = emptyList(),
+    /**
+     * The chats this run covered.
+     *
+     * Not the same as the chats that produced sources: one selected chat may simply have posted
+     * nothing in the window. Without this, a later run looks like it never examined that chat, and
+     * an earlier run's calls for it survive a rerun that had already decided against them.
+     */
+    val selectedChannels: List<AnalysedChannel> = emptyList(),
     val rawResponse: String = "",
     val completedAt: Instant = Instant.now(),
 )

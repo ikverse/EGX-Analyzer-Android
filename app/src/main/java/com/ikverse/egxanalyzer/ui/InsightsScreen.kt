@@ -322,8 +322,17 @@ private fun SessionCard(run: ScoredSession, windowSessions: Int) {
             if (run.pending > 0) " · ${run.pending} pending" else "",
         summaryTone = if (run.fullHits > 0) MaterialTheme.colorScheme.primary else null,
     ) {
+        // Where the card's contents came from. Built from more than one run it is not a single
+        // analysis, and reading it as one would misplace the responsibility for a call.
         Text(
-            (if (run.runCount > 1) "${run.runCount} runs · latest " else "Run ") + "$ranAt · ${run.model}",
+            if (run.runCount > 1) {
+                "${run.channelsTotal} chats · ${run.channelsFromLatest} from the run at $ranAt · " +
+                    "the rest from ${run.runCount - 1} earlier " +
+                    (if (run.runCount == 2) "run" else "runs")
+            } else {
+                "${run.channelsTotal} ${if (run.channelsTotal == 1) "chat" else "chats"} · " +
+                    "run $ranAt · ${run.model}"
+            },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -95,6 +95,8 @@ object PerformanceCalculator {
                         lastRunAt = run.completedAt,
                         model = run.model,
                         runCount = run.runCount,
+                        channelsFromLatest = run.channelsFromLatest,
+                        channelsTotal = run.channelsTotal,
                         calls = run.calls.sortedBy(ScoredCall::ticker),
                     )
                 }
@@ -102,23 +104,29 @@ object PerformanceCalculator {
         )
     }
 
-    /** The analysis that speaks for one target session, and what it recommended. */
+    /** What one target session ends up holding, and how many runs it came from. */
     private data class RunCalls(
         val targetDate: LocalDate?,
         val completedAt: Instant,
         val model: String,
-        /** How many analyses exist for this session, of which only this one is read. */
         val runCount: Int,
+        val channelsFromLatest: Int,
+        val channelsTotal: Int,
         val calls: List<ScoredCall>,
     )
 
     /**
-     * The newest analysis of each target session, and nothing else.
+     * For each session and each chat, the newest run that actually covered that chat.
      *
-     * Re-running a session supersedes the earlier attempt rather than adding to it: the later run
-     * read the same sources with whatever had been fixed since, so its answer stands alone. Merging
-     * the two would resurrect calls the newer run had already decided against, and counting both
-     * would weight a session by how many times it happened to be analysed.
+     * A run can only speak about what it read. Taking the newest run wholesale let an unrelated
+     * re-run over one chat erase four other chats' calls for that day, quietly shrinking their
+     * records; merging runs indiscriminately did the opposite and resurrected calls a re-run had
+     * already dropped. Keyed per chat, a re-run replaces the chats it covered - a dropped stock
+     * stays dropped - while chats it never looked at keep their last real reading.
+     *
+     * Coverage comes from the recorded selection. Analyses saved before that was stored fall back
+     * to the chats that produced sources, which understates them, so an older run can only lose a
+     * chat to a newer one that demonstrably read it.
      */
     private fun runs(
         analyses: List<SavedAnalysis>,
@@ -126,42 +134,74 @@ object PerformanceCalculator {
     ): List<RunCalls> = analyses
         .groupBy { it.result.recommendationTargetDate }
         .mapNotNull { (targetDate, forSession) ->
-            val latest = forSession.maxByOrNull { it.result.completedAt } ?: return@mapNotNull null
-            val channelNames = latest.result.sources
-                .filter { it.messageId != null }
-                .associate { it.messageId.toString() to it.channelName }
+            val reads = forSession
+                .sortedByDescending { it.result.completedAt }
+                .map { saved -> saved to callsByChannel(saved, targetDate, since) }
 
-            // Within the one run a stock can still be described by several occurrences; the copy
-            // stating the most price levels is the fullest reading of it.
-            val best = linkedMapOf<Pair<String, String>, Pair<Int, ScoredCall>>()
-            latest.result.consolidated.forEach { stock ->
-                stock.dataPoints.forEach { point ->
-                    val call = point.toCall(stock, channelNames, targetDate) ?: return@forEach
-                    if (call.openedOn < since) return@forEach
-                    val levels = listOf(
-                        call.entryLow, call.entryHigh, call.target1, call.target2, call.stopLoss,
-                    ).count { it != null }
-                    val key = call.ticker to call.channel
-                    val existing = best[key]
-                    if (existing == null || levels > existing.first) best[key] = levels to call
-                }
+            val claimed = mutableSetOf<Long?>()
+            val chosen = linkedMapOf<SavedAnalysis, List<ScoredCall>>()
+            for ((saved, byChannel) in reads) {
+                val covered = coverage(saved)
+                val mine = byChannel.filterKeys { it !in claimed && (covered.isEmpty() || it in covered) }
+                if (mine.isEmpty()) continue
+                claimed += mine.keys
+                chosen[saved] = mine.values.flatten()
             }
-            if (best.isEmpty()) {
-                null
-            } else {
-                RunCalls(
-                    targetDate = targetDate,
-                    completedAt = latest.result.completedAt,
-                    model = latest.model,
-                    runCount = forSession.size,
-                    calls = best.values.map { (_, call) -> call },
-                )
+            if (chosen.isEmpty()) return@mapNotNull null
+
+            val newest = chosen.keys.first()
+            RunCalls(
+                targetDate = targetDate,
+                completedAt = newest.result.completedAt,
+                model = newest.model,
+                runCount = chosen.size,
+                channelsFromLatest = chosen.getValue(newest).map(ScoredCall::channelId).distinct().size,
+                channelsTotal = claimed.size,
+                calls = chosen.values.flatten(),
+            )
+        }
+
+    /** The chats a run was pointed at, or the ones it heard from when that was not recorded. */
+    private fun coverage(saved: SavedAnalysis): Set<Long?> =
+        saved.result.selectedChannels.map { it.id as Long? }.toSet().ifEmpty {
+            saved.result.sources.map { it.channelId }.toSet()
+        }
+
+    /**
+     * One run's calls, grouped by the chat that made them.
+     *
+     * A stock described several times in one run collapses to the reading stating the most price
+     * levels, since runs differ mainly in how much of a message the model managed to read.
+     */
+    private fun callsByChannel(
+        saved: SavedAnalysis,
+        targetDate: LocalDate?,
+        since: LocalDate,
+    ): Map<Long?, List<ScoredCall>> {
+        val traces = saved.result.sources.filter { it.messageId != null }
+        val channelNames = traces.associate { it.messageId.toString() to it.channelName }
+        val channelIds = traces.associate { it.messageId.toString() to it.channelId }
+
+        val best = linkedMapOf<Pair<String, Long?>, Pair<Int, ScoredCall>>()
+        saved.result.consolidated.forEach { stock ->
+            stock.dataPoints.forEach { point ->
+                val call = point.toCall(stock, channelNames, channelIds, targetDate) ?: return@forEach
+                if (call.openedOn < since) return@forEach
+                val levels = listOf(
+                    call.entryLow, call.entryHigh, call.target1, call.target2, call.stopLoss,
+                ).count { it != null }
+                val key = call.ticker to call.channelId
+                val existing = best[key]
+                if (existing == null || levels > existing.first) best[key] = levels to call
             }
         }
+        return best.values.map { (_, call) -> call }.groupBy(ScoredCall::channelId)
+    }
 
     private fun RecommendationDataPoint.toCall(
         stock: ConsolidatedRecommendation,
         channelNames: Map<String, String>,
+        channelIds: Map<String, Long?>,
         targetDate: LocalDate?,
     ): ScoredCall? {
         val ticker = Scoring.normalizeTicker(stock.stockCode)
@@ -177,6 +217,7 @@ object PerformanceCalculator {
             companyEnglish = stock.stockNameEnglish,
             companyArabic = stock.stockNameArabic,
             channel = channelNames[sourceMessageId]?.trim()?.takeIf(String::isNotBlank) ?: UNKNOWN,
+            channelId = channelIds[sourceMessageId],
             openedOn = openedOn,
             entryLow = (buyPriceLow ?: buyPrice)?.round(2),
             entryHigh = (buyPriceHigh ?: buyPrice)?.round(2),

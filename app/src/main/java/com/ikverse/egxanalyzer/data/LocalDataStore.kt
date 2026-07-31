@@ -7,6 +7,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisMode
+import com.ikverse.egxanalyzer.model.AnalysedChannel
 import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.AnalysisDiagnostics
 import com.ikverse.egxanalyzer.model.ChannelSelection
@@ -310,6 +311,11 @@ class LocalDataStore(context: Context) :
                 })
             }
         })
+        put("selectedChannels", JSONArray().apply {
+            selectedChannels.forEach {
+                put(JSONObject().put("id", it.id).put("name", it.name))
+            }
+        })
         put("sources", JSONArray().apply {
             sources.forEach { source ->
                 put(JSONObject().apply {
@@ -380,6 +386,9 @@ class LocalDataStore(context: Context) :
                 indicators = item.optJSONArray("indicators")?.strings().orEmpty(),
             )
         },
+        selectedChannels = optJSONArray("selectedChannels")?.objects()?.map { item ->
+            AnalysedChannel(item.optLong("id"), cleanChannelName(item.optString("name")))
+        }.orEmpty(),
         sources = getJSONArray("sources").objects().map { item ->
             SourceTrace(
                 sourceId = item.getString("sourceId"),

@@ -48,6 +48,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import java.time.format.DateTimeFormatter
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -148,6 +150,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         // Sits below the target date and content types because it reads both. Above them it
         // fetched against whatever they were before the user had set them.
         SourcePreview(appState, scope)
+        DuplicateAnalysisDialog(appState)
 
         // Collapsed by default: the usual route is loading sources from Telegram, and adding one
         // by hand is the exception.
@@ -485,3 +488,50 @@ private fun SourcePreview(appState: AppState, scope: kotlinx.coroutines.Coroutin
 
 /** Enough to scan the window without pushing the run off the screen. */
 private val SourceListMaxHeight = 260.dp
+
+/**
+ * Asks before repeating an analysis that has already been paid for.
+ *
+ * Only shown when the session and the chats both match an existing report, so dismissing it is
+ * never the routine action.
+ */
+@Composable
+private fun DuplicateAnalysisDialog(appState: AppState) {
+    val duplicate = appState.duplicateOfSelection ?: return
+    val ranAt = remember(duplicate.id) {
+        DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm")
+            .withZone(ZoneId.systemDefault())
+            .format(duplicate.result.completedAt)
+    }
+    AlertDialog(
+        onDismissRequest = appState::dismissDuplicateWarning,
+        title = { Text("This session is already analysed") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "A report for ${duplicate.result.recommendationTargetDate} already covers " +
+                        "exactly these chats, run $ranAt.",
+                )
+                Text(
+                    duplicate.result.selectedChannels.joinToString { it.name },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "Running it again costs another request and replaces that report in Insights.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                appState.dismissDuplicateWarning()
+                appState.startAnalysis(confirmed = true)
+            }) { Text("Continue") }
+        },
+        dismissButton = {
+            TextButton(onClick = appState::dismissDuplicateWarning) { Text("Cancel") }
+        },
+    )
+}

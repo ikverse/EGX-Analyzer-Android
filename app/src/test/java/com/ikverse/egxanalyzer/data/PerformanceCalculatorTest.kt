@@ -54,7 +54,30 @@ class PerformanceCalculatorTest {
 
         assertEquals(1, report.sessions.size)
         assertEquals(listOf("AMOC"), report.sessions.single().calls.map { it.ticker })
-        assertEquals(2, report.sessions.single().runCount)
+        // Both runs covered the one chat, so the older contributes nothing and the card is the
+        // work of a single run.
+        assertEquals(1, report.sessions.single().runCount)
+    }
+
+    @Test
+    fun `a chat the newer run never covered keeps its earlier reading`() {
+        // The whole point of keying coverage per chat: a rerun over one chat must not erase what
+        // another chat said about the same session.
+        val broad = analysis(id = 1, secondChannel = "Second channel", extraTicker = "COMI")
+        val narrow = analysis(id = 2, ranAt = Instant.parse("2026-07-20T12:00:00Z"))
+
+        val report = PerformanceCalculator.report(
+            analyses = listOf(broad, narrow),
+            pricesFrom = called,
+            windowSessions = 10,
+            sessionsFor = { _, _ -> sessions(12.5) },
+        )
+
+        val session = report.sessions.single()
+        assertEquals(2, session.runCount)
+        assertEquals(setOf("First channel", "Second channel"), session.calls.map { it.channel }.toSet())
+        // The rerun dropped COMI for the chat it covered, and that drop stands.
+        assertEquals(false, session.calls.any { it.ticker == "COMI" && it.channel == "First channel" })
     }
 
     @Test

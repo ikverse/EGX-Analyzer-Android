@@ -14,6 +14,8 @@ data class ScoredCall(
     val companyEnglish: String?,
     val companyArabic: String?,
     val channel: String,
+    /** Two chats can share a name once emoji come off, so coverage is keyed by id. */
+    val channelId: Long?,
     val openedOn: LocalDate,
     val entryLow: Double?,
     val entryHigh: Double?,
@@ -50,8 +52,11 @@ data class ScoredSession(
     /** When it was last analysed, and with what - bookkeeping, kept for the detail view. */
     val lastRunAt: Instant,
     val model: String,
-    /** How many analyses contributed, so a re-run is visible without being a separate card. */
+    /** How many analyses contributed, so a card built from more than one says so. */
     val runCount: Int,
+    /** Chats covered by the newest run, against the total covered - the rest come from earlier ones. */
+    val channelsFromLatest: Int = 0,
+    val channelsTotal: Int = 0,
     val calls: List<ScoredCall>,
 ) {
     val fullHits: Int get() = calls.count { it.outcome.isFullHit }
