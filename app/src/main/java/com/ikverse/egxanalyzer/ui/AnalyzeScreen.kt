@@ -92,35 +92,6 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
     ) {
         // Chat selection leads, because choosing sources is the first step of a run.
         ChannelsSection(appState)
-        Box {
-            val activeChannel = appState.channels.firstOrNull {
-                it.id == appState.activeSourceChannelId
-            }
-            TextButton(onClick = { channelMenuOpen = true }) {
-                Text("Source channel: ${activeChannel?.name ?: "On-device import"}")
-            }
-            DropdownMenu(
-                expanded = channelMenuOpen,
-                onDismissRequest = { channelMenuOpen = false },
-            ) {
-                DropdownMenuItem(
-                    text = { Text("On-device import") },
-                    onClick = {
-                        appState.selectSourceChannel(null)
-                        channelMenuOpen = false
-                    },
-                )
-                appState.channels.filter(ChannelSelection::selected).forEach { channel ->
-                    DropdownMenuItem(
-                        text = { Text(channel.name) },
-                        onClick = {
-                            appState.selectSourceChannel(channel.id)
-                            channelMenuOpen = false
-                        },
-                    )
-                }
-            }
-        }
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -181,6 +152,37 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         // Collapsed by default: the usual route is loading sources from Telegram, and adding one
         // by hand is the exception.
         ExpandableSection("Advanced selection", Icons.Outlined.Tune) {
+            // Only ever labelled hand-added sources; the chat list above already says which
+            // channels a run reads from.
+        Box {
+                val activeChannel = appState.channels.firstOrNull {
+                    it.id == appState.activeSourceChannelId
+                }
+                TextButton(onClick = { channelMenuOpen = true }) {
+                    Text("Source channel: ${activeChannel?.name ?: "On-device import"}")
+                }
+                DropdownMenu(
+                    expanded = channelMenuOpen,
+                    onDismissRequest = { channelMenuOpen = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("On-device import") },
+                        onClick = {
+                            appState.selectSourceChannel(null)
+                            channelMenuOpen = false
+                        },
+                    )
+                    appState.channels.filter(ChannelSelection::selected).forEach { channel ->
+                        DropdownMenuItem(
+                            text = { Text(channel.name) },
+                            onClick = {
+                                appState.selectSourceChannel(channel.id)
+                                channelMenuOpen = false
+                            },
+                        )
+                    }
+                }
+            }
             OutlinedTextField(
                 value = textSource,
                 onValueChange = { textSource = it },

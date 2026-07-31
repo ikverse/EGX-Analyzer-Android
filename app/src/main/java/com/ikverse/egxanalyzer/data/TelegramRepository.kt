@@ -257,8 +257,12 @@ class TelegramRepository(
                         inputs += AnalysisInput.Image(sourceId, Uri.fromFile(local), "image/jpeg")
                     }
                 }
+                // A caption belongs to its photo rather than being a text source of its own, so
+                // it travels with the image whatever the content-type choice. Without it a card
+                // captioned "توصية سابقة" reaches the model stripped of the one thing that says
+                // it is a follow-up on an earlier call rather than a new one.
                 val caption = content.caption.text
-                if (caption.isNotBlank() && AnalysisContentType.TEXT in contentTypes) {
+                if (caption.isNotBlank() && AnalysisContentType.IMAGES in contentTypes) {
                     inputs += AnalysisInput.Text(sourceId, caption)
                 }
                 caption.ifBlank { "Photo" }
@@ -274,8 +278,9 @@ class TelegramRepository(
                         durationMilliseconds = voice.duration * 1_000L,
                     )
                 }
+                // As with photos: the caption is the voice note's own label, not separate text.
                 val caption = content.caption.text
-                if (caption.isNotBlank() && AnalysisContentType.TEXT in contentTypes) {
+                if (caption.isNotBlank() && AnalysisContentType.AUDIO in contentTypes) {
                     inputs += AnalysisInput.Text(sourceId, caption)
                 }
                 caption.ifBlank { "Voice message" }

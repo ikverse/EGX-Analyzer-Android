@@ -171,43 +171,20 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                         detail = "Refresh to pull your Telegram chat list onto this device.",
                     )
                 } else {
-                    // Bounded and scrolled in place: a long chat list otherwise pushes the whole
-                    // run out of reach, and this screen is now the whole flow.
-                    Column(
-                        Modifier
-                            .heightIn(max = ChatListMaxHeight)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        chats.forEach { chat -> ChannelCard(chat, appState, chats) }
+                    // Bounded and scrolled in place, inside a card like every other group here: a
+                    // long chat list otherwise pushes the whole run out of reach.
+                    SectionCard(title = "$selectedCount of ${chats.size} chats selected") {
+                        Column(
+                            Modifier
+                                .heightIn(max = ChatListMaxHeight)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            chats.forEach { chat -> ChannelCard(chat, appState, chats) }
+                        }
                     }
                 }
 
-                SectionCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        StatTile(
-                            value = selectedCount.toString(),
-                            label = "selected",
-                            tone = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.weight(1f),
-                        )
-                        StatTile(
-                            value = appState.channels.size.toString(),
-                            label = "chats",
-                            modifier = Modifier.weight(1f),
-                        )
-                        StatusPill(appState.recommendationTargetDate.toString(), StatusTone.GOOD)
-                    }
-                    Text(
-                        if (appState.analysisMode == AnalysisMode.NEXT_DAY) {
-                            "Current / next EGX session"
-                        } else {
-                            "Historical analysis"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
             TelegramAuthStep.INITIALIZING,
             TelegramAuthStep.LOGGING_OUT,

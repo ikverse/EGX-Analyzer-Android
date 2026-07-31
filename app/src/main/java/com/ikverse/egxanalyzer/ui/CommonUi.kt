@@ -113,6 +113,10 @@ internal fun ExpandableSection(
     icon: ImageVector? = null,
     modifier: Modifier = Modifier,
     initiallyExpanded: Boolean = false,
+    /** One line under the title saying what is inside, so a closed card still informs. */
+    summary: String? = null,
+    /** Colour for [summary], where the figure itself carries a verdict. */
+    summaryTone: Color? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var expanded by remember { mutableStateOf(initiallyExpanded) }
@@ -138,7 +142,16 @@ internal fun ExpandableSection(
                     )
                     Spacer(Modifier.width(10.dp))
                 }
-                Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    if (summary != null) {
+                        Text(
+                            summary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = summaryTone ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 Icon(
                     if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                     contentDescription = if (expanded) "Collapse $title" else "Expand $title",

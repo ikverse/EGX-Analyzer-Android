@@ -203,7 +203,13 @@ private fun Headline(report: PerformanceReport) {
 
 @Composable
 private fun OutcomeBreakdown(report: PerformanceReport) {
-    ExpandableSection(title = "Outcomes", icon = Icons.Outlined.Timeline) {
+    val judged = report.byOutcome.filterKeys(Outcome::judged).values.sum()
+    ExpandableSection(
+        title = "Outcomes",
+        icon = Icons.Outlined.Timeline,
+        summary = "${report.fullHits} full · ${report.partialHits} partial · " +
+            "${report.byOutcome[Outcome.STOPPED] ?: 0} stopped · ${report.tracked - judged} pending",
+    ) {
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -254,7 +260,14 @@ private fun OutcomeLabel(outcome: Outcome) {
 @Composable
 private fun ChannelRanking(channels: List<ChannelScore>) {
     if (channels.isEmpty()) return
-    ExpandableSection(title = "Sources ranked", icon = Icons.Outlined.Leaderboard) {
+    val best = channels.firstOrNull { it.judged > 0 }
+    ExpandableSection(
+        title = "Sources ranked",
+        icon = Icons.Outlined.Leaderboard,
+        summary = best?.let { "Best: ${it.channel} · ${it.anyTargetRate}% reached a target" }
+            ?: "${channels.size} sources, none judged yet",
+        summaryTone = best?.anyTargetRate.rateTone(),
+    ) {
         channels.forEachIndexed { index, channel ->
             if (index > 0) HorizontalDivider()
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -301,14 +314,18 @@ private fun RunCard(run: ScoredRun, windowSessions: Int) {
     }
     // Closed by default: a run is a summary line until asked for, so a page of them stays
     // readable however many analyses have been saved.
-    ExpandableSection(title = stamp, icon = Icons.Outlined.Assessment) {
-        Text(
-            "${run.calls.size} ${if (run.calls.size == 1) "recommendation" else "recommendations"} · " +
-                "${run.fullHits} full · ${run.partialHits} partial · ${run.stopped} stopped · " +
-                "${run.pending} not yet judgeable",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    ExpandableSection(
+        title = stamp,
+        icon = Icons.Outlined.Assessment,
+        summary = "${run.calls.size} ${if (run.calls.size == 1) "call" else "calls"} · " +
+            "${run.fullHits} full · ${run.partialHits} partial · ${run.stopped} stopped" +
+            if (run.pending > 0) " · ${run.pending} pending" else "",
+        summaryTone = when {
+            run.fullHits > 0 -> MaterialTheme.colorScheme.primary
+            run.stopped > run.partialHits -> MaterialTheme.colorScheme.error
+            else -> null
+        },
+    ) {
         Text(
             run.model,
             style = MaterialTheme.typography.labelSmall,

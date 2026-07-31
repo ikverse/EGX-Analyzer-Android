@@ -100,7 +100,11 @@ internal fun SettingsScreen(appState: AppState) {
         title = "Settings",
         subtitle = "Cloud models only. No Ollama or local-model runtime is included.",
     ) {
-        ExpandableSection("AI analysis") {
+        ExpandableSection(
+            "AI analysis",
+            summary = "${appState.cloudConfiguration.provider.displayName} · ${appState.cloudConfiguration.model.ifBlank { "no model" }}",
+            summaryTone = if (appState.credentialVerified == false) MaterialTheme.colorScheme.error else null,
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Box {
                     TextButton(onClick = { providerMenuOpen = true }) {
@@ -210,7 +214,10 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        ExpandableSection("Prompt and validation") {
+        ExpandableSection(
+            "Prompt and validation",
+            summary = if (appState.appPreferences.customSystemPrompt.isBlank()) "Canonical prompt" else "Custom prompt",
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     "Leave the system prompt blank to use the protected evidence-backed default.",
@@ -311,7 +318,10 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        ExpandableSection("Appearance") {
+        ExpandableSection(
+            "Appearance",
+            summary = appState.appPreferences.themeMode.displayName,
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Box {
                     OutlinedButton(onClick = { themeMenuOpen = true }) {
@@ -339,7 +349,10 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        ExpandableSection("Analysis defaults") {
+        ExpandableSection(
+            "Analysis defaults",
+            summary = "${appState.appPreferences.analysisLanguage.displayName} · ${appState.appPreferences.defaultContentTypes.size} content types",
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box {
                     OutlinedButton(onClick = { languageMenuOpen = true }) {
@@ -403,7 +416,10 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        ExpandableSection("Scoring") {
+        ExpandableSection(
+            "Scoring",
+            summary = "${appState.appPreferences.scoringWindowSessions} trading sessions",
+        ) {
             val window = appState.appPreferences.scoringWindowSessions
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Scoring window", modifier = Modifier.weight(1f))
@@ -427,7 +443,11 @@ internal fun SettingsScreen(appState: AppState) {
             )
         }
 
-        ExpandableSection("Telegram") {
+        ExpandableSection(
+            "Telegram",
+            summary = if (appState.telegramAuthState.step == TelegramAuthStep.READY) "Signed in · ${appState.channels.size} chats" else "Not connected",
+            summaryTone = if (appState.telegramAuthState.step == TelegramAuthStep.READY) null else MaterialTheme.colorScheme.error,
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(appState.telegramAuthState.message)
                 Text("${appState.channels.count(ChannelSelection::selected)} chats selected")
@@ -451,7 +471,10 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        ExpandableSection("Saved data and privacy") {
+        ExpandableSection(
+            "Saved data and privacy",
+            summary = "${appState.savedResults.size} saved analyses",
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("${appState.savedResults.size} analyses saved on this device")
                 Text(

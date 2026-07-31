@@ -43,6 +43,8 @@ Also exclude:
 - Non-EGX material
 - Previous or achieved recommendations
 - Target-hit updates
+- Follow-ups on an earlier call, including `توصية سابقة`, `التوصية السابقة`, `متابعة`, `تحديث`
+- A screenshot or forward of an older recommendation, whatever the day it was posted
 - Content that is no longer actionable
 - Liquidity rankings without an actionable recommendation
 - Sector rankings and sector-summary content
@@ -63,6 +65,8 @@ A sector named inside an otherwise valid stock recommendation, describing which 
 For an image containing multiple distinct sections, judge each section independently.
 
 For a Telegram message containing several images, judge each image independently. Exclude only the invalid image unless the message text or voice transcript makes the entire message invalid.
+
+Text accompanying an image is evidence about that image. When a caption marks the image as a past, previous, or already-achieved recommendation - `توصية سابقة`, `التوصية السابقة`, or a clear equivalent - exclude the image it belongs to, even when the image itself looks like a fresh recommendation card.
 
 An excluded item or section must create nothing in any output array, category, count, Notes field, or source link.
 
@@ -86,6 +90,9 @@ Examples for `TARGET_DATE: 2026-07-29`:
 - Source says `29/07/2026` → eligible for later gates.
 - Source has no readable date → exclude.
 - Telegram post is dated 29/7 but its image says 28/7 → exclude.
+- Telegram post is dated 29/7 but its image says 13/7 → exclude. An old card re-posted today is still an old card.
+
+A date that does not equal `TARGET_DATE` excludes the recommendation outright. It is never reported with `date` set to `TARGET_DATE` and the real date left in `visible_source_date`: that returns an excluded recommendation wearing the target date, which is worse than returning nothing.
 
 For an eligible recommendation, return:
 
