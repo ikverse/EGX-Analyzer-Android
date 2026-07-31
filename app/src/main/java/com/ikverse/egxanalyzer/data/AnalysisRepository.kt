@@ -191,8 +191,11 @@ class CloudAnalysisRepository(
         correctionInstructions: String? = null,
     ) = JSONObject().apply {
         put("model", modelName)
-        // No temperature is sent, matching the desktop, so both apps get the provider default and
-        // a report can be compared across them without the sampling differing underneath.
+        // Reading a price off a card has one right answer, printed in the source, so sampling could
+        // only ever move away from it - it is what produced English company names that changed
+        // between runs of the same card. Fixed rather than offered as a setting: no value above 0
+        // is useful for extraction. The desktop pins the same value in its own request builder.
+        put("temperature", 0.0)
         put("messages", JSONArray().apply {
             put(JSONObject().apply {
                 put("role", "system")
