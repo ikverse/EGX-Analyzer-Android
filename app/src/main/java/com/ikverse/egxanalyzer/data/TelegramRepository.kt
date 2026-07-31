@@ -212,7 +212,8 @@ class TelegramRepository(
             var fromMessageId = 0L
             var keepLoading = true
             var emptyPages = 0
-            while (keepLoading) {
+            var readHere = 0
+            while (keepLoading && readHere < MAX_MESSAGES_PER_CHAT) {
                 val history = client.getChatHistory(
                     chatId = chatId,
                     fromMessageId = fromMessageId,
@@ -233,6 +234,7 @@ class TelegramRepository(
                 }
                 emptyPages = 0
                 examined += messages.size
+                readHere += messages.size
                 messages.forEach { message ->
                     val publishedAt = Instant.ofEpochSecond(message.date.toLong())
                     when {
@@ -242,7 +244,6 @@ class TelegramRepository(
                     }
                 }
                 fromMessageId = messages.last().id
-                if (messages.size < HISTORY_PAGE_SIZE) break
             }
             if (emptyPages > HISTORY_RETRIES) silentChats++
         }
@@ -508,6 +509,16 @@ class TelegramRepository(
         /** How many empty answers to accept before believing a chat really is exhausted. */
         const val HISTORY_RETRIES = 4
         const val HISTORY_RETRY_DELAY_MS = 700L
+
+        /**
+         * A ceiling per chat, since paging now ends only at the window or an exhausted chat.
+         *
+         * TDLib decides for itself how many messages a page holds and routinely returns fewer than
+         * asked for, so a short page cannot mean the history is finished - treating it that way
+         * collected exactly one message per chat. Reaching the start of the window is what stops
+         * the walk; this only stops it running away on a chat that never gets there.
+         */
+        const val MAX_MESSAGES_PER_CHAT = 2_000
         const val CLIENT_CLOSE_TIMEOUT_MS = 10_000L
     }
 }
