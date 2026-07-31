@@ -15,7 +15,7 @@ model for recommendation analysis.
 - Authenticated cloud model discovery with a selectable provider model list and manual fallback
 - QwenCloud/Alibaba regional endpoint presets with QwenCloud International as the default
 - Persisted system/light/dark appearance preference
-- Persisted analysis language, temperature, response timeout, and default content types
+- Persisted analysis language, response timeout, and default content types
 - Provider endpoint/model reset without altering the saved credential
 - Telegram session status and actions available from Settings
 - On-device saved-analysis count and confirmed bulk deletion
