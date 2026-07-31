@@ -4,6 +4,7 @@ import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SourceTrace
+import com.ikverse.egxanalyzer.model.SourceDateGate
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
@@ -17,7 +18,12 @@ import java.time.LocalDate
  */
 object ConsolidatedParser {
 
-    fun parse(content: String): List<ConsolidatedRecommendation> {
+    /**
+     * @param targetDate the session being analysed. Occurrences printed with a date older than the
+     * session before it are dropped: they are re-posts of earlier cards, which the model has been
+     * told to exclude and has twice included anyway. Null skips the check.
+     */
+    fun parse(content: String, targetDate: LocalDate? = null): List<ConsolidatedRecommendation> {
         val payload = JSONObject(stripCodeFence(content))
         val stocks = payload.optJSONArray("top_consolidated_recommendations") ?: JSONArray()
         return buildList {
@@ -25,6 +31,12 @@ object ConsolidatedParser {
                 val stock = stocks.optJSONObject(index) ?: continue
                 val code = stock.string("stock_code")?.trim()?.uppercase()?.removeSuffix(".CA")
                 if (code.isNullOrBlank()) continue
+                val all = stock.optJSONArray("data_points").dataPoints()
+                val occurrences = all.filter {
+                    SourceDateGate.accepts(it.visibleSourceDate, targetDate)
+                }
+                // Every occurrence rejected means nothing is left to recommend.
+                if (occurrences.isEmpty() && all.isNotEmpty()) continue
                 add(
                     ConsolidatedRecommendation(
                         stockCode = code,
@@ -33,7 +45,7 @@ object ConsolidatedParser {
                         mentionCount = stock.optInt("mention_count", 0),
                         rank = stock.optInt("rank", index + 1),
                         notesSummary = stock.string("notes_summary"),
-                        dataPoints = stock.optJSONArray("data_points").dataPoints(),
+                        dataPoints = occurrences,
                     ),
                 )
             }
