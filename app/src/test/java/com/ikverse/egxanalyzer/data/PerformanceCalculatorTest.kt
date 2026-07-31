@@ -39,26 +39,42 @@ class PerformanceCalculatorTest {
     }
 
     @Test
-    fun `the copy stating the most price levels is the one kept`() {
-        val sparse = analysis(id = 1, entryLow = null, entryHigh = null, stopLoss = null)
-        val complete = analysis(id = 2)
+    fun `a rerun of a session replaces the earlier one rather than adding to it`() {
+        // The first run named two stocks, the second only one. The later run is the considered
+        // view, so the stock it dropped does not survive from the earlier attempt.
+        val first = analysis(id = 1, extraTicker = "COMI")
+        val second = analysis(id = 2, ranAt = Instant.parse("2026-07-20T12:00:00Z"))
 
         val report = PerformanceCalculator.report(
-            analyses = listOf(sparse, complete),
+            analyses = listOf(first, second),
             pricesFrom = called,
             windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
-        assertEquals(1, report.sessions.sumOf { it.calls.size })
-        assertEquals(9.8, report.sessions.flatMap { it.calls }.single().entryLow!!, 0.001)
-        assertEquals(9.0, report.sessions.flatMap { it.calls }.single().stopLoss!!, 0.001)
+        assertEquals(1, report.sessions.size)
+        assertEquals(listOf("AMOC"), report.sessions.single().calls.map { it.ticker })
+        assertEquals(2, report.sessions.single().runCount)
+    }
+
+    @Test
+    fun `within one run the copy stating the most price levels is kept`() {
+        val report = PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1, withSparseDuplicate = true)),
+            pricesFrom = called,
+            windowSessions = 10,
+            sessionsFor = { _, _ -> sessions(12.5) },
+        )
+
+        val call = report.sessions.flatMap { it.calls }.single()
+        assertEquals(9.8, call.entryLow!!, 0.001)
+        assertEquals(9.0, call.stopLoss!!, 0.001)
     }
 
     @Test
     fun `the same stock from two channels stays two calls`() {
         val report = PerformanceCalculator.report(
-            analyses = listOf(analysis(id = 1), analysis(id = 2, channel = "Second channel")),
+            analyses = listOf(analysis(id = 1, secondChannel = "Second channel")),
             pricesFrom = called,
             windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
@@ -167,6 +183,13 @@ class PerformanceCalculatorTest {
         entryLow: Double? = 9.8,
         entryHigh: Double? = 10.0,
         stopLoss: Double? = 9.0,
+        ranAt: Instant = Instant.parse("2026-07-20T09:00:00Z"),
+        /** A second stock this run named, to show a rerun dropping it. */
+        extraTicker: String? = null,
+        /** The same stock quoted again by another channel in the same run. */
+        secondChannel: String? = null,
+        /** The same stock and channel described twice, once with fewer levels. */
+        withSparseDuplicate: Boolean = false,
     ) = SavedAnalysis(
         id = id,
         provider = CloudProvider.QWEN,
@@ -177,8 +200,9 @@ class PerformanceCalculatorTest {
             // The session the run was aimed at, which is what a call is dated by and what the
             // Insights cards group on.
             recommendationTargetDate = called,
+            completedAt = ranAt,
             inquiryReplyCount = 0,
-            sources = listOf(
+            sources = listOfNotNull(
                 SourceTrace(
                     sourceId = "source-$id",
                     channelId = 1,
@@ -188,8 +212,19 @@ class PerformanceCalculatorTest {
                     contentType = AnalysisContentType.TEXT,
                     preview = "",
                 ),
+                secondChannel?.let {
+                    SourceTrace(
+                        sourceId = "source-$id-b",
+                        channelId = 2,
+                        channelName = it,
+                        messageId = 43,
+                        timestamp = Instant.parse("2026-07-20T10:05:00Z"),
+                        contentType = AnalysisContentType.TEXT,
+                        preview = "",
+                    )
+                },
             ),
-            consolidated = listOf(
+            consolidated = listOfNotNull(
                 ConsolidatedRecommendation(
                     stockCode = "AMOC.CA",
                     stockNameEnglish = "Alexandria Mineral Oils",
@@ -197,33 +232,56 @@ class PerformanceCalculatorTest {
                     mentionCount = 1,
                     rank = 1,
                     notesSummary = null,
-                    dataPoints = listOf(
-                        RecommendationDataPoint(
-                            date = called,
-                            effectiveDateBasis = "explicit",
-                            visibleSourceDate = called.toString(),
-                            dateEvidence = null,
-                            timingEvidence = null,
-                            sourceMessageId = "42",
-                            sourceImageRef = null,
-                            recommendationEvidence = null,
-                            recommendationType = "buy",
-                            buyPrice = null,
-                            buyPriceLow = entryLow,
-                            buyPriceHigh = entryHigh,
-                            target1 = 12.0,
-                            returnTp1Pct = null,
-                            target2 = 14.0,
-                            returnTp2Pct = null,
-                            stopLoss = stopLoss,
-                            support = null,
-                            resistance = null,
-                            riskPct = null,
-                            notesArabic = null,
-                        ),
+                    dataPoints = listOfNotNull(
+                        point("42", entryLow, entryHigh, stopLoss),
+                        // The same stock and channel again, stated with fewer levels.
+                        if (withSparseDuplicate) point("42", null, null, null) else null,
+                        // The same stock quoted by a second channel in the same run.
+                        secondChannel?.let { point("43", entryLow, entryHigh, stopLoss) },
                     ),
                 ),
+                // A stock only one run named, so a rerun dropping it is visible.
+                extraTicker?.let {
+                    ConsolidatedRecommendation(
+                        stockCode = it,
+                        stockNameEnglish = it,
+                        stockNameArabic = null,
+                        mentionCount = 1,
+                        rank = 2,
+                        notesSummary = null,
+                        dataPoints = listOf(point("42", entryLow, entryHigh, stopLoss)),
+                    )
+                },
             ),
         ),
+    )
+
+    private fun point(
+        messageId: String,
+        entryLow: Double?,
+        entryHigh: Double?,
+        stopLoss: Double?,
+    ) = RecommendationDataPoint(
+        date = called,
+        effectiveDateBasis = "explicit",
+        visibleSourceDate = called.toString(),
+        dateEvidence = null,
+        timingEvidence = null,
+        sourceMessageId = messageId,
+        sourceImageRef = null,
+        recommendationEvidence = null,
+        recommendationType = "buy",
+        buyPrice = null,
+        buyPriceLow = entryLow,
+        buyPriceHigh = entryHigh,
+        target1 = 12.0,
+        returnTp1Pct = null,
+        target2 = 14.0,
+        returnTp2Pct = null,
+        stopLoss = stopLoss,
+        support = null,
+        resistance = null,
+        riskPct = null,
+        notesArabic = null,
     )
 }

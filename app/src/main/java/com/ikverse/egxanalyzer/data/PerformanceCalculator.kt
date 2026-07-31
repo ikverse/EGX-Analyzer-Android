@@ -32,9 +32,9 @@ object PerformanceCalculator {
         val window = Scoring.clampWindow(windowSessions)
         if (pricesFrom == null) return PerformanceReport(windowSessions = window)
 
-        val scoredRuns = runs(analyses, pricesFrom).map { (run, rawCalls) ->
+        val scoredRuns = runs(analyses, pricesFrom).map { run ->
             run.copy(
-                calls = rawCalls.map { call ->
+                calls = run.calls.map { call ->
                     val sessions = sessionsFor(call.ticker, call.openedOn).take(window)
                     val scored = Scoring.score(
                         sessions = sessions,
@@ -88,93 +88,76 @@ object PerformanceCalculator {
             anyTargetRate = judged.takeIf { it > 0 }?.let { (any.toDouble() / it * 100).round(1) },
             byOutcome = calls.groupingBy(ScoredCall::outcome).eachCount(),
             channels = channelScores(calls),
-            // Grouped into one record per session: two analyses of the same day are the same
-            // subject, and showing them as separate cards headed by the same date said nothing.
             sessions = scoredRuns
-                .groupBy { it.targetDate }
-                .map { (date, group) ->
-                    val latest = group.maxBy { it.completedAt }
+                .map { run ->
                     ScoredSession(
-                        targetDate = date,
-                        lastRunAt = latest.completedAt,
-                        model = latest.model,
-                        runCount = group.size,
-                        calls = group.flatMap(RunCalls::calls).sortedBy(ScoredCall::ticker),
+                        targetDate = run.targetDate,
+                        lastRunAt = run.completedAt,
+                        model = run.model,
+                        runCount = run.runCount,
+                        calls = run.calls.sortedBy(ScoredCall::ticker),
                     )
                 }
                 .sortedByDescending { it.targetDate },
         )
     }
 
-    /** One analysis and the calls that survived deduplication from it. */
+    /** The analysis that speaks for one target session, and what it recommended. */
     private data class RunCalls(
         val targetDate: LocalDate?,
         val completedAt: Instant,
         val model: String,
+        /** How many analyses exist for this session, of which only this one is read. */
+        val runCount: Int,
         val calls: List<ScoredCall>,
     )
 
-    /** Calls grouped by the analysis that produced them. */
+    /**
+     * The newest analysis of each target session, and nothing else.
+     *
+     * Re-running a session supersedes the earlier attempt rather than adding to it: the later run
+     * read the same sources with whatever had been fixed since, so its answer stands alone. Merging
+     * the two would resurrect calls the newer run had already decided against, and counting both
+     * would weight a session by how many times it happened to be analysed.
+     */
     private fun runs(
         analyses: List<SavedAnalysis>,
         since: LocalDate,
-    ): List<Pair<RunCalls, List<ScoredCall>>> {
-        // Deduplication still spans runs: a call repeated by a later analysis of the same day is
-        // one call, and it belongs to whichever run described it most completely.
-        val owner = mutableMapOf<Triple<String, String, LocalDate>, Long>()
-        val unique = uniqueCalls(analyses, since, owner)
-        val byRun = unique.groupBy { call ->
-            owner.getValue(Triple(call.ticker, call.channel, call.openedOn))
-        }
-        return analyses.mapNotNull { saved ->
-            val calls = byRun[saved.id] ?: return@mapNotNull null
-            RunCalls(
-                targetDate = saved.result.recommendationTargetDate,
-                completedAt = saved.result.completedAt,
-                model = saved.model,
-                calls = emptyList(),
-            ) to calls
-        }
-    }
-
-    /**
-     * One entry per call, not per time a call was written down.
-     *
-     * Re-running an analysis for the same session saves another result listing the same
-     * recommendations, so the raw rows count a single call once per run. Left alone that inflates
-     * every total and quietly gives extra weight to whichever channel was analysed most often.
-     *
-     * Calls are keyed by stock, channel and target session, and the most recent run wins. A later
-     * run is the considered view - it read the same sources with whatever was fixed since - so a
-     * re-run replaces its predecessor rather than competing with it.
-     */
-    private fun uniqueCalls(
-        analyses: List<SavedAnalysis>,
-        since: LocalDate,
-        owner: MutableMap<Triple<String, String, LocalDate>, Long>,
-    ): List<ScoredCall> {
-        val best = linkedMapOf<Triple<String, String, LocalDate>, Pair<Instant, ScoredCall>>()
-        analyses.forEach { saved ->
-            val channelNames = saved.result.sources
+    ): List<RunCalls> = analyses
+        .groupBy { it.result.recommendationTargetDate }
+        .mapNotNull { (targetDate, forSession) ->
+            val latest = forSession.maxByOrNull { it.result.completedAt } ?: return@mapNotNull null
+            val channelNames = latest.result.sources
                 .filter { it.messageId != null }
                 .associate { it.messageId.toString() to it.channelName }
-            val targetDate = saved.result.recommendationTargetDate
-            val ranAt = saved.result.completedAt
-            saved.result.consolidated.forEach { stock ->
+
+            // Within the one run a stock can still be described by several occurrences; the copy
+            // stating the most price levels is the fullest reading of it.
+            val best = linkedMapOf<Pair<String, String>, Pair<Int, ScoredCall>>()
+            latest.result.consolidated.forEach { stock ->
                 stock.dataPoints.forEach { point ->
                     val call = point.toCall(stock, channelNames, targetDate) ?: return@forEach
                     if (call.openedOn < since) return@forEach
-                    val key = Triple(call.ticker, call.channel, call.openedOn)
+                    val levels = listOf(
+                        call.entryLow, call.entryHigh, call.target1, call.target2, call.stopLoss,
+                    ).count { it != null }
+                    val key = call.ticker to call.channel
                     val existing = best[key]
-                    if (existing == null || ranAt >= existing.first) {
-                        best[key] = ranAt to call
-                        owner[key] = saved.id
-                    }
+                    if (existing == null || levels > existing.first) best[key] = levels to call
                 }
             }
+            if (best.isEmpty()) {
+                null
+            } else {
+                RunCalls(
+                    targetDate = targetDate,
+                    completedAt = latest.result.completedAt,
+                    model = latest.model,
+                    runCount = forSession.size,
+                    calls = best.values.map { (_, call) -> call },
+                )
+            }
         }
-        return best.values.map { (_, call) -> call }
-    }
 
     private fun RecommendationDataPoint.toCall(
         stock: ConsolidatedRecommendation,
