@@ -37,14 +37,21 @@ data class ScoredCall(
     val sessions: List<DailySession> = emptyList(),
 )
 
-/** One saved analysis with everything it recommended, scored. */
-data class ScoredRun(
-    val analysisId: Long,
-    /** The session the run was aimed at - what the card is about. */
+/**
+ * One trading session and every call made for it, scored.
+ *
+ * The session is the subject, not the analysis: running the same day twice produces one record of
+ * that day, not two competing ones. Where runs disagree the newer wins, so this holds the surviving
+ * call from each.
+ */
+data class ScoredSession(
+    /** The session these calls were made for. */
     val targetDate: LocalDate?,
-    /** When the run happened, which is bookkeeping rather than the subject. */
-    val completedAt: Instant,
+    /** When it was last analysed, and with what - bookkeeping, kept for the detail view. */
+    val lastRunAt: Instant,
     val model: String,
+    /** How many analyses contributed, so a re-run is visible without being a separate card. */
+    val runCount: Int,
     val calls: List<ScoredCall>,
 ) {
     val fullHits: Int get() = calls.count { it.outcome.isFullHit }
@@ -99,5 +106,5 @@ data class PerformanceReport(
     val anyTargetRate: Double? = null,
     val byOutcome: Map<Outcome, Int> = emptyMap(),
     val channels: List<ChannelScore> = emptyList(),
-    val runs: List<ScoredRun> = emptyList(),
+    val sessions: List<ScoredSession> = emptyList(),
 )

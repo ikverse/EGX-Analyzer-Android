@@ -9,7 +9,7 @@ import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.ScoredCall
-import com.ikverse.egxanalyzer.model.ScoredRun
+import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.round
 import java.time.Instant
 import java.time.LocalDate
@@ -61,7 +61,7 @@ object PerformanceCalculator {
                 },
             )
         }
-        val calls = scoredRuns.flatMap(ScoredRun::calls)
+        val calls = scoredRuns.flatMap(RunCalls::calls)
 
         val judged = calls.count { it.outcome.judged }
         val full = calls.count { it.outcome.isFullHit }
@@ -88,19 +88,37 @@ object PerformanceCalculator {
             anyTargetRate = judged.takeIf { it > 0 }?.let { (any.toDouble() / it * 100).round(1) },
             byOutcome = calls.groupingBy(ScoredCall::outcome).eachCount(),
             channels = channelScores(calls),
-            // Ordered by the session each run is about, newest first; the run time only
-            // separates several runs aimed at the same session.
-            runs = scoredRuns.sortedWith(
-                compareByDescending<ScoredRun> { it.targetDate }.thenByDescending { it.completedAt },
-            ),
+            // Grouped into one record per session: two analyses of the same day are the same
+            // subject, and showing them as separate cards headed by the same date said nothing.
+            sessions = scoredRuns
+                .groupBy { it.targetDate }
+                .map { (date, group) ->
+                    val latest = group.maxBy { it.completedAt }
+                    ScoredSession(
+                        targetDate = date,
+                        lastRunAt = latest.completedAt,
+                        model = latest.model,
+                        runCount = group.size,
+                        calls = group.flatMap(RunCalls::calls).sortedBy(ScoredCall::ticker),
+                    )
+                }
+                .sortedByDescending { it.targetDate },
         )
     }
+
+    /** One analysis and the calls that survived deduplication from it. */
+    private data class RunCalls(
+        val targetDate: LocalDate?,
+        val completedAt: Instant,
+        val model: String,
+        val calls: List<ScoredCall>,
+    )
 
     /** Calls grouped by the analysis that produced them. */
     private fun runs(
         analyses: List<SavedAnalysis>,
         since: LocalDate,
-    ): List<Pair<ScoredRun, List<ScoredCall>>> {
+    ): List<Pair<RunCalls, List<ScoredCall>>> {
         // Deduplication still spans runs: a call repeated by a later analysis of the same day is
         // one call, and it belongs to whichever run described it most completely.
         val owner = mutableMapOf<Triple<String, String, LocalDate>, Long>()
@@ -110,8 +128,7 @@ object PerformanceCalculator {
         }
         return analyses.mapNotNull { saved ->
             val calls = byRun[saved.id] ?: return@mapNotNull null
-            ScoredRun(
-                analysisId = saved.id,
+            RunCalls(
                 targetDate = saved.result.recommendationTargetDate,
                 completedAt = saved.result.completedAt,
                 model = saved.model,

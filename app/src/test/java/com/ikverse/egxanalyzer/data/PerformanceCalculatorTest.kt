@@ -50,9 +50,9 @@ class PerformanceCalculatorTest {
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
-        assertEquals(1, report.runs.sumOf { it.calls.size })
-        assertEquals(9.8, report.runs.flatMap { it.calls }.single().entryLow!!, 0.001)
-        assertEquals(9.0, report.runs.flatMap { it.calls }.single().stopLoss!!, 0.001)
+        assertEquals(1, report.sessions.sumOf { it.calls.size })
+        assertEquals(9.8, report.sessions.flatMap { it.calls }.single().entryLow!!, 0.001)
+        assertEquals(9.0, report.sessions.flatMap { it.calls }.single().stopLoss!!, 0.001)
     }
 
     @Test
@@ -123,14 +123,14 @@ class PerformanceCalculatorTest {
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
-        val call = report.runs.flatMap { it.calls }.single()
+        val call = report.sessions.flatMap { it.calls }.single()
         assertEquals(1, call.sessions.size)
         assertEquals(called, call.sessions.single().date)
         assertEquals(9.9, call.sessions.single().open!!, 0.001)
     }
 
     @Test
-    fun `a run keeps the model and time that produced it`() {
+    fun `a session keeps the model and time of the run that produced it`() {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 7)),
             pricesFrom = called,
@@ -138,10 +138,11 @@ class PerformanceCalculatorTest {
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
-        val run = report.runs.single()
-        assertEquals(7L, run.analysisId)
-        assertEquals("test-model", run.model)
-        assertEquals(1, run.calls.size)
+        val session = report.sessions.single()
+        assertEquals(called, session.targetDate)
+        assertEquals("test-model", session.model)
+        assertEquals(1, session.runCount)
+        assertEquals(1, session.calls.size)
     }
 
     @Test
@@ -153,7 +154,7 @@ class PerformanceCalculatorTest {
             sessionsFor = { _, _ -> sessions(12.869998931884766) },
         )
 
-        assertEquals(12.87, report.runs.flatMap { it.calls }.single().peakHigh!!, 0.0001)
+        assertEquals(12.87, report.sessions.flatMap { it.calls }.single().peakHigh!!, 0.0001)
     }
 
     private fun sessions(high: Double) = listOf(
@@ -173,6 +174,9 @@ class PerformanceCalculatorTest {
         result = AnalysisResult(
             requestId = "request-$id",
             recommendations = emptyList(),
+            // The session the run was aimed at, which is what a call is dated by and what the
+            // Insights cards group on.
+            recommendationTargetDate = called,
             inquiryReplyCount = 0,
             sources = listOf(
                 SourceTrace(
