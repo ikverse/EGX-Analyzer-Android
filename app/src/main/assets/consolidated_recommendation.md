@@ -1,4 +1,4 @@
-<!-- EGX_PROMPT_SCHEMA: 3 -->
+<!-- EGX_PROMPT_SCHEMA: 4 -->
 # EGX consolidated recommendation analysis
 
 Analyze the supplied Egyptian stock-market Telegram sources as one Results run.
@@ -68,7 +68,12 @@ For a Telegram message containing several images, judge each image independently
 
 Text accompanying an image is evidence about that image. When a caption marks the image as a past, previous, or already-achieved recommendation - `توصية سابقة`, `التوصية السابقة`, or a clear equivalent - exclude the image it belongs to, even when the image itself looks like a fresh recommendation card.
 
-An excluded item or section must create nothing in any output array, category, count, Notes field, or source link.
+An excluded item or section must create nothing in `top_consolidated_recommendations`, any
+category, count, Notes field, or source link.
+
+Record it in `excluded` instead, with the stock code where there is one, the date you read, and the
+reason. That array is the only place an exclusion may appear, and it is how the exclusion is shown
+to have happened rather than merely assumed.
 
 ## 2. Hard date gate
 
@@ -94,13 +99,18 @@ Examples for `TARGET_DATE: 2026-07-29`:
 
 A date that does not equal `TARGET_DATE` excludes the recommendation outright. It is never reported with `date` set to `TARGET_DATE` and the real date left in `visible_source_date`: that returns an excluded recommendation wearing the target date, which is worse than returning nothing.
 
-For an eligible recommendation, return:
+For every recommendation you return:
 
-- `date`: `TARGET_DATE`
+- `date`: the session **you** judge the recommendation is for, read from the source. Not a copy of
+  `TARGET_DATE`. If the source names 30 July, `date` is `2026-07-30` even when `TARGET_DATE` is
+  `2026-07-29`.
 - `visible_source_date`: the exact visible or stated source date
 - `date_evidence`: the exact same-source date phrase
 
-Never set `date` to `TARGET_DATE` to repair a mismatched or missing `visible_source_date`.
+`date` and `TARGET_DATE` disagreeing is not an error to hide. It is how you say the source belongs
+to a different session, and it is checked. Copying `TARGET_DATE` into `date` while the real date
+sits in `visible_source_date` reports a recommendation you have already judged ineligible as though
+it qualified.
 
 ## 3. Destination classification
 
@@ -274,7 +284,7 @@ Return only one JSON object using this structure:
       "notes_summary": "concise Arabic string",
       "data_points": [
         {
-          "date": "YYYY-MM-DD",
+          "date": "YYYY-MM-DD, the session the source is for",
           "effective_date_basis": "explicit_date or watching",
           "visible_source_date": "string or null",
           "date_evidence": "string or null",
@@ -300,6 +310,15 @@ Return only one JSON object using this structure:
     }
   ],
   "achieved_targets": [],
+  "excluded": [
+    {
+      "stock_code": "English EGX ticker or null",
+      "source_message_id": "exact TELEGRAM_ID",
+      "source_image_ref": "integer or null",
+      "visible_source_date": "string or null",
+      "reason": "news | sector | past_recommendation | wrong_session | not_a_recommendation | no_date"
+    }
+  ],
   "client_inquiry_responses": [
     {
       "stock_code": "English EGX ticker",
@@ -342,6 +361,7 @@ Additional contract rules:
 - Populate categories only with stock codes present in final accepted recommendation rows.
 - `watchlist_stocks` contains only accepted rows classified as Watching.
 - `achieved_targets` remains empty because previous and target-hit content is excluded.
+- Everything excluded appears in `excluded`, with the date you read and why it was dropped.
 
 ## 9. Final invariants
 

@@ -392,6 +392,9 @@ class LocalDataStore(context: Context) :
                 indicators = item.optJSONArray("indicators")?.strings().orEmpty(),
             )
         },
+        modelExclusions = runCatching {
+            ConsolidatedParser.exclusions(optString("rawResponse"))
+        }.getOrDefault(emptyList()),
         selectedChannels = optJSONArray("selectedChannels")?.objects()?.map { item ->
             AnalysedChannel(item.optLong("id"), cleanChannelName(item.optString("name")))
         }.orEmpty(),

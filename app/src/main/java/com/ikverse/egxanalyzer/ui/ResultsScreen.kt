@@ -267,6 +267,23 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        if (saved.result.modelExclusions.isNotEmpty()) {
+            Spacer(Modifier.width(4.dp))
+            // What the model says it dropped. Worth as much attention as what it kept: an
+            // over-eager exclusion is invisible everywhere else.
+            Text("Excluded by the model", style = MaterialTheme.typography.titleSmall)
+            saved.result.modelExclusions.forEach { dropped ->
+                Text(
+                    listOfNotNull(
+                        dropped.stockCode,
+                        dropped.visibleSourceDate,
+                        dropped.reason.replace('_', ' '),
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Spacer(Modifier.width(4.dp))
         Text("Diagnostics", style = MaterialTheme.typography.titleSmall)
         Text(

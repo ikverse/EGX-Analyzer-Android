@@ -49,6 +49,8 @@ data class AnalysisRequest(
     val channelIds: List<Long>,
     /** The chats behind [channelIds], carried so the saved analysis can name its coverage. */
     val selectedChannels: List<AnalysedChannel> = emptyList(),
+    /** What the model reports having deliberately left out, and why. */
+    val modelExclusions: List<ModelExclusion> = emptyList(),
     val contentTypes: Set<AnalysisContentType>,
     val inputs: List<AnalysisInput>,
     val mode: AnalysisMode = AnalysisMode.NEXT_DAY,
@@ -140,6 +142,20 @@ data class ExcludedSource(
     val reason: String,
 )
 
+/**
+ * Something the model saw and rejected, in its own words.
+ *
+ * Exclusion used to be pure absence, which cannot be checked: a source dropped for good reason and
+ * one never examined looked identical. Stated outright, an over-eager gate becomes as visible as a
+ * leaky one.
+ */
+data class ModelExclusion(
+    val stockCode: String?,
+    val sourceMessageId: String?,
+    val visibleSourceDate: String?,
+    val reason: String,
+)
+
 data class AnalysisDiagnostics(
     val sourceWindowStart: Instant? = null,
     val sourceWindowEnd: Instant? = null,
@@ -177,6 +193,8 @@ data class AnalysisResult(
      * an earlier run's calls for it survive a rerun that had already decided against them.
      */
     val selectedChannels: List<AnalysedChannel> = emptyList(),
+    /** What the model reports having deliberately left out, and why. */
+    val modelExclusions: List<ModelExclusion> = emptyList(),
     val rawResponse: String = "",
     val completedAt: Instant = Instant.now(),
 )

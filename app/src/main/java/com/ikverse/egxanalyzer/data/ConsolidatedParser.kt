@@ -1,6 +1,7 @@
 package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
+import com.ikverse.egxanalyzer.model.ModelExclusion
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SourceTrace
@@ -146,4 +147,23 @@ object ConsolidatedParser {
 
     private fun stripCodeFence(value: String): String = value.trim()
         .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+
+    /** Reads the model's own account of what it dropped. Absent in responses predating schema 4. */
+    fun exclusions(content: String): List<ModelExclusion> = runCatching {
+        val rows = JSONObject(stripCodeFence(content)).optJSONArray("excluded") ?: JSONArray()
+        buildList {
+            for (index in 0 until rows.length()) {
+                val row = rows.optJSONObject(index) ?: continue
+                val reason = row.string("reason") ?: continue
+                add(
+                    ModelExclusion(
+                        stockCode = row.string("stock_code")?.trim()?.uppercase()?.removeSuffix(".CA"),
+                        sourceMessageId = row.string("source_message_id"),
+                        visibleSourceDate = row.string("visible_source_date"),
+                        reason = reason,
+                    ),
+                )
+            }
+        }
+    }.getOrDefault(emptyList())
 }
