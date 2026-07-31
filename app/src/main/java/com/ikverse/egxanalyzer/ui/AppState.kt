@@ -678,8 +678,19 @@ class AppState(
             inputs = batch.inputs
             telegramTraces = batch.traces.associateBy(SourceTrace::sourceId)
             sourceChannelIds = batch.traces.associate { it.sourceId to it.channelId }
-            telegramSyncMessage =
-                "Loaded ${batch.traces.size} Telegram messages (${batch.inputs.size} model inputs)."
+            // A bare zero reads as a failure. Saying how many messages were read, and over what
+            // window, separates "nothing posted in this window" from "nothing came back".
+            telegramSyncMessage = when {
+                batch.traces.isNotEmpty() ->
+                    "Loaded ${batch.traces.size} Telegram messages (${batch.inputs.size} model inputs)."
+                batch.examined > 0 ->
+                    "Read ${batch.examined} messages; none fall between ${window.start} and " +
+                        "${window.endExclusive}, or match the chosen content types."
+                batch.silentChats > 0 ->
+                    "Telegram returned nothing for ${batch.silentChats} of the selected chats. " +
+                        "Try again in a moment."
+                else -> "The selected chats have no messages."
+            }
         } catch (error: Exception) {
             telegramSyncMessage = error.message ?: "Telegram synchronization failed."
         }

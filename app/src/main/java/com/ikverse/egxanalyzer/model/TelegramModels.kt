@@ -34,6 +34,10 @@ data class TelegramChat(
 data class TelegramSourceBatch(
     val inputs: List<AnalysisInput>,
     val traces: List<SourceTrace>,
+    /** How many messages were read to find these, so an empty result can explain itself. */
+    val examined: Int = 0,
+    /** Chats that returned nothing at all, which is different from returning nothing recent. */
+    val silentChats: Int = 0,
 )
 
 /** How the desktop classifies a dialog, so both apps hide the same chats. */

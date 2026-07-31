@@ -205,6 +205,8 @@ class TelegramRepository(
         require(_authState.value.step == TelegramAuthStep.READY) { "Sign in to Telegram first." }
         val inputs = mutableListOf<AnalysisInput>()
         val traces = mutableListOf<SourceTrace>()
+        var examined = 0
+        var silentChats = 0
         channelIds.forEach { chatId ->
             val chat = chatCache[chatId] ?: client.getChat(chatId).requireValue<Chat>()
             var fromMessageId = 0L
@@ -230,6 +232,7 @@ class TelegramRepository(
                     continue
                 }
                 emptyPages = 0
+                examined += messages.size
                 messages.forEach { message ->
                     val publishedAt = Instant.ofEpochSecond(message.date.toLong())
                     when {
@@ -241,8 +244,14 @@ class TelegramRepository(
                 fromMessageId = messages.last().id
                 if (messages.size < HISTORY_PAGE_SIZE) break
             }
+            if (emptyPages > HISTORY_RETRIES) silentChats++
         }
-        return TelegramSourceBatch(inputs, traces.distinctBy(SourceTrace::sourceId))
+        return TelegramSourceBatch(
+            inputs = inputs,
+            traces = traces.distinctBy(SourceTrace::sourceId),
+            examined = examined,
+            silentChats = silentChats,
+        )
     }
 
     private suspend fun appendMessage(
