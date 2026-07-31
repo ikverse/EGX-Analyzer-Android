@@ -191,11 +191,8 @@ class CloudAnalysisRepository(
         correctionInstructions: String? = null,
     ) = JSONObject().apply {
         put("model", modelName)
-        // Reading a price off a card has one right answer, printed in the image. Sampling only
-        // ever invents a different one - it is what produced company names that changed between
-        // runs of the same source. Fixed so that re-running a session is a check on the sources
-        // rather than a roll of the dice.
-        put("temperature", 0.0)
+        // No temperature is sent, matching the desktop, so both apps get the provider default and
+        // a report can be compared across them without the sampling differing underneath.
         put("messages", JSONArray().apply {
             put(JSONObject().apply {
                 put("role", "system")
