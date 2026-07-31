@@ -45,6 +45,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -208,6 +209,7 @@ class TelegramRepository(
             val chat = chatCache[chatId] ?: client.getChat(chatId).requireValue<Chat>()
             var fromMessageId = 0L
             var keepLoading = true
+            var emptyPages = 0
             while (keepLoading) {
                 val history = client.getChatHistory(
                     chatId = chatId,
@@ -217,7 +219,17 @@ class TelegramRepository(
                     onlyLocal = false,
                 ).requireValue<dev.g000sha256.tdl.dto.Messages>()
                 val messages = history.messages.filterNotNull()
-                if (messages.isEmpty()) break
+                if (messages.isEmpty()) {
+                    // An empty page is not the same as the end of the chat. The first request for a
+                    // chat only asks the server to fetch it, and answers with nothing while that is
+                    // in flight - which read as "no messages" and made the preview come back empty
+                    // until it was pressed enough times to warm the cache. Ask again before
+                    // concluding there is nothing there.
+                    if (emptyPages++ >= HISTORY_RETRIES) break
+                    delay(HISTORY_RETRY_DELAY_MS)
+                    continue
+                }
+                emptyPages = 0
                 messages.forEach { message ->
                     val publishedAt = Instant.ofEpochSecond(message.date.toLong())
                     when {
@@ -483,6 +495,10 @@ class TelegramRepository(
         /** The desktop applies no limit; this is high enough to be one in name only. */
         const val MAX_CHATS = 1_000
         const val HISTORY_PAGE_SIZE = 100
+
+        /** How many empty answers to accept before believing a chat really is exhausted. */
+        const val HISTORY_RETRIES = 4
+        const val HISTORY_RETRY_DELAY_MS = 700L
         const val CLIENT_CLOSE_TIMEOUT_MS = 10_000L
     }
 }
