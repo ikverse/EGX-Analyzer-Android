@@ -320,11 +320,7 @@ private fun RunCard(run: ScoredRun, windowSessions: Int) {
         summary = "${run.calls.size} ${if (run.calls.size == 1) "call" else "calls"} · " +
             "${run.fullHits} full · ${run.partialHits} partial · ${run.stopped} stopped" +
             if (run.pending > 0) " · ${run.pending} pending" else "",
-        summaryTone = when {
-            run.fullHits > 0 -> MaterialTheme.colorScheme.primary
-            run.stopped > run.partialHits -> MaterialTheme.colorScheme.error
-            else -> null
-        },
+        summaryTone = if (run.fullHits > 0) MaterialTheme.colorScheme.primary else null,
     ) {
         Text(
             run.model,
@@ -515,10 +511,17 @@ private fun Outcome.onContainer(): Color = when (this) {
 }
 
 @Composable
+/**
+ * A hit rate is a finding, not a fault.
+ *
+ * The error colour is reserved for the app failing at something - a rejected key, prices that
+ * would not load. A source reaching its targets half the time is highlighted; below that the
+ * number speaks for itself in the ordinary text colour.
+ */
 private fun Double?.rateTone(): Color = when {
     this == null -> MaterialTheme.colorScheme.onSurfaceVariant
     this >= 50.0 -> MaterialTheme.colorScheme.primary
-    else -> MaterialTheme.colorScheme.error
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 @Composable
