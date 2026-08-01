@@ -48,9 +48,9 @@ object PerformanceCalculator {
                     call.copy(
                         outcome = scored.outcome,
                         settledOn = scored.settledOn,
-                        peakHigh = scored.peakHigh?.round(2),
+                        peakHigh = scored.peakHigh,
                         peakOn = scored.peakOn,
-                        troughLow = scored.troughLow?.round(2),
+                        troughLow = scored.troughLow,
                         troughOn = scored.troughOn,
                         returnPct = scored.returnPct,
                         sessionsElapsed = scored.sessionsElapsed,
@@ -219,11 +219,14 @@ object PerformanceCalculator {
             channel = channelNames[sourceMessageId]?.trim()?.takeIf(String::isNotBlank) ?: UNKNOWN,
             channelId = channelIds[sourceMessageId],
             openedOn = openedOn,
-            entryLow = (buyPriceLow ?: buyPrice)?.round(2),
-            entryHigh = (buyPriceHigh ?: buyPrice)?.round(2),
-            target1 = target1?.round(2),
-            target2 = target2?.round(2),
-            stopLoss = stopLoss?.round(2),
+            // Kept exactly as the source printed them. Rounding here reached the scorer, not just
+            // the screen: on a stock trading at 0.243 a target of 0.275 became 0.28, and the run
+            // then waited for a price nobody had called.
+            entryLow = buyPriceLow ?: buyPrice,
+            entryHigh = buyPriceHigh ?: buyPrice,
+            target1 = target1,
+            target2 = target2,
+            stopLoss = stopLoss,
             outcome = Outcome.UNPRICED,
             settledOn = null,
             peakHigh = null,

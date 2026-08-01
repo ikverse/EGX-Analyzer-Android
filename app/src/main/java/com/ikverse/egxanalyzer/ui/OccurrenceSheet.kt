@@ -131,7 +131,7 @@ private fun Figure(label: String, value: String, tone: androidx.compose.ui.graph
 }
 
 private fun plain(value: Double): String =
-    if (value == value.toLong().toDouble()) value.toLong().toString() else "%.2f".format(value)
+    if (value == value.toLong().toDouble()) value.toLong().toString() else value.toString()
 
 private fun withPercent(value: Double, percent: Double?): String =
     if (percent == null) plain(value) else "${plain(value)}  (${"%+.1f".format(percent)}%)"

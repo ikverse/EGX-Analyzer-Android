@@ -236,8 +236,9 @@ private fun TextCell(
     )
 }
 
+/** A price as the source wrote it. Two decimals hid the third one a 0.243 stock needs. */
 private fun number(value: Double?): String? = value?.let {
-    if (it == it.toLong().toDouble()) it.toLong().toString() else "%.2f".format(it)
+    if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString()
 }
 
 private fun percent(value: Double?): String? = value?.let { "%+.1f%%".format(it) }
