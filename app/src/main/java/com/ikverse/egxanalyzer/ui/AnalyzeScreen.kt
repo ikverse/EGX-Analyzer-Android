@@ -443,17 +443,22 @@ private fun RecommendationDateOption(
 }
 
 private fun showRecommendationDatePicker(activity: Activity, appState: AppState) {
-    val selected = appState.recommendationTargetDate
+    val today = LocalDate.now(ZoneId.of("Africa/Cairo"))
+    // Never open later than the latest date the picker allows. The target session runs ahead of
+    // today on a Friday, a Saturday, or any weekday after the close, and a DatePicker asked to open
+    // outside its own range throws rather than clamping. Historical analysis refuses a future date
+    // anyway, so today is the right place to land.
+    val opensOn = minOf(appState.recommendationTargetDate, today)
     DatePickerDialog(
         activity,
         { _, year, month, day ->
             appState.updateRecommendationTargetDate(LocalDate.of(year, month + 1, day))
         },
-        selected.year,
-        selected.monthValue - 1,
-        selected.dayOfMonth,
+        opensOn.year,
+        opensOn.monthValue - 1,
+        opensOn.dayOfMonth,
     ).apply {
-        datePicker.maxDate = LocalDate.now(ZoneId.of("Africa/Cairo"))
+        datePicker.maxDate = today
             .atStartOfDay(ZoneId.of("Africa/Cairo"))
             .toInstant()
             .toEpochMilli()
