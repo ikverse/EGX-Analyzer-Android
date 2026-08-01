@@ -1,41 +1,29 @@
 package com.ikverse.egxanalyzer.model
 
-import java.time.DayOfWeek
 import java.time.LocalDate
 
 /**
- * Rejects a recommendation whose source is older than the session it claims.
+ * Decides whether a recommendation belongs to the session being analysed.
  *
- * Channels re-post screenshots of old cards, and the model has dated them to the target session
- * with the real date left in `visible_source_date` - a 13 July card counted as a 30 July call. The
- * prompt forbids exactly that and was ignored twice, so the check is arithmetic here rather than an
- * instruction there.
+ * A source belongs to the session printed on it, and to no other. Channels re-post screenshots of
+ * old cards, and the model has dated them to the target session with the real date left in
+ * `visible_source_date` - a 13 July card counted as a 30 July call. The prompt forbids exactly that
+ * and was ignored twice, so the check is arithmetic here rather than an instruction there.
  *
- * A source belongs to the session it names. Two dates qualify: the target itself, and the session
- * before it - that is where a genuine call is published, on cards headed `T+1` or `اسهم مرشحه`
- * printed during one session for the next. The days between them are non-trading ones, so a card
- * printed over a weekend for Sunday's open still counts.
+ * The T+1 card needs no exception. A card published after Sunday's close for Monday's session is
+ * printed `27 JULY 2026`, so it passes the plain rule on Monday's report and fails it everywhere
+ * else. Accepting the neighbouring session as well would have counted every such card twice, once
+ * in the report for the day it was published and once in the report for the day it names.
  *
- * Both directions are rejected. Older is a re-post of a stale card. Later is next session's card,
- * published in the afternoon once today has closed - it sits inside today's window and belongs to
- * tomorrow's analysis, where it also appears.
+ * A date that cannot be read is rejected. It cannot be shown to belong here, and the model has
+ * already been told to exclude an undated card - one arriving anyway means its own gate did not
+ * hold, which is not the moment to be lenient.
  */
 object SourceDateGate {
 
     fun accepts(visibleSourceDate: String?, targetDate: LocalDate?): Boolean {
         if (targetDate == null) return true
-        // An unreadable date is not evidence of anything; the model's own gate covers the rest.
-        val printed = parse(visibleSourceDate) ?: return true
-        return printed in previousTradingSession(targetDate)..targetDate
-    }
-
-    /** The exchange trades Sunday to Thursday, so Friday and Saturday are skipped going back. */
-    fun previousTradingSession(from: LocalDate): LocalDate {
-        var candidate = from.minusDays(1)
-        while (candidate.dayOfWeek == DayOfWeek.FRIDAY || candidate.dayOfWeek == DayOfWeek.SATURDAY) {
-            candidate = candidate.minusDays(1)
-        }
-        return candidate
+        return parse(visibleSourceDate) == targetDate
     }
 
     /**

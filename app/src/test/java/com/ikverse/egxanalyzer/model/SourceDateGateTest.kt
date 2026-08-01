@@ -9,19 +9,31 @@ import java.time.LocalDate
 
 class SourceDateGateTest {
 
-    /** Thursday 30 July 2026; the session before it is Wednesday the 29th. */
+    /** Thursday 30 July 2026. */
     private val target = LocalDate.of(2026, 7, 30)
 
     @Test
     fun `a card printed with the target session is kept`() {
         assertTrue(SourceDateGate.accepts("30 JULY 2026", target))
         assertTrue(SourceDateGate.accepts("30/7/2026", target))
+        assertTrue(SourceDateGate.accepts("30-Jul-2026", target))
     }
 
     @Test
-    fun `a card printed the session before is kept`() {
-        // This is where a genuine call for the session is published - the T+1 cards.
-        assertTrue(SourceDateGate.accepts("29/07/2026", target))
+    fun `a T plus one card needs no exception`() {
+        // Published after Wednesday's close for Thursday's session, and printed with Thursday's
+        // date. When it was posted does not enter into it - the card names the session it calls.
+        assertTrue(SourceDateGate.accepts("30 JULY 2026", target))
+        // The same card a day later belongs to the next report, not this one, so no call is
+        // counted twice.
+        assertFalse(SourceDateGate.accepts("31/7/2026", target))
+    }
+
+    @Test
+    fun `a card printed the session before is rejected`() {
+        // A call made on Wednesday for Wednesday. Being inside the window that collected it is not
+        // the same as belonging to this session.
+        assertFalse(SourceDateGate.accepts("29/07/2026", target))
     }
 
     @Test
@@ -32,35 +44,36 @@ class SourceDateGateTest {
     }
 
     @Test
-    fun `the weekend does not count as a session`() {
-        // Sunday 2 August: the session before it is Thursday the 30th, not Saturday the 1st.
-        val sunday = LocalDate.of(2026, 8, 2)
-        assertEquals(LocalDate.of(2026, 7, 30), SourceDateGate.previousTradingSession(sunday))
-        assertTrue(SourceDateGate.accepts("30/7/2026", sunday))
-        assertFalse(SourceDateGate.accepts("29/7/2026", sunday))
-    }
-
-    @Test
-    fun `a card for a later session is rejected`() {
-        // These channels publish tomorrow's card in the afternoon, so it sits inside today's
-        // window while belonging to tomorrow's analysis.
+    fun `a later card is rejected`() {
         assertFalse(SourceDateGate.accepts("30 JULY 2026", LocalDate.of(2026, 7, 29)))
-        assertFalse(SourceDateGate.accepts("31/7/2026", target))
+        assertFalse(SourceDateGate.accepts("1/8/2026", target))
     }
 
     @Test
-    fun `a card printed over the weekend counts for the session that follows it`() {
-        // Sunday 2 August opens after a Friday and Saturday the exchange does not trade.
+    fun `a weekend date is neither special nor exempt`() {
+        // Sunday 2 August opens after a Friday and Saturday the exchange does not trade, but the
+        // rule does not care about sessions - only about the date printed on the card.
         val sunday = LocalDate.of(2026, 8, 2)
-        assertTrue(SourceDateGate.accepts("31/7/2026", sunday))
-        assertTrue(SourceDateGate.accepts("1/8/2026", sunday))
+        assertTrue(SourceDateGate.accepts("2/8/2026", sunday))
+        assertFalse(SourceDateGate.accepts("30/7/2026", sunday))
+        assertFalse(SourceDateGate.accepts("31/7/2026", sunday))
+        assertFalse(SourceDateGate.accepts("1/8/2026", sunday))
     }
 
     @Test
-    fun `an unreadable date is not treated as stale`() {
-        assertTrue(SourceDateGate.accepts(null, target))
-        assertTrue(SourceDateGate.accepts("", target))
-        assertTrue(SourceDateGate.accepts("last week", target))
+    fun `an unreadable date is rejected`() {
+        // It cannot be shown to belong here, and the model was already told to exclude an undated
+        // card. One arriving anyway means its own gate did not hold.
+        assertFalse(SourceDateGate.accepts(null, target))
+        assertFalse(SourceDateGate.accepts("", target))
+        assertFalse(SourceDateGate.accepts("last week", target))
+        assertFalse(SourceDateGate.accepts("سعر السهم", target))
+    }
+
+    @Test
+    fun `without a target session nothing is filtered`() {
+        assertTrue(SourceDateGate.accepts("13/7/2026", null))
+        assertTrue(SourceDateGate.accepts(null, null))
     }
 
     @Test
