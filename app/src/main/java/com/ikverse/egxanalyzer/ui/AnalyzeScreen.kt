@@ -1,9 +1,11 @@
 package com.ikverse.egxanalyzer.ui
 
+import android.Manifest
 import android.app.Activity
 import android.app.DatePickerDialog
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -14,6 +16,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.outlined.Preview
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -86,6 +93,28 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
             persistReadPermission(activity, uri)
             appState.addVoice(uri, activity.contentResolver.getType(uri))
         }
+    }
+    // Android 13 and later start with notifications denied, and the app never asked. Everything
+    // was built - channel, foreground service, deep link - and none of it could reach the screen,
+    // which looked exactly like a broken notification rather than a missing permission.
+    var notificationsAllowed by remember { mutableStateOf(AnalysisNotifier(activity).permitted()) }
+    val lifecycle = LocalLifecycleOwner.current
+    DisposableEffect(lifecycle) {
+        // Granting happens in system settings, so the answer arrives on the way back in.
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notificationsAllowed = AnalysisNotifier(activity).permitted()
+            }
+        }
+        lifecycle.lifecycle.addObserver(observer)
+        onDispose { lifecycle.lifecycle.removeObserver(observer) }
+    }
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        notificationsAllowed = granted
+        // The run starts either way. A notification is how you watch a run, not a condition for one.
+        appState.startAnalysis()
     }
     Screen(
         title = "Analyze",
@@ -302,7 +331,15 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         } else {
             Button(
                 // Started rather than awaited: the run outlives this screen now.
-                onClick = { appState.startAnalysis() },
+                onClick = {
+                    // Asked here rather than at first launch: a permission prompt before the app
+                    // has done anything is the one people decline, and Android never asks twice.
+                    if (notificationsAllowed) {
+                        appState.startAnalysis()
+                    } else {
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                },
                 enabled = analyzeDisabledReason == null,
             ) {
                 Icon(Icons.Outlined.AutoGraph, contentDescription = null)
@@ -318,6 +355,16 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                         "Select chats at the top of this screen and load the source window.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+            if (!notificationsAllowed) {
+                Text(
+                    "Notifications are off, so a run gives no progress while you are in another " +
+                        "app. The analysis itself is unaffected.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { activity.openNotificationSettings() }) {
+                    Text("Turn on notifications")
                 }
             }
             if (analyzeDisabledReason == null && appState.inputs.isEmpty()) {
@@ -536,5 +583,18 @@ private fun DuplicateAnalysisDialog(appState: AppState) {
         dismissButton = {
             TextButton(onClick = appState::dismissDuplicateWarning) { Text("Cancel") }
         },
+    )
+}
+
+/**
+ * Opens this app's notification settings.
+ *
+ * Once the permission has been denied Android will not ask again, so the only way back is the
+ * system screen.
+ */
+private fun Activity.openNotificationSettings() {
+    startActivity(
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
     )
 }
