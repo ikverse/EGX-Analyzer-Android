@@ -177,7 +177,7 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                         Column(
                             Modifier
                                 .heightIn(max = ChatListMaxHeight)
-                                .verticalScroll(rememberScrollState()),
+                                .scrollableColumn(),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             chats.forEach { chat -> ChannelCard(chat, appState, chats) }

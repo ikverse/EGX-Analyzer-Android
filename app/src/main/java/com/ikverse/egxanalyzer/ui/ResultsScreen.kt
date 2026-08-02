@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -70,7 +71,11 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                 detail = "Run an analysis and it will be stored here with the sources behind it.",
             )
         } else {
-            appState.savedResults.forEach { saved ->
+            BoxWithConstraints {
+              val columns = responsiveColumns(minColumnWidth = 380.dp, maxColumns = 2)
+              Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                ResponsiveRows(appState.savedResults, columns) { saved ->
+                  Box(Modifier.weight(1f)) {
                 SavedAnalysisCard(
                     saved = saved,
                     // Expanding also selects, so the companion pane follows what is open.
@@ -81,6 +86,9 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                     onDelete = { appState.deleteResult(saved) },
                     report = { appState.reportFor(saved) },
                 )
+                  }
+                }
+              }
             }
         }
     }
@@ -226,13 +234,23 @@ private fun ResultDetail(saved: SavedAnalysis) {
         // Analyses saved before the consolidated contract have no nested occurrences, so they fall
         // back to a flat list rather than showing an empty table.
         if (saved.result.consolidated.isNotEmpty()) {
-            RecommendationTable(
-                stocks = saved.result.consolidated,
-                channelFor = { messageId -> channelNames[messageId] },
-                imagePathFor = { ref -> saved.result.imagePathFor(ref) },
-                onOpenImage = { ref -> openImage = ref },
-                onSelectPoint = { stock, point -> detail = stock to point },
-            )
+            BoxWithConstraints {
+                if (maxWidth >= TableMinWidth) {
+                    RecommendationTable(
+                        stocks = saved.result.consolidated,
+                        channelFor = { messageId -> channelNames[messageId] },
+                        imagePathFor = { ref -> saved.result.imagePathFor(ref) },
+                        onOpenImage = { ref -> openImage = ref },
+                        onSelectPoint = { stock, point -> detail = stock to point },
+                    )
+                } else {
+                    // A sixteen-column table on a cover screen is a scroll bar with numbers behind
+                    // it. The same figures as cards stay readable without any horizontal scrolling.
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                        saved.result.consolidated.forEach { RecommendationCard(it) }
+                    }
+                }
+            }
         } else {
             saved.result.recommendations.forEach { LegacyDetail(it) }
         }
@@ -390,3 +408,6 @@ private fun AnalysisResult.imagePathFor(reference: Int?): String? =
 /** Long enough to catch the eye on arrival, short enough not to become decoration. */
 private const val FlashHalfCycleMs = 420
 private const val FlashDurationMs = 2_400L
+
+/** Below this a table can only be read by scrolling it sideways, which is not reading. */
+private val TableMinWidth = 600.dp

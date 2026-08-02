@@ -13,6 +13,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.material.icons.outlined.Rule
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Timeline
+import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.History
@@ -103,6 +110,7 @@ internal fun SettingsScreen(appState: AppState) {
     ) {
         ExpandableSection(
             "AI analysis",
+            icon = Icons.Outlined.SmartToy,
             summary = "${appState.cloudConfiguration.provider.displayName} · ${appState.cloudConfiguration.model.ifBlank { "no model" }}",
             summaryTone = if (appState.credentialVerified == false) MaterialTheme.colorScheme.error else null,
         ) {
@@ -217,6 +225,7 @@ internal fun SettingsScreen(appState: AppState) {
 
         ExpandableSection(
             "Prompt and validation",
+            icon = Icons.Outlined.Rule,
             summary = if (appState.appPreferences.customSystemPrompt.isBlank()) "Canonical prompt" else "Custom prompt",
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -271,7 +280,7 @@ internal fun SettingsScreen(appState: AppState) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxWidth().scrollableRow(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Button(onClick = {
@@ -321,6 +330,7 @@ internal fun SettingsScreen(appState: AppState) {
 
         ExpandableSection(
             "Appearance",
+            icon = Icons.Outlined.Palette,
             summary = appState.appPreferences.themeMode.displayName,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -352,6 +362,7 @@ internal fun SettingsScreen(appState: AppState) {
 
         ExpandableSection(
             "Analysis defaults",
+            icon = Icons.Outlined.Tune,
             summary = "${appState.appPreferences.analysisLanguage.displayName} · ${appState.appPreferences.defaultContentTypes.size} content types",
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -408,6 +419,7 @@ internal fun SettingsScreen(appState: AppState) {
 
         ExpandableSection(
             "Scoring",
+            icon = Icons.Outlined.Timeline,
             summary = "${appState.appPreferences.scoringWindowSessions} trading sessions",
         ) {
             val window = appState.appPreferences.scoringWindowSessions
@@ -435,6 +447,7 @@ internal fun SettingsScreen(appState: AppState) {
 
         ExpandableSection(
             "Telegram",
+            icon = Icons.Outlined.Forum,
             summary = if (appState.telegramAuthState.step == TelegramAuthStep.READY) "Signed in · ${appState.channels.size} chats" else "Not connected",
             summaryTone = if (appState.telegramAuthState.step == TelegramAuthStep.READY) null else MaterialTheme.colorScheme.error,
         ) {
@@ -463,6 +476,7 @@ internal fun SettingsScreen(appState: AppState) {
 
         ExpandableSection(
             "About",
+            icon = Icons.Outlined.Info,
             summary = BuildConfig.VERSION_NAME,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -476,6 +490,7 @@ internal fun SettingsScreen(appState: AppState) {
 
         ExpandableSection(
             "Saved data and privacy",
+            icon = Icons.Outlined.Shield,
             summary = "${appState.savedResults.size} saved analyses",
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

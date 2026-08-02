@@ -4,10 +4,12 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -91,7 +93,16 @@ internal fun InsightsScreen(appState: AppState) {
         Headline(report)
         OutcomeBreakdown(report)
         ChannelRanking(report.channels)
-        report.sessions.forEach { session -> SessionCard(session, report.windowSessions) }
+        // One collapsed card per row wasted most of a wide screen: each held a single line of
+        // text across the full width. The count is derived, so an untested width still behaves.
+        BoxWithConstraints {
+            val columns = responsiveColumns(minColumnWidth = 360.dp, maxColumns = 3)
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                ResponsiveRows(report.sessions, columns) { session ->
+                    Box(Modifier.weight(1f)) { SessionCard(session, report.windowSessions) }
+                }
+            }
+        }
     }
 }
 
@@ -142,10 +153,10 @@ private fun Headline(report: PerformanceReport) {
         BoxWithConstraints {
             // Four tiles need room to breathe; on a phone they wrap to two rows instead of being
             // squeezed until the figures truncate.
-            val perRow = if (maxWidth >= WideHeadlineWidth) 4 else 2
+            val perRow = if (maxWidth >= 520.dp) 4 else 2
             val tiles = listOf(
-                report.fullHitRate?.let { "$it%" }.orDash() to "Reached target 2",
-                report.anyTargetRate?.let { "$it%" }.orDash() to "Reached target 1+",
+                formatPercent(report.fullHitRate, signed = false) to "Reached target 2",
+                formatPercent(report.anyTargetRate, signed = false) to "Reached target 1+",
                 report.judged.toString() to "Calls judged",
                 report.tracked.toString() to "Calls tracked",
             )
@@ -264,7 +275,12 @@ private fun ChannelRanking(channels: List<ChannelScore>) {
     ExpandableSection(
         title = "Sources ranked",
         icon = Icons.Outlined.Leaderboard,
-        summary = best?.let { "Best: ${it.channel} · ${it.anyTargetRate}% reached a target" }
+        // The channel name is Arabic and the figure is not, so the percent sign drifted into the
+        // Arabic run and rendered before the name. A first-strong isolate keeps each in its own
+        // direction without changing what is written.
+        summary = best?.let {
+            "Best: ⁨${it.channel}⁩ · ${formatPercent(it.anyTargetRate, signed = false)} reached a target"
+        }
             ?: "${channels.size} sources, none judged yet",
         summaryTone = best?.anyTargetRate.rateTone(),
     ) {
@@ -278,7 +294,7 @@ private fun ChannelRanking(channels: List<ChannelScore>) {
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        channel.anyTargetRate?.let { "$it%" }.orDash(),
+                        formatPercent(channel.anyTargetRate, signed = false),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = channel.anyTargetRate.rateTone(),
@@ -294,8 +310,8 @@ private fun ChannelRanking(channels: List<ChannelScore>) {
                 Text(
                     "${channel.stopped} stopped · ${channel.expired} expired · " +
                         "${channel.notTradable} not tradable · " +
-                        "target 2 rate ${channel.fullHitRate?.let { "$it%" }.orDash()} · " +
-                        "median ${channel.medianSessionsToHit?.trimZero().orDash()} sessions to a target",
+                        "target 2 rate ${formatPercent(channel.fullHitRate, signed = false)} · " +
+                        "median ${formatPrice(channel.medianSessionsToHit)} sessions to a target",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -383,16 +399,24 @@ private fun ScoredCallRow(call: ScoredCall, windowSessions: Int) {
                     color = MaterialTheme.colorScheme.tertiary,
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Figure("Entry", call.entryRange(), Modifier.weight(1f))
-                Figure("Target 1", call.target1.orDash(), Modifier.weight(1f))
-                Figure("Target 2", call.target2.orDash(), Modifier.weight(1f))
-                Figure("Stop", call.stopLoss.orDash(), Modifier.weight(1f))
+            // Two groups rather than eight loose figures: what the channel asked for, and what the
+            // market did about it. Colour says which is which without reading the labels.
+            FigureGroup("The call") {
+                Figure("Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry)
+                Figure("Target 1", formatPrice(call.target1), Modifier.weight(1f), tone = PriceRole.target)
+                Figure("Target 2", formatPrice(call.target2), Modifier.weight(1f), tone = PriceRole.target)
+                Figure("Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f), tone = PriceRole.stop)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Figure("High since", call.peakHigh.orDash(), Modifier.weight(1f), on = call.peakOn)
-                Figure("Low since", call.troughLow.orDash(), Modifier.weight(1f), on = call.troughOn)
-                Figure("Sessions", call.sessionsElapsed.toString(), Modifier.weight(1f))
+            FigureGroup("What happened") {
+                Figure(
+                    "Peak since call", formatPrice(call.peakHigh), Modifier.weight(1f),
+                    tone = PriceRole.market, on = call.peakOn,
+                )
+                Figure(
+                    "Trough since call", formatPrice(call.troughLow), Modifier.weight(1f),
+                    tone = PriceRole.market, on = call.troughOn,
+                )
+                Figure("Sessions elapsed", call.sessionsElapsed.toString(), Modifier.weight(1f))
                 Figure(
                     "Return",
                     call.returnPct.signedPercent(),
@@ -423,7 +447,7 @@ private fun ScoredCallRow(call: ScoredCall, windowSessions: Int) {
 private fun SessionTable(sessions: List<DailySession>) {
     val scroll = rememberScrollState()
     Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.horizontalScroll(scroll)) {
+        Row(Modifier.horizontalScroll(scroll).fadingScrollbar(scroll, horizontal = true)) {
             Column {
                 SessionRow("Date", "Open", "High", "Low", "Close", "Volume", header = true)
                 sessions.forEach {
@@ -433,7 +457,7 @@ private fun SessionTable(sessions: List<DailySession>) {
                         it.high.orDash(),
                         it.low.orDash(),
                         it.close.orDash(),
-                        it.volume?.toLong()?.toString().orDash(),
+                        it.volume?.toLong()?.toString() ?: Dash,
                     )
                 }
             }
@@ -476,6 +500,35 @@ private fun ScoredCall.qualifier(windowSessions: Int): String? = when {
         "The session's own figures cannot say which level was reached first."
     else -> null
 }
+
+/**
+ * Four figures that belong together, laid out two-up when the width cannot take four.
+ *
+ * The cover screen has plenty of height and little width, so wrapping beats shrinking: four
+ * columns at 443dp truncates every price it is supposed to show.
+ */
+@Composable
+private fun FigureGroup(title: String, figures: @Composable RowScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        Text(
+            title.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        BoxWithConstraints {
+            if (maxWidth >= FourFiguresMinWidth) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.m), content = figures)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) { figures() }
+                }
+            }
+        }
+    }
+}
+
+/** Four prices need this much before the digits start truncating. */
+private val FourFiguresMinWidth = 420.dp
 
 @Composable
 private fun Figure(
@@ -543,18 +596,15 @@ private fun Double?.returnTone(): Color = when {
 
 private fun ScoredCall.entryRange(): String = when {
     entryLow == null && entryHigh == null -> Dash
-    entryHigh != null && entryLow != null && entryHigh != entryLow -> "$entryLow – $entryHigh"
-    else -> (entryLow ?: entryHigh).toString()
+    entryHigh != null && entryLow != null && entryHigh != entryLow ->
+        "${formatPrice(entryLow)} – ${formatPrice(entryHigh)}"
+    else -> formatPrice(entryLow ?: entryHigh)
 }
 
-private fun Double?.signedPercent(): String =
-    this?.let { "${if (it > 0) "+" else ""}$it%" } ?: Dash
+private fun Double?.signedPercent(): String = formatPercent(this)
 
-private fun Double.trimZero(): String =
-    if (this == toLong().toDouble()) toLong().toString() else toString()
+private fun Double.trimZero(): String = formatPrice(this)
 
-private fun Any?.orDash(): String = this?.toString() ?: Dash
+private fun Double?.orDash(): String = formatPrice(this)
 
-/** Four headline tiles fit across only once the pane is wider than a phone in portrait. */
-private val WideHeadlineWidth = 520.dp
-private const val Dash = "—"
+private fun Int?.orDash(): String = this?.toString() ?: Dash

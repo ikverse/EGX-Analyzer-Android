@@ -60,18 +60,26 @@ internal fun RecommendationTable(
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
-        val columns = (if (maxWidth >= WideTableMinWidth) WideColumns else CompactColumns) +
+        // Every width gets the trade columns, including both returns - they are the point of the
+        // table. Context is added as room allows rather than a separate column set, so nothing a
+        // decision needs is ever the thing that gets dropped.
+        val columns = TradeColumns +
+            (if (maxWidth >= ContextMinWidth) ContextColumns else emptyList()) +
+            (if (maxWidth >= NotesMinWidth) listOf(NotesColumn) else emptyList()) +
             imageColumn(imagePathFor, onOpenImage)
         Column {
             HeaderRow(columns, scroll)
             stocks.forEach { stock ->
                 StockHeadingRow(stock)
-                stock.dataPoints.forEach { point ->
+                stock.dataPoints.forEachIndexed { index, point ->
                     SourceRow(
                         point = point,
                         pinned = channelFor(point.sourceMessageId) ?: point.sourceMessageId,
                         columns = columns,
                         scroll = scroll,
+                        // Alternating tint: with this many columns the eye loses the row it was
+                        // following somewhere around the middle.
+                        striped = index % 2 == 1,
                         onClick = { onSelectPoint(stock, point) },
                     )
                 }
@@ -80,8 +88,11 @@ internal fun RecommendationTable(
     }
 }
 
-/** Enough room for the full desktop column set without the pinned column crowding it. */
-private val WideTableMinWidth = 620.dp
+/** Room for the levels a call implies without pushing the ones it states off the screen. */
+private val ContextMinWidth = 620.dp
+
+/** Arabic notes need real width or they truncate to nothing useful. */
+private val NotesMinWidth = 900.dp
 
 @Composable
 private fun HeaderRow(columns: List<TableColumn>, scroll: androidx.compose.foundation.ScrollState) {
@@ -104,17 +115,18 @@ private fun HeaderRow(columns: List<TableColumn>, scroll: androidx.compose.found
 
 @Composable
 private fun StockHeadingRow(stock: ConsolidatedRecommendation) {
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    HorizontalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.outlineVariant)
     Row(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .padding(horizontal = Space.m, vertical = Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // The anchor for everything under it, so it carries more weight than a row does.
         Text(
             stock.stockCode,
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.primary,
         )
         Column(Modifier.weight(1f).padding(start = 8.dp)) {
@@ -162,12 +174,22 @@ private fun SourceRow(
     pinned: String?,
     columns: List<TableColumn>,
     scroll: androidx.compose.foundation.ScrollState,
+    striped: Boolean,
     onClick: () -> Unit,
 ) {
     Row(
         Modifier
             .fillMaxWidth()
+            .background(
+                if (striped) {
+                    MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.4f)
+                } else {
+                    Color.Transparent
+                },
+            )
             .clickable(onClick = onClick)
+            // A minimum rather than a fixed height, so a large font scale grows the row instead of
+            // clipping it.
             .heightIn(min = 46.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -180,7 +202,10 @@ private fun SourceRow(
             )
         }
         VerticalRule()
-        Row(Modifier.horizontalScroll(scroll), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.horizontalScroll(scroll).fadingScrollbar(scroll, horizontal = true),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             columns.forEach { column -> column.cell(point) }
         }
     }
@@ -224,31 +249,66 @@ private fun TextCell(
     align: TextAlign = TextAlign.Start,
     tone: Color? = null,
     emphasis: Boolean = false,
+    /** Numbers get monospaced digits so a column can be compared down, not just read across. */
+    tabular: Boolean = false,
 ) {
+    val base = if (emphasis) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodySmall
     Text(
-        value?.takeIf(String::isNotBlank) ?: "—",
-        style = if (emphasis) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodySmall,
+        value?.takeIf(String::isNotBlank) ?: Dash,
+        style = if (tabular) base.copy(fontFamily = TabularFigures) else base,
         color = tone ?: MaterialTheme.colorScheme.onSurface,
         textAlign = align,
         maxLines = 2,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.width(width).padding(horizontal = 8.dp, vertical = 8.dp),
+        modifier = Modifier.width(width).padding(horizontal = Space.s, vertical = Space.s),
     )
 }
 
-/** A price as the source wrote it. Two decimals hid the third one a 0.243 stock needs. */
-private fun number(value: Double?): String? = value?.let {
-    if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString()
+/** A price cell: right-aligned, monospaced, coloured by what the figure is for. */
+@Composable
+private fun PriceCell(value: Double?, width: Dp, tone: Color, emphasis: Boolean = false) {
+    TextCell(formatPrice(value), width, TextAlign.End, tone, emphasis, tabular = true)
 }
 
-private fun percent(value: Double?): String? = value?.let { "%+.1f%%".format(it) }
+/**
+ * A return percentage, calculated when the source did not print one.
+ *
+ * The prompt tells the model to leave it null unless the card states it, and says the application
+ * works out the rest - which it never did, so the column was blank on most rows. A derived figure
+ * is shown dimmer than a printed one, because the two are not the same claim.
+ */
+@Composable
+private fun ReturnCell(point: RecommendationDataPoint, stated: Double?, target: Double?, width: Dp) {
+    val derived = stated == null
+    val value = stated ?: returnFrom(point, target)
+    TextCell(
+        formatPercent(value),
+        width,
+        TextAlign.End,
+        if (derived) PriceRole.derived else PriceRole.forReturn(value),
+        tabular = true,
+    )
+}
 
-private fun entry(point: RecommendationDataPoint): String? {
+/** Entry midpoint to target, the same basis the scorer uses, so the two never disagree. */
+private fun returnFrom(point: RecommendationDataPoint, target: Double?): Double? {
+    if (target == null) return null
+    val low = point.buyPriceLow ?: point.buyPrice
+    val high = point.buyPriceHigh ?: point.buyPrice
+    val entry = when {
+        low != null && high != null -> (low + high) / 2
+        else -> low ?: high ?: return null
+    }
+    if (entry == 0.0) return null
+    return (target - entry) / entry * 100
+}
+
+private fun entry(point: RecommendationDataPoint): String {
     val low = point.buyPriceLow
     val high = point.buyPriceHigh
     return when {
-        low != null && high != null && low != high -> "${number(low)} – ${number(high)}"
-        else -> number(point.buyPrice ?: low ?: high)
+        low != null && high != null && low != high -> "${formatPrice(low)} – ${formatPrice(high)}"
+        else -> formatPrice(point.buyPrice ?: low ?: high)
     }
 }
 
@@ -260,66 +320,46 @@ private fun timing(point: RecommendationDataPoint): String? = when {
 
 private val PinnedWidth = 116.dp
 
-/** Folded: the six fields that decide a trade. The rest stay reachable by scrolling. */
-private val CompactColumns: List<TableColumn> = listOf(
-    TableColumn("Timing", 92.dp, TextAlign.Start) { p -> TextCell(timing(p), 92.dp) },
-    TableColumn("Entry", 104.dp, TextAlign.End) { p ->
-        TextCell(entry(p), 104.dp, TextAlign.End, MaterialTheme.colorScheme.primary, emphasis = true)
+/**
+ * The columns, in the order a row is actually read: what kind of call it is, what it asks you to
+ * pay, what it is worth, what it risks, then the context behind it.
+ *
+ * Every figure a decision needs sits before the scroll on a wide screen, and the two return columns
+ * sit immediately beside their targets rather than at the far end, so a target and its upside are
+ * one glance rather than two.
+ */
+private val TradeColumns: List<TableColumn> = listOf(
+    TableColumn("Timing", 96.dp, TextAlign.Start) { p ->
+        TextCell(timing(p), 96.dp, tone = PriceRole.muted)
     },
-    TableColumn("TP1", 78.dp, TextAlign.End) { p ->
-        TextCell(number(p.target1), 78.dp, TextAlign.End, MaterialTheme.colorScheme.tertiary)
+    TableColumn("Entry", 118.dp, TextAlign.End) { p ->
+        TextCell(entry(p), 118.dp, TextAlign.End, PriceRole.entry, emphasis = true, tabular = true)
     },
-    TableColumn("TP2", 78.dp, TextAlign.End) { p ->
-        TextCell(number(p.target2), 78.dp, TextAlign.End, MaterialTheme.colorScheme.tertiary)
-    },
-    TableColumn("Stop", 78.dp, TextAlign.End) { p ->
-        TextCell(number(p.stopLoss), 78.dp, TextAlign.End, MaterialTheme.colorScheme.error)
-    },
-    TableColumn("Risk %", 72.dp, TextAlign.End) { p ->
-        TextCell(percent(p.riskPct), 72.dp, TextAlign.End)
-    },
-    TableColumn("Source date", 104.dp, TextAlign.Start) { p ->
-        TextCell(p.visibleSourceDate, 104.dp)
-    },
-    TableColumn("Target date", 104.dp, TextAlign.Start) { p ->
-        TextCell(p.date?.toString(), 104.dp)
-    },
-    TableColumn("Support", 80.dp, TextAlign.End) { p ->
-        TextCell(number(p.support), 80.dp, TextAlign.End)
-    },
-    TableColumn("Resistance", 88.dp, TextAlign.End) { p ->
-        TextCell(number(p.resistance), 88.dp, TextAlign.End)
+    TableColumn("Target 1", 84.dp, TextAlign.End) { p -> PriceCell(p.target1, 84.dp, PriceRole.target) },
+    TableColumn("TP1 %", 78.dp, TextAlign.End) { p -> ReturnCell(p, p.returnTp1Pct, p.target1, 78.dp) },
+    TableColumn("Target 2", 84.dp, TextAlign.End) { p -> PriceCell(p.target2, 84.dp, PriceRole.target) },
+    TableColumn("TP2 %", 78.dp, TextAlign.End) { p -> ReturnCell(p, p.returnTp2Pct, p.target2, 78.dp) },
+    TableColumn("Stop loss", 88.dp, TextAlign.End) { p -> PriceCell(p.stopLoss, 88.dp, PriceRole.stop) },
+    TableColumn("Risk %", 74.dp, TextAlign.End) { p ->
+        TextCell(formatPercent(p.riskPct), 74.dp, TextAlign.End, PriceRole.stop, tabular = true)
     },
 )
 
-/** Unfolded: every desktop column, in the desktop's order, with notes inline. */
-private val WideColumns: List<TableColumn> = listOf(
-    TableColumn("Target date", 104.dp, TextAlign.Start) { p -> TextCell(p.date?.toString(), 104.dp) },
-    TableColumn("Source date", 108.dp, TextAlign.Start) { p -> TextCell(p.visibleSourceDate, 108.dp) },
-    TableColumn("Timing", 96.dp, TextAlign.Start) { p -> TextCell(timing(p), 96.dp) },
-    TableColumn("Entry", 116.dp, TextAlign.End) { p ->
-        TextCell(entry(p), 116.dp, TextAlign.End, MaterialTheme.colorScheme.primary, emphasis = true)
+/** Context: true of the call, but not what you look at to judge it. */
+private val ContextColumns: List<TableColumn> = listOf(
+    TableColumn("Support", 84.dp, TextAlign.End) { p -> PriceCell(p.support, 84.dp, PriceRole.market) },
+    TableColumn("Resistance", 92.dp, TextAlign.End) { p -> PriceCell(p.resistance, 92.dp, PriceRole.market) },
+    TableColumn("Target date", 104.dp, TextAlign.Start) { p ->
+        TextCell(p.date?.toString(), 104.dp, tone = PriceRole.muted)
     },
-    TableColumn("TP1", 80.dp, TextAlign.End) { p ->
-        TextCell(number(p.target1), 80.dp, TextAlign.End, MaterialTheme.colorScheme.tertiary)
+    TableColumn("Source date", 108.dp, TextAlign.Start) { p ->
+        TextCell(p.visibleSourceDate, 108.dp, tone = PriceRole.muted)
     },
-    TableColumn("TP1 Return %", 92.dp, TextAlign.End) { p ->
-        TextCell(percent(p.returnTp1Pct), 92.dp, TextAlign.End, MaterialTheme.colorScheme.tertiary)
-    },
-    TableColumn("TP2", 80.dp, TextAlign.End) { p ->
-        TextCell(number(p.target2), 80.dp, TextAlign.End, MaterialTheme.colorScheme.tertiary)
-    },
-    TableColumn("TP2 Return %", 92.dp, TextAlign.End) { p ->
-        TextCell(percent(p.returnTp2Pct), 92.dp, TextAlign.End, MaterialTheme.colorScheme.tertiary)
-    },
-    TableColumn("Stop", 80.dp, TextAlign.End) { p ->
-        TextCell(number(p.stopLoss), 80.dp, TextAlign.End, MaterialTheme.colorScheme.error)
-    },
-    TableColumn("Support", 84.dp, TextAlign.End) { p -> TextCell(number(p.support), 84.dp, TextAlign.End) },
-    TableColumn("Resistance", 92.dp, TextAlign.End) { p -> TextCell(number(p.resistance), 92.dp, TextAlign.End) },
-    TableColumn("Risk %", 76.dp, TextAlign.End) { p -> TextCell(percent(p.riskPct), 76.dp, TextAlign.End) },
-    TableColumn("Notes", 260.dp, TextAlign.End) { p -> TextCell(p.notesArabic, 260.dp, TextAlign.End) },
 )
+
+private val NotesColumn = TableColumn("Notes", 260.dp, TextAlign.Start) { p ->
+    TextCell(p.notesArabic, 260.dp, tone = PriceRole.muted)
+}
 
 /** Trailing column so the thumbnail is beside the numbers it came from, in both column sets. */
 private fun imageColumn(

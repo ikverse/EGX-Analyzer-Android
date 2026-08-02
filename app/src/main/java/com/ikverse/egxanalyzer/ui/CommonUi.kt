@@ -46,27 +46,39 @@ import androidx.compose.ui.unit.dp
 internal fun Screen(
     title: String,
     subtitle: String,
+    /** Stays put while the page scrolls. The content reserves room so it never covers anything. */
+    floatingAction: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp)
-            .padding(top = 16.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.headlineLarge)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    val scroll = rememberScrollState()
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .fadingScrollbar(scroll)
+                .padding(horizontal = Space.l)
+                .padding(top = Space.l, bottom = if (floatingAction == null) Space.xl else FloatingActionInset),
+            verticalArrangement = Arrangement.spacedBy(Space.m),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                Text(title, style = MaterialTheme.typography.headlineLarge)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            content()
         }
-        content()
+        floatingAction?.let {
+            Box(Modifier.align(Alignment.BottomEnd).padding(Space.l)) { it() }
+        }
     }
 }
+
+/** Height of an extended action plus its margin, so the last card clears it when scrolled to. */
+private val FloatingActionInset = 88.dp
 
 /** A titled group of related controls, replacing the loose outlined boxes used before. */
 @Composable
@@ -89,9 +101,9 @@ internal fun SectionCard(
                             icon,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(IconSize.Inline),
                         )
-                        Spacer(Modifier.width(10.dp))
+                        Spacer(Modifier.width(Space.s))
                     }
                     Text(title, style = MaterialTheme.typography.titleMedium)
                 }
@@ -138,9 +150,9 @@ internal fun ExpandableSection(
                         icon,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(IconSize.Inline),
                     )
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(Space.s))
                 }
                 Column(Modifier.weight(1f)) {
                     Text(title, style = MaterialTheme.typography.titleMedium)

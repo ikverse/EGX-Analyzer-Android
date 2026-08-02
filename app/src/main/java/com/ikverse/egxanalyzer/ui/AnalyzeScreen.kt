@@ -46,6 +46,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -116,10 +117,49 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         // The run starts either way. A notification is how you watch a run, not a condition for one.
         appState.startAnalysis()
     }
+    // Computed here rather than inside the content, because the floating action needs it too.
+    val blockedReason = analyzeBlockedReason(appState)
     Screen(
         title = "Analyze",
         subtitle = "Send selected text, images, and voice-message content to " +
             appState.cloudConfiguration.provider.displayName + ".",
+        floatingAction = {
+            if (appState.analysisStatus == AnalysisStatus.RUNNING) {
+                ExtendedFloatingActionButton(
+                    onClick = { scope.launch { appState.cancelAnalysis() } },
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    icon = { Icon(Icons.Outlined.Cancel, contentDescription = null) },
+                    text = { Text("Cancel analysis") },
+                )
+            } else {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        // Asked here rather than at first launch: a permission prompt before the
+                        // app has done anything is the one people decline, and Android never asks
+                        // twice.
+                        if (blockedReason != null) return@ExtendedFloatingActionButton
+                        if (notificationsAllowed) {
+                            appState.startAnalysis()
+                        } else {
+                            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    },
+                    containerColor = if (blockedReason == null) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHighest
+                    },
+                    contentColor = if (blockedReason == null) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    icon = { Icon(Icons.Outlined.AutoGraph, contentDescription = null) },
+                    text = { Text("Analyze") },
+                )
+            }
+        },
     ) {
         // Chat selection leads, because choosing sources is the first step of a run.
         ChannelsSection(appState)
@@ -223,7 +263,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 minLines = 3,
             )
             Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth().scrollableRow(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Button(onClick = {
@@ -266,7 +306,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                     singleLine = true,
                 )
                 Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxWidth().scrollableRow(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(
@@ -309,43 +349,8 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 }
             }
         }
-        val analyzeDisabledReason = when {
-            !appState.cloudConfiguration.hasCredential ->
-                "Save the provider API key in Settings first."
-            appState.cloudConfiguration.model.isBlank() ->
-                "Load or enter a cloud model before analyzing."
-            appState.selectedContentTypes.isEmpty() ->
-                "Select at least one content type."
-            appState.inputs.isEmpty() &&
-                (appState.telegramAuthState.step != TelegramAuthStep.READY ||
-                    appState.channels.none(ChannelSelection::selected)) ->
-                "No sources are loaded. In Channels, select chats and load messages for a date, or add content above."
-            else -> null
-        }
-        if (appState.analysisStatus == AnalysisStatus.RUNNING) {
-            Button(onClick = { scope.launch { appState.cancelAnalysis() } }) {
-                Icon(Icons.Outlined.Cancel, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Cancel analysis")
-            }
-        } else {
-            Button(
-                // Started rather than awaited: the run outlives this screen now.
-                onClick = {
-                    // Asked here rather than at first launch: a permission prompt before the app
-                    // has done anything is the one people decline, and Android never asks twice.
-                    if (notificationsAllowed) {
-                        appState.startAnalysis()
-                    } else {
-                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
-                },
-                enabled = analyzeDisabledReason == null,
-            ) {
-                Icon(Icons.Outlined.AutoGraph, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Analyze selected sources")
-            }
+        val analyzeDisabledReason = blockedReason
+        if (appState.analysisStatus != AnalysisStatus.RUNNING) {
             analyzeDisabledReason?.let {
                 Text(it, color = MaterialTheme.colorScheme.error)
                 if (appState.inputs.isEmpty()) {
@@ -511,7 +516,7 @@ private fun SourcePreview(appState: AppState, scope: kotlinx.coroutines.Coroutin
             Column(
                 Modifier
                     .heightIn(max = SourceListMaxHeight)
-                    .verticalScroll(rememberScrollState()),
+                    .scrollableColumn(),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 sources.forEach { source ->
@@ -602,4 +607,24 @@ private fun Activity.openNotificationSettings() {
         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
             .putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
     )
+}
+
+/**
+ * Why a run cannot start, or null when it can.
+ *
+ * Lifted out of the screen body so the floating action and the explanation beneath the sources can
+ * agree without one of them re-deriving it.
+ */
+private fun analyzeBlockedReason(appState: AppState): String? = when {
+    !appState.cloudConfiguration.hasCredential ->
+        "Save the provider API key in Settings first."
+    appState.cloudConfiguration.model.isBlank() ->
+        "Load or enter a cloud model before analyzing."
+    appState.selectedContentTypes.isEmpty() ->
+        "Select at least one content type."
+    appState.inputs.isEmpty() &&
+        (appState.telegramAuthState.step != TelegramAuthStep.READY ||
+            appState.channels.none(ChannelSelection::selected)) ->
+        "No sources are loaded. In Channels, select chats and load messages for a date, or add content above."
+    else -> null
 }
