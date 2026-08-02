@@ -20,11 +20,25 @@ import java.time.LocalDate
 object ConsolidatedParser {
 
     /**
+     * How many collapsed copies of one occurrence are worth reporting.
+     *
+     * A stock legitimately appearing twice in an image is ordinary; a stock whose occurrences are
+     * byte-identical several times over is a model that got stuck.
+     */
+    private const val REPEAT_NOTE_THRESHOLD = 3
+
+    /**
      * @param targetDate the session being analysed. Occurrences printed with a date older than the
      * session before it are dropped: they are re-posts of earlier cards, which the model has been
      * told to exclude and has twice included anyway. Null skips the check.
+     * @param notes collects anything worth recording about the answer itself, for the diagnostics.
+     * Deliberately separate from the validation warnings, which cost a correction request.
      */
-    fun parse(content: String, targetDate: LocalDate? = null): List<ConsolidatedRecommendation> {
+    fun parse(
+        content: String,
+        targetDate: LocalDate? = null,
+        notes: MutableList<String> = mutableListOf(),
+    ): List<ConsolidatedRecommendation> {
         val payload = JSONObject(stripCodeFence(content))
         val stocks = payload.optJSONArray("top_consolidated_recommendations") ?: JSONArray()
         return buildList {
@@ -32,7 +46,15 @@ object ConsolidatedParser {
                 val stock = stocks.optJSONObject(index) ?: continue
                 val code = stock.string("stock_code")?.trim()?.uppercase()?.removeSuffix(".CA")
                 if (code.isNullOrBlank()) continue
-                val all = stock.optJSONArray("data_points").dataPoints()
+                // Occurrences identical in every field - date, evidence, prices, notes - describe
+                // one occurrence, however many times they were returned. A run on 2 August came
+                // back with the same point 106 times for one image and ranked that stock first on
+                // the strength of it.
+                val returned = stock.optJSONArray("data_points").dataPoints()
+                val all = returned.distinct()
+                if (returned.size - all.size >= REPEAT_NOTE_THRESHOLD) {
+                    notes += "$code returned ${returned.size} occurrences, ${all.size} distinct."
+                }
                 val occurrences = all.filter {
                     SourceDateGate.accepts(it.visibleSourceDate, targetDate)
                 }

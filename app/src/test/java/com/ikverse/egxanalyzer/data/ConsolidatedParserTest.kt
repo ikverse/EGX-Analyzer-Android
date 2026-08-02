@@ -135,4 +135,76 @@ class ConsolidatedParserTest {
 
         assertEquals(emptyList<Any>(), ConsolidatedParser.parse(empty))
     }
+
+    /**
+     * A response whose occurrences repeat, the way a model does when it gets stuck. The run on
+     * 2 August returned this same point 106 times for one image and ranked the stock first on it.
+     */
+    private fun repeated(copies: Int, vararg extra: String) = """
+        {
+          "top_consolidated_recommendations": [
+            {
+              "stock_code": "ADPS",
+              "stock_name_ar": "أدنس",
+              "mention_count": $copies,
+              "rank": 1,
+              "data_points": [
+                ${(List(copies) { POINT } + extra).joinToString(",")}
+              ]
+            }
+          ]
+        }
+    """.trimIndent()
+
+    @Test
+    fun `identical occurrences describe one occurrence`() {
+        val rows = ConsolidatedParser.parse(repeated(106))
+
+        assertEquals(1, rows.size)
+        assertEquals(1, rows.single().dataPoints.size)
+    }
+
+    @Test
+    fun `an occurrence differing in any field is kept`() {
+        val other = POINT.replace("\"target_1\": 2.5", "\"target_1\": 2.9")
+
+        val points = ConsolidatedParser.parse(repeated(4, other)).single().dataPoints
+
+        assertEquals(2, points.size)
+        assertEquals(setOf(2.5, 2.9), points.mapNotNull { it.target1 }.toSet())
+    }
+
+    @Test
+    fun `a stuck answer is recorded for the diagnostics`() {
+        val notes = mutableListOf<String>()
+
+        ConsolidatedParser.parse(repeated(106), null, notes)
+
+        assertEquals(listOf("ADPS returned 106 occurrences, 1 distinct."), notes)
+    }
+
+    @Test
+    fun `an ordinary answer says nothing`() {
+        val notes = mutableListOf<String>()
+
+        ConsolidatedParser.parse(repeated(2), notes = notes)
+
+        assertTrue(notes.isEmpty())
+    }
+
+    private companion object {
+        val POINT = """
+            {
+              "date": "2026-08-02",
+              "effective_date_basis": "explicit_date",
+              "visible_source_date": "02 AUG 2026",
+              "source_message_id": "63564677120",
+              "source_image_ref": 19,
+              "recommendation_type": "hold",
+              "buy_price": 2.1,
+              "target_1": 2.5,
+              "notes_ar": "الصفحة تعرض إحصائيات"
+            }
+        """.trimIndent()
+    }
 }

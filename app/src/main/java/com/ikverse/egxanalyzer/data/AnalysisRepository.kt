@@ -73,7 +73,10 @@ class CloudAnalysisRepository(
                 val document = consolidate(
                     request, harvest, config, appPreferences, credential, correctionInstructions, trace,
                 )
-                val parsed = parseResponse(request, document)
+                // Kept apart from the validation warnings below: these describe the answer for the
+                // record, and are not worth paying for a correction request over.
+                val notes = mutableListOf<String>()
+                val parsed = parseResponse(request, document, notes)
                 val (recommendations, warnings) =
                     validateRecommendations(request, parsed.recommendations)
                 if (warnings.isEmpty() || attempt >= appPreferences.correctionRetries) {
@@ -87,7 +90,7 @@ class CloudAnalysisRepository(
                             inputCount = request.inputs.size + request.excludedSources.size,
                             acceptedInputCount = request.inputs.size,
                             excludedSources = request.excludedSources,
-                            validationWarnings = harvest.warnings + warnings,
+                            validationWarnings = harvest.warnings + notes + warnings,
                             correctionAttempted = attempt > 0 || harvest.retried,
                             durationMilliseconds = (System.nanoTime() - startedAt) / 1_000_000,
                             requestCount = harvest.requestCount + attempt + 1,
@@ -566,9 +569,13 @@ class CloudAnalysisRepository(
         else -> "ogg"
     }
 
-    private fun parseResponse(request: AnalysisRequest, content: String): AnalysisResult {
+    private fun parseResponse(
+        request: AnalysisRequest,
+        content: String,
+        notes: MutableList<String> = mutableListOf(),
+    ): AnalysisResult {
         // The gate needs the session to compare against; without it every re-posted card passes.
-        val consolidated = ConsolidatedParser.parse(content, request.targetDate)
+        val consolidated = ConsolidatedParser.parse(content, request.targetDate, notes)
         val inquiries = runCatching {
             JSONObject(stripCodeFence(content)).optJSONArray("client_inquiry_responses")?.length() ?: 0
         }.getOrDefault(0)
