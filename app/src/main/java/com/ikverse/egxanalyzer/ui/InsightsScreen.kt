@@ -213,18 +213,14 @@ private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
     ExpandableSection(
         title = "Sources ranked",
         icon = Icons.Outlined.Leaderboard,
-        // The one thing this screen exists to say, so it is sized like a heading rather than like
-        // another row in a list of sections.
-        prominent = true,
         // Open by default: this is the question the tab exists to answer, not a detail to go
         // looking for.
         initiallyExpanded = true,
         // The channel name is Arabic and the figure is not, so a first-strong isolate keeps each
         // in its own direction rather than letting the percent sign drift into the name.
         summary = best?.let {
-            "${channels.size} ${if (channels.size == 1) "source" else "sources"} · best is " +
-                "⁨${it.channel}⁩ at ${formatPercent(it.anyTargetRate, signed = false)} reaching a target"
-        } ?: "${channels.size} ${if (channels.size == 1) "source" else "sources"}, none judged yet",
+            "Best: ⁨${it.channel}⁩ · ${formatPercent(it.anyTargetRate, signed = false)} reached a target"
+        } ?: "${channels.size} sources, none judged yet",
         summaryTone = best?.anyTargetRate.rateTone(),
     ) {
         BoxWithConstraints {

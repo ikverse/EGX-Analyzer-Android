@@ -133,8 +133,6 @@ internal fun ExpandableSection(
     summaryTone: Color? = null,
     /** Caps the content, for groups of form controls: a text field the width of a desk is unusable. */
     contentMaxWidth: Dp? = null,
-    /** Larger type for a group that leads a screen rather than sitting in a list of peers. */
-    prominent: Boolean = false,
     /** Hoisted when the layout around it needs to know: an open card claims the whole row. */
     expandedState: Boolean? = null,
     onExpandedChange: ((Boolean) -> Unit)? = null,
@@ -162,27 +160,16 @@ internal fun ExpandableSection(
                         icon,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(if (prominent) IconSize.Action else IconSize.Inline),
+                        modifier = Modifier.size(IconSize.Inline),
                     )
                     Spacer(Modifier.width(Space.s))
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        title,
-                        style = if (prominent) {
-                            MaterialTheme.typography.headlineSmall
-                        } else {
-                            MaterialTheme.typography.titleMedium
-                        },
-                    )
+                    Text(title, style = MaterialTheme.typography.titleMedium)
                     if (summary != null) {
                         Text(
                             summary,
-                            style = if (prominent) {
-                                MaterialTheme.typography.bodyLarge
-                            } else {
-                                MaterialTheme.typography.bodySmall
-                            },
+                            style = MaterialTheme.typography.bodySmall,
                             color = summaryTone ?: MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
