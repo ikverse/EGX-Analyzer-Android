@@ -51,12 +51,16 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
     val scope = rememberCoroutineScope()
     var firstValue by remember(appState.telegramAuthState.step) { mutableStateOf("") }
     var secondValue by remember(appState.telegramAuthState.step) { mutableStateOf("") }
-        Text(
-            appState.telegramAuthState.message,
-            color = if (appState.telegramAuthState.step == TelegramAuthStep.ERROR) {
-                MaterialTheme.colorScheme.error
-            } else MaterialTheme.colorScheme.primary,
-        )
+        // Only while signing in. Once ready the Telegram card says so itself, and a loose line
+        // above it pushed this column out of step with the one beside it.
+        if (appState.telegramAuthState.step != TelegramAuthStep.READY) {
+            Text(
+                appState.telegramAuthState.message,
+                color = if (appState.telegramAuthState.step == TelegramAuthStep.ERROR) {
+                    MaterialTheme.colorScheme.error
+                } else MaterialTheme.colorScheme.primary,
+            )
+        }
         when (appState.telegramAuthState.step) {
             TelegramAuthStep.API_CONFIGURATION -> {
                 AuthCard("Telegram application") {
@@ -129,72 +133,78 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
             TelegramAuthStep.READY -> {
                 val selectedCount = appState.channels.count(ChannelSelection::selected)
                 val busy = appState.busyLabel != null
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(Space.s),
-                    verticalArrangement = Arrangement.spacedBy(Space.s),
-                ) {
-                    OutlinedButton(
-                        enabled = !busy,
-                        onClick = {
-                            scope.launch {
-                                appState.runAction(
-                                    label = "Refreshing chats",
-                                    success = {
-                                        val found = appState.channels.size
-                                        "Chat list updated: $found channels found."
-                                    },
-                                ) { appState.refreshTelegramChats() }
-                            }
-                        },
-                    ) { Text("Refresh chats") }
-                    TextButton(
-                        enabled = !busy,
-                        onClick = {
-                            scope.launch {
-                                appState.runAction(
-                                    label = "Signing out",
-                                    success = { "Signed out of Telegram." },
-                                ) { appState.logoutTelegram() }
-                            }
-                        },
-                    ) { Text("Sign out") }
-                }
-
-                // The chats come first, then the action that uses them, so the screen reads in the
-                // order the task is done.
-                // Every chat is offered, broadcast channel or not: recommendations also arrive
-                // in groups and direct messages, and hiding those decided for the user which
-                // sources were worth reading.
                 val chats = appState.channels
-                if (chats.isEmpty()) {
-                    EmptyState(
-                        icon = Icons.Outlined.Forum,
-                        title = "No chats loaded",
-                        detail = "Refresh to pull your Telegram chat list onto this device.",
+                // Everything Telegram in one card. The status, the actions and the list were three
+                // loose blocks, which read as three unrelated things and left the column beside
+                // them starting higher than this one.
+                SectionCard(title = "Telegram", icon = Icons.Outlined.Forum) {
+                    Text(
+                        if (chats.isEmpty()) {
+                            "Signed in. No chats loaded yet."
+                        } else {
+                            "Signed in · $selectedCount of ${chats.size} chats selected"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else {
-                    // Bounded and scrolled in place, inside a card like every other group here: a
-                    // long chat list otherwise pushes the whole run out of reach.
-                    SectionCard(title = "$selectedCount of ${chats.size} chats selected") {
-                        // A chat row is a checkbox and a name; on a wide screen a single column of
-                        // them leaves three quarters of the card empty and pushes the rest of the
-                        // run off the bottom.
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(Space.s),
+                        verticalArrangement = Arrangement.spacedBy(Space.s),
+                    ) {
+                        OutlinedButton(
+                            enabled = !busy,
+                            onClick = {
+                                scope.launch {
+                                    appState.runAction(
+                                        label = "Refreshing chats",
+                                        success = {
+                                            val found = appState.channels.size
+                                            "Chat list updated: $found channels found."
+                                        },
+                                    ) { appState.refreshTelegramChats() }
+                                }
+                            },
+                        ) { Text("Refresh chats") }
+                        TextButton(
+                            enabled = !busy,
+                            onClick = {
+                                scope.launch {
+                                    appState.runAction(
+                                        label = "Signing out",
+                                        success = { "Signed out of Telegram." },
+                                    ) { appState.logoutTelegram() }
+                                }
+                            },
+                        ) { Text("Sign out") }
+                    }
+
+                    // Every chat is offered, broadcast channel or not: recommendations also arrive
+                    // in groups and direct messages, and hiding those decided for the user which
+                    // sources were worth reading.
+                    if (chats.isEmpty()) {
+                        EmptyState(
+                            icon = Icons.Outlined.Forum,
+                            title = "No chats loaded",
+                            detail = "Refresh to pull your Telegram chat list onto this device.",
+                        )
+                    } else {
+                        // Bounded and scrolled in place: a long chat list otherwise pushes the
+                        // whole run out of reach.
                         BoxWithConstraints {
                             val columns = responsiveColumns(minColumnWidth = 300.dp, maxColumns = 3)
                             Column(
                                 Modifier
                                     .heightIn(max = ChatListMaxHeight)
                                     .scrollableColumn(),
-                                verticalArrangement = Arrangement.spacedBy(Space.s),
+                                verticalArrangement = Arrangement.spacedBy(Space.xs),
                             ) {
-                                ResponsiveRows(chats, columns, spacing = Space.s) { chat, cardModifier ->
+                                ResponsiveRows(chats, columns, spacing = Space.xs) { chat, cardModifier ->
                                     ChannelCard(chat, appState, chats, cardModifier)
                                 }
                             }
                         }
                     }
                 }
-
             }
             TelegramAuthStep.INITIALIZING,
             TelegramAuthStep.LOGGING_OUT,

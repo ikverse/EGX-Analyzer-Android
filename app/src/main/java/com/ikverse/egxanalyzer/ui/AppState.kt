@@ -3,6 +3,7 @@ package com.ikverse.egxanalyzer.ui
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import com.ikverse.egxanalyzer.data.AnalysisRepository
 import com.ikverse.egxanalyzer.data.AnalysisPolicy
@@ -42,6 +43,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -260,7 +263,41 @@ class AppState(
             if (stored.isEmpty()) refreshEgxCatalog()
         }
         appScope.launch {
-            telegramRepository.authState.collect { telegramAuthState = it }
+            // The chat list is the first thing a run depends on, and it used to load in silence:
+            // an empty list looked identical whether it was still fetching or had failed.
+            var announced: TelegramAuthStep? = null
+            telegramRepository.authState.collect { state ->
+                telegramAuthState = state
+                if (state.step != announced) {
+                    announced = state.step
+                    when (state.step) {
+                        TelegramAuthStep.INITIALIZING ->
+                            statusMessage = StatusMessage("Loading Telegram chats…", succeeded = true)
+                        // Deliberately no count here: READY arrives before the chat list does, so
+                        // reading it now reports zero while six are about to appear. The count is
+                        // announced by the collector below, when there is one.
+                        TelegramAuthStep.READY -> statusMessage = StatusMessage(
+                            "Telegram ready · loading chats…",
+                            succeeded = true,
+                        )
+                        TelegramAuthStep.ERROR -> statusMessage = StatusMessage(
+                            state.message?.takeIf(String::isNotBlank)
+                                ?: "Telegram could not load your chats.",
+                            succeeded = false,
+                        )
+                        else -> Unit
+                    }
+                }
+            }
+        }
+        appScope.launch {
+            // Announced when the list actually lands, and again after a refresh changes it.
+            snapshotFlow { channels.size }
+                .distinctUntilChanged()
+                .filter { it > 0 }
+                .collect { count ->
+                    statusMessage = StatusMessage("$count Telegram chats loaded.", succeeded = true)
+                }
         }
         // Nothing about a previous session carries into this one: a restart starts from the
         // chat list Telegram reports now, with nothing selected.
@@ -532,6 +569,25 @@ class AppState(
         if (savedResults.recommendedTickers().isEmpty()) return
         refreshPrices(announce = false)
         settingsRepository.recordPriceRefreshDay(today)
+    }
+
+    /**
+     * Fetches only the stocks with no stored history at all.
+     *
+     * Deliberately outside the once-a-day guard: that guard exists so a day's settled prices are
+     * not refetched, not so a stock named for the first time this afternoon goes unscored until
+     * tomorrow. Quiet, and a failure leaves the card unpriced rather than interrupting the run.
+     */
+    private suspend fun priceStocksWithNoHistory() {
+        val named = savedResults.recommendedTickers()
+        if (named.isEmpty()) return
+        val unpriced = withContext(Dispatchers.IO) {
+            val priced = localDataStore.pricedTickers()
+            named.filterNot { it in priced }
+        }
+        if (unpriced.isEmpty()) return
+        runCatching { priceRepository.refresh(unpriced) }
+        recomputePerformance()
     }
 
     suspend fun refreshPrices(announce: Boolean = true) {
@@ -845,6 +901,10 @@ class AppState(
             analysisStatus = AnalysisStatus.COMPLETED
             analysisMessage = "Saved ${result.recommendations.size} recommendations."
             recomputePerformance()
+            // A run names stocks the price store has never seen, and until now nothing fetched
+            // them: the daily guard had already fired, so an Insights card sat unpriced until the
+            // button was pressed or the app was restarted the next day.
+            priceStocksWithNoHistory()
             analysisFinished(savedResults.firstOrNull()?.id, result.recommendations.size)
             destination = AppDestination.RESULTS
         } catch (_: CancellationException) {

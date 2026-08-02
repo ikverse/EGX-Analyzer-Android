@@ -6,6 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Assessment
+import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Leaderboard
 import androidx.compose.material.icons.outlined.Refresh
@@ -93,9 +95,10 @@ internal fun InsightsScreen(appState: AppState) {
             return@Screen
         }
 
-        Headline(report)
-        OutcomeBreakdown(report)
+        // The ranking leads. It is the question the tab exists to answer - which source is worth
+        // reading - and it used to sit below two summary cards as a collapsed line.
         ChannelRanking(report.channels)
+        Unscored(report)
         // One collapsed card per row wasted most of a wide screen: each held a single line of
         // text across the full width. The count is derived, so an untested width still behaves.
         // Collapsed cards share a row; an open one takes the whole width, because its contents are
@@ -186,51 +189,23 @@ private fun PricesBar(windowSessions: Int, refreshing: Boolean, onRefreshPrices:
 }
 
 @Composable
-private fun Headline(report: PerformanceReport) {
-    SectionCard {
-        BoxWithConstraints {
-            // Four tiles need room to breathe; on a phone they wrap to two rows instead of being
-            // squeezed until the figures truncate.
-            val perRow = if (maxWidth >= 520.dp) 4 else 2
-            val tiles = listOf(
-                formatPercent(report.fullHitRate, signed = false) to "Reached target 2",
-                formatPercent(report.anyTargetRate, signed = false) to "Reached target 1+",
-                report.judged.toString() to "Calls judged",
-                report.tracked.toString() to "Calls tracked",
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(Space.l)) {
-                tiles.chunked(perRow).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                        row.forEach { (value, label) ->
-                            StatTile(
-                                value = value,
-                                label = label,
-                                modifier = Modifier.weight(1f),
-                                tone = if (label.startsWith("Reached")) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                            )
-                        }
-                        repeat(perRow - row.size) { Column(Modifier.weight(1f)) {} }
-                    }
-                }
-            }
-        }
-        HorizontalDivider()
+private fun Unscored(report: PerformanceReport) {
+    /*
+     * What could not be judged, and why.
+     *
+     * This replaces four aggregate tiles - two rates and two totals - that averaged every source
+     * into one figure and so answered no question worth asking; the per-source cards above carry
+     * the same numbers where they mean something. What they never carried is how much of the data
+     * could not be scored at all, which is what decides whether the ranking above can be trusted.
+     */
+    val unscored = report.tracked - report.judged
+    if (unscored <= 0 && report.unpricedStocks == 0 && report.awaitingSessions == 0) return
+    SectionCard(title = "Not yet judged", icon = Icons.Outlined.HelpOutline) {
         Text(
-            buildString {
-                append(report.scoringSince?.let { "Oldest call scored: $it. " }.orEmpty())
-                append(
-                    "Only calls that could be judged count toward the hit rate: a stock with no " +
-                        "price history, or one whose entry never traded, counts for nobody.",
-                )
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            "$unscored of ${report.tracked} calls could not be scored" +
+                (report.scoringSince?.let { ", and scoring starts at $it" }.orEmpty()) + ".",
+            style = MaterialTheme.typography.bodyMedium,
         )
-        // Two different reasons a call reads as unpriced, and only one of them is worth acting on.
         if (report.unpricedStocks > 0) {
             StatusPill(
                 "${report.unpricedStocks} " +
@@ -251,50 +226,6 @@ private fun Headline(report: PerformanceReport) {
 }
 
 @Composable
-private fun OutcomeBreakdown(report: PerformanceReport) {
-    val judged = report.byOutcome.filterKeys(Outcome::judged).values.sum()
-    ExpandableSection(
-        title = "Outcomes",
-        icon = Icons.Outlined.Timeline,
-        summary = "${report.fullHits} full · ${report.partialHits} partial · " +
-            "${report.byOutcome[Outcome.STOPPED] ?: 0} stopped · ${report.tracked - judged} pending",
-    ) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(Space.s),
-            verticalArrangement = Arrangement.spacedBy(Space.s),
-        ) {
-            Outcome.entries.forEach { outcome ->
-                OutcomeChip(outcome, report.byOutcome[outcome] ?: 0)
-            }
-        }
-    }
-}
-
-@Composable
-private fun OutcomeChip(outcome: Outcome, count: Int) {
-    Surface(color = outcome.container(), shape = CircleShape) {
-        Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(Space.s),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                outcome.label,
-                style = MaterialTheme.typography.labelMedium,
-                color = outcome.onContainer(),
-            )
-            Text(
-                count.toString(),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = outcome.onContainer(),
-            )
-        }
-    }
-}
-
-/** The same chip without a figure, for a row that already names the one call it describes. */
-@Composable
 private fun OutcomeLabel(outcome: Outcome) {
     Surface(color = outcome.container(), shape = CircleShape) {
         Text(
@@ -307,53 +238,101 @@ private fun OutcomeLabel(outcome: Outcome) {
 }
 
 @Composable
-private fun ChannelRanking(channels: List<ChannelScore>) {
+private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
     if (channels.isEmpty()) return
-    val best = channels.firstOrNull { it.judged > 0 }
-    ExpandableSection(
-        title = "Sources ranked",
-        icon = Icons.Outlined.Leaderboard,
-        // The channel name is Arabic and the figure is not, so the percent sign drifted into the
-        // Arabic run and rendered before the name. A first-strong isolate keeps each in its own
-        // direction without changing what is written.
-        summary = best?.let {
-            "Best: ⁨${it.channel}⁩ · ${formatPercent(it.anyTargetRate, signed = false)} reached a target"
+    Text("Sources ranked", style = MaterialTheme.typography.titleMedium)
+    // Best first, and a source with nothing judged sinks below one that has been: an untested
+    // channel is not a good channel.
+    val ordered = channels.sortedWith(
+        compareByDescending<ChannelScore> { it.judged > 0 }
+            .thenByDescending { it.anyTargetRate ?: -1.0 }
+            .thenByDescending { it.judged },
+    )
+    BoxWithConstraints {
+        val columns = responsiveColumns(minColumnWidth = 340.dp, maxColumns = 2)
+        Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+            ResponsiveRows(ordered, columns) { channel, cardModifier ->
+                ChannelCard(channel, cardModifier)
+            }
         }
-            ?: "${channels.size} sources, none judged yet",
-        summaryTone = best?.anyTargetRate.rateTone(),
+    }
+}
+
+/** One source, and everything known about how it has done. */
+@Composable
+private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
+    Card(
+        modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        shape = MaterialTheme.shapes.medium,
     ) {
-        channels.forEachIndexed { index, channel ->
-            if (index > 0) HorizontalDivider()
-            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        channel.channel,
-                        style = MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        formatPercent(channel.anyTargetRate, signed = false),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = channel.anyTargetRate.rateTone(),
-                    )
-                }
+        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            // A fixed height so a long Arabic channel name does not make its card taller than the
+            // one beside it.
+            Row(
+                Modifier.heightIn(min = ChannelHeaderHeight),
+                verticalAlignment = Alignment.Top,
+            ) {
                 Text(
-                    "${channel.fullHits} full · ${channel.partialHits} partial of " +
-                        "${channel.judged} judged · ${channel.calls} calls · " +
-                        "avg ${channel.averageReturn.signedPercent()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    channel.channel,
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${channel.stopped} stopped · ${channel.expired} expired · " +
-                        "${channel.notTradable} not tradable · " +
-                        "target 2 rate ${formatPercent(channel.fullHitRate, signed = false)} · " +
-                        "median ${formatPrice(channel.medianSessionsToHit)} sessions to a target",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    formatPercent(channel.anyTargetRate, signed = false),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = channel.anyTargetRate.rateTone(),
                 )
             }
+            Text(
+                "reached a target · ${channel.judged} of ${channel.calls} calls judged",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            FigureGroup(
+                "How they turned out",
+                listOf(
+                    { Figure("Target 2", channel.fullHits.toString(), Modifier.weight(1f), tone = PriceRole.target) },
+                    { Figure("Target 1", channel.partialHits.toString(), Modifier.weight(1f), tone = PriceRole.target) },
+                    { Figure("Stopped", channel.stopped.toString(), Modifier.weight(1f), tone = PriceRole.stop) },
+                    { Figure("Expired", channel.expired.toString(), Modifier.weight(1f), tone = PriceRole.muted) },
+                ),
+            )
+            FigureGroup(
+                "What that was worth",
+                listOf(
+                    {
+                        Figure(
+                            "Target 2 rate", formatPercent(channel.fullHitRate, signed = false),
+                            Modifier.weight(1f), tone = channel.fullHitRate.rateTone(),
+                        )
+                    },
+                    {
+                        Figure(
+                            "Average return", channel.averageReturn.signedPercent(),
+                            Modifier.weight(1f), tone = channel.averageReturn.returnTone(),
+                        )
+                    },
+                    {
+                        Figure(
+                            "Sessions to a target", formatPrice(channel.medianSessionsToHit),
+                            Modifier.weight(1f),
+                        )
+                    },
+                    {
+                        Figure(
+                            "Not tradable", channel.notTradable.toString(),
+                            Modifier.weight(1f), tone = PriceRole.muted,
+                        )
+                    },
+                ),
+            )
         }
     }
 }
@@ -361,7 +340,9 @@ private fun ChannelRanking(channels: List<ChannelScore>) {
 /** Identifies a session across recompositions, so the layout knows which card is open. */
 private fun ScoredSession.key(): Any = targetDate ?: lastRunAt
 
-/** One trading session: every call made for it, and how each turned out. */
+/** Two lines of channel name, so a row of source cards stays level. */
+private val ChannelHeaderHeight = 44.dp
+
 @Composable
 private fun SessionCard(
     run: ScoredSession,

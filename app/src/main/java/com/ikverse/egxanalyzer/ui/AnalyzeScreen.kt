@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -199,7 +200,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                             ContentTypeToggle("Voice", AnalysisContentType.AUDIO, appState)
                         }
                     } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                             ContentTypeToggle("Text messages", AnalysisContentType.TEXT, appState)
                             ContentTypeToggle("Images / photos", AnalysisContentType.IMAGES, appState)
                             ContentTypeToggle("Voice messages", AnalysisContentType.AUDIO, appState)
@@ -503,12 +504,14 @@ private fun showRecommendationDatePicker(activity: Activity, appState: AppState)
 
 @Composable
 private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState: AppState) {
+    // The checkbox keeps its own 48dp target; only the gap it leaves beside the label is pulled in,
+    // so three of these stop reading as three separate paragraphs.
     Row(verticalAlignment = Alignment.CenterVertically) {
         Checkbox(
             checked = type in appState.selectedContentTypes,
             onCheckedChange = { appState.toggleContentType(type) },
         )
-        Text(label)
+        Text(label, modifier = Modifier.offset(x = (-4).dp))
     }
 }
 
