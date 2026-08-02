@@ -3,6 +3,14 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// One place decides the version. It stayed at 0.1.0 through every build, so a device could not be
+// asked which one it was running - a question that cost real time while diagnosing a black screen.
+// Bump the name here; the code is derived from it so the two can never disagree.
+val appVersionName = "0.2.0"
+val appVersionCode = appVersionName.split(".").let { (major, minor, patch) ->
+    major.toInt() * 10_000 + minor.toInt() * 100 + patch.toInt()
+}
+
 android {
     namespace = "com.ikverse.egxanalyzer"
     compileSdk = 37
@@ -11,8 +19,8 @@ android {
         applicationId = "com.ikverse.egxanalyzer"
         minSdk = 31
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -21,6 +29,10 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+        }
+        debug {
+            // A sideloaded build should be obvious in Settings without checking a commit hash.
+            versionNameSuffix = "-debug"
         }
     }
 

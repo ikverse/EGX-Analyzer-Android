@@ -44,6 +44,8 @@ class CloudAnalysisRepository(
     private val promptStore: PromptStore,
     private val configuration: () -> CloudConfiguration,
     private val preferences: () -> AppPreferences,
+    /** Records what was sent. Null in tests, where there is no device to write to. */
+    private val traceFor: ((String) -> RequestTrace)? = null,
 ) : AnalysisRepository {
     private val activeConnections = ConcurrentHashMap<String, HttpURLConnection>()
 
@@ -62,13 +64,14 @@ class CloudAnalysisRepository(
         require(config.model.isNotBlank()) { "Choose a cloud model." }
         val credential = credentialStore.read(config.provider)
             ?: error("No credential is saved for ${config.provider.displayName}.")
+        val trace = traceFor?.invoke(request.requestId)
         try {
-            val harvest = extract(request, config, appPreferences, credential)
+            val harvest = extract(request, config, appPreferences, credential, trace)
             var attempt = 0
             var correctionInstructions: String? = null
             while (true) {
                 val document = consolidate(
-                    request, harvest, config, appPreferences, credential, correctionInstructions,
+                    request, harvest, config, appPreferences, credential, correctionInstructions, trace,
                 )
                 val parsed = parseResponse(request, document)
                 val (recommendations, warnings) =
@@ -129,15 +132,21 @@ class CloudAnalysisRepository(
         config: CloudConfiguration,
         appPreferences: AppPreferences,
         credential: CharArray,
+        trace: RequestTrace?,
     ): Harvest {
         val harvest = Harvest()
         var globalRef = 0
+        var chunkNumber = 0
         for (chunk in AnalysisChunking.chunk(request.inputs)) {
+            chunkNumber += 1
             coroutineContext.ensureActive()
             // The run's reference for each image this chunk holds, in the order it sends them.
             val globalRefs = chunk.filterIsInstance<AnalysisInput.Image>().map { globalRef += 1; globalRef }
             harvest.imagesSent += globalRefs.size
-            var answer = readChunk(request, chunk, globalRefs, harvest, config, appPreferences, credential, null)
+            var answer = readChunk(
+                request, chunk, globalRefs, harvest, config, appPreferences, credential, null,
+                trace, "chunk-$chunkNumber",
+            )
             val missing = (1..globalRefs.size).filterNot(answer.cited::contains)
             if (missing.isNotEmpty()) {
                 // Retry this chunk alone rather than the run: eight images, not thirty-two. The
@@ -149,6 +158,7 @@ class CloudAnalysisRepository(
                     "Your previous response left IMAGE_REF ${missing.joinToString(", ")} out of both " +
                         "`extracted` and `excluded`. Return the full response again, accounting for " +
                         "every IMAGE_REF supplied.",
+                    trace, "chunk-$chunkNumber-retry",
                 )
                 if (second.cited.size > answer.cited.size) answer = second
             }
@@ -201,9 +211,12 @@ class CloudAnalysisRepository(
         appPreferences: AppPreferences,
         credential: CharArray,
         correctionInstructions: String?,
+        trace: RequestTrace?,
+        label: String,
     ): ChunkAnswer {
         val body = request.extractionBody(chunk, config.model, appPreferences, correctionInstructions)
         val response = executeCompletion(request.requestId, body, config, appPreferences, credential)
+        trace?.record(label, body, response)
         harvest.requestCount += 1
         val answer = ChunkAnswer()
         val payload = runCatching { JSONObject(stripCodeFence(contentOf(response))) }.getOrNull()
@@ -259,6 +272,7 @@ class CloudAnalysisRepository(
         appPreferences: AppPreferences,
         credential: CharArray,
         correctionInstructions: String?,
+        trace: RequestTrace?,
     ): String {
         val ranked = if (harvest.extracted.length() == 0) {
             JSONObject().put("top_consolidated_recommendations", JSONArray())
@@ -267,6 +281,7 @@ class CloudAnalysisRepository(
                 harvest.extracted, config.model, appPreferences, correctionInstructions,
             )
             val response = executeCompletion(request.requestId, body, config, appPreferences, credential)
+            trace?.record("consolidation", body, response)
             runCatching { JSONObject(stripCodeFence(contentOf(response))) }.getOrElse {
                 harvest.warnings += "Consolidation returned no readable JSON."
                 JSONObject().put("top_consolidated_recommendations", JSONArray())
@@ -278,14 +293,8 @@ class CloudAnalysisRepository(
                 "top_consolidated_recommendations",
                 ranked.optJSONArray("top_consolidated_recommendations") ?: JSONArray(),
             )
-            put("achieved_targets", JSONArray())
             put("excluded", harvest.excluded)
             put("client_inquiry_responses", harvest.inquiries)
-            put(
-                "text_based_categories",
-                ranked.optJSONObject("text_based_categories") ?: JSONObject(),
-            )
-            put("daily_breakdown", JSONObject())
         }.toString()
     }
 

@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.BuildConfig
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.ChannelSelection
@@ -457,6 +458,19 @@ internal fun SettingsScreen(appState: AppState) {
                         Text("Open Telegram sign-in")
                     }
                 }
+            }
+        }
+
+        ExpandableSection(
+            "About",
+            summary = BuildConfig.VERSION_NAME,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                Text(
+                    "Shown so a device can be asked which build it is running.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

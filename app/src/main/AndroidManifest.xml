@@ -32,5 +32,17 @@
             android:name=".data.AnalysisService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Shares a run's trace. Traces hold prompts, source labels and the model's answer, never
+             image bytes or credentials, but they still leave the device only when asked. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.traces"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/trace_paths" />
+        </provider>
     </application>
 </manifest>

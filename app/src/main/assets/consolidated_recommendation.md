@@ -1,4 +1,4 @@
-<!-- EGX_PROMPT_SCHEMA: 5 -->
+<!-- EGX_PROMPT_SCHEMA: 6 -->
 # EGX recommendation extraction
 
 Extract from the supplied Egyptian stock-market Telegram sources.
@@ -288,7 +288,6 @@ source: a stock named twice in two images is two entries, not one merged entry.
       "source_image_ref": "integer or null",
       "recommendation_evidence": "exact same-source cue",
       "recommendation_type": "buy or sell",
-      "destination": "main or watching",
       "buy_price": "number or null",
       "buy_price_low": "number or null",
       "buy_price_high": "number or null",
@@ -342,7 +341,6 @@ source: a stock named twice in two images is two entries, not one merged entry.
 
 Additional contract rules:
 
-- `destination` is `watching` for a stock classified as Watching and `main` otherwise.
 - Do not merge two occurrences of one stock, even from the same image. Consolidation needs them apart.
 - Everything excluded appears in `excluded`, with the date you read and why it was dropped.
 

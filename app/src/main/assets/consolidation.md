@@ -1,4 +1,4 @@
-<!-- EGX_PROMPT_SCHEMA: 5 -->
+<!-- EGX_PROMPT_SCHEMA: 6 -->
 # EGX recommendation consolidation
 
 Every source in this run has already been read. You are given the complete list of extracted
@@ -43,15 +43,7 @@ Write exactly one `notes_summary` per stock, in Arabic, from that stock's occurr
 - Keep source-specific evidence and values in `data_points`, not in the summary.
 - Keep it under 60 Arabic words.
 
-## 5. Categories
-
-Populate `text_based_categories` only with stock codes present in the final ranked rows.
-
-- `watchlist_stocks`: stocks whose occurrences are `destination: watching`.
-- `most_important_stocks`: the highest-ranked main-destination stocks.
-- `trading_stocks`: main-destination stocks presented for trading between sessions.
-
-## 6. JSON contract
+## 5. JSON contract
 
 Return only one JSON object. Copy each occurrence into `data_points` with every field it arrived
 with, unchanged.
@@ -93,20 +85,14 @@ with, unchanged.
         }
       ]
     }
-  ],
-  "text_based_categories": {
-    "most_important_stocks": [],
-    "trading_stocks": [],
-    "watchlist_stocks": []
-  }
+  ]
 }
 ```
 
-## 7. Final invariants
+## 6. Final invariants
 
 Before returning JSON, confirm:
 
 - Every occurrence supplied appears in exactly one stock's `data_points`.
 - No `source_message_id` or `source_image_ref` differs from the value it arrived with.
 - Ranks run 1..n with no gaps and no duplicates.
-- Every code in `text_based_categories` is a code you returned.

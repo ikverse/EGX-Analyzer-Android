@@ -138,9 +138,9 @@ private fun StockHeadingRow(stock: ConsolidatedRecommendation) {
                 )
             }
         }
-        if (stock.dataPoints.any(RecommendationDataPoint::isWatching)) {
-            // The source flagged this stock as one to watch rather than dating a buy, so it is
-            // labelled rather than left as a bare word floating beside the name.
+        if (stock.dataPoints.isNotEmpty() && stock.dataPoints.all(RecommendationDataPoint::isWatching)) {
+            // Every occurrence, not any: a stock called for a buy by one source and merely watched
+            // by another was labelled Watch list, which reads as though nobody had called it.
             Surface(
                 color = MaterialTheme.colorScheme.tertiaryContainer,
                 shape = MaterialTheme.shapes.small,

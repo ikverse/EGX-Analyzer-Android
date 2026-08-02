@@ -8,6 +8,7 @@ import com.ikverse.egxanalyzer.data.CloudAnalysisRepository
 import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.PromptStore
+import com.ikverse.egxanalyzer.data.RequestTrace
 import com.ikverse.egxanalyzer.data.SymbolMap
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.TelegramRepository
@@ -25,7 +26,9 @@ class EgxApplication : Application() {
             promptStore = PromptStore(assets),
             configuration = { state.cloudConfiguration },
             preferences = { state.appPreferences },
+            traceFor = { requestId -> RequestTrace(this, requestId) },
         )
+        RequestTrace.prune(this)
         val localDataStore = LocalDataStore(this)
         val notifier = AnalysisNotifier(this)
         AppState(

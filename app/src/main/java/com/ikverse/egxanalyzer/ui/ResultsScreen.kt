@@ -43,6 +43,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import com.ikverse.egxanalyzer.data.RequestTrace
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
@@ -307,6 +309,24 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        val traceDirectory = java.io.File(
+            java.io.File(LocalContext.current.filesDir, RequestTrace.TRACE_ROOT),
+            saved.result.requestId,
+        )
+        if (traceDirectory.isDirectory) {
+            // What was actually sent, not what we believe was sent. Reconstructing a request from
+            // the sources table is how a mis-cited image went unnoticed for two runs.
+            Text(
+                "Request trace: ${traceDirectory.listFiles()?.size ?: 0} file(s)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                traceDirectory.path,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (diagnostics.requestCount > 0) {
             Text(
                 "${diagnostics.requestCount} model requests · ${diagnostics.imagesSent} images sent · " +
