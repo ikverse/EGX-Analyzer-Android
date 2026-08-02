@@ -319,4 +319,25 @@ class ConsolidatedParserTest {
             }
         """.trimIndent()
     }
+
+    /**
+     * A T+1 card is its own kind of call, and the sources label it as one.
+     *
+     * The channels post a table headed "أسهم مرشحة للمتاجرة T+1" - a trade between today's close
+     * and tomorrow's open - and it used to arrive indistinguishable from an ordinary dated call.
+     */
+    @Test
+    fun `a T+1 occurrence keeps its basis and its wording`() {
+        val point = priced("2.01", "2.10").replace(
+            "\"recommendation_type\": \"buy\"",
+            "\"recommendation_type\": \"buy\", \"effective_date_basis\": \"t_plus_1\", " +
+                "\"timing_evidence\": \"أسهم مرشحة للمتاجرة T+1\"",
+        )
+
+        val occurrence = ConsolidatedParser.parse(stock("CRST", point)).single().dataPoints.single()
+
+        assertTrue(occurrence.isTPlusOne)
+        assertTrue(!occurrence.isWatching)
+        assertEquals("أسهم مرشحة للمتاجرة T+1", occurrence.timingEvidence)
+    }
 }

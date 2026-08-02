@@ -200,7 +200,14 @@ fun Modifier.fadingScrollbar(
     val scheme = androidx.compose.material3.MaterialTheme.colorScheme
     val bar = color ?: scheme.onSurfaceVariant
     var scrolling by remember { mutableStateOf(false) }
+    // The effect also runs when the screen first composes, which showed a bar on every scrollable
+    // the moment it appeared, before anything had been scrolled.
+    var composed by remember { mutableStateOf(false) }
     LaunchedEffect(state.value) {
+        if (!composed) {
+            composed = true
+            return@LaunchedEffect
+        }
         scrolling = true
         delay(SCROLLBAR_LINGER_MS)
         scrolling = false
@@ -246,14 +253,17 @@ private const val MIN_THUMB_PX = 48f
 @Composable
 fun Modifier.scrollableColumn(): Modifier {
     val state = rememberScrollState()
-    return this.verticalScroll(state).fadingScrollbar(state)
+    // The bar is drawn outside the scroll, not inside it: a draw modifier placed after
+    // verticalScroll is a child of it, so it would be measured against the content and slide away
+    // with it instead of staying pinned to the edge of the viewport.
+    return this.fadingScrollbar(state).verticalScroll(state)
 }
 
 /** A horizontal scroll that shows how much is left. */
 @Composable
 fun Modifier.scrollableRow(): Modifier {
     val state = rememberScrollState()
-    return this.horizontalScroll(state).fadingScrollbar(state, horizontal = true)
+    return this.fadingScrollbar(state, horizontal = true).horizontalScroll(state)
 }
 
 /**

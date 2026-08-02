@@ -1,4 +1,4 @@
-<!-- EGX_PROMPT_SCHEMA: 6 -->
+<!-- EGX_PROMPT_SCHEMA: 7 -->
 # EGX recommendation extraction
 
 Extract from the supplied Egyptian stock-market Telegram sources.
@@ -83,7 +83,7 @@ to have happened rather than merely assumed.
 
 `TARGET_DATE` is supplied in the runtime context.
 
-Apply this date gate to every Main or Watching recommendation, regardless of whether its source is an image, text message, or voice-note transcript.
+Apply this date gate to every Main, Watching or T+1 recommendation, regardless of whether its source is an image, text message, or voice-note transcript.
 
 1. Read the date explicitly printed or stated inside that exact source item.
 2. Parse it without changing, advancing, repairing, or inferring it.
@@ -173,9 +173,30 @@ Requirements:
 - A Watching heading may govern the ticker immediately beneath it in the same image card.
 - Do not apply Watching wording from one stock or section to another.
 
-### Main and Watching sections in one image
+### T+1
+
+Use `effective_date_basis: t_plus_1` when the source itself prints a `T+1` marker over that stock, using wording such as:
+
+- `أسهم مرشحة للمتاجرة T+1`
+- `من ترشيحات T+1`
+- `للمتاجرة بين نهاية جلسة اليوم وبداية الجلسة التالية`
+- `T+1`
+- A clear semantic equivalent
+
+Requirements:
+
+- The source date must equal `TARGET_DATE` exactly, exactly as for any other basis.
+- Copy the exact `T+1` wording into `timing_evidence`.
+- A `T+1` heading governs only the rows in its own card, table, or section.
+- Do not apply a `T+1` heading found in one section to any other section of the same image, and do not infer `T+1` from a message that merely mentions it elsewhere.
+- Where a row is both `T+1` and under Watching wording, Watching wins: it is the stronger statement about whether the call is live.
+- Preserve all explicitly stated levels.
+
+### Main, Watching and T+1 sections in one image
 
 Scan the entire image from top to bottom and analyze every distinct section independently. Do not stop after the first recommendation panel.
+
+A heading of any kind - Main, Watching or `T+1` - describes the section beneath it and nothing else.
 
 When `أهم الأسهم اليوم` appears below another recommendation or Watching card, also extract every valid stock row from the table directly beneath that heading.
 
@@ -280,7 +301,7 @@ source: a stock named twice in two images is two entries, not one merged entry.
       "stock_name_en": "string",
       "stock_name_ar": "string or null",
       "date": "YYYY-MM-DD, the session the source is for",
-      "effective_date_basis": "explicit_date or watching",
+      "effective_date_basis": "explicit_date, watching, or t_plus_1",
       "visible_source_date": "string or null",
       "date_evidence": "string or null",
       "timing_evidence": "string or null",
@@ -357,7 +378,8 @@ Before returning JSON, delete every row that fails any of these checks:
 - Its visible or stated source date equals `TARGET_DATE`.
 - Its `date_evidence` comes from that exact source.
 - A Main row has `effective_date_basis: explicit_date` and `timing_evidence: null`.
-- A Watching row has exact same-source Watching wording in `timing_evidence`.
+- A Watching row has `effective_date_basis: watching` and exact same-source Watching wording in `timing_evidence`.
+- A T+1 row has `effective_date_basis: t_plus_1` and the exact `T+1` wording from its own section in `timing_evidence`.
 - Its stock identity and values come from the same ticker row.
 - Its values and image reference come from the same source.
 - It appears in exactly one destination.

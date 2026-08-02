@@ -104,7 +104,7 @@ internal fun InsightsScreen(appState: AppState) {
         // a table of figures and half a row squeezes every price onto two lines.
         var openSession by remember { mutableStateOf<Any?>(null) }
         BoxWithConstraints {
-            val columns = responsiveColumns(minColumnWidth = 360.dp, maxColumns = 3)
+            val columns = responsiveColumns(minColumnWidth = SessionCardMinWidth, maxColumns = 3)
             // Grouped before rendering rather than while: the run of collapsed cards between two
             // open ones is what forms a row, and that cannot be decided one card at a time.
             val bands = remember(report.sessions, openSession) {
@@ -224,7 +224,7 @@ private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
         summaryTone = best?.anyTargetRate.rateTone(),
     ) {
         BoxWithConstraints {
-            val columns = responsiveColumns(minColumnWidth = 320.dp, maxColumns = 2)
+            val columns = responsiveColumns(minColumnWidth = ChannelCardMinWidth, maxColumns = 2)
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 ResponsiveRows(ordered, columns) { channel, cardModifier ->
                     ChannelCard(channel, cardModifier)
@@ -362,7 +362,7 @@ private fun SessionCard(
         // Two stocks across on an unfolded screen: a call card is a heading and eight figures, and
         // one per row leaves half the session card empty.
         BoxWithConstraints {
-            val columns = responsiveColumns(minColumnWidth = 340.dp, maxColumns = 2)
+            val columns = responsiveColumns(minColumnWidth = CallCardMinWidth, maxColumns = 2)
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 ResponsiveRows(run.calls, columns, spacing = Space.s) { call, cardModifier ->
                     ScoredCallRow(call, windowSessions, cardModifier)
@@ -481,7 +481,7 @@ private fun ScoredCallRow(call: ScoredCall, windowSessions: Int, modifier: Modif
 private fun SessionTable(sessions: List<DailySession>) {
     val scroll = rememberScrollState()
     Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.horizontalScroll(scroll).fadingScrollbar(scroll, horizontal = true)) {
+        Row(Modifier.fadingScrollbar(scroll, horizontal = true).horizontalScroll(scroll)) {
             Column {
                 SessionRow("Date", "Open", "High", "Low", "Close", "Volume", header = true)
                 sessions.forEach {
@@ -567,6 +567,17 @@ private fun FigureGroup(title: String, figures: List<@Composable RowScope.() -> 
 
 /** Four prices need this much before the digits start truncating. */
 private val FourFiguresMinWidth = 420.dp
+
+/*
+ * Column thresholds, set against the narrowest screen meant to show two of something.
+ *
+ * A Fold unfolded is 750dp, not the 851dp an emulator's inner display reports. After the rail and
+ * the page padding that leaves 638dp, and less again inside a card - so a 320dp minimum, which
+ * looks generous, silently gives one column on the device it was written for.
+ */
+private val ChannelCardMinWidth = 280.dp
+private val SessionCardMinWidth = 290.dp
+private val CallCardMinWidth = 280.dp
 
 @Composable
 private fun Figure(

@@ -57,8 +57,8 @@ internal fun Screen(
         Column(
             Modifier
                 .fillMaxSize()
-                .verticalScroll(scroll)
                 .fadingScrollbar(scroll)
+                .verticalScroll(scroll)
                 .padding(horizontal = Space.l)
                 .padding(top = Space.l, bottom = if (floatingAction == null) Space.xl else FloatingActionInset),
             verticalArrangement = Arrangement.spacedBy(Space.m),

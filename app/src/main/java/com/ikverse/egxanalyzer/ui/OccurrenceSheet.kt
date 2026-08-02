@@ -34,6 +34,8 @@ internal fun OccurrenceSheet(
     stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     imagePath: String? = null,
+    /** Highest the stock has traded since the call, drawn as the ladder's arrow. */
+    peak: Double? = null,
     onDismiss: () -> Unit,
 ) {
     var viewingImage by remember { mutableStateOf(false) }
@@ -55,7 +57,7 @@ internal fun OccurrenceSheet(
                 }
             }
 
-            PriceLadder(point)
+            PriceLadder(point, peak = peak)
 
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(Space.xl),

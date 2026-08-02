@@ -25,14 +25,23 @@ import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldLayout
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -73,28 +82,79 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
     val separatingFold = layoutInfo?.displayFeatures.orEmpty().filterIsInstance<FoldingFeature>()
         .firstOrNull(FoldingFeature::isSeparating)
 
-    // The suite picks a bar on a phone and a rail on anything wider from the window size class,
-    // which already accounts for a device being unfolded.
-    NavigationSuiteScaffold(
-        navigationSuiteItems = {
-            AppDestination.entries.forEach { destination ->
+    // A bar on a phone and a rail on anything wider, at the same breakpoint the suite used when it
+    // chose for itself. The choice is made here so the rail can be spaced and aligned deliberately;
+    // the components underneath are still Material's own.
+    val rail = windowWidth != WindowWidth.COMPACT
+    NavigationSuiteScaffoldLayout(
+        navigationSuite = { AppNavigation(appState, rail) },
+        navigationSuiteType = if (rail) {
+            NavigationSuiteType.NavigationRail
+        } else {
+            NavigationSuiteType.NavigationBar
+        },
+    ) {
+        // The suite scaffold used to paint this; the layout does not. Without it the window
+        // background shows through behind the status and navigation bars as a pale band.
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            AppContent(activity, appState)
+        }
+    }
+}
+
+/** Icons carry the rail on a glance, so they are a size up from the Material default of 24dp. */
+private val NavigationIconSize = 28.dp
+
+/**
+ * How far the rail's items sit below the top of the window.
+ *
+ * A rail item is an icon stacked over a label, so left at the top its icon lands beside the blank
+ * space above the page title rather than beside the title itself. This drops the column until the
+ * first icon meets the heading next to it.
+ */
+private val RailTopInset = 14.dp
+
+/** Room between rail items, where Material leaves 4dp and the four destinations read as one block. */
+private val RailItemGap = 16.dp
+
+@Composable
+private fun AppNavigation(appState: AppState, rail: Boolean) {
+    if (rail) {
+        NavigationRail {
+            Spacer(Modifier.height(RailTopInset))
+            AppDestination.entries.forEachIndexed { index, destination ->
+                if (index > 0) Spacer(Modifier.height(RailItemGap))
                 val selected = appState.destination == destination
-                item(
+                NavigationRailItem(
                     selected = selected,
                     onClick = { appState.navigate(destination) },
-                    icon = {
-                        Icon(
-                            if (selected) destination.selectedIcon else destination.icon,
-                            contentDescription = destination.label,
-                        )
-                    },
+                    icon = { NavigationIcon(destination, selected) },
                     label = { Text(destination.label) },
                 )
             }
-        },
-    ) {
-        AppContent(activity, appState)
+        }
+    } else {
+        NavigationBar {
+            AppDestination.entries.forEach { destination ->
+                val selected = appState.destination == destination
+                NavigationBarItem(
+                    selected = selected,
+                    onClick = { appState.navigate(destination) },
+                    icon = { NavigationIcon(destination, selected) },
+                    label = { Text(destination.label) },
+                )
+            }
+        }
     }
+}
+
+@Composable
+private fun NavigationIcon(destination: AppDestination, selected: Boolean) {
+    Icon(
+        if (selected) destination.selectedIcon else destination.icon,
+        contentDescription = destination.label,
+        modifier = Modifier.size(NavigationIconSize),
+    )
 }
 
 @Composable

@@ -8,6 +8,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -128,9 +129,9 @@ class PriceRepository(
 
         val days = buildList {
             for (index in 0 until stamps.length()) {
-                val high = highs?.optDouble(index)?.takeUnless(Double::isNaN)
-                val low = lows?.optDouble(index)?.takeUnless(Double::isNaN)
-                // A session still open reports nulls; it is not history yet.
+                val high = highs?.price(index)
+                val low = lows?.price(index)
+                // A session still open reports nulls, and sometimes zeros; it is not history yet.
                 if (high == null || low == null) continue
                 add(
                     DailySession(
@@ -140,9 +141,9 @@ class PriceRepository(
                             .toLocalDate(),
                         high = high,
                         low = low,
-                        close = closes?.optDouble(index)?.takeUnless(Double::isNaN),
+                        close = closes?.price(index),
                         volume = volumes?.optDouble(index)?.takeUnless(Double::isNaN),
-                        open = opens?.optDouble(index)?.takeUnless(Double::isNaN),
+                        open = opens?.price(index),
                     ),
                 )
             }
@@ -166,3 +167,14 @@ class PriceRepository(
         const val CONCURRENCY = 4
     }
 }
+
+/**
+ * One price from a Yahoo series, or null when the session has not really traded yet.
+ *
+ * A session still in progress comes back as null on some fields and as **zero** on others. Zero was
+ * being stored as a real price, and a low of zero is under every stop loss ever printed, so every
+ * call on that stock was judged stopped by a session that had not happened. No EGX stock trades at
+ * or below nothing, which makes this safe to read as "not known".
+ */
+private fun JSONArray.price(index: Int): Double? =
+    optDouble(index).takeUnless { it.isNaN() || it <= 0.0 }

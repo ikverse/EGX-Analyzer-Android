@@ -217,4 +217,130 @@ class ScoringTest {
         assertEquals(30, Scoring.clampWindow(90))
         assertEquals(10, Scoring.clampWindow(10))
     }
+
+    /**
+     * A session still in progress can arrive with zeros where its high and low belong.
+     *
+     * Twelve such rows were stored on 2 August 2026 and every call on those stocks was judged
+     * stopped, because nothing trades below nothing. The window they poisoned was the current one,
+     * so every source's record was being marked down by a session that had not happened yet.
+     */
+    @Test
+    fun `a session priced at zero neither stops a call nor reaches its target`() {
+        val live = DailySession("TEST", start.plusDays(1), high = 0.0, low = 0.0, close = 11.0, volume = 0.0, open = 0.0)
+
+        val scored = Scoring.score(
+            sessions = listOf(sessions(10.0 to 9.5).single(), live),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+
+        assertEquals(Outcome.OPEN, scored.outcome)
+        assertNull(scored.settledOn)
+    }
+
+    @Test
+    fun `a zero session is not counted as the peak or the trough`() {
+        val live = DailySession("TEST", start.plusDays(1), high = 0.0, low = 0.0, close = 11.0, volume = 0.0, open = 0.0)
+
+        val scored = Scoring.score(
+            sessions = listOf(sessions(10.0 to 9.5).single(), live),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+
+        assertEquals(10.0, scored.peakHigh!!, 0.001)
+        assertEquals(9.5, scored.troughLow!!, 0.001)
+    }
+
+    @Test
+    fun `only the bad half of a session is discarded`() {
+        // The feed reports a real high and a zero low on the same row often enough to matter.
+        val half = DailySession("TEST", start.plusDays(1), high = 12.5, low = 0.0, close = 12.0, volume = 1.0, open = 11.0)
+
+        val scored = Scoring.score(
+            sessions = listOf(sessions(10.0 to 9.5).single(), half),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+
+        assertEquals(Outcome.PARTIAL_HIT, scored.outcome)
+        assertEquals(12.5, scored.peakHigh!!, 0.001)
+    }
+
+    /**
+     * A stop is confirmed by a break, not by a touch.
+     *
+     * The sources print the rule on the cards - the stop "يتاكد بالكسر بنسبة 2%" - and judging an
+     * exact touch as a loss was stricter than what they publish. Across the saved calls it read 26
+     * stop-outs where there were 7, and called six reached targets losses.
+     */
+    @Test
+    fun `touching the stop exactly is not a stop out`() {
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 10.2 to 9.0),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+
+        assertEquals(Outcome.OPEN, scored.outcome)
+    }
+
+    @Test
+    fun `a break shallower than the tolerance is not a stop out`() {
+        // 8.83 is 1.9% under a stop of 9.00.
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 10.2 to 8.83),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+
+        assertEquals(Outcome.OPEN, scored.outcome)
+    }
+
+    @Test
+    fun `a break past the tolerance stops the call`() {
+        // 8.81 is 2.1% under a stop of 9.00.
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 10.2 to 8.81),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+
+        assertEquals(Outcome.STOPPED, scored.outcome)
+        assertEquals(start.plusDays(1), scored.settledOn)
+    }
+
+    @Test
+    fun `a stopped call is still measured to the printed stop`() {
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 10.2 to 8.0),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+
+        assertEquals(Outcome.STOPPED, scored.outcome)
+        // From the middle of the 9.8-10.0 band down to 9.00, not to the level that triggered it.
+        assertEquals(-9.09, scored.returnPct!!, 0.01)
+    }
+
+    @Test
+    fun `a target is still only reached at the printed level`() {
+        // 11.8 is within 2% of the 12.00 target, which buys it nothing.
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.8, 11.8 to 10.5),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+
+        assertEquals(Outcome.OPEN, scored.outcome)
+    }
 }

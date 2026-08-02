@@ -37,7 +37,12 @@ import com.ikverse.egxanalyzer.model.RecommendationDataPoint
  * which matters because the app's whole claim is that every number is traceable to a source.
  */
 @Composable
-internal fun RecommendationCard(stock: ConsolidatedRecommendation, modifier: Modifier = Modifier) {
+internal fun RecommendationCard(
+    stock: ConsolidatedRecommendation,
+    modifier: Modifier = Modifier,
+    /** Highest the stock has traded since the call, drawn as the ladder's arrow. */
+    peak: Double? = null,
+) {
     var expanded by remember { mutableStateOf(false) }
     val headline = stock.dataPoints.firstOrNull()
 
@@ -50,7 +55,7 @@ internal fun RecommendationCard(stock: ConsolidatedRecommendation, modifier: Mod
             StockHeader(stock)
 
             if (headline != null) {
-                PriceLadder(headline)
+                PriceLadder(headline, peak = peak)
                 LevelRow(headline)
                 headline.riskRewardRatio()?.let { ratio ->
                     Text(

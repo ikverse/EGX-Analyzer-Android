@@ -260,6 +260,22 @@ class AppState(
     var pricesRefreshing by mutableStateOf(false)
         private set
 
+    /**
+     * The highest a stock has traded since a call was made, or null when nothing prices it yet.
+     *
+     * Read from the scored calls rather than recomputed, so a price ladder can never disagree with
+     * the figure Insights reports for the same call.
+     */
+    fun peakSince(ticker: String, openedOn: LocalDate?): Double? {
+        if (openedOn == null) return null
+        val wanted = Scoring.normalizeTicker(ticker)
+        return performance.sessions
+            .asSequence()
+            .flatMap { it.calls.asSequence() }
+            .firstOrNull { Scoring.normalizeTicker(it.ticker) == wanted && it.openedOn == openedOn }
+            ?.peakHigh
+    }
+
     init {
         appScope.launch {
             recomputePerformance()
@@ -840,9 +856,24 @@ class AppState(
         ) {
             syncTelegramSources()
         }
+        // A caption is part of its photo or voice note, not a text source of its own, so it is
+        // selected by whatever selected the media it belongs to. Filtering it as text meant that
+        // with only Images chosen every caption was dropped here - the model read each card with
+        // none of the words the channel wrote above it, and the phrase filter below, which reads
+        // text and nothing else, could never fire.
+        val mediaSourceIds = inputs.mapNotNull { input ->
+            when (input) {
+                is AnalysisInput.Image ->
+                    input.sourceId.takeIf { AnalysisContentType.IMAGES in selectedContentTypes }
+                is AnalysisInput.Voice ->
+                    input.sourceId.takeIf { AnalysisContentType.AUDIO in selectedContentTypes }
+                is AnalysisInput.Text -> null
+            }
+        }.toSet()
         val contentSelectedInputs = inputs.filter {
             when (it) {
-                is AnalysisInput.Text -> AnalysisContentType.TEXT in selectedContentTypes
+                is AnalysisInput.Text -> it.sourceId in mediaSourceIds ||
+                    AnalysisContentType.TEXT in selectedContentTypes
                 is AnalysisInput.Image -> AnalysisContentType.IMAGES in selectedContentTypes
                 is AnalysisInput.Voice -> AnalysisContentType.AUDIO in selectedContentTypes
             }

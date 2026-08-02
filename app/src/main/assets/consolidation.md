@@ -1,4 +1,4 @@
-<!-- EGX_PROMPT_SCHEMA: 6 -->
+<!-- EGX_PROMPT_SCHEMA: 7 -->
 # EGX recommendation consolidation
 
 Every source in this run has already been read. You are given the complete list of extracted
@@ -62,7 +62,7 @@ with, unchanged.
       "data_points": [
         {
           "date": "YYYY-MM-DD",
-          "effective_date_basis": "explicit_date or watching",
+          "effective_date_basis": "explicit_date, watching, or t_plus_1",
           "visible_source_date": "string or null",
           "date_evidence": "string or null",
           "timing_evidence": "string or null",

@@ -124,6 +124,9 @@ data class RecommendationDataPoint(
     val notesArabic: String?,
 ) {
     val isWatching: Boolean get() = effectiveDateBasis == "watching"
+
+    /** Named on the card itself as a T+1 trade, between today's close and tomorrow's open. */
+    val isTPlusOne: Boolean get() = effectiveDateBasis == "t_plus_1"
 }
 
 /** One consolidated stock from `top_consolidated_recommendations`. */

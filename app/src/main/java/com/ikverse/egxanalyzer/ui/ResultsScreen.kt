@@ -57,6 +57,7 @@ import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SavedAnalysis
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -74,27 +75,83 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                 detail = "Run an analysis and it will be stored here with the sources behind it.",
             )
         } else {
+            // Which run is open lives here rather than in the card, because a report needs the whole
+            // row to show its table - half of one is under the width the table needs and falls back
+            // to cards - and a card cannot give itself a row.
+            var openRun by remember { mutableStateOf(appState.pendingResultId) }
+            // A run arriving from a notification opens itself, whether the screen was already
+            // showing or not.
+            LaunchedEffect(appState.pendingResultId) {
+                appState.pendingResultId?.let { openRun = it }
+            }
             BoxWithConstraints {
-              val columns = responsiveColumns(minColumnWidth = 380.dp, maxColumns = 2)
-              Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                ResponsiveRows(appState.savedResults, columns) { saved, cardModifier ->
-                SavedAnalysisCard(
-                    modifier = cardModifier,
-                    saved = saved,
-                    // Expanding also selects, so the companion pane follows what is open.
-                    onExpand = { appState.selectResult(saved) },
-                    highlighted = saved.id == appState.pendingResultId,
-                    onHighlightShown = { appState.consumePendingResult() },
-                    onShare = { shareReport(activity, appState.reportFor(saved)) },
-                    onDelete = { appState.deleteResult(saved) },
-                    report = { appState.reportFor(saved) },
-                )
+                val columns = responsiveColumns(minColumnWidth = SavedRunMinWidth, maxColumns = 2)
+                // Grouped before rendering rather than while: the run of collapsed cards between
+                // two open ones is what forms a row, and that cannot be decided one card at a time.
+                val bands = remember(appState.savedResults, openRun) {
+                    buildList {
+                        val closed = mutableListOf<SavedAnalysis>()
+                        appState.savedResults.forEach { saved ->
+                            if (saved.id == openRun) {
+                                if (closed.isNotEmpty()) add(closed.toList() to false)
+                                closed.clear()
+                                add(listOf(saved) to true)
+                            } else {
+                                closed += saved
+                            }
+                        }
+                        if (closed.isNotEmpty()) add(closed.toList() to false)
+                    }
                 }
-              }
+
+                @Composable
+                fun card(saved: SavedAnalysis, expanded: Boolean, cardModifier: Modifier) {
+                    SavedAnalysisCard(
+                        modifier = cardModifier,
+                        saved = saved,
+                        expanded = expanded,
+                        onExpandedChange = { open ->
+                            openRun = if (open) saved.id else null
+                            // Expanding also selects, so the companion pane follows what is open.
+                            if (open) appState.selectResult(saved)
+                        },
+                        highlighted = saved.id == appState.pendingResultId,
+                        onHighlightShown = { appState.consumePendingResult() },
+                        onShare = { shareReport(activity, appState.reportFor(saved)) },
+                        onDelete = { appState.deleteResult(saved) },
+                        report = { appState.reportFor(saved) },
+                        peakFor = appState::peakSince,
+                    )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                    bands.forEach { (band, open) ->
+                        if (open) {
+                            card(band.single(), expanded = true, cardModifier = Modifier.fillMaxWidth())
+                        } else {
+                            ResponsiveRows(band, columns) { saved, cardModifier ->
+                                card(saved, expanded = false, cardModifier = cardModifier)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
+
+/**
+ * What a saved run needs before two of them share a row.
+ *
+ * An unfolded Fold is 750dp, which leaves 638dp once the rail and page padding are taken, so the
+ * old 380dp minimum asked for 760dp and never once got it on the screen it was meant for.
+ */
+private val SavedRunMinWidth = 300.dp
+
+/** The card's ladder draws the headline occurrence, so its date is the date of the call. */
+private fun ConsolidatedRecommendation.peak(
+    peakFor: (String, LocalDate?) -> Double?,
+): Double? = peakFor(stockCode, dataPoints.firstOrNull()?.date)
 
 /**
  * Saved runs the store could not read back.
@@ -147,17 +204,20 @@ private fun UnreadableNotice(count: Int) {
 private fun SavedAnalysisCard(
     modifier: Modifier = Modifier,
     saved: SavedAnalysis,
-    /** Opened from a notification: it starts expanded and its edge flashes briefly. */
+    /** Held by the screen, which needs it to give an open report a row of its own. */
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    /** Opened from a notification: its edge flashes briefly. */
     highlighted: Boolean = false,
     onHighlightShown: () -> Unit = {},
-    onExpand: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit,
     report: () -> AnalysisReport,
+    /** Highest a stock has traded since the call, for the ladder's arrow. */
+    peakFor: (String, LocalDate?) -> Double? = { _, _ -> null },
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var showReport by remember { mutableStateOf(false) }
-    var expanded by remember { mutableStateOf(highlighted) }
     val stockCount = saved.result.consolidated.size.takeIf { it > 0 }
         ?: saved.result.recommendations.map(RecommendationResult::ticker).distinct().size
 
@@ -237,10 +297,7 @@ private fun SavedAnalysisCard(
             )
 
             FilledTonalButton(
-                onClick = {
-                    expanded = !expanded
-                    if (expanded) onExpand()
-                },
+                onClick = { onExpandedChange(!expanded) },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(if (expanded) "Hide recommendations" else "View recommendations")
@@ -254,7 +311,7 @@ private fun SavedAnalysisCard(
                 }
             }
 
-            AnimatedVisibility(expanded) { ResultDetail(saved) }
+            AnimatedVisibility(expanded) { ResultDetail(saved, peakFor) }
         }
     }
 }
@@ -269,7 +326,7 @@ private fun shareReport(activity: Activity, report: AnalysisReport) {
 }
 
 @Composable
-private fun ResultDetail(saved: SavedAnalysis) {
+private fun ResultDetail(saved: SavedAnalysis, peakFor: (String, LocalDate?) -> Double?) {
     var detail by remember { mutableStateOf<Pair<ConsolidatedRecommendation, RecommendationDataPoint>?>(null) }
     var showTrace by remember { mutableStateOf(false) }
     var openImage by remember { mutableStateOf<Int?>(null) }
@@ -297,7 +354,9 @@ private fun ResultDetail(saved: SavedAnalysis) {
                     // A sixteen-column table on a cover screen is a scroll bar with numbers behind
                     // it. The same figures as cards stay readable without any horizontal scrolling.
                     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                        saved.result.consolidated.forEach { RecommendationCard(it) }
+                        saved.result.consolidated.forEach { stock ->
+                            RecommendationCard(stock, peak = stock.peak(peakFor))
+                        }
                     }
                 }
             }
@@ -316,6 +375,7 @@ private fun ResultDetail(saved: SavedAnalysis) {
             stock = stock,
             point = point,
             imagePath = saved.result.imagePathFor(point.sourceImageRef),
+            peak = peakFor(stock.stockCode, point.date),
             onDismiss = { detail = null },
         )
     }

@@ -23,6 +23,19 @@ object Scoring {
         sessions.coerceIn(MIN_WINDOW_SESSIONS, MAX_WINDOW_SESSIONS)
 
     /**
+     * How far below the stop a session must trade before the call counts as stopped out.
+     *
+     * The sources print the rule on the cards themselves - "ننصح بإيقاف الخسائر المحدد مع العلم أنة
+     * يتاكد بالكسر بنسبة 2%", the stop is confirmed by a 2% break - and judging them on an exact
+     * touch instead was stricter than the rule they publish. Across the saved calls it turned 26
+     * stop-outs into 7, and six of the calls it had recorded as losses had reached a target.
+     *
+     * Only the stop is given room. A target loosened the same way would credit a source for a level
+     * it never traded at.
+     */
+    const val STOP_BREAK_TOLERANCE = 0.02
+
+    /**
      * One spelling per stock.
      *
      * Sources quote the same company as both AMOC and AMOC.CA, and treating those as two stocks
@@ -50,7 +63,10 @@ object Scoring {
         windowSessions: Int,
     ): Scored {
         val window = clampWindow(windowSessions)
-        val considered = sessions.take(window)
+        // A session in progress can arrive with a high or low of zero. Stored once, it stopped
+        // every call on that stock - nothing trades below nothing - and reported a peak of zero
+        // besides. A price that is not positive is not a price, whatever the feed says.
+        val considered = sessions.map(DailySession::traded).take(window)
         if (considered.isEmpty()) return Scored(Outcome.UNPRICED, null, null, 0, null, null, null, null, null)
 
         // A call quoting only one target has nothing further to reach, so that target is the full
@@ -88,7 +104,8 @@ object Scoring {
             if (entered) {
                 val hitFull = reached(day.high, fullTarget)
                 val hitPartial = partialTarget != null && reached(day.high, partialTarget)
-                val hitStop = day.low != null && stopLoss != null && day.low <= stopLoss
+                val hitStop = day.low != null && stopLoss != null &&
+                    day.low <= stopLoss * (1 - STOP_BREAK_TOLERANCE)
                 val hitAnyTarget = hitFull || hitPartial
 
                 // Nothing has settled yet, so an unorderable session cannot be resolved either way.
@@ -246,7 +263,22 @@ data class DailySession(
     val volume: Double?,
     /** Null for sessions stored before the open was recorded; a refresh fills it in. */
     val open: Double? = null,
-)
+) {
+    /**
+     * The same session with any price that is not positive read as unknown.
+     *
+     * A session still in progress can come back with zeros where its high and low belong. Twelve
+     * such rows were stored on 2 August, and every call on those stocks was judged stopped by a
+     * low of zero. Rows already on disk are cleaned on the way in rather than trusted.
+     */
+    val traded: DailySession
+        get() = copy(
+            high = high?.takeIf { it > 0.0 },
+            low = low?.takeIf { it > 0.0 },
+            close = close?.takeIf { it > 0.0 },
+            open = open?.takeIf { it > 0.0 },
+        )
+}
 
 data class Scored(
     val outcome: Outcome,

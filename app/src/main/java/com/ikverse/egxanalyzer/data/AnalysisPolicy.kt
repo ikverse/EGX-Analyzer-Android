@@ -8,8 +8,25 @@ data class FilteredAnalysisInputs(
     val excluded: List<ExcludedSource>,
 )
 
+/**
+ * Decides what can be settled from a source's own words before anything is sent.
+ *
+ * Three outcomes, not two: a marker or a custom exclude phrase drops the source, an include phrase
+ * keeps it whatever else it says, and anything the words do not settle goes to the model. Channels
+ * caption their cards, and a caption saying the call is from the previous session is worth more
+ * than the picture - it costs nothing to read and saves an image from being sent at all.
+ */
 object AnalysisPolicy {
     private val arabicDiacritics = Regex("[\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED\\u0640]")
+
+    /**
+     * Emoji, variation selectors and joiners, which these captions end and interrupt phrases with.
+     *
+     * Replaced with a space rather than removed, so a marker split by one still reads as two words
+     * and a marker followed by one is not glued to whatever comes next.
+     */
+    private val symbols = Regex("[\\p{So}\\p{Sk}\\p{Cf}\\uFE0E\\uFE0F]")
+    private val whitespace = Regex("\\s+")
     private val previousRecommendationMarkers = listOf(
         "السابق",
         "توصية سابقة",
@@ -77,4 +94,7 @@ object AnalysisPolicy {
         .replace('آ', 'ا')
         .replace('ى', 'ي')
         .replace('ة', 'ه')
+        .let { symbols.replace(it, " ") }
+        .let { whitespace.replace(it, " ") }
+        .trim()
 }
