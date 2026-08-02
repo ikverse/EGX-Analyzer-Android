@@ -213,7 +213,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             shape = MaterialTheme.shapes.large,
         ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.CalendarMonth, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
@@ -290,7 +290,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
             )
             Row(
                 modifier = Modifier.fillMaxWidth().scrollableRow(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 Button(onClick = {
                     appState.addText(textSource)
@@ -319,7 +319,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
             }
         }
         ExpandableSection("Cloud model", Icons.Outlined.SmartToy) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Text(
                     appState.cloudConfiguration.provider.displayName,
                     color = MaterialTheme.colorScheme.primary,
@@ -333,7 +333,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth().scrollableRow(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     OutlinedButton(
                         onClick = { scope.launch { appState.loadCloudModels() } },
@@ -437,7 +437,7 @@ private fun SourceCard(input: AnalysisInput, onRemove: () -> Unit) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = MaterialTheme.shapes.large,
     ) {
-        Column(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(Space.m)) {
             Text(
                 when (input) {
                     is AnalysisInput.Text -> "Text · ${input.value.take(100)}"
@@ -548,7 +548,7 @@ private fun SourcePreview(appState: AppState, scope: kotlinx.coroutines.Coroutin
                 Modifier
                     .heightIn(max = SourceListMaxHeight)
                     .scrollableColumn(),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 sources.forEach { source ->
                     Column {
@@ -598,7 +598,7 @@ private fun DuplicateAnalysisDialog(appState: AppState) {
         onDismissRequest = appState::dismissDuplicateWarning,
         title = { Text("This session is already analysed") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Text(
                     "A report for ${duplicate.result.recommendationTargetDate} already covers " +
                         "exactly these chats, run $ranAt.",

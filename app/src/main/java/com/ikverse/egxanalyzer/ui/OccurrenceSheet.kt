@@ -44,11 +44,11 @@ internal fun OccurrenceSheet(
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .padding(horizontal = Space.l)
+                .padding(bottom = Space.xl),
+            verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                 Text(stock.stockCode, style = MaterialTheme.typography.headlineSmall)
                 stock.stockNameArabic?.let {
                     Text(it, style = MaterialTheme.typography.bodyMedium)
@@ -58,15 +58,15 @@ internal fun OccurrenceSheet(
             PriceLadder(point)
 
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.xl),
+                verticalArrangement = Arrangement.spacedBy(Space.m),
             ) {
-                Figure("Entry", entryText(point), MaterialTheme.colorScheme.primary)
-                point.target1?.let { Figure("Target 1", withPercent(it, point.returnTp1Pct), MaterialTheme.colorScheme.tertiary) }
-                point.target2?.let { Figure("Target 2", withPercent(it, point.returnTp2Pct), MaterialTheme.colorScheme.tertiary) }
-                point.stopLoss?.let { Figure("Stop", withPercent(it, point.riskPct), MaterialTheme.colorScheme.error) }
-                point.support?.let { Figure("Support", plain(it), MaterialTheme.colorScheme.onSurface) }
-                point.resistance?.let { Figure("Resistance", plain(it), MaterialTheme.colorScheme.onSurface) }
+                Figure("Entry", entryText(point), PriceRole.entry)
+                point.target1?.let { Figure("Target 1", withPercent(it, point.returnTp1Pct), PriceRole.target) }
+                point.target2?.let { Figure("Target 2", withPercent(it, point.returnTp2Pct), PriceRole.target) }
+                point.stopLoss?.let { Figure("Stop loss", withPercent(it, point.riskPct), PriceRole.stop) }
+                point.support?.let { Figure("Support", plain(it), PriceRole.market) }
+                point.resistance?.let { Figure("Resistance", plain(it), PriceRole.market) }
             }
 
             point.riskRewardRatio()?.let {
@@ -131,10 +131,10 @@ private fun Figure(label: String, value: String, tone: androidx.compose.ui.graph
 }
 
 private fun plain(value: Double): String =
-    if (value == value.toLong().toDouble()) value.toLong().toString() else value.toString()
+    formatPrice(value)
 
 private fun withPercent(value: Double, percent: Double?): String =
-    if (percent == null) plain(value) else "${plain(value)}  (${"%+.1f".format(percent)}%)"
+    if (percent == null) plain(value) else "${plain(value)}  (${formatPercent(percent)})"
 
 private fun entryText(point: RecommendationDataPoint): String {
     val low = point.buyPriceLow

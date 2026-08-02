@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -95,11 +96,47 @@ internal fun InsightsScreen(appState: AppState) {
         ChannelRanking(report.channels)
         // One collapsed card per row wasted most of a wide screen: each held a single line of
         // text across the full width. The count is derived, so an untested width still behaves.
+        // Collapsed cards share a row; an open one takes the whole width, because its contents are
+        // a table of figures and half a row squeezes every price onto two lines.
+        var openSession by remember { mutableStateOf<Any?>(null) }
         BoxWithConstraints {
             val columns = responsiveColumns(minColumnWidth = 360.dp, maxColumns = 3)
+            // Grouped before rendering rather than while: the run of collapsed cards between two
+            // open ones is what forms a row, and that cannot be decided one card at a time.
+            val bands = remember(report.sessions, openSession) {
+                buildList {
+                    val run = mutableListOf<ScoredSession>()
+                    report.sessions.forEach { session ->
+                        if (openSession == session.key()) {
+                            if (run.isNotEmpty()) add(run.toList() to false)
+                            run.clear()
+                            add(listOf(session) to true)
+                        } else {
+                            run += session
+                        }
+                    }
+                    if (run.isNotEmpty()) add(run.toList() to false)
+                }
+            }
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                ResponsiveRows(report.sessions, columns) { session ->
-                    Box(Modifier.weight(1f)) { SessionCard(session, report.windowSessions) }
+                bands.forEach { (band, open) ->
+                    if (open) {
+                        SessionCard(
+                            band.single(), report.windowSessions,
+                            expanded = true,
+                            onExpandedChange = { openSession = null },
+                        )
+                    } else {
+                        ResponsiveRows(band, columns) { session ->
+                            Box(Modifier.weight(1f)) {
+                                SessionCard(
+                                    session, report.windowSessions,
+                                    expanded = false,
+                                    onExpandedChange = { openSession = session.key() },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -160,9 +197,9 @@ private fun Headline(report: PerformanceReport) {
                 report.judged.toString() to "Calls judged",
                 report.tracked.toString() to "Calls tracked",
             )
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.l)) {
                 tiles.chunked(perRow).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                         row.forEach { (value, label) ->
                             StatTile(
                                 value = value,
@@ -222,8 +259,8 @@ private fun OutcomeBreakdown(report: PerformanceReport) {
             "${report.byOutcome[Outcome.STOPPED] ?: 0} stopped · ${report.tracked - judged} pending",
     ) {
         FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             Outcome.entries.forEach { outcome ->
                 OutcomeChip(outcome, report.byOutcome[outcome] ?: 0)
@@ -237,7 +274,7 @@ private fun OutcomeChip(outcome: Outcome, count: Int) {
     Surface(color = outcome.container(), shape = CircleShape) {
         Row(
             Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -286,7 +323,7 @@ private fun ChannelRanking(channels: List<ChannelScore>) {
     ) {
         channels.forEachIndexed { index, channel ->
             if (index > 0) HorizontalDivider()
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         channel.channel,
@@ -320,9 +357,17 @@ private fun ChannelRanking(channels: List<ChannelScore>) {
     }
 }
 
+/** Identifies a session across recompositions, so the layout knows which card is open. */
+private fun ScoredSession.key(): Any = targetDate ?: lastRunAt
+
 /** One trading session: every call made for it, and how each turned out. */
 @Composable
-private fun SessionCard(run: ScoredSession, windowSessions: Int) {
+private fun SessionCard(
+    run: ScoredSession,
+    windowSessions: Int,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+) {
     val ranAt = remember(run.lastRunAt) {
         DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm")
             .withZone(ZoneId.systemDefault())
@@ -337,6 +382,8 @@ private fun SessionCard(run: ScoredSession, windowSessions: Int) {
             "${run.fullHits} full · ${run.partialHits} partial · ${run.stopped} stopped" +
             if (run.pending > 0) " · ${run.pending} pending" else "",
         summaryTone = if (run.fullHits > 0) MaterialTheme.colorScheme.primary else null,
+        expandedState = expanded,
+        onExpandedChange = onExpandedChange,
     ) {
         // Where the card's contents came from. Built from more than one run it is not a single
         // analysis, and reading it as one would misplace the responsibility for a call.
@@ -366,7 +413,7 @@ private fun ScoredCallRow(call: ScoredCall, windowSessions: Int) {
         ),
         shape = MaterialTheme.shapes.medium,
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(call.ticker, style = MaterialTheme.typography.titleSmall)
@@ -401,29 +448,41 @@ private fun ScoredCallRow(call: ScoredCall, windowSessions: Int) {
             }
             // Two groups rather than eight loose figures: what the channel asked for, and what the
             // market did about it. Colour says which is which without reading the labels.
-            FigureGroup("The call") {
-                Figure("Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry)
-                Figure("Target 1", formatPrice(call.target1), Modifier.weight(1f), tone = PriceRole.target)
-                Figure("Target 2", formatPrice(call.target2), Modifier.weight(1f), tone = PriceRole.target)
-                Figure("Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f), tone = PriceRole.stop)
-            }
-            FigureGroup("What happened") {
-                Figure(
-                    "Peak since call", formatPrice(call.peakHigh), Modifier.weight(1f),
-                    tone = PriceRole.market, on = call.peakOn,
-                )
-                Figure(
-                    "Trough since call", formatPrice(call.troughLow), Modifier.weight(1f),
-                    tone = PriceRole.market, on = call.troughOn,
-                )
-                Figure("Sessions elapsed", call.sessionsElapsed.toString(), Modifier.weight(1f))
-                Figure(
-                    "Return",
-                    call.returnPct.signedPercent(),
-                    Modifier.weight(1f),
-                    tone = call.returnPct.returnTone(),
-                )
-            }
+            FigureGroup(
+                "The call",
+                listOf(
+                    { Figure("Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry) },
+                    { Figure("Target 1", formatPrice(call.target1), Modifier.weight(1f), tone = PriceRole.target) },
+                    { Figure("Target 2", formatPrice(call.target2), Modifier.weight(1f), tone = PriceRole.target) },
+                    { Figure("Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f), tone = PriceRole.stop) },
+                ),
+            )
+            FigureGroup(
+                "What happened",
+                listOf(
+                    {
+                        Figure(
+                            "Peak since call", formatPrice(call.peakHigh), Modifier.weight(1f),
+                            tone = PriceRole.market, on = call.peakOn,
+                        )
+                    },
+                    {
+                        Figure(
+                            "Trough since call", formatPrice(call.troughLow), Modifier.weight(1f),
+                            tone = PriceRole.market, on = call.troughOn,
+                        )
+                    },
+                    { Figure("Sessions elapsed", call.sessionsElapsed.toString(), Modifier.weight(1f)) },
+                    {
+                        Figure(
+                            "Return",
+                            call.returnPct.signedPercent(),
+                            Modifier.weight(1f),
+                            tone = call.returnPct.returnTone(),
+                        )
+                    },
+                ),
+            )
             if (call.sessions.isNotEmpty()) {
                 TextButton(onClick = { expanded = !expanded }) {
                     Text(
@@ -508,7 +567,7 @@ private fun ScoredCall.qualifier(windowSessions: Int): String? = when {
  * columns at 443dp truncates every price it is supposed to show.
  */
 @Composable
-private fun FigureGroup(title: String, figures: @Composable RowScope.() -> Unit) {
+private fun FigureGroup(title: String, figures: List<@Composable RowScope.() -> Unit>) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Text(
             title.uppercase(),
@@ -516,11 +575,15 @@ private fun FigureGroup(title: String, figures: @Composable RowScope.() -> Unit)
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         BoxWithConstraints {
-            if (maxWidth >= FourFiguresMinWidth) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.m), content = figures)
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) { figures() }
+            // Taken as a list rather than a row of slots, because wrapping means splitting them -
+            // and a lambda that draws four figures cannot be cut in half.
+            val perRow = if (maxWidth >= FourFiguresMinWidth) figures.size else 2
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                figures.chunked(perRow).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                        row.forEach { figure -> figure() }
+                        repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
                 }
             }
         }

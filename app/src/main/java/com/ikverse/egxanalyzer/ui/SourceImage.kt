@@ -187,7 +187,7 @@ internal fun SourceImageViewer(path: String?, reference: Int?, onDismiss: () -> 
                 )
             }
 
-            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd).padding(Space.m)) {
                 Text("Close", color = Color.White)
             }
         }

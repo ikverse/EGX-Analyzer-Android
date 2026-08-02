@@ -37,7 +37,8 @@ internal fun PriceLadder(point: RecommendationDataPoint, modifier: Modifier = Mo
     if (span <= 0.0) return
 
     val stopColor = MaterialTheme.colorScheme.error
-    val entryColor = MaterialTheme.colorScheme.primary
+    // Entry is the reference the other bands are read against, so it stays neutral.
+    val entryColor = MaterialTheme.colorScheme.onSurface
     val targetColor = MaterialTheme.colorScheme.tertiary
     val trackColor = MaterialTheme.colorScheme.surfaceVariant
 

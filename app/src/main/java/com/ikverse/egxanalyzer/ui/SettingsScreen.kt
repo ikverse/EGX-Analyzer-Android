@@ -112,9 +112,10 @@ internal fun SettingsScreen(appState: AppState) {
             "AI analysis",
             icon = Icons.Outlined.SmartToy,
             summary = "${appState.cloudConfiguration.provider.displayName} · ${appState.cloudConfiguration.model.ifBlank { "no model" }}",
+            contentMaxWidth = FormWidth,
             summaryTone = if (appState.credentialVerified == false) MaterialTheme.colorScheme.error else null,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Box {
                     TextButton(onClick = { providerMenuOpen = true }) {
                         Text("Provider: ${appState.cloudConfiguration.provider.displayName}")
@@ -182,8 +183,8 @@ internal fun SettingsScreen(appState: AppState) {
                     singleLine = true,
                 )
                 FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     Button(
                         enabled = appState.busyLabel == null,
@@ -227,8 +228,9 @@ internal fun SettingsScreen(appState: AppState) {
             "Prompt and validation",
             icon = Icons.Outlined.Rule,
             summary = if (appState.appPreferences.customSystemPrompt.isBlank()) "Canonical prompt" else "Custom prompt",
+            contentMaxWidth = FormWidth,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Text(
                     "Leave the system prompt blank to use the protected evidence-backed default.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -281,7 +283,7 @@ internal fun SettingsScreen(appState: AppState) {
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth().scrollableRow(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     Button(onClick = {
                         appState.updatePromptCustomization(
@@ -332,8 +334,9 @@ internal fun SettingsScreen(appState: AppState) {
             "Appearance",
             icon = Icons.Outlined.Palette,
             summary = appState.appPreferences.themeMode.displayName,
+            contentMaxWidth = FormWidth,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Box {
                     OutlinedButton(onClick = { themeMenuOpen = true }) {
                         Text("Theme: ${appState.appPreferences.themeMode.displayName}")
@@ -364,8 +367,9 @@ internal fun SettingsScreen(appState: AppState) {
             "Analysis defaults",
             icon = Icons.Outlined.Tune,
             summary = "${appState.appPreferences.analysisLanguage.displayName} · ${appState.appPreferences.defaultContentTypes.size} content types",
+            contentMaxWidth = FormWidth,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Box {
                     OutlinedButton(onClick = { languageMenuOpen = true }) {
                         Text("Output language: ${appState.appPreferences.analysisLanguage.displayName}")
@@ -421,6 +425,7 @@ internal fun SettingsScreen(appState: AppState) {
             "Scoring",
             icon = Icons.Outlined.Timeline,
             summary = "${appState.appPreferences.scoringWindowSessions} trading sessions",
+            contentMaxWidth = FormWidth,
         ) {
             val window = appState.appPreferences.scoringWindowSessions
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -449,15 +454,16 @@ internal fun SettingsScreen(appState: AppState) {
             "Telegram",
             icon = Icons.Outlined.Forum,
             summary = if (appState.telegramAuthState.step == TelegramAuthStep.READY) "Signed in · ${appState.channels.size} chats" else "Not connected",
+            contentMaxWidth = FormWidth,
             summaryTone = if (appState.telegramAuthState.step == TelegramAuthStep.READY) null else MaterialTheme.colorScheme.error,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Text(appState.telegramAuthState.message)
                 Text("${appState.channels.count(ChannelSelection::selected)} chats selected")
                 if (appState.telegramAuthState.step == TelegramAuthStep.READY) {
                     FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Space.s),
+                        verticalArrangement = Arrangement.spacedBy(Space.s),
                     ) {
                         OutlinedButton(onClick = {
                             scope.launch { appState.refreshTelegramChats() }
@@ -478,8 +484,9 @@ internal fun SettingsScreen(appState: AppState) {
             "About",
             icon = Icons.Outlined.Info,
             summary = BuildConfig.VERSION_NAME,
+            contentMaxWidth = FormWidth,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                 Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                 Text(
                     "Shown so a device can be asked which build it is running.",
@@ -492,8 +499,9 @@ internal fun SettingsScreen(appState: AppState) {
             "Saved data and privacy",
             icon = Icons.Outlined.Shield,
             summary = "${appState.savedResults.size} saved analyses",
+            contentMaxWidth = FormWidth,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Text("${appState.savedResults.size} analyses saved on this device")
                 Text(
                     "Provider keys and the Telegram database key are encrypted using Android Keystore. " +
@@ -510,3 +518,7 @@ internal fun SettingsScreen(appState: AppState) {
         }
     }
 }
+
+/** Wide enough for a long model name, narrow enough that a field still reads as a field. */
+private val FormWidth = 560.dp
+

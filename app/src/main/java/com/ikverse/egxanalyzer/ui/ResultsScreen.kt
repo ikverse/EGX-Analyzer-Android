@@ -137,7 +137,7 @@ private fun SavedAnalysisCard(
         },
         shape = MaterialTheme.shapes.large,
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -197,7 +197,7 @@ private fun SavedAnalysisCard(
             }
 
             AnimatedVisibility(showReport) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     HorizontalDivider()
                     Text(report().title, style = MaterialTheme.typography.titleSmall)
                     Text(report().markdown, style = MaterialTheme.typography.bodySmall)
@@ -230,7 +230,7 @@ private fun ResultDetail(saved: SavedAnalysis) {
             .associate { it.messageId.toString() to it.channelName }
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
         // Analyses saved before the consolidated contract have no nested occurrences, so they fall
         // back to a flat list rather than showing an empty table.
         if (saved.result.consolidated.isNotEmpty()) {
@@ -278,7 +278,7 @@ private fun ResultDetail(saved: SavedAnalysis) {
 @Composable
 private fun TraceAndDiagnostics(saved: SavedAnalysis) {
     val diagnostics = saved.result.diagnostics
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Text("Sources", style = MaterialTheme.typography.titleSmall)
         saved.result.sources.forEach { source ->
             Text(
@@ -369,7 +369,7 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis) {
 /** Detail for analyses saved before the consolidated contract existed. */
 @Composable
 private fun LegacyDetail(recommendation: RecommendationResult) {
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Text(
             "${recommendation.ticker} · ${recommendation.companyName}",
             style = MaterialTheme.typography.titleSmall,

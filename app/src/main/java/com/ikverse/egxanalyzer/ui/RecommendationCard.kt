@@ -46,7 +46,7 @@ internal fun RecommendationCard(stock: ConsolidatedRecommendation, modifier: Mod
         colors = CardDefaults.elevatedCardColors(),
         elevation = CardDefaults.elevatedCardElevation(),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
             StockHeader(stock)
 
             if (headline != null) {
@@ -78,7 +78,7 @@ internal fun RecommendationCard(stock: ConsolidatedRecommendation, modifier: Mod
             )
 
             AnimatedVisibility(expanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                     stock.dataPoints.forEach { point ->
                         HorizontalDivider()
                         OccurrenceDetail(point)
@@ -152,13 +152,17 @@ private fun SignalChip(stock: ConsolidatedRecommendation) {
 @Composable
 private fun LevelRow(point: RecommendationDataPoint) {
     FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.xl),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
-        Level("Entry", entryText(point), MaterialTheme.colorScheme.primary)
-        point.target1?.let { Level("Target 1", figure(it, point.returnTp1Pct), MaterialTheme.colorScheme.tertiary) }
-        point.target2?.let { Level("Target 2", figure(it, point.returnTp2Pct), MaterialTheme.colorScheme.tertiary) }
-        point.stopLoss?.let { Level("Stop", figure(it, point.riskPct), MaterialTheme.colorScheme.error) }
+        Level("Entry", entryText(point), PriceRole.entry)
+        point.target1?.let {
+            Level("Target 1", figure(it, point.returnTp1Pct ?: impliedReturn(point, it)), PriceRole.target)
+        }
+        point.target2?.let {
+            Level("Target 2", figure(it, point.returnTp2Pct ?: impliedReturn(point, it)), PriceRole.target)
+        }
+        point.stopLoss?.let { Level("Stop loss", figure(it, point.riskPct), PriceRole.stop) }
     }
 }
 
@@ -176,7 +180,7 @@ private fun Level(label: String, value: String, tone: androidx.compose.ui.graphi
 
 @Composable
 private fun OccurrenceDetail(point: RecommendationDataPoint) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Text(
             listOfNotNull(
                 point.visibleSourceDate?.let { "Source date $it" },
@@ -192,9 +196,13 @@ private fun OccurrenceDetail(point: RecommendationDataPoint) {
         point.timingEvidence?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            point.support?.let { Text("Support $it", style = MaterialTheme.typography.labelMedium) }
-            point.resistance?.let { Text("Resistance $it", style = MaterialTheme.typography.labelMedium) }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.l)) {
+            point.support?.let {
+                Text("Support ${formatPrice(it)}", style = MaterialTheme.typography.labelMedium, color = PriceRole.market)
+            }
+            point.resistance?.let {
+                Text("Resistance ${formatPrice(it)}", style = MaterialTheme.typography.labelMedium, color = PriceRole.market)
+            }
         }
         point.notesArabic?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End, modifier = Modifier.fillMaxWidth())
@@ -206,10 +214,22 @@ private fun entryText(point: RecommendationDataPoint): String {
     val low = point.buyPriceLow
     val high = point.buyPriceHigh
     return when {
-        low != null && high != null && low != high -> "$low – $high"
-        else -> (point.buyPrice ?: low ?: high)?.toString() ?: "—"
+        low != null && high != null && low != high -> "${formatPrice(low)} – ${formatPrice(high)}"
+        else -> formatPrice(point.buyPrice ?: low ?: high)
     }
 }
 
 private fun figure(value: Double, percent: Double?): String =
-    if (percent == null) "$value" else "$value  (${"%+.1f".format(percent)}%)"
+    if (percent == null) formatPrice(value) else "${formatPrice(value)}  (${formatPercent(percent)})"
+
+/** Entry midpoint to target, so a card shows the upside even when the source never printed it. */
+private fun impliedReturn(point: RecommendationDataPoint, target: Double?): Double? {
+    if (target == null) return null
+    val low = point.buyPriceLow ?: point.buyPrice
+    val high = point.buyPriceHigh ?: point.buyPrice
+    val entry = when {
+        low != null && high != null -> (low + high) / 2
+        else -> low ?: high ?: return null
+    }
+    return if (entry == 0.0) null else (target - entry) / entry * 100
+}

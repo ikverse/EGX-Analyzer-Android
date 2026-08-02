@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -34,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -93,7 +95,7 @@ internal fun SectionCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = MaterialTheme.shapes.large,
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             if (title != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (icon != null) {
@@ -129,9 +131,15 @@ internal fun ExpandableSection(
     summary: String? = null,
     /** Colour for [summary], where the figure itself carries a verdict. */
     summaryTone: Color? = null,
+    /** Caps the content, for groups of form controls: a text field the width of a desk is unusable. */
+    contentMaxWidth: Dp? = null,
+    /** Hoisted when the layout around it needs to know: an open card claims the whole row. */
+    expandedState: Boolean? = null,
+    onExpandedChange: ((Boolean) -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(initiallyExpanded) }
+    var localExpanded by remember { mutableStateOf(initiallyExpanded) }
+    val expanded = expandedState ?: localExpanded
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -141,7 +149,9 @@ internal fun ExpandableSection(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clickable { expanded = !expanded }
+                    .clickable {
+                        if (onExpandedChange != null) onExpandedChange(!expanded) else localExpanded = !expanded
+                    }
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -172,8 +182,10 @@ internal fun ExpandableSection(
             }
             AnimatedVisibility(expanded) {
                 Column(
-                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    Modifier
+                        .padding(start = Space.l, end = Space.l, bottom = Space.l)
+                        .then(contentMaxWidth?.let { Modifier.widthIn(max = it) } ?: Modifier),
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
                     content = content,
                 )
             }
@@ -189,7 +201,7 @@ internal fun StatTile(
     modifier: Modifier = Modifier,
     tone: Color = MaterialTheme.colorScheme.onSurface,
 ) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Text(value, style = MaterialTheme.typography.headlineSmall, color = tone)
         Text(
             label.uppercase(),
@@ -235,7 +247,7 @@ internal fun EmptyState(icon: ImageVector, title: String, detail: String) {
         Column(
             Modifier.fillMaxWidth().padding(vertical = 32.dp, horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = CircleShape) {

@@ -130,8 +130,8 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                 val selectedCount = appState.channels.count(ChannelSelection::selected)
                 val busy = appState.busyLabel != null
                 FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     OutlinedButton(
                         enabled = !busy,
