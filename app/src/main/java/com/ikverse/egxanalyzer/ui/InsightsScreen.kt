@@ -399,7 +399,16 @@ private fun SessionCard(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        run.calls.forEach { call -> ScoredCallRow(call, windowSessions) }
+        // Two stocks across on an unfolded screen: a call card is a heading and eight figures, and
+        // one per row leaves half the session card empty.
+        BoxWithConstraints {
+            val columns = responsiveColumns(minColumnWidth = 340.dp, maxColumns = 2)
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                ResponsiveRows(run.calls, columns, spacing = Space.s) { call ->
+                    Box(Modifier.weight(1f)) { ScoredCallRow(call, windowSessions) }
+                }
+            }
+        }
     }
 }
 
