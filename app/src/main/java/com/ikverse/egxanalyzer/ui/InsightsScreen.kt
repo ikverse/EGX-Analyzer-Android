@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -42,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.ChannelScore
@@ -127,14 +129,13 @@ internal fun InsightsScreen(appState: AppState) {
                             onExpandedChange = { openSession = null },
                         )
                     } else {
-                        ResponsiveRows(band, columns) { session ->
-                            Box(Modifier.weight(1f)) {
-                                SessionCard(
-                                    session, report.windowSessions,
-                                    expanded = false,
-                                    onExpandedChange = { openSession = session.key() },
-                                )
-                            }
+                        ResponsiveRows(band, columns) { session, cardModifier ->
+                            SessionCard(
+                                session, report.windowSessions,
+                                expanded = false,
+                                onExpandedChange = { openSession = session.key() },
+                                modifier = cardModifier,
+                            )
                         }
                     }
                 }
@@ -367,6 +368,7 @@ private fun SessionCard(
     windowSessions: Int,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val ranAt = remember(run.lastRunAt) {
         DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm")
@@ -384,6 +386,7 @@ private fun SessionCard(
         summaryTone = if (run.fullHits > 0) MaterialTheme.colorScheme.primary else null,
         expandedState = expanded,
         onExpandedChange = onExpandedChange,
+        modifier = modifier,
     ) {
         // Where the card's contents came from. Built from more than one run it is not a single
         // analysis, and reading it as one would misplace the responsibility for a call.
@@ -404,8 +407,8 @@ private fun SessionCard(
         BoxWithConstraints {
             val columns = responsiveColumns(minColumnWidth = 340.dp, maxColumns = 2)
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                ResponsiveRows(run.calls, columns, spacing = Space.s) { call ->
-                    Box(Modifier.weight(1f)) { ScoredCallRow(call, windowSessions) }
+                ResponsiveRows(run.calls, columns, spacing = Space.s) { call, cardModifier ->
+                    ScoredCallRow(call, windowSessions, cardModifier)
                 }
             }
         }
@@ -413,21 +416,25 @@ private fun SessionCard(
 }
 
 @Composable
-private fun ScoredCallRow(call: ScoredCall, windowSessions: Int) {
+private fun ScoredCallRow(call: ScoredCall, windowSessions: Int, modifier: Modifier = Modifier) {
     var expanded by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
     Card(
-        Modifier.fillMaxWidth(),
+        modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
         shape = MaterialTheme.shapes.medium,
     ) {
         Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // A fixed two lines for the name, so a company whose name wraps does not make its card
+            // taller than the one beside it. This is what left the pair ragged when they sat
+            // side by side.
+            Row(
+                Modifier.heightIn(min = CardHeaderHeight),
+                verticalAlignment = Alignment.Top,
+            ) {
                 Column(Modifier.weight(1f)) {
                     Text(call.ticker, style = MaterialTheme.typography.titleSmall)
-                    // Both names, as the results table shows them: the Arabic name is what the
-                    // source wrote, the English one is what the catalog calls the same company.
                     listOfNotNull(call.companyArabic, call.companyEnglish)
                         .filter(String::isNotBlank)
                         .distinct()
@@ -437,6 +444,8 @@ private fun ScoredCallRow(call: ScoredCall, windowSessions: Int) {
                                 it.joinToString(" · "),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                 }
@@ -680,3 +689,7 @@ private fun Double.trimZero(): String = formatPrice(this)
 private fun Double?.orDash(): String = formatPrice(this)
 
 private fun Int?.orDash(): String = this?.toString() ?: Dash
+
+/** Ticker plus two lines of company name, so every call card starts the same height. */
+private val CardHeaderHeight = 76.dp
+

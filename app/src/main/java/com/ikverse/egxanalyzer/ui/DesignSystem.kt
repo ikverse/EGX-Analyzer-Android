@@ -7,8 +7,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxWithConstraintsScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -148,24 +150,35 @@ fun <T> ColumnScope.ResponsiveRows(
     items: List<T>,
     columns: Int,
     spacing: Dp = Space.m,
-    item: @Composable RowScope.(T) -> Unit,
+    /**
+     * Receives a modifier that must be applied to whatever the item draws.
+     *
+     * Cards in a row are sized to the tallest of them, so a stock whose name wraps to two lines no
+     * longer leaves its neighbour floating with a ragged edge beneath it. Handing the modifier down
+     * is what lets the card itself stretch; a box around a short card only pads the gap.
+     */
+    item: @Composable (T, Modifier) -> Unit,
 ) {
     if (columns <= 1) {
         Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-            items.forEach { value -> Row(Modifier.fillMaxWidth()) { item(value) } }
+            items.forEach { value -> item(value, Modifier.fillMaxWidth()) }
         }
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
         items.chunked(columns).forEach { row ->
+            // Deliberately not IntrinsicSize.Min: every cell here contains a BoxWithConstraints
+            // somewhere, and intrinsic measurement of a SubcomposeLayout throws. Cards are kept
+            // level by giving their headers a common height instead, which is where the raggedness
+            // came from.
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(spacing),
             ) {
-                row.forEach { value -> item(value) }
-                repeat(columns - row.size) {
-                    androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                row.forEach { value ->
+                    Box(Modifier.weight(1f)) { item(value, Modifier.fillMaxWidth()) }
                 }
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }

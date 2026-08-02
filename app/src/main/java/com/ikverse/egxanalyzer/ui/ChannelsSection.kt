@@ -187,8 +187,8 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                                     .scrollableColumn(),
                                 verticalArrangement = Arrangement.spacedBy(Space.s),
                             ) {
-                                ResponsiveRows(chats, columns, spacing = Space.s) { chat ->
-                                    Box(Modifier.weight(1f)) { ChannelCard(chat, appState, chats) }
+                                ResponsiveRows(chats, columns, spacing = Space.s) { chat, cardModifier ->
+                                    ChannelCard(chat, appState, chats, cardModifier)
                                 }
                             }
                         }
@@ -231,6 +231,7 @@ private fun ChannelCard(
     channel: ChannelSelection,
     appState: AppState,
     allChannels: List<ChannelSelection>,
+    modifier: Modifier = Modifier,
 ) {
     // Two chats can carry the same words and differ only by a trailing emoji, which reads as a
     // duplicate. When that happens the id is promoted so the difference is visible.

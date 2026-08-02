@@ -74,9 +74,9 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
             BoxWithConstraints {
               val columns = responsiveColumns(minColumnWidth = 380.dp, maxColumns = 2)
               Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                ResponsiveRows(appState.savedResults, columns) { saved ->
-                  Box(Modifier.weight(1f)) {
+                ResponsiveRows(appState.savedResults, columns) { saved, cardModifier ->
                 SavedAnalysisCard(
+                    modifier = cardModifier,
                     saved = saved,
                     // Expanding also selects, so the companion pane follows what is open.
                     onExpand = { appState.selectResult(saved) },
@@ -86,7 +86,6 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                     onDelete = { appState.deleteResult(saved) },
                     report = { appState.reportFor(saved) },
                 )
-                  }
                 }
               }
             }
@@ -96,6 +95,7 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
 
 @Composable
 private fun SavedAnalysisCard(
+    modifier: Modifier = Modifier,
     saved: SavedAnalysis,
     /** Opened from a notification: it starts expanded and its edge flashes briefly. */
     highlighted: Boolean = false,
@@ -128,7 +128,7 @@ private fun SavedAnalysisCard(
     }
 
     Card(
-        Modifier.fillMaxWidth(),
+        modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         border = if (highlighted) {
             BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = edge))
