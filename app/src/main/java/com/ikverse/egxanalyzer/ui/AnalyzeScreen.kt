@@ -161,18 +161,51 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
             }
         },
     ) {
-        // Chat selection leads, because choosing sources is the first step of a run.
-        ChannelsSection(appState)
+        // Chat selection leads, because choosing sources is the first step of a run - and on a
+        // wide screen it sits beside the settings that shape it rather than above them, so both
+        // are visible while either is being changed.
+        AdaptivePanes(
+            main = {
+                ChannelsSection(appState)
+                SourcePreview(appState, scope)
+                blockedReason?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+            },
+            side = {
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             shape = MaterialTheme.shapes.large,
         ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Content types", fontWeight = FontWeight.Bold)
-                ContentTypeToggle("Text messages", AnalysisContentType.TEXT, appState)
-                ContentTypeToggle("Images / photos", AnalysisContentType.IMAGES, appState)
-                ContentTypeToggle("Voice messages", AnalysisContentType.AUDIO, appState)
+            Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Outlined.TextFields,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(IconSize.Inline),
+                    )
+                    Spacer(Modifier.width(Space.s))
+                    Text("Content types", fontWeight = FontWeight.Bold)
+                }
+                // Three checkboxes stacked is a phone layout; anywhere wider it is three rows of
+                // empty space.
+                AdaptiveInline(minWidth = 340.dp) { horizontal ->
+                    if (horizontal) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Space.l)) {
+                            ContentTypeToggle("Text", AnalysisContentType.TEXT, appState)
+                            ContentTypeToggle("Images", AnalysisContentType.IMAGES, appState)
+                            ContentTypeToggle("Voice", AnalysisContentType.AUDIO, appState)
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                            ContentTypeToggle("Text messages", AnalysisContentType.TEXT, appState)
+                            ContentTypeToggle("Images / photos", AnalysisContentType.IMAGES, appState)
+                            ContentTypeToggle("Voice messages", AnalysisContentType.AUDIO, appState)
+                        }
+                    }
+                }
             }
         }
         Card(
@@ -216,13 +249,6 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 }
             }
         }
-        // Sits below the target date and content types because it reads both. Above them it
-        // fetched against whatever they were before the user had set them.
-        SourcePreview(appState, scope)
-        DuplicateAnalysisDialog(appState)
-
-        // Collapsed by default: the usual route is loading sources from Telegram, and adding one
-        // by hand is the exception.
         ExpandableSection("Advanced selection", Icons.Outlined.Tune) {
             // Only ever labelled hand-added sources; the chat list above already says which
             // channels a run reads from.
@@ -349,10 +375,15 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 }
             }
         }
+            },
+        )
+        DuplicateAnalysisDialog(appState)
+
+        // Collapsed by default: the usual route is loading sources from Telegram, and adding one
+        // by hand is the exception.
         val analyzeDisabledReason = blockedReason
         if (appState.analysisStatus != AnalysisStatus.RUNNING) {
             analyzeDisabledReason?.let {
-                Text(it, color = MaterialTheme.colorScheme.error)
                 if (appState.inputs.isEmpty()) {
                     // The chat list now sits at the top of this screen, so there is nowhere to send
                     // the user - only somewhere to point them.

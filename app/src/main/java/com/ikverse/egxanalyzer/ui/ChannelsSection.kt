@@ -2,6 +2,8 @@ package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
@@ -174,13 +176,21 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                     // Bounded and scrolled in place, inside a card like every other group here: a
                     // long chat list otherwise pushes the whole run out of reach.
                     SectionCard(title = "$selectedCount of ${chats.size} chats selected") {
-                        Column(
-                            Modifier
-                                .heightIn(max = ChatListMaxHeight)
-                                .scrollableColumn(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            chats.forEach { chat -> ChannelCard(chat, appState, chats) }
+                        // A chat row is a checkbox and a name; on a wide screen a single column of
+                        // them leaves three quarters of the card empty and pushes the rest of the
+                        // run off the bottom.
+                        BoxWithConstraints {
+                            val columns = responsiveColumns(minColumnWidth = 300.dp, maxColumns = 3)
+                            Column(
+                                Modifier
+                                    .heightIn(max = ChatListMaxHeight)
+                                    .scrollableColumn(),
+                                verticalArrangement = Arrangement.spacedBy(Space.s),
+                            ) {
+                                ResponsiveRows(chats, columns, spacing = Space.s) { chat ->
+                                    Box(Modifier.weight(1f)) { ChannelCard(chat, appState, chats) }
+                                }
+                            }
                         }
                     }
                 }

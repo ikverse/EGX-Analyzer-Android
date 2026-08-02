@@ -7,6 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxWithConstraintsScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -240,5 +241,58 @@ fun Modifier.scrollableColumn(): Modifier {
 fun Modifier.scrollableRow(): Modifier {
     val state = rememberScrollState()
     return this.horizontalScroll(state).fadingScrollbar(state, horizontal = true)
+}
+
+/**
+ * A tall thing beside the short things that configure it, once there is room for both.
+ *
+ * A screen of full-width cards wastes most of a wide display: a card holding three checkboxes was
+ * spanning 1600 pixels. Below [minWidth] the two panes stack, which is the right answer on a cover
+ * screen where height is the plentiful dimension.
+ */
+@Composable
+fun AdaptivePanes(
+    minWidth: Dp = 720.dp,
+    mainWeight: Float = 1.3f,
+    main: @Composable ColumnScope.() -> Unit,
+    side: @Composable ColumnScope.() -> Unit,
+) {
+    BoxWithConstraints {
+        if (maxWidth >= minWidth) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                Column(
+                    Modifier.weight(mainWeight),
+                    verticalArrangement = Arrangement.spacedBy(Space.m),
+                    content = main,
+                )
+                Column(
+                    Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(Space.m),
+                    content = side,
+                )
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                main()
+                side()
+            }
+        }
+    }
+}
+
+/**
+ * Lays a handful of small controls across the width instead of stacking them.
+ *
+ * Three checkboxes in a column is a phone layout; on anything wider it is three rows of mostly
+ * nothing.
+ */
+@Composable
+fun AdaptiveInline(
+    minWidth: Dp = 420.dp,
+    content: @Composable (horizontal: Boolean) -> Unit,
+) {
+    BoxWithConstraints {
+        content(maxWidth >= minWidth)
+    }
 }
 
