@@ -205,6 +205,7 @@ class TelegramRepository(
         require(_authState.value.step == TelegramAuthStep.READY) { "Sign in to Telegram first." }
         val inputs = mutableListOf<AnalysisInput>()
         val traces = mutableListOf<SourceTrace>()
+        val collected = CollectedImages()
         var examined = 0
         var silentChats = 0
         channelIds.forEach { chatId ->
@@ -240,7 +241,7 @@ class TelegramRepository(
                     when {
                         publishedAt.isBefore(start) -> keepLoading = false
                         publishedAt.isBefore(endExclusive) ->
-                            appendMessage(chat, message, contentTypes, inputs, traces)
+                            appendMessage(chat, message, contentTypes, inputs, traces, collected)
                     }
                 }
                 fromMessageId = messages.last().id
@@ -261,9 +262,11 @@ class TelegramRepository(
         contentTypes: Set<AnalysisContentType>,
         inputs: MutableList<AnalysisInput>,
         traces: MutableList<SourceTrace>,
+        collected: CollectedImages,
     ) {
         val sourceId = "tg:${chat.id}:${message.id}"
         val content = message.content
+        var repost = false
         val preview = when (content) {
             is MessageText -> {
                 if (AnalysisContentType.TEXT in contentTypes) {
@@ -276,15 +279,24 @@ class TelegramRepository(
                     val photo = content.photo.sizes.maxByOrNull { it.width * it.height }?.photo
                     if (photo != null) {
                         val local = download(photo.id)
-                        inputs += AnalysisInput.Image(sourceId, Uri.fromFile(local), "image/jpeg")
+                        // The same picture posted twice - reposted, or forwarded back into the
+                        // channel - downloads to one file. Sending it again bills a second image
+                        // and has the model read every card on it twice, which is where a report
+                        // full of duplicate rows comes from.
+                        repost = !collected.accept(local.path)
+                        if (!repost) {
+                            inputs += AnalysisInput.Image(sourceId, Uri.fromFile(local), "image/jpeg")
+                        }
                     }
                 }
                 // A caption belongs to its photo rather than being a text source of its own, so
                 // it travels with the image whatever the content-type choice. Without it a card
                 // captioned "توصية سابقة" reaches the model stripped of the one thing that says
-                // it is a follow-up on an earlier call rather than a new one.
+                // it is a follow-up on an earlier call rather than a new one. By the same token a
+                // repost's caption stays behind: its picture is not in the request, and a caption
+                // with no card under it is the model's problem to guess at.
                 val caption = content.caption.text
-                if (caption.isNotBlank() && AnalysisContentType.IMAGES in contentTypes) {
+                if (caption.isNotBlank() && !repost && AnalysisContentType.IMAGES in contentTypes) {
                     inputs += AnalysisInput.Text(sourceId, caption)
                 }
                 caption.ifBlank { "Photo" }
@@ -309,7 +321,9 @@ class TelegramRepository(
             }
             else -> return
         }
-        if (inputs.any { it.sourceId == sourceId }) {
+        // A repost contributes no input of its own, but it is still a message that was read, and
+        // the source list is where that shows.
+        if (repost || inputs.any { it.sourceId == sourceId }) {
             traces += SourceTrace(
                 sourceId = sourceId,
                 channelId = chat.id,
@@ -321,7 +335,7 @@ class TelegramRepository(
                     is MessagePhoto -> AnalysisContentType.IMAGES
                     else -> AnalysisContentType.AUDIO
                 },
-                preview = preview.take(160),
+                preview = preview.asPreview(),
             )
         }
     }
@@ -521,4 +535,54 @@ class TelegramRepository(
         const val MAX_MESSAGES_PER_CHAT = 2_000
         const val CLIENT_CLOSE_TIMEOUT_MS = 10_000L
     }
+}
+
+/** How much of a message is kept as its label in the source list. */
+internal const val PREVIEW_LENGTH = 160
+
+/**
+ * Which picture files a run has already collected.
+ *
+ * Telegram hands the same photo out under a different message id when it is reposted, and TDLib
+ * downloads all of them to one file.
+ */
+internal class CollectedImages {
+    private val paths = mutableSetOf<String>()
+
+    /** True the first time a file is offered, false for every repost of it. */
+    fun accept(path: String): Boolean = paths.add(path)
+}
+
+/**
+ * The opening of a message, trimmed to [PREVIEW_LENGTH] and free of broken emoji.
+ *
+ * An emoji is two UTF-16 units, so trimming by character count can cut one in half. The stray half
+ * then pairs with whatever follows it once the trace is written out: in two runs saved on 2 August
+ * it merged with the quote closing its own JSON string - a lone U+D83D and a `"` becoming a single
+ * turtle - and both payloads were left unparseable and their reports unreachable.
+ */
+internal fun String.asPreview(): String {
+    val source = this
+    val preview = StringBuilder(minOf(source.length, PREVIEW_LENGTH))
+    var index = 0
+    while (index < source.length && preview.length < PREVIEW_LENGTH) {
+        val character = source[index]
+        val pairs = character.isHighSurrogate() &&
+            index + 1 < source.length &&
+            source[index + 1].isLowSurrogate()
+        when {
+            pairs -> {
+                if (preview.length + 2 > PREVIEW_LENGTH) break
+                preview.append(character).append(source[index + 1])
+                index += 2
+            }
+            // Half of a pair with nothing to join: it can only do damage downstream.
+            character.isSurrogate() -> index++
+            else -> {
+                preview.append(character)
+                index++
+            }
+        }
+    }
+    return preview.toString()
 }

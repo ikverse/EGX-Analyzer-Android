@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.ui
 
 import android.net.Uri
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
@@ -173,6 +174,15 @@ class AppState(
     val manualInputs: List<AnalysisInput>
         get() = inputs.filterNot { it.sourceId in telegramTraces.keys }
     var savedResults by mutableStateOf(localDataStore.results())
+        private set
+
+    /**
+     * Saved runs that would not parse, and so are missing from [savedResults].
+     *
+     * Kept visible rather than swallowed: a report that cannot be read looks exactly like a report
+     * that was never produced, and the newest one on screen is then silently an older run.
+     */
+    var unreadableResults by mutableIntStateOf(localDataStore.unreadableResults)
         private set
     var selectedResult by mutableStateOf<SavedAnalysis?>(savedResults.firstOrNull())
         private set
@@ -897,9 +907,18 @@ class AppState(
             val result = analysisRepository.analyze(request)
             localDataStore.saveResult(result, cloudConfiguration.provider, cloudConfiguration.model)
             savedResults = localDataStore.results()
+            unreadableResults = localDataStore.unreadableResults
             selectedResult = savedResults.firstOrNull()
             analysisStatus = AnalysisStatus.COMPLETED
-            analysisMessage = "Saved ${result.recommendations.size} recommendations."
+            // Saving and reading back are two different things, and a run that will not read back
+            // is a run that is not there. Saying so beats leaving an older report on screen looking
+            // like the newest one.
+            analysisMessage = if (savedResults.none { it.result.requestId == result.requestId }) {
+                "Analysed ${result.recommendations.size} recommendations, but the saved report " +
+                    "could not be read back."
+            } else {
+                "Saved ${result.recommendations.size} recommendations."
+            }
             recomputePerformance()
             // A run names stocks the price store has never seen, and until now nothing fetched
             // them: the daily guard had already fired, so an Insights card sat unpriced until the
@@ -937,6 +956,7 @@ class AppState(
     fun deleteResult(result: SavedAnalysis) {
         localDataStore.deleteResult(result.id)
         savedResults = localDataStore.results()
+        unreadableResults = localDataStore.unreadableResults
         selectedResult = savedResults.firstOrNull()
         appScope.launch { recomputePerformance() }
     }
@@ -944,6 +964,7 @@ class AppState(
     fun deleteAllResults() {
         localDataStore.deleteAllResults()
         savedResults = emptyList()
+        unreadableResults = 0
         selectedResult = null
         settingsMessage = "All saved analyses deleted."
         appScope.launch { recomputePerformance() }

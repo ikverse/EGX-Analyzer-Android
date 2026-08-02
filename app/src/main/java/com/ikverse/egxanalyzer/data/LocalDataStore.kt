@@ -233,6 +233,16 @@ class LocalDataStore(context: Context) :
             SQLiteDatabase.CONFLICT_REPLACE,
         )
 
+    /**
+     * How many saved runs the last [results] call could not read back.
+     *
+     * A payload that failed to parse used to be dropped without a word. Two runs saved on 2 August
+     * were unreadable, so neither appeared in the list and the newest report on screen was quietly
+     * an older one - a thinner report that simply looked like the latest.
+     */
+    var unreadableResults: Int = 0
+        private set
+
     fun results(): List<SavedAnalysis> = readableDatabase.query(
         "analyses",
         arrayOf("id", "provider", "model", "payload"),
@@ -242,6 +252,7 @@ class LocalDataStore(context: Context) :
         null,
         "completed_at DESC",
     ).use { cursor ->
+        var unreadable = 0
         buildList {
             while (cursor.moveToNext()) {
                 runCatching {
@@ -253,9 +264,9 @@ class LocalDataStore(context: Context) :
                             result = JSONObject(cursor.getString(3)).toAnalysisResult(),
                         ),
                     )
-                }
+                }.onFailure { unreadable++ }
             }
-        }
+        }.also { unreadableResults = unreadable }
     }
 
     fun deleteResult(id: Long) {

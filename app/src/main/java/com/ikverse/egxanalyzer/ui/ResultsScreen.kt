@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Assessment
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -64,6 +66,7 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
         title = "Results",
         subtitle = "Saved recommendations and their exact source traces remain on this device.",
     ) {
+        UnreadableNotice(appState.unreadableResults)
         if (appState.savedResults.isEmpty()) {
             EmptyState(
                 icon = Icons.Outlined.Assessment,
@@ -88,6 +91,53 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                 )
                 }
               }
+            }
+        }
+    }
+}
+
+/**
+ * Saved runs the store could not read back.
+ *
+ * These used to be dropped in silence, which left an older report sitting at the top of the list
+ * looking like the newest one - the surest way to read a stale report and not know it.
+ */
+@Composable
+private fun UnreadableNotice(count: Int) {
+    if (count <= 0) return
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(Space.l),
+            horizontalArrangement = Arrangement.spacedBy(Space.m),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Outlined.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(IconSize.Action),
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                Text(
+                    if (count == 1) "1 saved analysis cannot be read" else "$count saved analyses cannot be read",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+                Text(
+                    if (count == 1) {
+                        "Its stored report is damaged, so it is missing from the list below and " +
+                            "the newest report here may be an earlier run."
+                    } else {
+                        "Their stored reports are damaged, so they are missing from the list " +
+                            "below and the newest report here may be an earlier run."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
             }
         }
     }
