@@ -51,15 +51,20 @@ object ConsolidatedParser {
                 // back with the same point 106 times for one image and ranked that stock first on
                 // the strength of it.
                 val returned = stock.optJSONArray("data_points").dataPoints()
-                val all = returned.distinct()
-                if (returned.size - all.size >= REPEAT_NOTE_THRESHOLD) {
-                    notes += "$code returned ${returned.size} occurrences, ${all.size} distinct."
+                val distinct = returned.distinct()
+                if (returned.size - distinct.size >= REPEAT_NOTE_THRESHOLD) {
+                    notes += "$code returned ${returned.size} occurrences, ${distinct.size} distinct."
+                }
+                val all = distinct.filter { it.hasPrice() }
+                if (distinct.size > all.size) {
+                    notes += "$code dropped ${distinct.size - all.size} occurrence(s) carrying no price."
                 }
                 val occurrences = all.filter {
                     SourceDateGate.accepts(it.visibleSourceDate, targetDate)
                 }
-                // Every occurrence rejected means nothing is left to recommend.
-                if (occurrences.isEmpty() && all.isNotEmpty()) continue
+                // Every occurrence rejected means nothing is left to recommend - whether they were
+                // rejected for their date or for carrying no price.
+                if (occurrences.isEmpty() && distinct.isNotEmpty()) continue
                 add(
                     ConsolidatedRecommendation(
                         stockCode = code,
@@ -75,11 +80,23 @@ object ConsolidatedParser {
         }
     }
 
+    /**
+     * An occurrence with no entry, no target and no stop has nothing to act on.
+     *
+     * The market summary an analyst posts at the close - index levels, sector bars, biggest movers -
+     * is not a recommendation, but the model reads it as one. On 2 August it produced 37 occurrences
+     * of a stock from one such page, and the next run turned the same page into an EGX30 row.
+     */
+    private fun RecommendationDataPoint.hasPrice(): Boolean =
+        buyPrice != null || buyPriceLow != null || buyPriceHigh != null ||
+            target1 != null || target2 != null || stopLoss != null
+
     /** Flattens one row per occurrence, mirroring how the desktop derives its recommendation rows. */
     fun flatten(
         stocks: List<ConsolidatedRecommendation>,
         traces: List<SourceTrace>,
         targetDate: LocalDate?,
+        notes: MutableList<String> = mutableListOf(),
     ): List<RecommendationResult> {
         val channelByMessageId = traces
             .filter { it.messageId != null }
@@ -87,10 +104,18 @@ object ConsolidatedParser {
         val sourceIdByMessageId = traces
             .filter { it.messageId != null }
             .groupBy({ it.messageId.toString() }, { it.sourceId })
-        return stocks.flatMap { stock ->
+        val rows = stocks.flatMap { stock ->
             val signal = signalOf(stock.dataPoints)
             val confidence = minOf(1.0, 0.5 + stock.mentionCount / 10.0)
             stock.dataPoints.map { point ->
+                // A buy's second target is the farther one. Cards print the two side by side and
+                // right to left, and the model has read that pair backwards while reading the buy
+                // zone above it correctly - which would score the second target as reached first.
+                val ordered = point.target1 != null && point.target2 != null &&
+                    point.target2 < point.target1 && signal != "SELL"
+                if (ordered) {
+                    notes += "${stock.stockCode} had its targets the wrong way round."
+                }
                 RecommendationResult(
                     ticker = stock.stockCode,
                     companyName = stock.stockNameEnglish ?: stock.stockCode,
@@ -100,8 +125,8 @@ object ConsolidatedParser {
                     timing = point.timingEvidence ?: point.effectiveDateBasis,
                     entryLow = point.buyPriceLow ?: point.buyPrice,
                     entryHigh = point.buyPriceHigh ?: point.buyPrice,
-                    takeProfit1 = point.target1,
-                    takeProfit2 = point.target2,
+                    takeProfit1 = if (ordered) point.target2 else point.target1,
+                    takeProfit2 = if (ordered) point.target1 else point.target2,
                     stopLoss = point.stopLoss,
                     notesArabic = point.notesArabic ?: stock.notesSummary,
                     sourceIds = sourceIdByMessageId[point.sourceMessageId].orEmpty(),
@@ -111,6 +136,39 @@ object ConsolidatedParser {
                 )
             }
         }
+        return rows.collapseRepeatedCalls(notes)
+    }
+
+    /**
+     * One row per call, however many times a channel posted it.
+     *
+     * A channel posts the same table twice a minute apart with a different row highlighted each
+     * time; both images carry every row, so the same call is extracted once per post. Two channels
+     * making the same call are still two calls, so the channel is part of what makes a call itself.
+     * The extra posting is kept as a source: it happened, and the source list is where that shows.
+     */
+    private fun List<RecommendationResult>.collapseRepeatedCalls(
+        notes: MutableList<String>,
+    ): List<RecommendationResult> {
+        val byCall = LinkedHashMap<List<Any?>, RecommendationResult>()
+        var collapsed = 0
+        for (row in this) {
+            val call = listOf(
+                row.sourceName, row.ticker,
+                row.entryLow, row.entryHigh, row.takeProfit1, row.takeProfit2, row.stopLoss,
+            )
+            val kept = byCall[call]
+            if (kept == null) {
+                byCall[call] = row
+            } else {
+                collapsed++
+                byCall[call] = kept.copy(
+                    sourceIds = (kept.sourceIds + row.sourceIds).distinct(),
+                )
+            }
+        }
+        if (collapsed > 0) notes += "$collapsed repeated posting(s) of a call counted once."
+        return byCall.values.toList()
     }
 
     /**

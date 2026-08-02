@@ -192,6 +192,118 @@ class ConsolidatedParserTest {
         assertTrue(notes.isEmpty())
     }
 
+    /** One stock, with whatever occurrences the test needs. */
+    private fun stock(code: String, vararg points: String) = """
+        {
+          "top_consolidated_recommendations": [
+            {"stock_code": "$code", "mention_count": 1, "rank": 1,
+             "data_points": [${points.joinToString(",")}]}
+          ]
+        }
+    """.trimIndent()
+
+    private fun priced(target1: String, target2: String, message: String = "60397") = """
+        {
+          "date": "2026-08-02", "visible_source_date": "02 AUG 2026",
+          "source_message_id": "$message", "recommendation_type": "buy",
+          "buy_price_low": 1.92, "buy_price_high": 1.93,
+          "target_1": $target1, "target_2": $target2, "stop_loss": 1.86
+        }
+    """.trimIndent()
+
+    @Test
+    fun `an occurrence carrying no price is not a recommendation`() {
+        val summary = """
+            {
+              "date": "2026-08-02", "visible_source_date": "02 AUG 2026",
+              "source_message_id": "60397", "recommendation_type": "hold",
+              "notes_ar": "المؤشر ضمن أكثر الأسهم ارتفاعا"
+            }
+        """.trimIndent()
+        val notes = mutableListOf<String>()
+
+        val rows = ConsolidatedParser.parse(stock("EGX30", summary), null, notes)
+
+        assertEquals(emptyList<Any>(), rows)
+        assertEquals(listOf("EGX30 dropped 1 occurrence(s) carrying no price."), notes)
+    }
+
+    @Test
+    fun `a watching card with only a trigger price survives`() {
+        val watching = """
+            {
+              "date": "2026-08-02", "visible_source_date": "02 AUG 2026",
+              "source_message_id": "60397", "recommendation_type": "buy",
+              "buy_price": 9.2, "timing_evidence": "سهم المراقبة"
+            }
+        """.trimIndent()
+
+        val rows = ConsolidatedParser.parse(stock("AMOC", watching))
+
+        assertEquals(1, rows.single().dataPoints.size)
+    }
+
+    @Test
+    fun `a buy whose targets arrive reversed is put back in order`() {
+        val notes = mutableListOf<String>()
+        val stocks = ConsolidatedParser.parse(stock("CRST", priced("2.10", "2.01")))
+
+        val row = ConsolidatedParser.flatten(
+            stocks, listOf(trace("s1", 60397L, "إسأل فني")), LocalDate.of(2026, 8, 2), notes,
+        ).single()
+
+        assertEquals(2.01, row.takeProfit1!!, 0.001)
+        assertEquals(2.10, row.takeProfit2!!, 0.001)
+        assertEquals(listOf("CRST had its targets the wrong way round."), notes)
+    }
+
+    @Test
+    fun `targets already in order are left alone`() {
+        val stocks = ConsolidatedParser.parse(stock("CRST", priced("2.01", "2.10")))
+
+        val row = ConsolidatedParser.flatten(
+            stocks, listOf(trace("s1", 60397L, "إسأل فني")), LocalDate.of(2026, 8, 2),
+        ).single()
+
+        assertEquals(2.01, row.takeProfit1!!, 0.001)
+        assertEquals(2.10, row.takeProfit2!!, 0.001)
+    }
+
+    @Test
+    fun `a call a channel posted twice is counted once, keeping both sources`() {
+        val notes = mutableListOf<String>()
+        val stocks = ConsolidatedParser.parse(
+            stock("ETEL", priced("2.01", "2.10", "111"), priced("2.01", "2.10", "222")),
+        )
+
+        val rows = ConsolidatedParser.flatten(
+            stocks,
+            listOf(trace("s1", 111L, "إسأل فني"), trace("s2", 222L, "إسأل فني")),
+            LocalDate.of(2026, 8, 2),
+            notes,
+        )
+
+        assertEquals(1, rows.size)
+        assertEquals(listOf("s1", "s2"), rows.single().sourceIds)
+        assertEquals(listOf("1 repeated posting(s) of a call counted once."), notes)
+    }
+
+    @Test
+    fun `two channels making the same call are two calls`() {
+        val stocks = ConsolidatedParser.parse(
+            stock("ETEL", priced("2.01", "2.10", "111"), priced("2.01", "2.10", "222")),
+        )
+
+        val rows = ConsolidatedParser.flatten(
+            stocks,
+            listOf(trace("s1", 111L, "إسأل فني"), trace("s2", 222L, "CFI Egypt")),
+            LocalDate.of(2026, 8, 2),
+        )
+
+        assertEquals(2, rows.size)
+        assertEquals(listOf("إسأل فني", "CFI Egypt"), rows.map { it.sourceName })
+    }
+
     private companion object {
         val POINT = """
             {
