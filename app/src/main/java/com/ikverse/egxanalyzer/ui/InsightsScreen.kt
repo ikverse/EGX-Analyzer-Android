@@ -98,7 +98,6 @@ internal fun InsightsScreen(appState: AppState) {
         // The ranking leads. It is the question the tab exists to answer - which source is worth
         // reading - and it used to sit below two summary cards as a collapsed line.
         ChannelRanking(report.channels)
-        Unscored(report)
         // One collapsed card per row wasted most of a wide screen: each held a single line of
         // text across the full width. The count is derived, so an untested width still behaves.
         // Collapsed cards share a row; an open one takes the whole width, because its contents are
@@ -189,43 +188,6 @@ private fun PricesBar(windowSessions: Int, refreshing: Boolean, onRefreshPrices:
 }
 
 @Composable
-private fun Unscored(report: PerformanceReport) {
-    /*
-     * What could not be judged, and why.
-     *
-     * This replaces four aggregate tiles - two rates and two totals - that averaged every source
-     * into one figure and so answered no question worth asking; the per-source cards above carry
-     * the same numbers where they mean something. What they never carried is how much of the data
-     * could not be scored at all, which is what decides whether the ranking above can be trusted.
-     */
-    val unscored = report.tracked - report.judged
-    if (unscored <= 0 && report.unpricedStocks == 0 && report.awaitingSessions == 0) return
-    SectionCard(title = "Not yet judged", icon = Icons.Outlined.HelpOutline) {
-        Text(
-            "$unscored of ${report.tracked} calls could not be scored" +
-                (report.scoringSince?.let { ", and scoring starts at $it" }.orEmpty()) + ".",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        if (report.unpricedStocks > 0) {
-            StatusPill(
-                "${report.unpricedStocks} " +
-                    (if (report.unpricedStocks == 1) "stock has" else "stocks have") +
-                    " no stored prices — refresh to score them",
-                StatusTone.BAD,
-            )
-        }
-        if (report.awaitingSessions > 0) {
-            StatusPill(
-                "${report.awaitingSessions} " +
-                    (if (report.awaitingSessions == 1) "call is" else "calls are") +
-                    " waiting for the exchange to publish their sessions",
-                StatusTone.NEUTRAL,
-            )
-        }
-    }
-}
-
-@Composable
 private fun OutcomeLabel(outcome: Outcome) {
     Surface(color = outcome.container(), shape = CircleShape) {
         Text(
@@ -240,7 +202,6 @@ private fun OutcomeLabel(outcome: Outcome) {
 @Composable
 private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
     if (channels.isEmpty()) return
-    Text("Sources ranked", style = MaterialTheme.typography.titleMedium)
     // Best first, and a source with nothing judged sinks below one that has been: an untested
     // channel is not a good channel.
     val ordered = channels.sortedWith(
@@ -248,11 +209,26 @@ private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
             .thenByDescending { it.anyTargetRate ?: -1.0 }
             .thenByDescending { it.judged },
     )
-    BoxWithConstraints {
-        val columns = responsiveColumns(minColumnWidth = 340.dp, maxColumns = 2)
-        Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-            ResponsiveRows(ordered, columns) { channel, cardModifier ->
-                ChannelCard(channel, cardModifier)
+    val best = ordered.firstOrNull { it.judged > 0 }
+    ExpandableSection(
+        title = "Sources ranked",
+        icon = Icons.Outlined.Leaderboard,
+        // Open by default: this is the question the tab exists to answer, not a detail to go
+        // looking for.
+        initiallyExpanded = true,
+        // The channel name is Arabic and the figure is not, so a first-strong isolate keeps each
+        // in its own direction rather than letting the percent sign drift into the name.
+        summary = best?.let {
+            "Best: ⁨${it.channel}⁩ · ${formatPercent(it.anyTargetRate, signed = false)} reached a target"
+        } ?: "${channels.size} sources, none judged yet",
+        summaryTone = best?.anyTargetRate.rateTone(),
+    ) {
+        BoxWithConstraints {
+            val columns = responsiveColumns(minColumnWidth = 320.dp, maxColumns = 2)
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                ResponsiveRows(ordered, columns) { channel, cardModifier ->
+                    ChannelCard(channel, cardModifier)
+                }
             }
         }
     }
