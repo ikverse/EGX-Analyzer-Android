@@ -799,7 +799,23 @@ class AppState(
 
     suspend fun logoutTelegram() = telegramRepository.logout()
 
-    suspend fun refreshTelegramChats() = telegramRepository.refreshChats()
+    /**
+     * True only while the chat list is being refreshed.
+     *
+     * [busyLabel] means "something is running", so a pull indicator driven by it would spin for
+     * work the pull did not start - and go on spinning after the chats had arrived.
+     */
+    var chatsRefreshing by mutableStateOf(false)
+        private set
+
+    suspend fun refreshTelegramChats() {
+        chatsRefreshing = true
+        try {
+            telegramRepository.refreshChats()
+        } finally {
+            chatsRefreshing = false
+        }
+    }
 
     fun updateTelegramSourceDate(value: String): Boolean {
         val parsed = runCatching { LocalDate.parse(value.trim()) }.getOrNull() ?: return false

@@ -101,19 +101,59 @@ class ScoringTest {
         assertNull(scored.ambiguity)
     }
 
+    /**
+     * A call that got where it was sent and gave it back is not a call that only went against you.
+     *
+     * Daily figures cannot prove the target came first, so this credits the favourable order on
+     * purpose rather than by accident.
+     */
     @Test
-    fun `a session that hits both target and stop is reported as ambiguous`() {
-        // Daily figures cannot say which came first, and picking the favourable one would inflate
-        // every hit rate built on this.
+    fun `a session that hits both target and stop is a partial hit that fell back`() {
         val scored = Scoring.score(
             sessions = sessions(13.0 to 8.0),
             entryLow = 9.8, entryHigh = 10.0,
             target1 = 12.0, target2 = null, stopLoss = 9.0,
             windowSessions = 10,
         )
-        assertEquals(Outcome.AMBIGUOUS, scored.outcome)
-        assertNull(scored.returnPct)
-        assertEquals(Ambiguity.TARGET_AND_STOP, scored.ambiguity)
+        assertEquals(Outcome.PARTIAL_HIT, scored.outcome)
+        assertEquals(true, scored.stoppedAfterPartial)
+        assertNull(scored.ambiguity)
+    }
+
+    /**
+     * The feed's precision is not a tolerance.
+     *
+     * Yahoo sends 32-bit floats, so GGCC's high of 1.03 arrived as 1.0299999713897705 and its
+     * first target read as missed - the call was recorded as a plain stop-out on 4 August.
+     */
+    @Test
+    fun `a high stored as a float still reaches the target it printed`() {
+        val session = DailySession(
+            "TEST", start, high = 1.0299999713897705, low = 0.88, close = 1.0,
+            volume = null, open = 0.98,
+        )
+
+        val scored = Scoring.score(
+            sessions = listOf(session),
+            entryLow = 0.98, entryHigh = 0.989,
+            target1 = 1.03, target2 = 1.08, stopLoss = 0.955,
+            windowSessions = 5,
+        )
+
+        assertEquals(Outcome.PARTIAL_HIT, scored.outcome)
+        assertEquals(true, scored.stoppedAfterPartial)
+    }
+
+    /** A millionth of slack must never turn a real miss into a hit. */
+    @Test
+    fun `a high a whole cent short of the target has still missed it`() {
+        val scored = Scoring.score(
+            sessions = sessions(11.99 to 9.9),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = null, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+        assertEquals(Outcome.OPEN, scored.outcome)
     }
 
     @Test

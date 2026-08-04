@@ -108,12 +108,15 @@ object Scoring {
                     day.low <= stopLoss * (1 - STOP_BREAK_TOLERANCE)
                 val hitAnyTarget = hitFull || hitPartial
 
-                // Nothing has settled yet, so an unorderable session cannot be resolved either way.
                 if (partialOn == null && hitAnyTarget) {
+                    // A target and the stop in one session is read as the target first: the call
+                    // got where it was sent and gave it back, which is not the same as a call that
+                    // only ever went against you. Daily figures cannot prove that order, so this
+                    // credits the favourable one deliberately.
                     if (hitStop) {
-                        return Scored(
-                            Outcome.AMBIGUOUS, day.date, null, elapsed, peak, peakOn, trough,
-                            troughOn, null, ambiguity = Ambiguity.TARGET_AND_STOP,
+                        return partial(
+                            partialTarget ?: fullTarget, day.date, elapsed, peak, peakOn, trough,
+                            troughOn, entryLow, entryHigh, stoppedAfter = true, windowComplete = true,
                         )
                     }
                     // The entry first became available on the same session a target was reached.
@@ -236,8 +239,20 @@ object Scoring {
         return open != null && open.atMost(bound)
     }
 
+    /**
+     * Whether the session's high got to the target.
+     *
+     * The comparison allows for the feed's own precision and nothing else. Yahoo sends 32-bit
+     * floats, so a high of 1.03 arrives as 1.0299999713897705 - GGCC reached its first target on
+     * 4 August and was recorded as a plain stop-out because of it. This is not a tolerance: the
+     * slack is a millionth, far below any price anyone quotes and far above the float's own error,
+     * so a target genuinely missed is still missed.
+     */
     private fun reached(high: Double?, target: Double?): Boolean =
-        high != null && target != null && high >= target
+        high != null && target != null && high >= target * (1 - FLOAT_PRECISION_SLACK)
+
+    /** Comfortably above a 32-bit float's error, comfortably below a quoted price's last digit. */
+    private const val FLOAT_PRECISION_SLACK = 1e-6
 
     /**
      * Return measured from the middle of the entry band.
@@ -312,9 +327,6 @@ data class DailySession(
  * about an ambiguous call, and it was being thrown away.
  */
 enum class Ambiguity {
-    /** The day's high reached a target and its low broke the stop. */
-    TARGET_AND_STOP,
-
     /** The buy zone first opened on the day a target was reached, above the zone. */
     ENTRY_AND_TARGET,
 }

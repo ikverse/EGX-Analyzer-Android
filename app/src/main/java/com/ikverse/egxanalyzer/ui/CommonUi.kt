@@ -79,25 +79,7 @@ internal fun Screen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // A gesture with nothing on screen to suggest it is a gesture nobody finds.
-                if (onRefresh != null && refreshHint != null) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Outlined.ArrowDownward,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(14.dp),
-                        )
-                        Text(
-                            refreshHint,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                if (onRefresh != null && refreshHint != null) PullHint(refreshHint)
             }
             content()
         }
@@ -118,6 +100,36 @@ internal fun Screen(
         }
     }
 }
+
+/**
+ * A gesture with nothing on screen to suggest it is a gesture is one nobody finds.
+ *
+ * Drawn here rather than only under a page title, because the pull does not always belong to the
+ * page as a whole - on Analyze it refreshes one card's contents, and the hint belongs with them.
+ */
+@Composable
+internal fun PullHint(text: String, modifier: Modifier = Modifier) {
+    Row(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Outlined.ArrowDownward,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(PullHintIcon),
+        )
+        Text(
+            text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Sized to the label beside it rather than to the icon grid, which would tower over it. */
+private val PullHintIcon = 14.dp
 
 /** Height of an extended action plus its margin, so the last card clears it when scrolled to. */
 private val FloatingActionInset = 88.dp

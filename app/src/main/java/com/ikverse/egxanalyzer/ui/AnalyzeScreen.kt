@@ -198,6 +198,21 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 )
             }
         },
+        // Only once signed in: before that there are no chats to fetch, and a pull that did
+        // nothing would read as the screen being stuck.
+        onRefresh = if (appState.telegramAuthState.step == TelegramAuthStep.READY) {
+            {
+                scope.launch {
+                    appState.runAction(
+                        label = "Refreshing chats",
+                        success = { "Chat list updated: ${appState.channels.size} channels found." },
+                    ) { appState.refreshTelegramChats() }
+                }
+            }
+        } else {
+            null
+        },
+        refreshing = appState.chatsRefreshing,
     ) {
         // Chat selection leads, because choosing sources is the first step of a run - and on a
         // wide screen it sits beside the settings that shape it rather than above them, so both
@@ -205,17 +220,9 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         AdaptivePanes(
             main = {
                 ChannelsSection(appState)
-                SourcePreview(appState, scope)
-                blockedReason?.let {
-                    Text(
-                        it,
-                        color = if (attempted) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
+                // The reason a run cannot start sits with the button that loads what it is
+                // missing, rather than as a loose line under the card it is about.
+                SourcePreview(appState, scope, blockedReason, attempted)
             },
             side = {
         Card(
@@ -566,7 +573,14 @@ private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState
  * paid request can be seen first, and so the window can be sanity-checked against the chats.
  */
 @Composable
-private fun SourcePreview(appState: AppState, scope: kotlinx.coroutines.CoroutineScope) {
+private fun SourcePreview(
+    appState: AppState,
+    scope: kotlinx.coroutines.CoroutineScope,
+    /** Why a run cannot start, or nothing when it can. */
+    blockedReason: String?,
+    /** Whether Analyze has been pressed: until it has, this is guidance rather than an error. */
+    attempted: Boolean,
+) {
     val selected = appState.channels.count(ChannelSelection::selected)
     val sources = appState.telegramSources
     SectionCard(title = "Source preview", icon = Icons.Outlined.Preview) {
@@ -576,6 +590,17 @@ private fun SourcePreview(appState: AppState, scope: kotlinx.coroutines.Coroutin
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        blockedReason?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (attempted) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
         OutlinedButton(
             onClick = {
                 scope.launch {

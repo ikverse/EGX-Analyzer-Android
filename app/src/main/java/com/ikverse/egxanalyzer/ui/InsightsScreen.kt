@@ -23,13 +23,10 @@ import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Leaderboard
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -80,11 +77,7 @@ internal fun InsightsScreen(appState: AppState) {
         refreshing = appState.pricesRefreshing,
         refreshHint = "Pull down to refresh prices",
     ) {
-        PricesBar(
-            windowSessions = full.windowSessions,
-            refreshing = appState.pricesRefreshing,
-            onRefreshPrices = { scope.launch { appState.refreshPrices() } },
-        )
+        PricesBar(full.windowSessions)
 
         if (full.tracked == 0) {
             EmptyState(
@@ -200,43 +193,20 @@ internal fun InsightsScreen(appState: AppState) {
 }
 
 @Composable
-private fun PricesBar(windowSessions: Int, refreshing: Boolean, onRefreshPrices: () -> Unit) {
+private fun PricesBar(windowSessions: Int) {
     // The window itself lives in Settings; here it is only context for the figures, so one line is
-    // enough and the space goes to the results.
+    // enough and the space goes to the results. Refreshing is the pull, so there is no button.
     SectionCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "$windowSessions trading ${if (windowSessions == 1) "session" else "sessions"}",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    "Scoring window · change it in Settings",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Button(onClick = onRefreshPrices, enabled = !refreshing) {
-                if (refreshing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                } else {
-                    Icon(
-                        Icons.Outlined.Refresh,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-                Text(
-                    if (refreshing) "Fetching…" else "Refresh prices",
-                    modifier = Modifier.padding(start = 6.dp),
-                )
-            }
-        }
+        Text(
+            "$windowSessions trading ${if (windowSessions == 1) "session" else "sessions"}",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            "Scoring window · change it in Settings",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -294,7 +264,6 @@ private fun ScoredCall.reason(windowSessions: Int): String {
         Outcome.OPEN -> "Still inside its window, nothing settled yet."
         Outcome.UNPRICED -> "No stored prices for this stock yet."
         Outcome.AMBIGUOUS -> when (ambiguity) {
-            Ambiguity.TARGET_AND_STOP -> "Target and stop both hit on $on."
             Ambiguity.ENTRY_AND_TARGET -> "Opened above the buy zone, target hit that day."
             // Scored before the reason was recorded, so only the fact survives.
             null -> "Two levels were reached in one session and cannot be ordered."

@@ -159,24 +159,13 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // With the chats rather than under the page title: the pull refreshes this
+                    // card, not the screen, and a hint at the top would promise something else.
+                    PullHint("Pull down to refresh chats")
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(Space.s),
                         verticalArrangement = Arrangement.spacedBy(Space.s),
                     ) {
-                        OutlinedButton(
-                            enabled = !busy,
-                            onClick = {
-                                scope.launch {
-                                    appState.runAction(
-                                        label = "Refreshing chats",
-                                        success = {
-                                            val found = appState.channels.size
-                                            "Chat list updated: $found channels found."
-                                        },
-                                    ) { appState.refreshTelegramChats() }
-                                }
-                            },
-                        ) { Text("Refresh chats") }
                         TextButton(
                             enabled = !busy,
                             onClick = {

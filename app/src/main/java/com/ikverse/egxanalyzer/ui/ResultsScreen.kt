@@ -258,6 +258,15 @@ internal enum class RunOrder(val label: String, val comparator: Comparator<Saved
  * Taken from the selection the run recorded. Analyses saved before that was stored fall back to the
  * chats their rows actually name, which understates a run that read a chat and found nothing.
  */
+/** What the model recorded as dating an occurrence, named so it can be ticked off a list. */
+internal fun RecommendationDataPoint.timingLabel(): String = timing(this) ?: "Not stated"
+
+/** Every timing this report actually contains, in the order the table lists them. */
+private fun AnalysisResult.timings(): List<String> =
+    consolidated.flatMap(ConsolidatedRecommendation::dataPoints)
+        .map(RecommendationDataPoint::timingLabel)
+        .distinct()
+
 internal fun SavedAnalysis.channelNames(): List<String> =
     result.selectedChannels.map { it.name }.filter(String::isNotBlank).distinct()
         .ifEmpty {
@@ -491,14 +500,45 @@ private fun ResultDetail(saved: SavedAnalysis, peakFor: (String, LocalDate?) -> 
             .associate { it.messageId.toString() to it.channelName }
     }
 
+    // Session-only, and per report: a timing hidden here is a row someone chose not to read now,
+    // not a preference about every report they open later.
+    val timings = remember(saved.id) { saved.result.timings() }
+    var shownTimings by remember(saved.id) { mutableStateOf(timings.toSet()) }
+    val stocks = remember(saved.id, shownTimings) {
+        saved.result.consolidated
+            .map { stock -> stock.copy(dataPoints = stock.dataPoints.filter { it.timingLabel() in shownTimings }) }
+            .filter { it.dataPoints.isNotEmpty() }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+        FilterRow(
+            active = shownTimings.size < timings.size,
+            onClearAll = { shownTimings = timings.toSet() },
+        ) {
+            CheckedSetFilter(
+                label = "timings",
+                options = timings,
+                shown = shownTimings,
+                onToggle = { name ->
+                    shownTimings = if (name in shownTimings) shownTimings - name else shownTimings + name
+                },
+                onSelectAll = { shownTimings = timings.toSet() },
+            )
+        }
+        if (stocks.isEmpty() && saved.result.consolidated.isNotEmpty()) {
+            Text(
+                "No recommendations match these timings.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         // Analyses saved before the consolidated contract have no nested occurrences, so they fall
         // back to a flat list rather than showing an empty table.
         if (saved.result.consolidated.isNotEmpty()) {
             BoxWithConstraints {
                 if (maxWidth >= TableMinWidth) {
                     RecommendationTable(
-                        stocks = saved.result.consolidated,
+                        stocks = stocks,
                         channelFor = { messageId -> channelNames[messageId] },
                         imagePathFor = { ref -> saved.result.imagePathFor(ref) },
                         onOpenImage = { ref -> openImage = ref },
@@ -508,7 +548,7 @@ private fun ResultDetail(saved: SavedAnalysis, peakFor: (String, LocalDate?) -> 
                     // A sixteen-column table on a cover screen is a scroll bar with numbers behind
                     // it. The same figures as cards stay readable without any horizontal scrolling.
                     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                        saved.result.consolidated.forEach { stock ->
+                        stocks.forEach { stock ->
                             RecommendationCards(
                                 stock = stock,
                                 channelFor = { messageId -> channelNames[messageId] },

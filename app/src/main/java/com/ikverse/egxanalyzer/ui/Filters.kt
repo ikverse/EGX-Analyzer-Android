@@ -119,6 +119,85 @@ internal fun MultiSelectFilter(
     }
 }
 
+/**
+ * A dropdown of checkboxes that start ticked, where the ticks are what is shown.
+ *
+ * The opposite convention to [MultiSelectFilter], and deliberately: that one filters a list nobody
+ * has to look at in full, so untouched means everything. This one narrows a table whose rows are
+ * all on screen already, and a box that has to be ticked to reveal a row that was already there
+ * reads backwards.
+ */
+@Composable
+internal fun CheckedSetFilter(
+    label: String,
+    options: List<String>,
+    shown: Set<String>,
+    onToggle: (String) -> Unit,
+    onSelectAll: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (options.size < 2) return
+    var open by remember { mutableStateOf(false) }
+    Row(modifier) {
+        FilterChip(
+            selected = shown.size < options.size,
+            onClick = { open = true },
+            label = {
+                Text(
+                    when {
+                        shown.size == options.size -> "All $label"
+                        shown.size == 1 -> shown.first()
+                        else -> "${shown.size} of ${options.size} $label"
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            trailingIcon = {
+                Icon(
+                    Icons.Outlined.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(IconSize.Inline),
+                )
+            },
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Checkbox(checked = option in shown, onCheckedChange = null)
+                            Text(
+                                option,
+                                Modifier.padding(start = Space.s),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    },
+                    onClick = { onToggle(option) },
+                )
+            }
+            if (shown.size < options.size) {
+                DropdownMenuItem(
+                    text = { Text("Select all") },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Outlined.Close,
+                            contentDescription = null,
+                            modifier = Modifier.size(IconSize.Inline),
+                        )
+                    },
+                    onClick = {
+                        onSelectAll()
+                        open = false
+                    },
+                )
+            }
+        }
+    }
+}
+
 /** A dropdown that picks one value, or none for everything. */
 @Composable
 internal fun SingleSelectFilter(
