@@ -54,6 +54,7 @@ object PerformanceCalculator {
                         troughOn = scored.troughOn,
                         returnPct = scored.returnPct,
                         sessionsElapsed = scored.sessionsElapsed,
+                        ambiguity = scored.ambiguity,
                         stoppedAfterPartial = scored.stoppedAfterPartial,
                         windowComplete = scored.windowComplete,
                         sessions = sessions,
@@ -101,6 +102,38 @@ object PerformanceCalculator {
                     )
                 }
                 .sortedByDescending { it.targetDate },
+        )
+    }
+
+    /**
+     * The same report over a subset of its calls.
+     *
+     * Every figure is recomputed rather than filtered: a rate, a ranking or a session's counts that
+     * still described calls the screen is hiding would be worse than no filter at all. Sessions
+     * left with nothing to show drop out entirely.
+     *
+     * The scoring itself is untouched - each call keeps the outcome it was already given - so this
+     * is only ever a narrower view of the same judgement.
+     */
+    fun refine(report: PerformanceReport, keep: (ScoredCall) -> Boolean): PerformanceReport {
+        val sessions = report.sessions
+            .map { session -> session.copy(calls = session.calls.filter(keep)) }
+            .filter { it.calls.isNotEmpty() }
+        val calls = sessions.flatMap(ScoredSession::calls)
+        val judged = calls.count { it.outcome.judged }
+        val full = calls.count { it.outcome.isFullHit }
+        val any = calls.count { it.outcome.reachedATarget }
+        return report.copy(
+            scoringSince = calls.minOfOrNull(ScoredCall::openedOn),
+            tracked = calls.size,
+            judged = judged,
+            fullHits = full,
+            partialHits = any - full,
+            fullHitRate = judged.takeIf { it > 0 }?.let { (full.toDouble() / it * 100).round(1) },
+            anyTargetRate = judged.takeIf { it > 0 }?.let { (any.toDouble() / it * 100).round(1) },
+            byOutcome = calls.groupingBy(ScoredCall::outcome).eachCount(),
+            channels = channelScores(calls),
+            sessions = sessions,
         )
     }
 

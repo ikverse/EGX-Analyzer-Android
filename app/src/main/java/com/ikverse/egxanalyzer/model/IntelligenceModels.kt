@@ -31,6 +31,8 @@ data class ScoredCall(
     val troughOn: LocalDate? = null,
     val returnPct: Double?,
     val sessionsElapsed: Int,
+    /** Set only for [Outcome.AMBIGUOUS], saying which pair of events could not be ordered. */
+    val ambiguity: Ambiguity? = null,
     /** The first target was banked and the stop was reached afterwards. */
     val stoppedAfterPartial: Boolean = false,
     /** False while the window is still running, so a partial hit may still become a full one. */

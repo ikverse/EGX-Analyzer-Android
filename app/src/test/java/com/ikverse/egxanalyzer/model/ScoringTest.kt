@@ -98,6 +98,7 @@ class ScoringTest {
             windowSessions = 10,
         )
         assertEquals(Outcome.FULL_HIT, scored.outcome)
+        assertNull(scored.ambiguity)
     }
 
     @Test
@@ -112,6 +113,7 @@ class ScoringTest {
         )
         assertEquals(Outcome.AMBIGUOUS, scored.outcome)
         assertNull(scored.returnPct)
+        assertEquals(Ambiguity.TARGET_AND_STOP, scored.ambiguity)
     }
 
     @Test
@@ -176,6 +178,8 @@ class ScoringTest {
         val scored = Scoring.score(session, 9.8, 10.0, 12.0, null, 9.0, windowSessions = 10)
         assertEquals(Outcome.AMBIGUOUS, scored.outcome)
         assertEquals(false, scored.outcome.judged)
+        // Which of the two cases it was is the whole of what the card can say about it.
+        assertEquals(Ambiguity.ENTRY_AND_TARGET, scored.ambiguity)
     }
 
     @Test
@@ -339,6 +343,82 @@ class ScoringTest {
             entryLow = 9.8, entryHigh = 10.0,
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = 10,
+        )
+
+        assertEquals(Outcome.OPEN, scored.outcome)
+    }
+
+    /**
+     * A price the feed stores as 18.100000381469727 is a price of 18.10.
+     *
+     * Yahoo sends 32-bit floats, so a stock that opened exactly at the top of its buy zone reads as
+     * opening above it, and the call is filed as unorderable rather than the partial hit it was.
+     * Three real calls went that way on 3 August 2026 - CLHO on its open, UEGC on a low of
+     * 2.430000066757202 against a zone ending at 2.43.
+     */
+    @Test
+    fun `an open a fraction above the band still counts as buyable`() {
+        val session = DailySession(
+            "TEST", start, high = 19.72, low = 18.0, close = 18.32, volume = null,
+            open = 18.100000381469727,
+        )
+
+        val scored = Scoring.score(
+            sessions = listOf(session),
+            entryLow = 18.0, entryHigh = 18.1,
+            target1 = 19.2, target2 = 20.7, stopLoss = 17.3,
+            windowSessions = 5,
+        )
+
+        assertEquals(Outcome.PARTIAL_HIT, scored.outcome)
+    }
+
+    @Test
+    fun `a low a fraction above the band still touches it`() {
+        val sessions = listOf(
+            DailySession("TEST", start, high = 2.55, low = 2.430000066757202, close = 2.45, volume = null, open = 2.46),
+            DailySession("TEST", start.plusDays(1), high = 2.70, low = 2.41, close = 2.70, volume = null, open = 2.45),
+        )
+
+        val scored = Scoring.score(
+            sessions = sessions,
+            entryLow = 2.4, entryHigh = 2.43,
+            target1 = 2.62, target2 = 2.75, stopLoss = 2.35,
+            windowSessions = 5,
+        )
+
+        assertEquals(Outcome.PARTIAL_HIT, scored.outcome)
+    }
+
+    /** A real gap is still a real gap: this is not licence to buy above the zone. */
+    @Test
+    fun `an open genuinely above the band is still unorderable`() {
+        val session = DailySession(
+            "TEST", start, high = 0.907, low = 0.85, close = 0.901, volume = null, open = 0.86,
+        )
+
+        val scored = Scoring.score(
+            sessions = listOf(session),
+            entryLow = 0.848, entryHigh = 0.856,
+            target1 = 0.89, target2 = 0.92, stopLoss = 0.825,
+            windowSessions = 5,
+        )
+
+        assertEquals(Outcome.AMBIGUOUS, scored.outcome)
+    }
+
+    /** The tolerance is for the entry only. A target is either met or it is not. */
+    @Test
+    fun `a high a fraction short of the target has not reached it`() {
+        val session = DailySession(
+            "TEST", start, high = 11.999, low = 9.8, close = 11.9, volume = null, open = 9.9,
+        )
+
+        val scored = Scoring.score(
+            sessions = listOf(session),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 5,
         )
 
         assertEquals(Outcome.OPEN, scored.outcome)

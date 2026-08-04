@@ -13,6 +13,10 @@ import com.ikverse.egxanalyzer.model.TelegramAuthState
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import com.ikverse.egxanalyzer.model.TelegramChat
 import com.ikverse.egxanalyzer.model.TelegramSourceBatch
+import com.ikverse.egxanalyzer.BuildConfig
+import com.ikverse.egxanalyzer.data.SyncedRun
+import com.ikverse.egxanalyzer.data.Tombstone
+import org.json.JSONObject
 import dev.g000sha256.tdl.TdlClient
 import dev.g000sha256.tdl.TdlResult
 import dev.g000sha256.tdl.dto.AuthorizationState
@@ -134,6 +138,17 @@ class TelegramRepository(
         _chats.value = emptyList()
         client = TdlClient.create()
         startClientCollectors()
+    }
+
+    /**
+     * Signs in by showing a QR code for an already-signed-in Telegram to scan.
+     *
+     * Nothing to type, which matters most on a tablet. Telegram answers with a `tg://login` link,
+     * which the screen renders as the code; scanning it there completes the sign-in here.
+     */
+    suspend fun startQrSignIn() {
+        setState(TelegramAuthStep.INITIALIZING, "Asking Telegram for a sign-in code…")
+        execute { client.requestQrCodeAuthentication(longArrayOf()) }
     }
 
     suspend fun submitPhoneNumber(phoneNumber: String) {
@@ -340,6 +355,195 @@ class TelegramRepository(
         }
     }
 
+    /**
+     * The private channel this app keeps its reports in, created once and remembered.
+     *
+     * A channel of its own rather than Saved Messages: sync traffic should not be mixed in with
+     * whatever else someone keeps there, and a named chat can be found, muted or deleted without
+     * touching anything else.
+     */
+    private suspend fun syncChatId(): Long {
+        preferences.getLong(KEY_SYNC_CHAT, 0L).takeIf { it != 0L }?.let { stored ->
+            // Confirm it still exists; a chat deleted on another device must not swallow uploads.
+            if (runCatching { client.getChat(stored).requireValue<Chat>() }.isSuccess) return stored
+        }
+        // Ask Telegram whether the channel already exists before making one. Without this every
+        // device created its own and none of them ever met: the phone uploaded six reports and the
+        // tablet, looking at a channel of its own, reported itself already in sync with nothing.
+        // Where uploads go: the busiest of the duplicates, so everything converges on one channel
+        // rather than splitting further, and deterministically when they are all empty.
+        val existing = findSyncChats()
+        if (existing.isNotEmpty()) {
+            val busiest = existing.maxByOrNull { reportsIn(it).size } ?: existing.min()
+            preferences.edit().putLong(KEY_SYNC_CHAT, busiest).apply()
+            return busiest
+        }
+        val created = client.createNewSupergroupChat(
+            SYNC_CHAT_TITLE,
+            false,
+            true,
+            "Reports from EGX Analyzer. Created by the app; safe to mute.",
+            null,
+            0,
+            false,
+        ).requireValue<Chat>()
+        preferences.edit().putLong(KEY_SYNC_CHAT, created.id).apply()
+        return created.id
+    }
+
+    /**
+     * Every channel by this name, because there can be more than one.
+     *
+     * Two devices that both created one before either could find the other leave duplicates, and
+     * picking whichever came back first meant a device could adopt the empty one and report itself
+     * in sync while six reports sat in the other. Reading them all makes that self-correcting.
+     */
+    private suspend fun findSyncChats(): List<Long> {
+        // From the loaded chat list rather than a server search. searchChatsOnServer returned
+        // nothing for these - they are private supergroups with no username - and a failed search
+        // silently read as "none exist", so every attempt created another channel. Three of them
+        // before this was caught. The list the app already holds cannot lie in that direction.
+        if (chatCache.isEmpty()) runCatching { refreshChats() }
+        return chatCache.values
+            .filter { it.title == SYNC_CHAT_TITLE }
+            .map(Chat::id)
+    }
+
+    /**
+     * Every report anywhere under this name, by the id its file name carries.
+     *
+     * Read across every duplicate: a report is worth having whichever channel it landed in, and a
+     * device that once uploaded to a channel of its own should not lose those reports now.
+     */
+    suspend fun listSyncedReports(): Map<String, Int> {
+        val target = syncChatId()
+        val chats = (findSyncChats() + target).distinct()
+        return chats.fold(linkedMapOf()) { all, chat ->
+            reportsIn(chat).forEach { (id, fileId) -> all.putIfAbsent(id, fileId) }
+            all
+        }
+    }
+
+    private suspend fun reportsIn(chatId: Long): Map<String, Int> =
+        contentsOf(chatId).reports.mapValues { (_, entry) -> entry.fileId }
+
+    /** One file in the channel: enough to download it, and enough to delete it. */
+    private data class ChannelFile(val fileId: Int, val messageId: Long)
+
+    private data class ChannelContents(
+        val reports: Map<String, ChannelFile>,
+        val tombstones: Map<String, ChannelFile>,
+    )
+
+    private suspend fun contentsOf(chatId: Long): ChannelContents {
+        val reports = linkedMapOf<String, ChannelFile>()
+        val tombstones = linkedMapOf<String, ChannelFile>()
+        var fromMessageId = 0L
+        while (true) {
+            val page = client.getChatHistory(chatId, fromMessageId, 0, HISTORY_PAGE_SIZE, false)
+                .requireValue<dev.g000sha256.tdl.dto.Messages>()
+            val messages = page.messages.filterNotNull()
+            if (messages.isEmpty()) break
+            messages.forEach { message ->
+                val document = (message.content as? dev.g000sha256.tdl.dto.MessageDocument)?.document
+                val name = document?.fileName ?: return@forEach
+                val file = ChannelFile(document.document.id, message.id)
+                // A tombstone is named for the report it buries, so it must be recognised first:
+                // "deleted-<id>.json" would otherwise read as a report called "deleted-<id>".
+                val buried = Tombstone.requestIdOf(name)
+                if (buried != null) {
+                    tombstones.putIfAbsent(buried, file)
+                    return@forEach
+                }
+                SyncedRun.requestIdOf(name)?.let { reports.putIfAbsent(it, file) }
+            }
+            fromMessageId = messages.last().id
+        }
+        return ChannelContents(reports, tombstones)
+    }
+
+    /** Every report the channel says was deleted, so no device brings one back. */
+    suspend fun listTombstones(): Set<String> {
+        val chats = (findSyncChats() + syncChatId()).distinct()
+        return chats.flatMap { contentsOf(it).tombstones.keys }.toSet()
+    }
+
+    /**
+     * Removes a report from the channel and publishes the marker that keeps it gone.
+     *
+     * Both halves matter: deleting the file stops a device that has not seen it from fetching it,
+     * and the marker stops a device that already holds it from uploading it back.
+     */
+    suspend fun buryReport(requestId: String) {
+        val chats = (findSyncChats() + syncChatId()).distinct()
+        chats.forEach { chat ->
+            val contents = contentsOf(chat)
+            contents.reports[requestId]?.let { file ->
+                runCatching {
+                    client.deleteMessages(chat, longArrayOf(file.messageId), true).requireValue<Any?>()
+                }
+            }
+        }
+        val target = syncChatId()
+        if (contentsOf(target).tombstones.containsKey(requestId)) return
+        val marker = Tombstone(requestId)
+        val staged = File(context.cacheDir, marker.fileName).apply {
+            writeText(JSONObject().put("deleted", requestId).toString())
+        }
+        try {
+            execute {
+                client.sendMessage(
+                    target,
+                    null,
+                    null,
+                    null,
+                    null,
+                    dev.g000sha256.tdl.dto.InputMessageDocument(
+                        dev.g000sha256.tdl.dto.InputDocument(
+                            dev.g000sha256.tdl.dto.InputFileLocal(staged.path),
+                            null,
+                            true,
+                        ),
+                        dev.g000sha256.tdl.dto.FormattedText("deleted $requestId", emptyArray()),
+                    ),
+                )
+            }
+        } finally {
+            staged.delete()
+        }
+    }
+
+    /** Puts one report in the channel. The file name is the identity; nothing else is read back. */
+    suspend fun uploadReport(run: SyncedRun) {
+        val chatId = syncChatId()
+        val staged = File(context.cacheDir, run.fileName).apply { writeText(run.toDocument()) }
+        try {
+            execute {
+                client.sendMessage(
+                    chatId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    dev.g000sha256.tdl.dto.InputMessageDocument(
+                        dev.g000sha256.tdl.dto.InputDocument(
+                            dev.g000sha256.tdl.dto.InputFileLocal(staged.path),
+                            null,
+                            true,
+                        ),
+                        dev.g000sha256.tdl.dto.FormattedText(run.requestId, emptyArray()),
+                    ),
+                )
+            }
+        } finally {
+            staged.delete()
+        }
+    }
+
+    /** Reads one report back out of the channel. */
+    suspend fun downloadReport(fileId: Int): SyncedRun? =
+        SyncedRun.fromDocument(download(fileId).readText())
+
     private suspend fun download(fileId: Int): File {
         val downloaded = client.downloadFile(fileId, 16, 0, 0, true)
             .requireValue<dev.g000sha256.tdl.dto.File>()
@@ -352,6 +556,15 @@ class TelegramRepository(
     private suspend fun handleAuthorizationState(state: AuthorizationState) {
         when (state) {
             is AuthorizationStateWaitTdlibParameters -> {
+                // Built in where the build supplies them: an api_id names the application, not the
+                // person, so making each user register one only stood between them and signing in.
+                // A build without them falls back to asking, so a checkout without the file works.
+                val bundledId = BuildConfig.TELEGRAM_API_ID
+                val bundledHash = BuildConfig.TELEGRAM_API_HASH
+                if (bundledId > 0 && bundledHash.isNotBlank()) {
+                    initializeTdlib(bundledId, bundledHash)
+                    return
+                }
                 val apiId = preferences.getInt(KEY_API_ID, 0)
                 val hash = secretStore.readSecret(KEY_API_HASH)
                 if (apiId == 0 || hash == null) {
@@ -534,6 +747,8 @@ class TelegramRepository(
          */
         const val MAX_MESSAGES_PER_CHAT = 2_000
         const val CLIENT_CLOSE_TIMEOUT_MS = 10_000L
+        const val KEY_SYNC_CHAT = "telegram_sync_chat"
+        const val SYNC_CHAT_TITLE = "EGX Analyzer sync"
     }
 }
 

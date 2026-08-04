@@ -111,12 +111,18 @@ object Scoring {
                 // Nothing has settled yet, so an unorderable session cannot be resolved either way.
                 if (partialOn == null && hitAnyTarget) {
                     if (hitStop) {
-                        return Scored(Outcome.AMBIGUOUS, day.date, null, elapsed, peak, peakOn, trough, troughOn, null)
+                        return Scored(
+                            Outcome.AMBIGUOUS, day.date, null, elapsed, peak, peakOn, trough,
+                            troughOn, null, ambiguity = Ambiguity.TARGET_AND_STOP,
+                        )
                     }
                     // The entry first became available on the same session a target was reached.
                     // Only the open can order those, since it precedes every other price of the day.
                     if (enteredHere && !day.buyableAtOpen(entryLow, entryHigh)) {
-                        return Scored(Outcome.AMBIGUOUS, day.date, null, elapsed, peak, peakOn, trough, troughOn, null)
+                        return Scored(
+                            Outcome.AMBIGUOUS, day.date, null, elapsed, peak, peakOn, trough,
+                            troughOn, null, ambiguity = Ambiguity.ENTRY_AND_TARGET,
+                        )
                     }
                 }
 
@@ -196,8 +202,26 @@ object Scoring {
         val boundLow = low ?: high ?: return false
         val boundHigh = high ?: low ?: return false
         if (this.low == null || this.high == null) return false
-        return this.low <= maxOf(boundLow, boundHigh) && this.high >= minOf(boundLow, boundHigh)
+        return this.low.atMost(maxOf(boundLow, boundHigh)) &&
+            this.high.atLeast(minOf(boundLow, boundHigh))
     }
+
+    /**
+     * Whether two prices are the same price, at the precision anyone actually quotes one.
+     *
+     * The feed sends 32-bit floats, so a stock that opened at exactly 18.10 is stored as
+     * 18.100000381469727. Against a buy zone ending at 18.1 that read as opening *above* the zone,
+     * and the call was recorded as unorderable rather than the partial hit it was. UEGC lost a day
+     * the same way, on a low of 2.430000066757202 against 2.43.
+     *
+     * Three decimals is more than any of these cards print, so this can only ever forgive the
+     * feed's own noise. Deliberately not applied to targets: a target is either met or it is not.
+     */
+    private fun Double.atMost(bound: Double): Boolean = this <= bound + PRICE_EPSILON
+
+    private fun Double.atLeast(bound: Double): Boolean = this >= bound - PRICE_EPSILON
+
+    private const val PRICE_EPSILON = 0.0005
 
     /**
      * The session opened at a price the entry band would already have bought.
@@ -209,7 +233,7 @@ object Scoring {
      */
     private fun DailySession.buyableAtOpen(low: Double?, high: Double?): Boolean {
         val bound = listOfNotNull(low, high).maxOrNull() ?: return false
-        return open != null && open <= bound
+        return open != null && open.atMost(bound)
     }
 
     private fun reached(high: Double?, target: Double?): Boolean =
@@ -280,6 +304,21 @@ data class DailySession(
         )
 }
 
+/**
+ * Why a session could not be ordered.
+ *
+ * Daily bars give a high and a low but no sequence, so two events inside one session sometimes
+ * cannot be placed against each other. Which of the two it was is the only useful thing to say
+ * about an ambiguous call, and it was being thrown away.
+ */
+enum class Ambiguity {
+    /** The day's high reached a target and its low broke the stop. */
+    TARGET_AND_STOP,
+
+    /** The buy zone first opened on the day a target was reached, above the zone. */
+    ENTRY_AND_TARGET,
+}
+
 data class Scored(
     val outcome: Outcome,
     val settledOn: LocalDate?,
@@ -293,6 +332,8 @@ data class Scored(
     val returnPct: Double?,
     /** The first target was banked and the stop was reached afterwards. */
     val stoppedAfterPartial: Boolean = false,
+    /** Set only for [Outcome.AMBIGUOUS], saying which pair of events could not be ordered. */
+    val ambiguity: Ambiguity? = null,
     /** False while the window is still running, so a partial hit may still become a full one. */
     val windowComplete: Boolean = false,
 )

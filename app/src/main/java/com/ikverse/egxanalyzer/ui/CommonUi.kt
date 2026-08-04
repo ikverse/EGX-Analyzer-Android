@@ -17,6 +17,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -24,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.runtime.getValue
@@ -44,16 +47,22 @@ import androidx.compose.ui.unit.dp
  * The title scrolls rather than sitting in a fixed app bar so these screens, which are long, get
  * the full height on a phone.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun Screen(
     title: String,
     subtitle: String,
     /** Stays put while the page scrolls. The content reserves room so it never covers anything. */
     floatingAction: (@Composable () -> Unit)? = null,
+    /** Given, the page pulls down to refresh. Its spinner is [refreshing]. */
+    onRefresh: (() -> Unit)? = null,
+    refreshing: Boolean = false,
+    /** Says what the pull does. Carried with [onRefresh] so it cannot appear on a page without it. */
+    refreshHint: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val scroll = rememberScrollState()
-    Box(Modifier.fillMaxSize()) {
+    val page = @Composable {
         Column(
             Modifier
                 .fillMaxSize()
@@ -70,11 +79,42 @@ internal fun Screen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // A gesture with nothing on screen to suggest it is a gesture nobody finds.
+                if (onRefresh != null && refreshHint != null) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Outlined.ArrowDownward,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            refreshHint,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
             content()
         }
+    }
+    Box(Modifier.fillMaxSize()) {
+        if (onRefresh == null) {
+            page()
+        } else {
+            // The gesture wraps only the scrolling page: a floating button that slid down with the
+            // indicator would look like it had come loose.
+            PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh) { page() }
+        }
         floatingAction?.let {
-            Box(Modifier.align(Alignment.BottomEnd).padding(Space.l)) { it() }
+            // Further in from the corner on a big screen, where the edge is a long way from the
+            // content and a button hard against it reads as stuck to the frame.
+            val inset = if (LocalWindowWidth.current == WindowWidth.COMPACT) Space.l else Space.xl + Space.s
+            Box(Modifier.align(Alignment.BottomEnd).padding(inset)) { it() }
         }
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Rule
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Info
@@ -87,7 +88,9 @@ internal fun SettingsScreen(appState: AppState) {
             text = {
                 Text(
                     "This permanently removes ${appState.savedResults.size} saved analyses and " +
-                        "their source traces from this device. Telegram and provider credentials are not changed.",
+                        "their source traces from this device, from your Telegram sync channel, " +
+                        "and from every other device that syncs with it. It cannot be undone. " +
+                        "Telegram and provider credentials are not changed.",
                 )
             },
             confirmButton = {
@@ -417,6 +420,33 @@ internal fun SettingsScreen(appState: AppState) {
                     },
                     valueRange = 30f..300f,
                     steps = 8,
+                )
+            }
+        }
+
+        ExpandableSection(
+            "Sync",
+            icon = Icons.Outlined.CloudSync,
+            summary = "${appState.savedResults.size} reports on this device",
+            contentMaxWidth = FormWidth,
+        ) {
+            Text(
+                "Reports are kept in a private Telegram channel of your own, so every device signed " +
+                    "in to your account sees the same history. A saved report never changes, so " +
+                    "syncing only ever adds - nothing is overwritten and nothing is deleted.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = { scope.launch { appState.syncReports() } },
+                enabled = appState.telegramAuthState.step == TelegramAuthStep.READY &&
+                    appState.busyLabel == null,
+            ) { Text("Sync now") }
+            if (appState.telegramAuthState.step != TelegramAuthStep.READY) {
+                Text(
+                    "Sign in to Telegram to sync.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

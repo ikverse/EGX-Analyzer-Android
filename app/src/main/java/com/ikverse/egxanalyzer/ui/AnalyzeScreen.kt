@@ -12,6 +12,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.outlined.Preview
@@ -47,6 +48,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -60,6 +62,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
 import java.time.format.DateTimeFormatter
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,6 +77,7 @@ import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.ZoneId
@@ -120,26 +124,44 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
     }
     // Computed here rather than inside the content, because the floating action needs it too.
     val blockedReason = analyzeBlockedReason(appState)
+    // Until Analyze is pressed this is guidance, not a complaint: painting it red on a freshly
+    // opened app tells someone who has done nothing wrong that something is broken.
+    var attempted by remember { mutableStateOf(false) }
     Screen(
         title = "Analyze",
         subtitle = "Send selected text, images, and voice-message content to " +
             appState.cloudConfiguration.provider.displayName + ".",
         floatingAction = {
+            val big = LocalWindowWidth.current != WindowWidth.COMPACT
+            val actionModifier = if (big) Modifier.height(BigActionHeight) else Modifier
             if (appState.analysisStatus == AnalysisStatus.RUNNING) {
                 ExtendedFloatingActionButton(
                     onClick = { scope.launch { appState.cancelAnalysis() } },
+                    modifier = actionModifier,
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    icon = { Icon(Icons.Outlined.Cancel, contentDescription = null) },
-                    text = { Text("Cancel analysis") },
+                    // A spinner rather than the cancel icon: the button is still what cancels the
+                    // run, but while one is going the first thing it has to say is that it is alive.
+                    icon = {
+                        CircularProgressIndicator(
+                            Modifier.size(if (big) BigActionIcon else ActionIcon),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            strokeWidth = 2.dp,
+                        )
+                    },
+                    text = { RunningLabel(appState.analysisStartedAt, big) },
                 )
             } else {
                 ExtendedFloatingActionButton(
+                    modifier = actionModifier,
                     onClick = {
                         // Asked here rather than at first launch: a permission prompt before the
                         // app has done anything is the one people decline, and Android never asks
                         // twice.
-                        if (blockedReason != null) return@ExtendedFloatingActionButton
+                        if (blockedReason != null) {
+                            attempted = true
+                            return@ExtendedFloatingActionButton
+                        }
                         if (notificationsAllowed) {
                             appState.startAnalysis()
                         } else {
@@ -156,8 +178,23 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    icon = { Icon(Icons.Outlined.AutoGraph, contentDescription = null) },
-                    text = { Text("Analyze") },
+                    icon = {
+                        Icon(
+                            Icons.Outlined.AutoGraph,
+                            contentDescription = null,
+                            modifier = Modifier.size(if (big) BigActionIcon else ActionIcon),
+                        )
+                    },
+                    text = {
+                        Text(
+                            "Analyze",
+                            style = if (big) {
+                                MaterialTheme.typography.titleMedium
+                            } else {
+                                MaterialTheme.typography.labelLarge
+                            },
+                        )
+                    },
                 )
             }
         },
@@ -170,7 +207,14 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 ChannelsSection(appState)
                 SourcePreview(appState, scope)
                 blockedReason?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error)
+                    Text(
+                        it,
+                        color = if (attempted) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
                 }
             },
             side = {
@@ -661,4 +705,43 @@ private fun analyzeBlockedReason(appState: AppState): String? = when {
             appState.channels.none(ChannelSelection::selected)) ->
         "No sources are loaded. In Channels, select chats and load messages for a date, or add content above."
     else -> null
+}
+
+/** The action is the point of this screen, so it grows with the room a big screen gives it. */
+private val BigActionHeight = 88.dp
+private val ActionIcon = 24.dp
+private val BigActionIcon = 34.dp
+
+/**
+ * What the button says while a run is going.
+ *
+ * The clock is there because a run takes anywhere from seventy seconds to eleven minutes, one has
+ * already died on a timeout, and nothing else on screen says how long this one has been waiting.
+ * It counts elapsed rather than remaining: the repository reports nothing until it finishes, so
+ * any figure claiming to know how far along the run is would be invented.
+ */
+@Composable
+private fun RunningLabel(startedAt: java.time.Instant?, big: Boolean) {
+    var elapsed by remember(startedAt) { mutableStateOf(elapsedSince(startedAt)) }
+    LaunchedEffect(startedAt) {
+        while (startedAt != null) {
+            elapsed = elapsedSince(startedAt)
+            delay(1_000)
+        }
+    }
+    Column {
+        Text(
+            "Cancel analysis",
+            style = if (big) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge,
+        )
+        elapsed?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+private fun elapsedSince(startedAt: java.time.Instant?): String? {
+    val start = startedAt ?: return null
+    val seconds = java.time.Duration.between(start, java.time.Instant.now()).seconds.coerceAtLeast(0)
+    return "%d:%02d elapsed".format(seconds / 60, seconds % 60)
 }

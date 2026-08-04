@@ -10,6 +10,7 @@ json = "20250517"
 tdlCoroutines = "14.0.0"
 
 [libraries]
+zxing-core = { module = "com.google.zxing:core", version = "3.5.3" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }

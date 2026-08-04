@@ -312,7 +312,8 @@ private fun entry(point: RecommendationDataPoint): String {
     }
 }
 
-private fun timing(point: RecommendationDataPoint): String? = when {
+/** What dated this occurrence: the first thing read on a row, and the label on a card. */
+internal fun timing(point: RecommendationDataPoint): String? = when {
     point.isWatching -> "Watching"
     point.isTPlusOne -> "T+1"
     point.effectiveDateBasis == "explicit_date" -> "Explicit date"

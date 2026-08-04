@@ -79,15 +79,21 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                     }) { Text("Initialize Telegram") }
                 }
             }
-            TelegramAuthStep.PHONE_NUMBER -> AuthCard("Phone number") {
+            TelegramAuthStep.PHONE_NUMBER -> AuthCard("Sign in to Telegram") {
+                // Scanning is offered first: it is the shorter path on any device, and on a tablet
+                // typing a phone number and then a code is the worst part of setting the app up.
+                Button(onClick = {
+                    scope.launch { appState.startTelegramQrSignIn() }
+                }) { Text("Sign in by QR code") }
+                Text(
+                    "Or sign in with your phone number:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 AuthField(firstValue, { firstValue = it }, "Phone number with country code")
                 Button(onClick = {
                     scope.launch { appState.submitTelegramPhone(firstValue) }
                 }) { Text("Send verification code") }
-                TextButton(onClick = {
-                    firstValue = ""
-                    scope.launch { appState.resetTelegramApiConfiguration() }
-                }) { Text("Change Telegram app ID / hash") }
             }
             TelegramAuthStep.VERIFICATION_CODE -> AuthCard("Verification code") {
                 AuthField(firstValue, { firstValue = it }, "Telegram code")
@@ -126,9 +132,15 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                     scope.launch { appState.registerTelegram(firstValue, secondValue) }
                 }) { Text("Register") }
             }
-            TelegramAuthStep.OTHER_DEVICE_CONFIRMATION -> AuthCard("Confirm on another device") {
-                Text(appState.telegramAuthState.link.orEmpty())
-                Text("Open this link in Telegram on an already signed-in device.")
+            TelegramAuthStep.OTHER_DEVICE_CONFIRMATION -> AuthCard("Scan with Telegram") {
+                val link = appState.telegramAuthState.link.orEmpty()
+                if (link.isNotBlank()) {
+                    QrCode(link)
+                }
+                Text(
+                    "On a device already signed in to Telegram, open Settings, then Devices, then " +
+                        "Link Desktop Device, and scan this code.",
+                )
             }
             TelegramAuthStep.READY -> {
                 val selectedCount = appState.channels.count(ChannelSelection::selected)

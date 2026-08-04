@@ -14,6 +14,9 @@ import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.PerformanceCalculator
 import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.SettingsRepository
+import com.ikverse.egxanalyzer.data.SyncOutcome
+import com.ikverse.egxanalyzer.data.SyncedRun
+import com.ikverse.egxanalyzer.data.syncActions
 import com.ikverse.egxanalyzer.data.recommendedTickers
 import com.ikverse.egxanalyzer.data.TelegramRepository
 import com.ikverse.egxanalyzer.model.AnalysedChannel
@@ -187,6 +190,15 @@ class AppState(
     var selectedResult by mutableStateOf<SavedAnalysis?>(savedResults.firstOrNull())
         private set
     var analysisStatus by mutableStateOf(AnalysisStatus.IDLE)
+        private set
+
+    /**
+     * When the running analysis started, so the button can count.
+     *
+     * A run takes anywhere from seventy seconds to eleven minutes, and one has already died on a
+     * timeout, so "how long has this been going" is a real question while waiting on it.
+     */
+    var analysisStartedAt by mutableStateOf<Instant?>(null)
         private set
     var analysisMessage by mutableStateOf<String?>(null)
         private set
@@ -695,6 +707,78 @@ class AppState(
     suspend fun resetTelegramApiConfiguration() =
         telegramRepository.resetApiConfiguration()
 
+    /**
+     * Brings this device and the sync channel to the same set of reports.
+     *
+     * A union, not a merge: a saved run never changes, so whatever either side has, both should
+     * have. Nothing is overwritten and nothing is deleted, which is why this can run without asking
+     * what to keep.
+     */
+    suspend fun syncReports() = runAction(
+        label = "Syncing reports with Telegram",
+        success = SyncOutcome::summary,
+    ) {
+        // Deletions this device made while offline are carried out first, so nothing it has
+        // already discarded is uploaded back a moment later.
+        localDataStore.pendingDeletions().forEach { requestId ->
+            runCatching { telegramRepository.buryReport(requestId) }
+                .onSuccess { localDataStore.clearDeletion(requestId) }
+        }
+
+        val remote = telegramRepository.listSyncedReports()
+        val local = localDataStore.savedRequestIds()
+        val deleted = telegramRepository.listTombstones()
+        val actions = syncActions(local, remote.keys, deleted)
+        val toUpload = actions.upload
+        val toDownload = actions.download
+
+        // A report another device buried goes from here too. That is what makes a delete a delete
+        // rather than a local hiding.
+        var forgotten = 0
+        actions.forget.forEach { requestId ->
+            localDataStore.deleteResultByRequestId(requestId)
+            forgotten++
+        }
+
+        var downloaded = 0
+        toDownload.forEach { requestId ->
+            val fileId = remote[requestId] ?: return@forEach
+            val run = telegramRepository.downloadReport(fileId) ?: return@forEach
+            if (localDataStore.adoptResult(
+                    run.requestId, run.provider, run.model, run.completedAt, run.payload,
+                )
+            ) {
+                downloaded++
+            }
+        }
+
+        var uploaded = 0
+        savedResults.filter { it.result.requestId in toUpload }.forEach { saved ->
+            telegramRepository.uploadReport(saved.toSyncedRun())
+            uploaded++
+        }
+
+        if (downloaded > 0 || forgotten > 0) {
+            savedResults = localDataStore.results()
+            unreadableResults = localDataStore.unreadableResults
+            recomputePerformance()
+        }
+        SyncOutcome(uploaded, downloaded, local.size - toUpload.size)
+    }
+
+    private fun SavedAnalysis.toSyncedRun() = SyncedRun(
+        requestId = result.requestId,
+        provider = provider.name,
+        model = model,
+        completedAt = result.completedAt.toString(),
+        payload = localDataStore.storedJsonOf(result),
+    )
+
+    suspend fun startTelegramQrSignIn() = runAction(
+        label = "Preparing a Telegram sign-in code",
+        success = { "Scan the code with Telegram on a signed-in device." },
+    ) { telegramRepository.startQrSignIn() }
+
     suspend fun submitTelegramPhone(phone: String) =
         telegramRepository.submitPhoneNumber(phone)
 
@@ -931,6 +1015,7 @@ class AppState(
             }.distinctBy(SourceTrace::sourceId),
         )
         activeRequestId = request.requestId
+        analysisStartedAt = Instant.now()
         analysisStatus = AnalysisStatus.RUNNING
         analysisMessage = "Sending ${selectedInputs.size} sources to ${cloudConfiguration.provider.displayName}…"
         analysisRunning(selectedInputs.size, cloudConfiguration.model)
@@ -956,6 +1041,11 @@ class AppState(
             // button was pressed or the app was restarted the next day.
             priceStocksWithNoHistory()
             analysisFinished(savedResults.firstOrNull()?.id, result.recommendations.size)
+            // Published as soon as it exists, so another device only ever has to pull. A failure
+            // here is not the run failing: the report is saved, and the next sync will carry it.
+            savedResults.firstOrNull { it.result.requestId == result.requestId }?.let { saved ->
+                runCatching { telegramRepository.uploadReport(saved.toSyncedRun()) }
+            }
             destination = AppDestination.RESULTS
         } catch (_: CancellationException) {
             analysisStatus = AnalysisStatus.CANCELLED
@@ -969,6 +1059,7 @@ class AppState(
             }
         } finally {
             activeRequestId = null
+            analysisStartedAt = null
         }
     }
 
@@ -984,21 +1075,42 @@ class AppState(
         selectedResult = result
     }
 
+    /**
+     * Removes a report here and everywhere.
+     *
+     * The intent is recorded before the row goes, so a delete survives being offline, a crash, or
+     * Telegram being slow: the next sync buries it in the channel and every other device drops it.
+     */
     fun deleteResult(result: SavedAnalysis) {
+        localDataStore.recordDeletion(result.result.requestId)
         localDataStore.deleteResult(result.id)
         savedResults = localDataStore.results()
         unreadableResults = localDataStore.unreadableResults
         selectedResult = savedResults.firstOrNull()
-        appScope.launch { recomputePerformance() }
+        appScope.launch {
+            recomputePerformance()
+            runCatching { telegramRepository.buryReport(result.result.requestId) }
+                .onSuccess { localDataStore.clearDeletion(result.result.requestId) }
+        }
     }
 
     fun deleteAllResults() {
+        // Recorded before anything is removed, so a delete that spans every report cannot half
+        // happen: whatever the app manages to bury now, the rest goes at the next sync.
+        val doomed = savedResults.map { it.result.requestId }
+        doomed.forEach(localDataStore::recordDeletion)
         localDataStore.deleteAllResults()
         savedResults = emptyList()
         unreadableResults = 0
         selectedResult = null
         settingsMessage = "All saved analyses deleted."
-        appScope.launch { recomputePerformance() }
+        appScope.launch {
+            recomputePerformance()
+            doomed.forEach { requestId ->
+                runCatching { telegramRepository.buryReport(requestId) }
+                    .onSuccess { localDataStore.clearDeletion(requestId) }
+            }
+        }
     }
 
     fun reportFor(saved: SavedAnalysis): AnalysisReport {

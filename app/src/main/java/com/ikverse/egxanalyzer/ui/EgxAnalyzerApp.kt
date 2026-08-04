@@ -43,6 +43,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldLayout
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
@@ -57,6 +59,14 @@ import androidx.window.layout.WindowInfoTracker
 import androidx.window.layout.WindowLayoutInfo
 
 internal enum class WindowWidth { COMPACT, MEDIUM, EXPANDED }
+
+/**
+ * How wide the window is, for screens that size themselves by it.
+ *
+ * The shell already works this out to choose a rail or a bar; publishing it saves every screen
+ * measuring the window again and disagreeing about where the line falls.
+ */
+internal val LocalWindowWidth = staticCompositionLocalOf { WindowWidth.COMPACT }
 
 /**
  * Width at which the layout switches to its wide form.
@@ -86,6 +96,7 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
     // chose for itself. The choice is made here so the rail can be spaced and aligned deliberately;
     // the components underneath are still Material's own.
     val rail = windowWidth != WindowWidth.COMPACT
+    CompositionLocalProvider(LocalWindowWidth provides windowWidth) {
     NavigationSuiteScaffoldLayout(
         navigationSuite = { AppNavigation(appState, rail) },
         navigationSuiteType = if (rail) {
@@ -99,6 +110,7 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             AppContent(activity, appState)
         }
+    }
     }
 }
 

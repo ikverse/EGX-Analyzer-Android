@@ -73,4 +73,42 @@ class AnalysisPolicyTest {
         assertEquals(listOf(input), result.accepted)
         assertTrue(result.excluded.isEmpty())
     }
+
+    /**
+     * The wording these channels use when a call has already worked.
+     *
+     * They repost the whole table to announce a hit, so one missed caption is not one wasted image
+     * but every row on it read a second time. The list matched `تحقق` and `تحقيق`, which appear in
+     * none of 120 saved captions; what they write is `حقق المستهدف`.
+     */
+    @Test
+    fun `an announcement that the target was reached is excluded`() {
+        val inputs = listOf(
+            AnalysisInput.Text(
+                "one",
+                "*سهم \"عامر جروب AMER.CA\"من توصياتنا في جلسة \"اليوم\" من ترشيحات T+1 " +
+                    "حقق المستهدف الاول و الثاني \"4.83\" بنسبه صعود 3.21%*",
+            ),
+            AnalysisInput.Text("two", "✅ سهم نهر الخير حققنا نسبة ربح بلغت 21.45% خلال 3 اسابيع فقط"),
+            AnalysisInput.Text("three", "*أسهم مرشحة للمتاجرة T+1*"),
+        )
+
+        val result = AnalysisPolicy.filter(inputs, "", "")
+
+        assertEquals(listOf("three"), result.accepted.map(AnalysisInput::sourceId))
+        assertEquals(listOf("one", "two"), result.excluded.map { it.sourceId })
+        assertTrue(result.excluded.all { it.reason == "target_already_hit" })
+    }
+
+    @Test
+    fun `a live call that merely names a target is kept`() {
+        val inputs = listOf(
+            AnalysisInput.Text("one", "توصية شراء CRST نطاق 1.92-1.93 يستهدف 2.10 والهدف الأول 2.01"),
+        )
+
+        val result = AnalysisPolicy.filter(inputs, "", "")
+
+        assertEquals(inputs, result.accepted)
+        assertTrue(result.excluded.isEmpty())
+    }
 }

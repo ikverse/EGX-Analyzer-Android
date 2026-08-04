@@ -3,6 +3,9 @@ package com.ikverse.egxanalyzer.ui
 import android.app.Activity
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,6 +23,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -38,11 +42,13 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +56,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.ikverse.egxanalyzer.data.RequestTrace
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.AnalysisResult
@@ -61,13 +68,86 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ResultsScreen(activity: Activity, appState: AppState) {
+    val scope = rememberCoroutineScope()
     Screen(
         title = "Results",
-        subtitle = "Saved recommendations and their exact source traces remain on this device.",
+        subtitle = "Saved recommendations and their exact source traces, on this device and in your Telegram sync channel.",
+        onRefresh = { scope.launch { appState.refreshPrices() } },
+        refreshing = appState.pricesRefreshing,
+        refreshHint = "Pull down to refresh prices",
     ) {
         UnreadableNotice(appState.unreadableResults)
+        // Session-only, deliberately: a filter that survived a restart would hide runs from someone
+        // who had forgotten it was on.
+        var channelFilter by remember { mutableStateOf(emptySet<String>()) }
+        var dateFilter by remember { mutableStateOf<String?>(null) }
+        var order by remember { mutableStateOf(RunOrder.RUN_NEWEST) }
+        val allChannels = remember(appState.savedResults) {
+            appState.savedResults.flatMap { it.channelNames() }.distinct().sorted()
+        }
+        val allDates = remember(appState.savedResults) {
+            appState.savedResults.mapNotNull { it.result.recommendationTargetDate?.toString() }
+                .distinct()
+                .sortedDescending()
+        }
+        if (appState.savedResults.isNotEmpty()) {
+            FilterRow(
+                active = channelFilter.isNotEmpty() || dateFilter != null,
+                onClearAll = {
+                    channelFilter = emptySet()
+                    dateFilter = null
+                },
+            ) {
+                MultiSelectFilter(
+                    label = "channels",
+                    options = allChannels,
+                    selected = channelFilter,
+                    onToggle = { name ->
+                        channelFilter = if (name in channelFilter) {
+                            channelFilter - name
+                        } else {
+                            channelFilter + name
+                        }
+                    },
+                    onClear = { channelFilter = emptySet() },
+                )
+                SingleSelectFilter(
+                    label = "dates",
+                    options = allDates,
+                    selected = dateFilter,
+                    onSelect = { dateFilter = it },
+                )
+                // Deliberately outside the filters' clear-all: an order is not something a list
+                // can be cleared of, and resetting it would look like a filter had gone missing.
+                SortFilter(
+                    options = RunOrder.entries,
+                    selected = order,
+                    label = RunOrder::label,
+                    onSelect = { order = it },
+                )
+            }
+        }
+        val shown = remember(appState.savedResults, dateFilter, channelFilter, order) {
+            appState.savedResults
+                .filter { saved ->
+                    (
+                        dateFilter == null ||
+                            saved.result.recommendationTargetDate?.toString() == dateFilter
+                        ) &&
+                        (channelFilter.isEmpty() || saved.channelNames().any { it in channelFilter })
+                }
+                .sortedWith(order.comparator)
+        }
+        if (shown.isEmpty() && appState.savedResults.isNotEmpty()) {
+            EmptyState(
+                icon = Icons.Outlined.Assessment,
+                title = "No runs match these filters",
+                detail = "Clear a filter to see the rest of your saved analyses.",
+            )
+        }
         if (appState.savedResults.isEmpty()) {
             EmptyState(
                 icon = Icons.Outlined.Assessment,
@@ -86,22 +166,10 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
             }
             BoxWithConstraints {
                 val columns = responsiveColumns(minColumnWidth = SavedRunMinWidth, maxColumns = 2)
-                // Grouped before rendering rather than while: the run of collapsed cards between
-                // two open ones is what forms a row, and that cannot be decided one card at a time.
-                val bands = remember(appState.savedResults, openRun) {
-                    buildList {
-                        val closed = mutableListOf<SavedAnalysis>()
-                        appState.savedResults.forEach { saved ->
-                            if (saved.id == openRun) {
-                                if (closed.isNotEmpty()) add(closed.toList() to false)
-                                closed.clear()
-                                add(listOf(saved) to true)
-                            } else {
-                                closed += saved
-                            }
-                        }
-                        if (closed.isNotEmpty()) add(closed.toList() to false)
-                    }
+                // Grouped before rendering rather than while: which cards share a row depends on
+                // where the open one sits, and that cannot be decided one card at a time.
+                val bands = remember(shown, openRun, columns) {
+                    expandableBands(shown, columns) { it.id == openRun }
                 }
 
                 @Composable
@@ -124,10 +192,20 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                     )
                 }
 
+                // Opening a report puts its top at the top of the view, rather than leaving you
+                // halfway down a table you just asked for.
+                val reveal = remember { BringIntoViewRequester() }
+                LaunchedEffect(openRun) {
+                    if (openRun != null) reveal.bringIntoView()
+                }
                 Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                     bands.forEach { (band, open) ->
                         if (open) {
-                            card(band.single(), expanded = true, cardModifier = Modifier.fillMaxWidth())
+                            card(
+                                band.single(),
+                                expanded = true,
+                                cardModifier = Modifier.fillMaxWidth().bringIntoViewRequester(reveal),
+                            )
                         } else {
                             ResponsiveRows(band, columns) { saved, cardModifier ->
                                 card(saved, expanded = false, cardModifier = cardModifier)
@@ -148,10 +226,43 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
  */
 private val SavedRunMinWidth = 300.dp
 
-/** The card's ladder draws the headline occurrence, so its date is the date of the call. */
-private fun ConsolidatedRecommendation.peak(
-    peakFor: (String, LocalDate?) -> Double?,
-): Double? = peakFor(stockCode, dataPoints.firstOrNull()?.date)
+/**
+ * The orders a saved run can be listed in.
+ *
+ * Two dates matter and they disagree: the session a report is about, and when it was actually run.
+ * A late run for an earlier session sits at the top under one and in the middle under the other.
+ *
+ * Runs with no target date go last whichever way the target-date orders point, newest run first
+ * among themselves, so that block reads the same either way instead of flipping with the arrow.
+ */
+internal enum class RunOrder(val label: String, val comparator: Comparator<SavedAnalysis>) {
+    RUN_NEWEST("Run date, newest", compareByDescending { it.result.completedAt }),
+    RUN_OLDEST("Run date, oldest", compareBy { it.result.completedAt }),
+    TARGET_NEWEST(
+        "Target date, newest",
+        compareBy<SavedAnalysis> { it.result.recommendationTargetDate == null }
+            .thenByDescending { it.result.recommendationTargetDate }
+            .thenByDescending { it.result.completedAt },
+    ),
+    TARGET_OLDEST(
+        "Target date, oldest",
+        compareBy<SavedAnalysis> { it.result.recommendationTargetDate == null }
+            .thenBy { it.result.recommendationTargetDate }
+            .thenByDescending { it.result.completedAt },
+    ),
+}
+
+/**
+ * Which chats a saved run covered.
+ *
+ * Taken from the selection the run recorded. Analyses saved before that was stored fall back to the
+ * chats their rows actually name, which understates a run that read a chat and found nothing.
+ */
+internal fun SavedAnalysis.channelNames(): List<String> =
+    result.selectedChannels.map { it.name }.filter(String::isNotBlank).distinct()
+        .ifEmpty {
+            result.recommendations.mapNotNull { it.sourceName.takeIf(String::isNotBlank) }.distinct()
+        }
 
 /**
  * Saved runs the store could not read back.
@@ -218,6 +329,9 @@ private fun SavedAnalysisCard(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var showReport by remember { mutableStateOf(false) }
+    // Asked for, because deleting is no longer local: it removes the report from the sync channel
+    // and from every other device, and there is nothing left to restore it from.
+    var confirmDelete by remember { mutableStateOf(false) }
     val stockCount = saved.result.consolidated.size.takeIf { it > 0 }
         ?: saved.result.recommendations.map(RecommendationResult::ticker).distinct().size
 
@@ -278,7 +392,7 @@ private fun SavedAnalysisCard(
                         DropdownMenuItem(
                             text = { Text("Delete") },
                             leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
-                            onClick = { menuOpen = false; onDelete() },
+                            onClick = { menuOpen = false; confirmDelete = true },
                         )
                     }
                 }
@@ -288,6 +402,22 @@ private fun SavedAnalysisCard(
                 StatTile(stockCount.toString(), "stocks", tone = MaterialTheme.colorScheme.primary)
                 StatTile(saved.result.sources.size.toString(), "sources")
                 StatTile("${saved.result.diagnostics.durationMilliseconds / 1000}s", "took")
+            }
+
+            saved.channelNames().takeIf(List<String>::isNotEmpty)?.let { names ->
+                Text(
+                    // Two names and a count: the full list of a six-chat run would wrap to three
+                    // lines and push the button off a half-width card.
+                    if (names.size <= 2) {
+                        names.joinToString(" · ")
+                    } else {
+                        names.take(2).joinToString(" · ") + " +${names.size - 2}"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
 
             Text(
@@ -313,6 +443,30 @@ private fun SavedAnalysisCard(
 
             AnimatedVisibility(expanded) { ResultDetail(saved, peakFor) }
         }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete this analysis?") },
+            text = {
+                Text(
+                    "It will be removed from this device and from your Telegram sync channel, so " +
+                        "every device drops it too. This cannot be undone.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        onDelete()
+                    },
+                ) { Text("Delete everywhere") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
+            },
+        )
     }
 }
 
@@ -355,7 +509,11 @@ private fun ResultDetail(saved: SavedAnalysis, peakFor: (String, LocalDate?) -> 
                     // it. The same figures as cards stay readable without any horizontal scrolling.
                     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                         saved.result.consolidated.forEach { stock ->
-                            RecommendationCard(stock, peak = stock.peak(peakFor))
+                            RecommendationCards(
+                                stock = stock,
+                                channelFor = { messageId -> channelNames[messageId] },
+                                peakFor = peakFor,
+                            )
                         }
                     }
                 }

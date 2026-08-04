@@ -38,6 +38,18 @@ object AnalysisPolicy {
         "old recommendation",
         "old recommendations",
     )
+    /**
+     * Wording that announces a call already worked, which makes its image an old card reposted.
+     *
+     * `حقق المستهدف` is the phrase these channels actually use, and it was missing: the list had
+     * `تحقق` and `تحقيق`, neither of which appears once in 120 saved captions. Nine target-hit
+     * posts went through because of it, and three of those had rows extracted from them as live
+     * calls - including the T+1 table reposted on 2 August to say AMER had hit both targets, which
+     * duplicated four stocks.
+     *
+     * Past tense by construction, which is what makes it safe: a live call says `يستهدف` or
+     * `الهدف الأول`, never that the target was reached.
+     */
     private val targetHitMarkers = listOf(
         "وصل الى المستهدف",
         "وصل للمستهدف",
@@ -45,6 +57,8 @@ object AnalysisPolicy {
         "تم تحقيق المستهدف",
         "تحقق المستهدف",
         "تحقيق المستهدف",
+        "حقق المستهدف",
+        "حققنا نسبة ربح",
         "target reached",
         "reached target",
         "target achieved",

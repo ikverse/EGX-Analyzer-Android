@@ -11,6 +11,28 @@ val appVersionCode = appVersionName.split(".").let { (major, minor, patch) ->
     major.toInt() * 10_000 + minor.toInt() * 100 + patch.toInt()
 }
 
+/**
+ * The Telegram application credentials, read from `local.properties`, which git ignores.
+ *
+ * An api_id identifies the *application*, not the person using it - every third-party Telegram
+ * client registers one at my.telegram.org and ships it. Asking each user to register their own was
+ * a form standing between them and a phone number for no reason. Absent, the app falls back to
+ * asking, so a checkout without the file still builds and still works.
+ */
+val telegramProperties: Map<String, String> = rootProject.file("local.properties")
+    .takeIf { it.exists() }
+    ?.readLines()
+    ?.mapNotNull { line ->
+        val text = line.trim()
+        if (text.startsWith("#") || "=" !in text) return@mapNotNull null
+        val key = text.substringBefore("=").trim()
+        key to text.substringAfter("=").trim()
+    }
+    ?.toMap()
+    .orEmpty()
+val telegramApiId: String = telegramProperties["telegramApiId"] ?: "0"
+val telegramApiHash: String = telegramProperties["telegramApiHash"] ?: ""
+
 android {
     namespace = "com.ikverse.egxanalyzer"
     compileSdk = 37
@@ -24,6 +46,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+
+        buildConfigField("int", "TELEGRAM_API_ID", telegramApiId)
+        buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
     }
 
     buildTypes {
@@ -42,8 +67,8 @@ android {
     }
 
     buildFeatures {
-        compose = true
         buildConfig = true
+        compose = true
     }
 
     packaging {
@@ -65,6 +90,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.window)
     implementation(libs.tdl.coroutines.android)
+    // Encodes the tg://login link TDLib hands back; scanning it beats typing a phone and a code.
+    implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
     // android.jar stubs org.json in local unit tests, so supply a real implementation.

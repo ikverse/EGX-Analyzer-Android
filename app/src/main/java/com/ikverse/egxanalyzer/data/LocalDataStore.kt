@@ -53,6 +53,7 @@ class LocalDataStore(context: Context) :
             )""",
         )
         db.createDailyPrices()
+        db.createPendingDeletions()
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -64,8 +65,15 @@ class LocalDataStore(context: Context) :
             )""",
         )
         db.createDailyPrices()
+        db.createPendingDeletions()
         db.addOpenColumn()
     }
+
+    private fun SQLiteDatabase.createPendingDeletions() = execSQL(
+        """CREATE TABLE IF NOT EXISTS pending_deletions (
+            request_id TEXT PRIMARY KEY
+        )""",
+    )
 
     private fun SQLiteDatabase.createDailyPrices() = execSQL(
         // One row per stock per session. The unique key lets a refresh re-fetch the same days
@@ -234,6 +242,65 @@ class LocalDataStore(context: Context) :
         )
 
     /**
+     * Reports deleted here but not yet buried in the sync channel.
+     *
+     * Deleting has to work with no signal - tidying up is exactly what you do on a plane - so the
+     * intent is recorded and carried out at the next sync. Kept in the same database as the reports
+     * so a delete and its record cannot be separated by a crash.
+     */
+    fun pendingDeletions(): Set<String> = readableDatabase
+        .rawQuery("SELECT request_id FROM pending_deletions", null)
+        .use { cursor -> buildSet { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+
+    fun recordDeletion(requestId: String) {
+        writableDatabase.insertWithOnConflict(
+            "pending_deletions",
+            null,
+            ContentValues().apply { put("request_id", requestId) },
+            SQLiteDatabase.CONFLICT_IGNORE,
+        )
+    }
+
+    fun clearDeletion(requestId: String) {
+        writableDatabase.delete("pending_deletions", "request_id = ?", arrayOf(requestId))
+    }
+
+    fun requestIdOf(id: Long): String? = readableDatabase
+        .query("analyses", arrayOf("request_id"), "id = ?", arrayOf(id.toString()), null, null, null)
+        .use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+
+    /** Every run this device already holds, so a sync only fetches what it has not seen. */
+    fun savedRequestIds(): Set<String> = readableDatabase
+        .rawQuery("SELECT request_id FROM analyses", null)
+        .use { cursor -> buildSet { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+
+    /**
+     * Stores a run that arrived from another device.
+     *
+     * Ignores one already held rather than replacing it: a saved run never changes, so the copy on
+     * disk and the copy in the cloud are the same thing, and overwriting could only lose a repair
+     * made locally. Returns whether anything was actually added.
+     */
+    fun adoptResult(
+        requestId: String,
+        provider: String,
+        model: String,
+        completedAt: String,
+        payload: String,
+    ): Boolean = writableDatabase.insertWithOnConflict(
+        "analyses",
+        null,
+        ContentValues().apply {
+            put("request_id", requestId)
+            put("provider", provider)
+            put("model", model)
+            put("completed_at", completedAt)
+            put("payload", payload)
+        },
+        SQLiteDatabase.CONFLICT_IGNORE,
+    ) != -1L
+
+    /**
      * How many saved runs the last [results] call could not read back.
      *
      * A payload that failed to parse used to be dropped without a word. Two runs saved on 2 August
@@ -269,6 +336,11 @@ class LocalDataStore(context: Context) :
         }.also { unreadableResults = unreadable }
     }
 
+    /** Removes a report by the identity that travels between devices. */
+    fun deleteResultByRequestId(requestId: String) {
+        writableDatabase.delete("analyses", "request_id = ?", arrayOf(requestId))
+    }
+
     fun deleteResult(id: Long) {
         writableDatabase.delete("analyses", "id = ?", arrayOf(id.toString()))
     }
@@ -276,6 +348,9 @@ class LocalDataStore(context: Context) :
     fun deleteAllResults() {
         writableDatabase.delete("analyses", null, null)
     }
+
+    /** The stored form of a run, for anything that has to move one off this device. */
+    fun storedJsonOf(result: AnalysisResult): String = result.toJson().toString()
 
     private fun AnalysisResult.toJson() = JSONObject().apply {
         put("requestId", requestId)
@@ -470,6 +545,6 @@ class LocalDataStore(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
-        const val DATABASE_VERSION = 4
+        const val DATABASE_VERSION = 5
     }
 }

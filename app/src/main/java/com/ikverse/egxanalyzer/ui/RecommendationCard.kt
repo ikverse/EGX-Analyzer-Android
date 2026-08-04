@@ -1,15 +1,22 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
@@ -24,27 +31,114 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
+import java.time.LocalDate
 
 /**
- * One stock, with every occurrence the model extracted for it.
+ * Every occurrence of one stock, one card each, swiped through sideways.
+ *
+ * A stock is often called twice in a report - by two channels, or once as a watch and once for a
+ * named date - and those calls have different entries and different targets. Folding them into a
+ * single card showed the first and silently dropped the rest, which is the one thing a table row
+ * never did.
+ */
+@Composable
+internal fun RecommendationCards(
+    stock: ConsolidatedRecommendation,
+    /** The channel behind an occurrence, looked up by the message the model cited. */
+    channelFor: (String?) -> String?,
+    /** Highest the stock has traded since a given call date, drawn as the ladder's arrow. */
+    peakFor: (String, LocalDate?) -> Double?,
+    modifier: Modifier = Modifier,
+) {
+    val points = stock.dataPoints
+    if (points.isEmpty()) {
+        Card(
+            modifier = modifier.fillMaxWidth(),
+            colors = CardDefaults.elevatedCardColors(),
+            elevation = CardDefaults.elevatedCardElevation(),
+        ) {
+            Column(Modifier.padding(Space.l)) { StockHeader(stock, point = null, channel = null) }
+        }
+        return
+    }
+
+    val pager = rememberPagerState(pageCount = { points.size })
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        HorizontalPager(
+            state = pager,
+            // The peek is what makes the swipe discoverable: a card that filled the width would
+            // look like the only one there is. A lone occurrence keeps the full width.
+            contentPadding = PaddingValues(horizontal = if (points.size > 1) CardPeek else 0.dp),
+            pageSpacing = Space.s,
+            verticalAlignment = Alignment.Top,
+        ) { page ->
+            val point = points[page]
+            RecommendationCard(
+                stock = stock,
+                point = point,
+                channel = channelFor(point.sourceMessageId),
+                peak = peakFor(stock.stockCode, point.date),
+            )
+        }
+        if (points.size > 1) PagerFooter(pager.currentPage, points.size)
+    }
+}
+
+/** How much of the neighbouring cards shows at each edge. */
+private val CardPeek = 24.dp
+
+@Composable
+private fun PagerFooter(current: Int, total: Int) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(total) { index ->
+            Box(
+                Modifier
+                    .padding(horizontal = 3.dp)
+                    .size(if (index == current) 8.dp else 6.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (index == current) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant
+                        },
+                    ),
+            )
+        }
+        Spacer(Modifier.width(Space.s))
+        Text(
+            "${current + 1} of $total",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * One occurrence: what this source, on this date, actually said.
  *
  * Collapsed it answers "what is the trade"; expanded it answers "where did this come from",
  * which matters because the app's whole claim is that every number is traceable to a source.
  */
 @Composable
-internal fun RecommendationCard(
+private fun RecommendationCard(
     stock: ConsolidatedRecommendation,
+    point: RecommendationDataPoint,
+    channel: String?,
+    peak: Double?,
     modifier: Modifier = Modifier,
-    /** Highest the stock has traded since the call, drawn as the ladder's arrow. */
-    peak: Double? = null,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val headline = stock.dataPoints.firstOrNull()
+    var expanded by remember(point) { mutableStateOf(false) }
 
     Card(
         modifier = modifier.fillMaxWidth().clickable { expanded = !expanded },
@@ -52,21 +146,21 @@ internal fun RecommendationCard(
         elevation = CardDefaults.elevatedCardElevation(),
     ) {
         Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
-            StockHeader(stock)
+            StockHeader(stock, point, channel)
 
-            if (headline != null) {
-                PriceLadder(headline, peak = peak)
-                LevelRow(headline)
-                headline.riskRewardRatio()?.let { ratio ->
-                    Text(
-                        "Risk / reward  1 : ${"%.1f".format(ratio)}",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            PriceLadder(point, peak = peak)
+            LevelRow(point)
+            point.riskRewardRatio()?.let { ratio ->
+                Text(
+                    "Risk / reward  1 : ${"%.1f".format(ratio)}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
-            stock.notesSummary?.let { notes ->
+            // This occurrence's own note where it has one; the stock's summary is the fallback,
+            // not the default, or three cards would repeat the same paragraph.
+            (point.notesArabic ?: stock.notesSummary)?.let { notes ->
                 Text(
                     notes,
                     style = MaterialTheme.typography.bodyMedium,
@@ -76,18 +170,15 @@ internal fun RecommendationCard(
             }
 
             Text(
-                if (expanded) "Hide sources" else "${stock.dataPoints.size} source occurrence" +
-                    if (stock.dataPoints.size == 1) "" else "s",
+                if (expanded) "Hide source" else "Source",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
 
             AnimatedVisibility(expanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                    stock.dataPoints.forEach { point ->
-                        HorizontalDivider()
-                        OccurrenceDetail(point)
-                    }
+                    HorizontalDivider()
+                    OccurrenceDetail(point)
                 }
             }
         }
@@ -95,7 +186,11 @@ internal fun RecommendationCard(
 }
 
 @Composable
-private fun StockHeader(stock: ConsolidatedRecommendation) {
+private fun StockHeader(
+    stock: ConsolidatedRecommendation,
+    point: RecommendationDataPoint?,
+    channel: String?,
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(
@@ -114,40 +209,36 @@ private fun StockHeader(stock: ConsolidatedRecommendation) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            SignalChip(stock)
-            if (stock.dataPoints.any(RecommendationDataPoint::isWatching)) {
-                Spacer(Modifier.width(4.dp))
+            // Two cards for one stock can be identical apart from who said it.
+            channel?.takeIf(String::isNotBlank)?.let {
                 Text(
-                    "Watching",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.tertiary,
+                    it,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
         }
+        if (point != null) TimingChip(point)
     }
 }
 
+/**
+ * What dated the call, in place of the buy/sell signal.
+ *
+ * Every occurrence in a report is a buy, so the old chip said the same word on every card; which
+ * session a call is for is the thing that actually differs between two rows of the same stock.
+ */
 @Composable
-private fun SignalChip(stock: ConsolidatedRecommendation) {
-    val types = stock.dataPoints.mapNotNull { it.recommendationType?.lowercase() }.toSet()
-    val label = when {
-        types.contains("sell") && !types.contains("buy") -> "SELL"
-        types.contains("buy") -> "BUY"
-        else -> "HOLD"
-    }
-    val tone = when (label) {
-        "BUY" -> MaterialTheme.colorScheme.tertiaryContainer
-        "SELL" -> MaterialTheme.colorScheme.errorContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
-    }
+private fun TimingChip(point: RecommendationDataPoint) {
+    // Falls back to the signal only when the model recorded no basis at all, so the chip is
+    // never blank.
+    val label = timing(point) ?: point.recommendationType?.uppercase() ?: "-"
     AssistChip(
         onClick = {},
         enabled = false,
         label = { Text(label, fontWeight = FontWeight.Bold) },
         colors = AssistChipDefaults.assistChipColors(
-            disabledContainerColor = tone,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
             disabledLabelColor = MaterialTheme.colorScheme.onSurface,
         ),
     )

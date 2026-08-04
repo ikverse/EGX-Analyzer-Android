@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Leaderboard
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Timeline
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -48,6 +49,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.data.PerformanceCalculator
+import com.ikverse.egxanalyzer.model.Ambiguity
 import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.Outcome
@@ -68,29 +71,91 @@ import java.time.format.DateTimeFormatter
 @Composable
 internal fun InsightsScreen(appState: AppState) {
     val scope = rememberCoroutineScope()
-    val report = appState.performance
+    val full = appState.performance
 
     Screen(
         title = "Insights",
         subtitle = "How every saved recommendation turned out, judged against the sessions that followed it.",
+        onRefresh = { scope.launch { appState.refreshPrices() } },
+        refreshing = appState.pricesRefreshing,
+        refreshHint = "Pull down to refresh prices",
     ) {
         PricesBar(
-            windowSessions = report.windowSessions,
+            windowSessions = full.windowSessions,
             refreshing = appState.pricesRefreshing,
             onRefreshPrices = { scope.launch { appState.refreshPrices() } },
         )
 
-        if (report.tracked == 0) {
+        if (full.tracked == 0) {
             EmptyState(
                 icon = Icons.Outlined.Insights,
-                title = if (report.scoringSince == null) "No prices stored yet" else "Nothing scored yet",
-                detail = if (report.scoringSince == null) {
+                title = if (full.scoringSince == null) "No prices stored yet" else "Nothing scored yet",
+                detail = if (full.scoringSince == null) {
                     "Fetch prices to start scoring. Every stock your analyses have named is priced " +
                         "for the last few trading sessions, and scoring begins at the earliest one."
                 } else {
-                    "Saved analyses name no stock dated on or after ${report.scoringSince}, which " +
+                    "Saved analyses name no stock dated on or after ${full.scoringSince}, which " +
                         "is the first session with stored prices."
                 },
+            )
+            return@Screen
+        }
+
+        // Session-only: a filter that outlived a restart would quietly shrink the record someone
+        // came back to read.
+        var channels by remember { mutableStateOf(emptySet<String>()) }
+        var outcomes by remember { mutableStateOf(emptySet<String>()) }
+        var stock by remember { mutableStateOf("") }
+        val everyChannel = remember(full.channels) { full.channels.map(ChannelScore::channel).sorted() }
+        FilterRow(
+            active = channels.isNotEmpty() || outcomes.isNotEmpty() || stock.isNotBlank(),
+            onClearAll = {
+                channels = emptySet()
+                outcomes = emptySet()
+                stock = ""
+            },
+        ) {
+            MultiSelectFilter(
+                label = "channels",
+                options = everyChannel,
+                selected = channels,
+                onToggle = { name ->
+                    channels = if (name in channels) channels - name else channels + name
+                },
+                onClear = { channels = emptySet() },
+            )
+            MultiSelectFilter(
+                label = "outcomes",
+                options = OutcomeFilters.keys.toList(),
+                selected = outcomes,
+                onToggle = { name ->
+                    outcomes = if (name in outcomes) outcomes - name else outcomes + name
+                },
+                onClear = { outcomes = emptySet() },
+            )
+            StockFilterField(value = stock, onValueChange = { stock = it })
+        }
+
+        // Recomputed, not merely hidden: a rate or a session count still describing calls the
+        // screen is filtering out would be worse than showing no filter at all.
+        val wanted = stock.trim().uppercase()
+        val report = remember(full, channels, outcomes, wanted) {
+            if (channels.isEmpty() && outcomes.isEmpty() && wanted.isEmpty()) {
+                full
+            } else {
+                PerformanceCalculator.refine(full) { call ->
+                    (channels.isEmpty() || call.channel in channels) &&
+                        (outcomes.isEmpty() || outcomes.any { OutcomeFilters[it]?.invoke(call) == true }) &&
+                        (wanted.isEmpty() || call.ticker.contains(wanted))
+                }
+            }
+        }
+
+        if (report.tracked == 0) {
+            EmptyState(
+                icon = Icons.Outlined.Insights,
+                title = "Nothing matches these filters",
+                detail = "Clear a filter to see the rest of your calls.",
             )
             return@Screen
         }
@@ -105,22 +170,10 @@ internal fun InsightsScreen(appState: AppState) {
         var openSession by remember { mutableStateOf<Any?>(null) }
         BoxWithConstraints {
             val columns = responsiveColumns(minColumnWidth = SessionCardMinWidth, maxColumns = 3)
-            // Grouped before rendering rather than while: the run of collapsed cards between two
-            // open ones is what forms a row, and that cannot be decided one card at a time.
-            val bands = remember(report.sessions, openSession) {
-                buildList {
-                    val run = mutableListOf<ScoredSession>()
-                    report.sessions.forEach { session ->
-                        if (openSession == session.key()) {
-                            if (run.isNotEmpty()) add(run.toList() to false)
-                            run.clear()
-                            add(listOf(session) to true)
-                        } else {
-                            run += session
-                        }
-                    }
-                    if (run.isNotEmpty()) add(run.toList() to false)
-                }
+            // Grouped before rendering rather than while: which cards share a row depends on where
+            // the open one sits, and that cannot be decided one card at a time.
+            val bands = remember(report.sessions, openSession, columns) {
+                expandableBands(report.sessions, columns) { openSession == it.key() }
             }
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 bands.forEach { (band, open) ->
@@ -188,16 +241,68 @@ private fun PricesBar(windowSessions: Int, refreshing: Boolean, onRefreshPrices:
 }
 
 @Composable
-private fun OutcomeLabel(outcome: Outcome) {
-    Surface(color = outcome.container(), shape = CircleShape) {
+private fun OutcomeLabel(call: ScoredCall, windowSessions: Int) {
+    // Every label explains itself, not just the puzzling one: a chip that is sometimes tappable
+    // teaches nobody that it can be tapped.
+    var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    Surface(
+        color = call.outcome.container(),
+        shape = CircleShape,
+        onClick = { showing = true },
+    ) {
         Text(
-            outcome.label,
+            call.outcome.label,
             style = MaterialTheme.typography.labelMedium,
-            color = outcome.onContainer(),
+            color = call.outcome.onContainer(),
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
+    if (showing) {
+        AlertDialog(
+            onDismissRequest = { showing = false },
+            title = { Text("${call.ticker} · ${call.outcome.label}") },
+            text = { Text(call.reason(windowSessions)) },
+            confirmButton = {
+                TextButton(onClick = { showing = false }) { Text("Close") }
+            },
+        )
+    }
 }
+
+/**
+ * The one line that says why this call ended up where it did.
+ *
+ * Names the session it settled on rather than speaking generally, because "reached target 1" and
+ * "reached target 1 on 3 Aug" answer different questions, and the second is the one being asked.
+ */
+private fun ScoredCall.reason(windowSessions: Int): String {
+    val on = settledOn?.format(OUTCOME_DATE)
+    return when (outcome) {
+        Outcome.FULL_HIT -> "Reached target 2 on $on."
+        Outcome.PARTIAL_HIT -> when {
+            stoppedAfterPartial -> "Reached target 1, then fell back to the stop on $on."
+            // Not final yet: target 2 is still in reach, and a card that said only "reached
+            // target 1" would read as the verdict.
+            !windowComplete ->
+                "Reached target 1 on $on; may still reach target 2 before the " +
+                    "$windowSessions-session window closes."
+            else -> "Reached target 1 on $on."
+        }
+        Outcome.STOPPED -> "Broke the stop by more than 2% on $on."
+        Outcome.EXPIRED -> "The window closed with no target or stop reached."
+        Outcome.ENTRY_NOT_REACHED -> "The buy zone never traded in the window."
+        Outcome.OPEN -> "Still inside its window, nothing settled yet."
+        Outcome.UNPRICED -> "No stored prices for this stock yet."
+        Outcome.AMBIGUOUS -> when (ambiguity) {
+            Ambiguity.TARGET_AND_STOP -> "Target and stop both hit on $on."
+            Ambiguity.ENTRY_AND_TARGET -> "Opened above the buy zone, target hit that day."
+            // Scored before the reason was recorded, so only the fact survives.
+            null -> "Two levels were reached in one session and cannot be ordered."
+        }
+    }
+}
+
+private val OUTCOME_DATE = DateTimeFormatter.ofPattern("d MMM")
 
 @Composable
 private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
@@ -274,8 +379,10 @@ private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
             FigureGroup(
                 "How they turned out",
                 listOf(
+                    // "Target 1 only": a call that ran on to target 2 is counted there, so these
+                    // four figures partition the judged calls instead of double-counting them.
+                    { Figure("Target 1 only", channel.partialHits.toString(), Modifier.weight(1f), tone = PriceRole.target) },
                     { Figure("Target 2", channel.fullHits.toString(), Modifier.weight(1f), tone = PriceRole.target) },
-                    { Figure("Target 1", channel.partialHits.toString(), Modifier.weight(1f), tone = PriceRole.target) },
                     { Figure("Stopped", channel.stopped.toString(), Modifier.weight(1f), tone = PriceRole.stop) },
                     { Figure("Expired", channel.expired.toString(), Modifier.weight(1f), tone = PriceRole.muted) },
                 ),
@@ -406,7 +513,7 @@ private fun ScoredCallRow(call: ScoredCall, windowSessions: Int, modifier: Modif
                             )
                         }
                 }
-                OutcomeLabel(call.outcome)
+                OutcomeLabel(call, windowSessions)
             }
             Text(
                 "${call.channel} · called ${call.openedOn}" +
@@ -414,22 +521,17 @@ private fun ScoredCallRow(call: ScoredCall, windowSessions: Int, modifier: Modif
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            call.qualifier(windowSessions)?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.tertiary,
-                )
-            }
             // Two groups rather than eight loose figures: what the channel asked for, and what the
             // market did about it. Colour says which is which without reading the labels.
             FigureGroup(
                 "The call",
                 listOf(
+                    // Paid and risked first, aimed at second: wrapped two-up this keeps the targets
+                    // side by side in reading order rather than splitting them across rows.
                     { Figure("Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry) },
+                    { Figure("Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f), tone = PriceRole.stop) },
                     { Figure("Target 1", formatPrice(call.target1), Modifier.weight(1f), tone = PriceRole.target) },
                     { Figure("Target 2", formatPrice(call.target2), Modifier.weight(1f), tone = PriceRole.target) },
-                    { Figure("Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f), tone = PriceRole.stop) },
                 ),
             )
             FigureGroup(
@@ -523,16 +625,6 @@ private fun SessionRow(
                 )
             }
     }
-}
-
-/** The one-line caveat a card needs, or nothing when the outcome speaks for itself. */
-private fun ScoredCall.qualifier(windowSessions: Int): String? = when {
-    stoppedAfterPartial -> "Reached target 1, then fell back to the stop."
-    outcome == Outcome.PARTIAL_HIT && !windowComplete ->
-        "May still reach target 2 within the $windowSessions-session window."
-    outcome == Outcome.AMBIGUOUS ->
-        "The session's own figures cannot say which level was reached first."
-    else -> null
 }
 
 /**
@@ -661,3 +753,15 @@ private fun Int?.orDash(): String = this?.toString() ?: Dash
 /** Ticker plus two lines of company name, so every call card starts the same height. */
 private val CardHeaderHeight = 76.dp
 
+/**
+ * The outcome groups worth filtering by, in the order they are worth asking about.
+ *
+ * Coarser than the outcomes themselves: "reached a target" is one question, not two, and the
+ * several ways a call can end up unjudged are one answer - nothing is known yet.
+ */
+private val OutcomeFilters: Map<String, (ScoredCall) -> Boolean> = linkedMapOf(
+    "Reached a target" to { call -> call.outcome.reachedATarget },
+    "Stopped" to { call -> call.outcome == Outcome.STOPPED },
+    "Expired" to { call -> call.outcome == Outcome.EXPIRED },
+    "Not judged" to { call -> !call.outcome.judged },
+)
