@@ -1,18 +1,40 @@
 package com.ikverse.egxanalyzer.data
 
+import com.ikverse.egxanalyzer.model.RuleKind
+import com.ikverse.egxanalyzer.model.RuleScope
+import com.ikverse.egxanalyzer.model.RuleSlot
+import com.ikverse.egxanalyzer.model.WordingRule
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AnalysisPolicyTest {
+
+    /** What the app ships with and nothing else: the state a fresh install filters in. */
+    private val shipped = RuleSet(emptyList())
+
+    /** The old free-text boxes, expressed as the rules they became. */
+    private fun rules(keep: String = "", drop: String = "") = RuleSet(
+        listOf(RuleSlot.SOURCE_KEEP to keep, RuleSlot.SOURCE_DROP to drop).flatMap { (slot, raw) ->
+            raw.split(",").map(String::trim).filter(String::isNotEmpty).map { phrase ->
+                WordingRule(
+                    id = "test:${slot.name}:$phrase",
+                    slot = slot,
+                    kind = if (slot == RuleSlot.SOURCE_KEEP) RuleKind.INCLUDE else RuleKind.EXCLUDE,
+                    phrase = phrase,
+                    scope = RuleScope.BOTH,
+                )
+            }
+        },
+    )
     @Test
     fun `previous recommendations and achieved targets are excluded by source id`() {
         val inputs = listOf(
             AnalysisInput.Text("one", "هذه توصية سابقة تم تحقيق المستهدف"),
             AnalysisInput.Text("two", "شراء COMI عند مستوى الدعم"),
         )
-        val result = AnalysisPolicy.filter(inputs, "", "")
+        val result = AnalysisPolicy.filter(inputs, shipped)
         assertEquals(listOf("two"), result.accepted.map(AnalysisInput::sourceId))
         assertEquals("one", result.excluded.single().sourceId)
     }
@@ -32,7 +54,7 @@ class AnalysisPolicyTest {
             AnalysisInput.Text("two", "اهم الاسهم اليوم"),
         )
 
-        val result = AnalysisPolicy.filter(inputs, "", "")
+        val result = AnalysisPolicy.filter(inputs, shipped)
 
         assertEquals(listOf("two"), result.accepted.map(AnalysisInput::sourceId))
         assertEquals("one", result.excluded.single().sourceId)
@@ -46,7 +68,7 @@ class AnalysisPolicyTest {
             AnalysisInput.Text("three", "اهم الاسهم اليوم🐎🐎"),
         )
 
-        val result = AnalysisPolicy.filter(inputs, "", "")
+        val result = AnalysisPolicy.filter(inputs, shipped)
 
         assertEquals(listOf("three"), result.accepted.map(AnalysisInput::sourceId))
         assertEquals(listOf("one", "two"), result.excluded.map { it.sourceId })
@@ -56,7 +78,7 @@ class AnalysisPolicyTest {
     fun `a source the words do not settle is left for the model`() {
         val inputs = listOf(AnalysisInput.Text("one", "*كريستمارك CRST.CA* توصية شراء"))
 
-        val result = AnalysisPolicy.filter(inputs, "", "")
+        val result = AnalysisPolicy.filter(inputs, shipped)
 
         assertEquals(inputs, result.accepted)
         assertTrue(result.excluded.isEmpty())
@@ -65,11 +87,7 @@ class AnalysisPolicyTest {
     @Test
     fun `include phrases override built in and custom exclusions`() {
         val input = AnalysisInput.Text("one", "توصية سابقة VIP")
-        val result = AnalysisPolicy.filter(
-            inputs = listOf(input),
-            includePhrases = "VIP",
-            excludePhrases = "توصية",
-        )
+        val result = AnalysisPolicy.filter(listOf(input), rules(keep = "VIP", drop = "توصية"))
         assertEquals(listOf(input), result.accepted)
         assertTrue(result.excluded.isEmpty())
     }
@@ -93,7 +111,7 @@ class AnalysisPolicyTest {
             AnalysisInput.Text("three", "*أسهم مرشحة للمتاجرة T+1*"),
         )
 
-        val result = AnalysisPolicy.filter(inputs, "", "")
+        val result = AnalysisPolicy.filter(inputs, shipped)
 
         assertEquals(listOf("three"), result.accepted.map(AnalysisInput::sourceId))
         assertEquals(listOf("one", "two"), result.excluded.map { it.sourceId })
@@ -106,7 +124,7 @@ class AnalysisPolicyTest {
             AnalysisInput.Text("one", "توصية شراء CRST نطاق 1.92-1.93 يستهدف 2.10 والهدف الأول 2.01"),
         )
 
-        val result = AnalysisPolicy.filter(inputs, "", "")
+        val result = AnalysisPolicy.filter(inputs, shipped)
 
         assertEquals(inputs, result.accepted)
         assertTrue(result.excluded.isEmpty())

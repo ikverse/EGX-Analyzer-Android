@@ -7,6 +7,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import com.ikverse.egxanalyzer.data.AnalysisRepository
+import com.ikverse.egxanalyzer.data.RuleRejection
+import com.ikverse.egxanalyzer.data.RuleSet
+import com.ikverse.egxanalyzer.model.RuleKind
+import com.ikverse.egxanalyzer.model.RuleOrigin
+import com.ikverse.egxanalyzer.model.RuleScope
+import com.ikverse.egxanalyzer.model.RuleSlot
+import com.ikverse.egxanalyzer.model.WordingRule
+import android.os.Build
+import com.ikverse.egxanalyzer.data.ComposedPrompt
+import com.ikverse.egxanalyzer.data.PromptComposer
+import com.ikverse.egxanalyzer.data.PromptStore
+import com.ikverse.egxanalyzer.model.PromptVersion
+import com.ikverse.egxanalyzer.data.SyncedRule
+import com.ikverse.egxanalyzer.data.mergeRules
+import com.ikverse.egxanalyzer.data.rulesToUpload
 import com.ikverse.egxanalyzer.data.AnalysisPolicy
 import com.ikverse.egxanalyzer.data.EndpointPolicy
 import com.ikverse.egxanalyzer.data.EgxCatalog
@@ -71,6 +86,8 @@ class AppState(
     private val localDataStore: LocalDataStore,
     private val telegramRepository: TelegramRepository,
     private val priceRepository: PriceRepository,
+    /** The shipped prompt, which every generated version is composed from. */
+    private val promptStore: PromptStore,
     /** Announces a run that has started; supplied by the app so this class stays testable. */
     private val analysisRunning: (sources: Int, model: String) -> Unit = { _, _ -> },
     /** Announces a finished run and the analysis it saved. */
@@ -178,6 +195,196 @@ class AppState(
         get() = inputs.filterNot { it.sourceId in telegramTraces.keys }
     var savedResults by mutableStateOf(localDataStore.results())
         private set
+
+    /**
+     * The wording the app recognises, shipped rows and the user's together.
+     *
+     * Held here rather than read per run so the Settings screen and the next analysis are looking
+     * at the same set - the filter and the prompt disagreeing about which rules are on would be
+     * invisible until a report came out wrong.
+     */
+    var wordingRules by mutableStateOf(localDataStore.wordingRules())
+        private set
+
+    val ruleSet: RuleSet get() = RuleSet(wordingRules)
+
+    /**
+     * Whether custom wording reaches the prompt at all.
+     *
+     * Off means the shipped prompt is sent exactly as it is. It does not delete a rule or stop the
+     * local ones working - "restore the default" has to mean something narrower than "throw away
+     * what I configured", or nobody dares press it.
+     */
+    var useDefaultPromptOnly by mutableStateOf(settingsRepository.useDefaultPromptOnly())
+        private set
+
+    var promptVersions by mutableStateOf(localDataStore.promptVersions())
+        private set
+
+    /** The version a run would use right now. */
+    var activePrompt by mutableStateOf(composePrompt())
+        private set
+
+    private fun composePrompt(): ComposedPrompt = PromptComposer.compose(
+        defaultPrompt = promptStore.consolidatedPrompt(),
+        rules = ruleSet,
+        useDefaultOnly = useDefaultPromptOnly,
+    )
+
+    /**
+     * Regenerates the active prompt from the shipped one plus whatever is configured now.
+     *
+     * Never from the last generated version. Appending to that is how a prompt collects
+     * instructions nobody added and keeps ones that were deleted.
+     */
+    private fun regeneratePrompt(reason: String) {
+        val composed = composePrompt()
+        if (composed.id != activePrompt.id || promptVersions.none { it.id == composed.id }) {
+            localDataStore.rememberPromptVersion(
+                PromptVersion(
+                    id = composed.id,
+                    sequence = localDataStore.nextPromptSequence(),
+                    text = composed.text,
+                    schemaVersion = composed.schemaVersion,
+                    ruleIds = composed.ruleIds,
+                    reason = reason,
+                    device = deviceName,
+                    createdAt = System.currentTimeMillis(),
+                ),
+            )
+            promptVersions = localDataStore.promptVersions()
+        }
+        activePrompt = composed
+    }
+
+    fun usePromptDefaultOnly(value: Boolean) {
+        useDefaultPromptOnly = value
+        settingsRepository.saveUseDefaultPromptOnly(value)
+        regeneratePrompt(if (value) "Switched to the default prompt" else "Custom wording re-enabled")
+    }
+
+    /** Whichever device made a change, so a later merge can tell two edits apart. */
+    private val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
+
+    /**
+     * Adds or replaces a rule, or says why it cannot.
+     *
+     * Returns the reason rather than throwing, because every caller is a person typing into a form
+     * and the only useful response is the sentence they need to read.
+     */
+    fun saveWordingRule(rule: WordingRule): RuleRejection? {
+        val candidate = rule.copy(
+            phrase = rule.phrase.trim(),
+            updatedAt = System.currentTimeMillis(),
+            updatedBy = deviceName,
+        )
+        ruleSet.rejectionFor(candidate)?.let { return it }
+        val existing = wordingRules.any { it.id == candidate.id }
+        localDataStore.saveWordingRule(candidate)
+        wordingRules = localDataStore.wordingRules()
+        regeneratePrompt("${if (existing) "Edited" else "Added"} \"${candidate.phrase}\"")
+        return null
+    }
+
+    /**
+     * A built-in rule is never removed, only switched off.
+     *
+     * They are what the app ships knowing, and an app update replaces the whole set; deleting one
+     * locally would mean the next update quietly brought it back.
+     */
+    fun deleteWordingRule(rule: WordingRule) {
+        if (rule.origin == RuleOrigin.BUILT_IN) {
+            saveWordingRule(rule.copy(enabled = false))
+            return
+        }
+        localDataStore.buryWordingRule(rule.id, System.currentTimeMillis(), deviceName)
+        wordingRules = localDataStore.wordingRules()
+        regeneratePrompt("Deleted \"${rule.phrase}\"")
+    }
+
+    fun setWordingRuleEnabled(rule: WordingRule, enabled: Boolean) {
+        val updated = rule.copy(
+            enabled = enabled,
+            updatedAt = System.currentTimeMillis(),
+            updatedBy = deviceName,
+        )
+        localDataStore.saveWordingRule(updated)
+        wordingRules = localDataStore.wordingRules()
+        regeneratePrompt("${if (enabled) "Enabled" else "Disabled"} \"${rule.phrase}\"")
+    }
+
+    /**
+     * Brings the wording tables into line with every other device.
+     *
+     * Revisions rather than rows: a table can be edited offline on two devices at once, so what
+     * travels is what each device did and when, and the merge decides. Returns whether anything
+     * here changed, because a rule arriving changes the prompt that gets generated next.
+     */
+    private suspend fun syncWordingRules(): Boolean {
+        val mine = localDataStore.wordingRuleRevisions().map { (rule, deleted) ->
+            SyncedRule(rule, deleted)
+        }
+        val theirs = runCatching { telegramRepository.syncedRules() }.getOrNull() ?: return false
+
+        var changed = false
+        val byId = mine.associateBy { it.rule.id }
+        theirs.forEach { incoming ->
+            val here = byId[incoming.rule.id]
+            val newer = here == null ||
+                incoming.rule.updatedAt > here.rule.updatedAt ||
+                (
+                    incoming.rule.updatedAt == here.rule.updatedAt &&
+                        incoming.rule.updatedBy > here.rule.updatedBy
+                    )
+            if (newer) {
+                localDataStore.adoptWordingRule(incoming.rule, incoming.deleted)
+                changed = true
+            }
+        }
+
+        // Only what this device knows better. Re-uploading a revision the channel already holds
+        // would grow the log without telling anyone anything.
+        rulesToUpload(mine, theirs).forEach { revision ->
+            runCatching { telegramRepository.uploadRule(revision) }
+        }
+
+        if (changed) wordingRules = localDataStore.wordingRules()
+        return changed
+    }
+
+    /**
+     * Carries the old free-text phrase fields over, once.
+     *
+     * They were one box for includes and one for excludes, applied both here and in the prompt with
+     * no way to say which - so they become rules scoped to both, which is what they already did.
+     */
+    private fun adoptLegacyPhrases() {
+        val stored = localDataStore.wordingRules()
+        if (stored.any { it.origin == RuleOrigin.USER }) return
+        val migrated = listOf(
+            RuleSlot.SOURCE_KEEP to appPreferences.includePhrases,
+            RuleSlot.SOURCE_DROP to appPreferences.excludePhrases,
+        ).flatMap { (slot, raw) ->
+            raw.split(",", "\n")
+                .map(String::trim)
+                .filter(String::isNotEmpty)
+                .map { phrase ->
+                    WordingRule(
+                        id = "legacy:${slot.name.lowercase()}:${WordingRule.normalize(phrase)}",
+                        slot = slot,
+                        kind = if (slot == RuleSlot.SOURCE_KEEP) RuleKind.INCLUDE else RuleKind.EXCLUDE,
+                        phrase = phrase,
+                        scope = RuleScope.BOTH,
+                        note = "Carried over from the old phrase boxes.",
+                        updatedAt = System.currentTimeMillis(),
+                        updatedBy = deviceName,
+                    )
+                }
+        }
+        if (migrated.isEmpty()) return
+        migrated.forEach(localDataStore::saveWordingRule)
+        wordingRules = localDataStore.wordingRules()
+    }
 
     /**
      * Saved runs that would not parse, and so are missing from [savedResults].
@@ -289,6 +496,10 @@ class AppState(
     }
 
     init {
+        adoptLegacyPhrases()
+        // Recorded on first launch too, so the very first run has a version to name rather than
+        // a gap where one should be.
+        regeneratePrompt("First run")
         appScope.launch {
             recomputePerformance()
             refreshPricesIfStale()
@@ -725,6 +936,10 @@ class AppState(
                 .onSuccess { localDataStore.clearDeletion(requestId) }
         }
 
+        // Rules first: a report downloaded a moment later was judged under somebody's rules, and
+        // arriving with the reports but without them is the one order that explains nothing.
+        val rulesChanged = syncWordingRules()
+
         val remote = telegramRepository.listSyncedReports()
         val local = localDataStore.savedRequestIds()
         val deleted = telegramRepository.listTombstones()
@@ -757,6 +972,8 @@ class AppState(
             telegramRepository.uploadReport(saved.toSyncedRun())
             uploaded++
         }
+
+        if (rulesChanged) regeneratePrompt("Rules arrived from another device")
 
         if (downloaded > 0 || forgotten > 0) {
             savedResults = localDataStore.results()
@@ -978,11 +1195,8 @@ class AppState(
                 is AnalysisInput.Voice -> AnalysisContentType.AUDIO in selectedContentTypes
             }
         }
-        val filtered = AnalysisPolicy.filter(
-            inputs = contentSelectedInputs,
-            includePhrases = appPreferences.includePhrases,
-            excludePhrases = appPreferences.excludePhrases,
-        )
+        val rules = ruleSet
+        val filtered = AnalysisPolicy.filter(contentSelectedInputs, rules)
         val selectedInputs = filtered.accepted
         if (selectedInputs.isEmpty()) {
             analysisMessage = if (filtered.excluded.isNotEmpty()) {
@@ -1007,6 +1221,8 @@ class AppState(
             sourceWindowStart = window.start,
             sourceWindowEnd = window.endExclusive,
             excludedSources = filtered.excluded,
+            rules = rules,
+            prompt = activePrompt,
             sourceTraces = selectedInputs.map { input ->
                 telegramTraces[input.sourceId] ?: run {
                 val channel = channels.firstOrNull { it.id == sourceChannelIds[input.sourceId] }

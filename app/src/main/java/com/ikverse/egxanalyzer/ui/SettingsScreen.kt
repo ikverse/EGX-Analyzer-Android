@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Settings
@@ -59,6 +60,7 @@ import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import com.ikverse.egxanalyzer.model.ThemeMode
+import com.ikverse.egxanalyzer.model.WordingRule
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -69,15 +71,6 @@ internal fun SettingsScreen(appState: AppState) {
     var themeMenuOpen by remember { mutableStateOf(false) }
     var languageMenuOpen by remember { mutableStateOf(false) }
     var credential by remember { mutableStateOf("") }
-    var customPrompt by remember(appState.appPreferences.customSystemPrompt) {
-        mutableStateOf(appState.appPreferences.customSystemPrompt)
-    }
-    var includePhrases by remember(appState.appPreferences.includePhrases) {
-        mutableStateOf(appState.appPreferences.includePhrases)
-    }
-    var excludePhrases by remember(appState.appPreferences.excludePhrases) {
-        mutableStateOf(appState.appPreferences.excludePhrases)
-    }
     var confirmDeleteAll by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -228,37 +221,35 @@ internal fun SettingsScreen(appState: AppState) {
         }
 
         ExpandableSection(
+            "Analysis rules",
+            icon = Icons.Outlined.Rule,
+            summary = "${appState.ruleSet.all.count(WordingRule::enabled)} of " +
+                "${appState.ruleSet.all.size} on",
+            contentMaxWidth = FormWidth,
+        ) {
+            AnalysisRulesSection(appState)
+        }
+
+        ExpandableSection(
+            "Generated prompt",
+            icon = Icons.Outlined.Description,
+            summary = if (appState.useDefaultPromptOnly) {
+                "Default only"
+            } else {
+                "v${appState.promptVersions.firstOrNull { it.id == appState.activePrompt.id }?.sequence ?: 1}"
+            },
+            contentMaxWidth = FormWidth,
+        ) {
+            GeneratedPromptSection(appState)
+        }
+
+        ExpandableSection(
             "Prompt and validation",
             icon = Icons.Outlined.Rule,
             summary = if (appState.appPreferences.customSystemPrompt.isBlank()) "Canonical prompt" else "Custom prompt",
             contentMaxWidth = FormWidth,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Text(
-                    "Leave the system prompt blank to use the protected evidence-backed default.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = customPrompt,
-                    onValueChange = { customPrompt = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Custom system prompt") },
-                    minLines = 4,
-                )
-                OutlinedTextField(
-                    value = includePhrases,
-                    onValueChange = { includePhrases = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Priority/include phrases") },
-                    minLines = 2,
-                )
-                OutlinedTextField(
-                    value = excludePhrases,
-                    onValueChange = { excludePhrases = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Exclude phrases") },
-                    minLines = 2,
-                )
                 Text("Correction retries: ${appState.appPreferences.correctionRetries}")
                 Slider(
                     value = appState.appPreferences.correctionRetries.toFloat(),
@@ -284,52 +275,7 @@ internal fun SettingsScreen(appState: AppState) {
                     appState.catalogMessage,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth().scrollableRow(),
-                    horizontalArrangement = Arrangement.spacedBy(Space.s),
-                ) {
-                    Button(onClick = {
-                        appState.updatePromptCustomization(
-                            customPrompt,
-                            includePhrases,
-                            excludePhrases,
-                        )
-                    }) {
-                        Icon(Icons.Outlined.Tune, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Save prompt")
-                    }
-                    OutlinedButton(onClick = {
-                        appState.resetPromptCustomization()
-                        customPrompt = ""
-                        includePhrases = ""
-                        excludePhrases = ""
-                    }) {
-                        Text("Restore default")
-                    }
-                }
-                if (appState.promptHistory.isNotEmpty()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.History, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Prompt history", fontWeight = FontWeight.Bold)
-                    }
-                    appState.promptHistory.take(5).forEachIndexed { index, snapshot ->
-                        TextButton(onClick = {
-                            appState.restorePromptSnapshot(snapshot)
-                            customPrompt = snapshot.systemPrompt
-                            includePhrases = snapshot.includePhrases
-                            excludePhrases = snapshot.excludePhrases
-                        }) {
-                            Text(
-                                "Restore ${index + 1} · " +
-                                    java.time.Instant.ofEpochMilli(
-                                        snapshot.savedAtEpochMilliseconds,
-                                    ).toString(),
-                            )
-                        }
-                    }
-                }
+
             }
         }
 

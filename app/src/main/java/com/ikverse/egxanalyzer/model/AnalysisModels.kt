@@ -1,5 +1,8 @@
 package com.ikverse.egxanalyzer.model
 
+import com.ikverse.egxanalyzer.data.ComposedPrompt
+import com.ikverse.egxanalyzer.data.RuleSet
+
 import android.net.Uri
 import java.time.LocalDate
 import java.time.Instant
@@ -61,6 +64,15 @@ data class AnalysisRequest(
     val sourceWindowStart: Instant? = null,
     val sourceWindowEnd: Instant? = null,
     val excludedSources: List<ExcludedSource> = emptyList(),
+    /** The wording rules in force for this run, so the request can say what it was told to look for. */
+    val rules: RuleSet = RuleSet(emptyList()),
+    /**
+     * The prompt this run will actually send, generated before the run rather than during it.
+     *
+     * Passed rather than looked up so a run cannot be judged by a prompt that changed while it was
+     * in flight, and so the version it used is a fact about the request.
+     */
+    val prompt: ComposedPrompt? = null,
 )
 
 data class SourceTrace(
@@ -172,6 +184,15 @@ data class AnalysisDiagnostics(
     val requestCount: Int = 0,
     val imagesSent: Int = 0,
     val unaccountedImages: List<UnaccountedImage> = emptyList(),
+    /**
+     * The prompt version this run was judged by, and the rules folded into it.
+     *
+     * Recorded rather than re-derived: editing a rule tomorrow must not change what a report from
+     * today is understood to have meant.
+     */
+    val promptId: String? = null,
+    val promptSchemaVersion: Int? = null,
+    val promptRuleIds: List<String> = emptyList(),
 )
 
 /**

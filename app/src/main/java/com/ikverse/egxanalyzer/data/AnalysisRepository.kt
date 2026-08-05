@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.util.Base64
 import com.ikverse.egxanalyzer.model.AnalysisRequest
 import com.ikverse.egxanalyzer.model.AnalysisResult
+import com.ikverse.egxanalyzer.model.RuleKind
 import com.ikverse.egxanalyzer.model.AnalysisDiagnostics
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AppPreferences
@@ -96,6 +97,9 @@ class CloudAnalysisRepository(
                             requestCount = harvest.requestCount + attempt + 1,
                             imagesSent = harvest.imagesSent,
                             unaccountedImages = harvest.unaccounted,
+                            promptId = request.prompt?.id,
+                            promptSchemaVersion = request.prompt?.schemaVersion,
+                            promptRuleIds = request.prompt?.ruleIds.orEmpty(),
                         ),
                     )
                 }
@@ -409,10 +413,10 @@ class CloudAnalysisRepository(
         put("messages", JSONArray().apply {
             put(JSONObject().apply {
                 put("role", "system")
-                put(
-                    "content",
-                    preferences.customSystemPrompt.trim().ifBlank { promptStore.consolidatedPrompt() },
-                )
+                // The generated prompt when there is one, the shipped one otherwise. There is no
+                // longer a box that replaces the whole file: that froze whoever used it out of
+                // every prompt improvement an update would have brought.
+                put("content", prompt?.text ?: promptStore.consolidatedPrompt())
             })
             put(JSONObject().apply {
                 put("role", "user")
@@ -421,7 +425,7 @@ class CloudAnalysisRepository(
                         JSONObject().put("type", "text").put(
                             "text",
                             "${requestPrompt(chunk)} ${preferences.analysisLanguage.promptInstruction} " +
-                                customizationPrompt(preferences) +
+                                customizationPrompt(rules) +
                                 correctionInstructions.orEmpty(),
                         ),
                     )
@@ -538,12 +542,21 @@ class CloudAnalysisRepository(
         put("response_format", JSONObject().put("type", "json_object"))
     }
 
-    private fun customizationPrompt(value: AppPreferences): String = buildString {
-        if (value.includePhrases.isNotBlank()) {
-            append("Prioritize content matching these phrases: ${value.includePhrases}. ")
+    /**
+     * What the run's own rules add to the prompt.
+     *
+     * Only rules that asked to be sent appear here. A rule scoped to this device is a decision
+     * already made by the time anything is uploaded, and repeating it to the model would be asking
+     * it to re-judge sources it will never see.
+     */
+    private fun customizationPrompt(rules: RuleSet): String = buildString {
+        val include = rules.modelPhrases(RuleKind.INCLUDE)
+        if (include.isNotEmpty()) {
+            append("Prioritize content matching these phrases: ${include.joinToString(", ")}. ")
         }
-        if (value.excludePhrases.isNotBlank()) {
-            append("Exclude content matching these phrases: ${value.excludePhrases}. ")
+        val exclude = rules.modelPhrases(RuleKind.EXCLUDE)
+        if (exclude.isNotEmpty()) {
+            append("Exclude content matching these phrases: ${exclude.joinToString(", ")}. ")
         }
     }
 

@@ -2,6 +2,8 @@ package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.ExcludedSource
+import com.ikverse.egxanalyzer.model.RuleSlot
+import com.ikverse.egxanalyzer.model.WordingRule
 
 data class FilteredAnalysisInputs(
     val accepted: List<AnalysisInput>,
@@ -11,80 +13,39 @@ data class FilteredAnalysisInputs(
 /**
  * Decides what can be settled from a source's own words before anything is sent.
  *
- * Three outcomes, not two: a marker or a custom exclude phrase drops the source, an include phrase
- * keeps it whatever else it says, and anything the words do not settle goes to the model. Channels
- * caption their cards, and a caption saying the call is from the previous session is worth more
- * than the picture - it costs nothing to read and saves an image from being sent at all.
+ * Three outcomes, not two: a phrase that drops the source, a phrase that keeps it whatever else it
+ * says, and anything the words do not settle going to the model. Channels caption their cards, and
+ * a caption saying the call is from the previous session is worth more than the picture - it costs
+ * nothing to read and saves an image from being sent at all.
+ *
+ * The phrases are rows now rather than lists here, because every channel added brings wording the
+ * last one did not use.
  */
 object AnalysisPolicy {
-    private val arabicDiacritics = Regex("[\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED\\u0640]")
-
-    /**
-     * Emoji, variation selectors and joiners, which these captions end and interrupt phrases with.
-     *
-     * Replaced with a space rather than removed, so a marker split by one still reads as two words
-     * and a marker followed by one is not glued to whatever comes next.
-     */
-    private val symbols = Regex("[\\p{So}\\p{Sk}\\p{Cf}\\uFE0E\\uFE0F]")
-    private val whitespace = Regex("\\s+")
-    private val previousRecommendationMarkers = listOf(
-        "السابق",
-        "توصية سابقة",
-        "توصيات سابقة",
-        "التوصية السابقة",
-        "التوصيات السابقة",
-        "previous recommendation",
-        "previous recommendations",
-        "old recommendation",
-        "old recommendations",
-    )
-    /**
-     * Wording that announces a call already worked, which makes its image an old card reposted.
-     *
-     * `حقق المستهدف` is the phrase these channels actually use, and it was missing: the list had
-     * `تحقق` and `تحقيق`, neither of which appears once in 120 saved captions. Nine target-hit
-     * posts went through because of it, and three of those had rows extracted from them as live
-     * calls - including the T+1 table reposted on 2 August to say AMER had hit both targets, which
-     * duplicated four stocks.
-     *
-     * Past tense by construction, which is what makes it safe: a live call says `يستهدف` or
-     * `الهدف الأول`, never that the target was reached.
-     */
-    private val targetHitMarkers = listOf(
-        "وصل الى المستهدف",
-        "وصل للمستهدف",
-        "تم الوصول الى المستهدف",
-        "تم تحقيق المستهدف",
-        "تحقق المستهدف",
-        "تحقيق المستهدف",
-        "حقق المستهدف",
-        "حققنا نسبة ربح",
-        "target reached",
-        "reached target",
-        "target achieved",
-        "achieved target",
-    )
 
     fun filter(
         inputs: List<AnalysisInput>,
-        includePhrases: String,
-        excludePhrases: String,
+        rules: RuleSet,
     ): FilteredAnalysisInputs {
-        val includes = phrases(includePhrases)
-        val excludes = phrases(excludePhrases)
+        val keep = rules.localPhrases(RuleSlot.SOURCE_KEEP)
+        val drop = rules.localPhrases(RuleSlot.SOURCE_DROP)
+        val previous = rules.localPhrases(RuleSlot.EXCLUSION_PREVIOUS)
+        val targetHit = rules.localPhrases(RuleSlot.EXCLUSION_TARGET_HIT)
         val textBySource = inputs.filterIsInstance<AnalysisInput.Text>()
             .groupBy(AnalysisInput.Text::sourceId)
             .mapValues { (_, values) -> values.joinToString("\n", transform = AnalysisInput.Text::value) }
         val excluded = mutableListOf<ExcludedSource>()
         val rejectedIds = textBySource.mapNotNull { (sourceId, value) ->
-            val normalized = normalize(value)
-            val included = includes.any(normalized::contains)
+            // The source's words go through the same normalizer the rules did, or a phrase stored
+            // one way would never match the same phrase typed another.
+            val normalized = WordingRule.normalize(value)
+            // Order is the rule: keeping wins over every reason to drop, and the reason recorded is
+            // the first that applied, so a source excluded twice is still reported once.
             val reason = when {
-                included -> null
-                excludes.any(normalized::contains) -> "custom_exclude_phrase"
-                previousRecommendationMarkers.any { normalize(it) in normalized } ->
-                    "previous_recommendation"
-                targetHitMarkers.any { normalize(it) in normalized } -> "target_already_hit"
+                keep.any(normalized::contains) -> null
+                drop.any(normalized::contains) -> "custom_exclude_phrase"
+                previous.any(normalized::contains) -> "previous_recommendation"
+                targetHit.any(normalized::contains) -> "target_already_hit"
                 else -> null
             }
             reason?.let {
@@ -97,18 +58,4 @@ object AnalysisPolicy {
             excluded = excluded,
         )
     }
-
-    private fun phrases(value: String): List<String> =
-        value.split('\n', ',', ';').map(::normalize).filter(String::isNotBlank)
-
-    private fun normalize(value: String): String = arabicDiacritics
-        .replace(value.lowercase(), "")
-        .replace('أ', 'ا')
-        .replace('إ', 'ا')
-        .replace('آ', 'ا')
-        .replace('ى', 'ي')
-        .replace('ة', 'ه')
-        .let { symbols.replace(it, " ") }
-        .let { whitespace.replace(it, " ") }
-        .trim()
 }

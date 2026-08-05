@@ -5,6 +5,12 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.ikverse.egxanalyzer.model.WordingRule
+import com.ikverse.egxanalyzer.model.RuleSlot
+import com.ikverse.egxanalyzer.model.RuleScope
+import com.ikverse.egxanalyzer.model.RuleOrigin
+import com.ikverse.egxanalyzer.model.PromptVersion
+import com.ikverse.egxanalyzer.model.RuleKind
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.AnalysedChannel
@@ -54,6 +60,8 @@ class LocalDataStore(context: Context) :
         )
         db.createDailyPrices()
         db.createPendingDeletions()
+        db.createWordingRules()
+        db.createPromptVersions()
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -66,8 +74,54 @@ class LocalDataStore(context: Context) :
         )
         db.createDailyPrices()
         db.createPendingDeletions()
+        db.createWordingRules()
+        db.createPromptVersions()
         db.addOpenColumn()
     }
+
+    /**
+     * The wording rules, including the shipped ones once they have been changed.
+     *
+     * Only rows that differ from what the app ships are stored: a built-in rule nobody has touched
+     * has nothing worth saving, and writing all of them would mean an app update could not retire
+     * one. `deleted` is a tombstone rather than a real delete, so a removal survives a sync instead
+     * of being undone by the next device that still holds the row.
+     */
+    private fun SQLiteDatabase.createWordingRules() = execSQL(
+        """CREATE TABLE IF NOT EXISTS wording_rules (
+            id TEXT PRIMARY KEY,
+            slot TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            phrase TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            origin TEXT NOT NULL,
+            channels TEXT NOT NULL DEFAULT '',
+            note TEXT,
+            updated_at INTEGER NOT NULL DEFAULT 0,
+            updated_by TEXT NOT NULL DEFAULT '',
+            deleted INTEGER NOT NULL DEFAULT 0
+        )""",
+    )
+
+    /**
+     * Every prompt this device has generated, keyed by what generated it.
+     *
+     * The id is a hash of the shipped prompt and the rules folded into it, so the same
+     * configuration is the same version everywhere and two devices never race for a number.
+     */
+    private fun SQLiteDatabase.createPromptVersions() = execSQL(
+        """CREATE TABLE IF NOT EXISTS prompt_versions (
+            id TEXT PRIMARY KEY,
+            sequence INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            schema_version INTEGER,
+            rule_ids TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL DEFAULT '',
+            device TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL DEFAULT 0
+        )""",
+    )
 
     private fun SQLiteDatabase.createPendingDeletions() = execSQL(
         """CREATE TABLE IF NOT EXISTS pending_deletions (
@@ -248,6 +302,152 @@ class LocalDataStore(context: Context) :
      * intent is recorded and carried out at the next sync. Kept in the same database as the reports
      * so a delete and its record cannot be separated by a crash.
      */
+    /** Every stored rule that has not been tombstoned. */
+    fun wordingRules(): List<WordingRule> = readableDatabase
+        .query("wording_rules", null, "deleted = 0", null, null, null, "updated_at ASC")
+        .use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    runCatching { cursor.toWordingRule() }.getOrNull()?.let(::add)
+                }
+            }
+        }
+
+    /**
+     * Every stored rule including the buried ones.
+     *
+     * The sync needs the tombstones: a delete that is not published is a delete the next device
+     * undoes by uploading the rule back.
+     */
+    fun wordingRuleRevisions(): List<Pair<WordingRule, Boolean>> = readableDatabase
+        .query("wording_rules", null, null, null, null, null, "updated_at ASC")
+        .use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    runCatching {
+                        cursor.toWordingRule() to
+                            (cursor.getInt(cursor.getColumnIndexOrThrow("deleted")) == 1)
+                    }.getOrNull()?.let(::add)
+                }
+            }
+        }
+
+    /** Writes a rule exactly as the merge decided it, tombstone included. */
+    fun adoptWordingRule(rule: WordingRule, deleted: Boolean) {
+        saveWordingRule(rule)
+        if (deleted) {
+            writableDatabase.execSQL(
+                "UPDATE wording_rules SET deleted = 1 WHERE id = ?",
+                arrayOf<Any>(rule.id),
+            )
+        }
+    }
+
+    fun saveWordingRule(rule: WordingRule) {
+        writableDatabase.insertWithOnConflict(
+            "wording_rules",
+            null,
+            ContentValues().apply {
+                put("id", rule.id)
+                put("slot", rule.slot.name)
+                put("kind", rule.kind.name)
+                put("phrase", rule.phrase)
+                put("scope", rule.scope.name)
+                put("enabled", if (rule.enabled) 1 else 0)
+                put("origin", rule.origin.name)
+                put("channels", rule.channels.joinToString(","))
+                put("note", rule.note)
+                put("updated_at", rule.updatedAt)
+                put("updated_by", rule.updatedBy)
+                put("deleted", 0)
+            },
+            SQLiteDatabase.CONFLICT_REPLACE,
+        )
+    }
+
+    /**
+     * Buries a rule rather than removing the row.
+     *
+     * The same reason a deleted report leaves a marker: without one, the next device to sync sees
+     * the rule missing here and puts it back.
+     */
+    fun buryWordingRule(id: String, at: Long, by: String) {
+        writableDatabase.execSQL(
+            "UPDATE wording_rules SET deleted = 1, updated_at = ?, updated_by = ? WHERE id = ?",
+            arrayOf<Any>(at, by, id),
+        )
+    }
+
+    private fun Cursor.toWordingRule() = WordingRule(
+        id = getString(getColumnIndexOrThrow("id")),
+        slot = RuleSlot.valueOf(getString(getColumnIndexOrThrow("slot"))),
+        kind = RuleKind.valueOf(getString(getColumnIndexOrThrow("kind"))),
+        phrase = getString(getColumnIndexOrThrow("phrase")),
+        scope = RuleScope.valueOf(getString(getColumnIndexOrThrow("scope"))),
+        enabled = getInt(getColumnIndexOrThrow("enabled")) == 1,
+        origin = RuleOrigin.valueOf(getString(getColumnIndexOrThrow("origin"))),
+        channels = getString(getColumnIndexOrThrow("channels"))
+            .split(",")
+            .mapNotNull(String::toLongOrNull)
+            .toSet(),
+        note = if (isNull(getColumnIndexOrThrow("note"))) null else getString(getColumnIndexOrThrow("note")),
+        updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
+        updatedBy = getString(getColumnIndexOrThrow("updated_by")),
+    )
+
+    fun promptVersions(): List<PromptVersion> = readableDatabase
+        .query("prompt_versions", null, null, null, null, null, "sequence DESC")
+        .use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        PromptVersion(
+                            id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
+                            sequence = cursor.getInt(cursor.getColumnIndexOrThrow("sequence")),
+                            text = cursor.getString(cursor.getColumnIndexOrThrow("text")),
+                            schemaVersion = cursor.getColumnIndexOrThrow("schema_version").let {
+                                if (cursor.isNull(it)) null else cursor.getInt(it)
+                            },
+                            ruleIds = cursor.getString(cursor.getColumnIndexOrThrow("rule_ids"))
+                                .split(",").filter(String::isNotBlank),
+                            reason = cursor.getString(cursor.getColumnIndexOrThrow("reason")),
+                            device = cursor.getString(cursor.getColumnIndexOrThrow("device")),
+                            createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
+                        ),
+                    )
+                }
+            }
+        }
+
+    /**
+     * Records a generated prompt, or leaves the existing one alone.
+     *
+     * Regenerating the same configuration produces the same id, and the version that already
+     * carries it is the one runs were made against - overwriting its date would rewrite history
+     * to say a later change had happened.
+     */
+    fun rememberPromptVersion(version: PromptVersion) {
+        writableDatabase.insertWithOnConflict(
+            "prompt_versions",
+            null,
+            ContentValues().apply {
+                put("id", version.id)
+                put("sequence", version.sequence)
+                put("text", version.text)
+                put("schema_version", version.schemaVersion)
+                put("rule_ids", version.ruleIds.joinToString(","))
+                put("reason", version.reason)
+                put("device", version.device)
+                put("created_at", version.createdAt)
+            },
+            SQLiteDatabase.CONFLICT_IGNORE,
+        )
+    }
+
+    fun nextPromptSequence(): Int = readableDatabase
+        .rawQuery("SELECT COALESCE(MAX(sequence), 0) + 1 FROM prompt_versions", null)
+        .use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 1 }
+
     fun pendingDeletions(): Set<String> = readableDatabase
         .rawQuery("SELECT request_id FROM pending_deletions", null)
         .use { cursor -> buildSet { while (cursor.moveToNext()) add(cursor.getString(0)) } }
@@ -364,6 +564,9 @@ class LocalDataStore(context: Context) :
             put("acceptedInputCount", diagnostics.acceptedInputCount)
             put("correctionAttempted", diagnostics.correctionAttempted)
             put("durationMilliseconds", diagnostics.durationMilliseconds)
+            put("promptId", diagnostics.promptId)
+            put("promptSchemaVersion", diagnostics.promptSchemaVersion)
+            put("promptRuleIds", JSONArray(diagnostics.promptRuleIds))
             put("validationWarnings", JSONArray(diagnostics.validationWarnings))
             put("excludedSources", JSONArray().apply {
                 diagnostics.excludedSources.forEach {
@@ -450,6 +653,11 @@ class LocalDataStore(context: Context) :
                 acceptedInputCount = value.optInt("acceptedInputCount"),
                 correctionAttempted = value.optBoolean("correctionAttempted"),
                 durationMilliseconds = value.optLong("durationMilliseconds"),
+                promptId = value.optString("promptId").takeIf(String::isNotBlank),
+                promptSchemaVersion = value.optInt("promptSchemaVersion").takeIf { it > 0 },
+                promptRuleIds = value.optJSONArray("promptRuleIds")
+                    ?.let { array -> (0 until array.length()).map(array::getString) }
+                    .orEmpty(),
                 validationWarnings = value.optJSONArray("validationWarnings")?.strings().orEmpty(),
                 excludedSources = value.optJSONArray("excludedSources")?.objects()?.map {
                     ExcludedSource(it.optString("sourceId"), it.optString("reason"))
@@ -545,6 +753,6 @@ class LocalDataStore(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
-        const val DATABASE_VERSION = 5
+        const val DATABASE_VERSION = 7
     }
 }

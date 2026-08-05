@@ -20,10 +20,13 @@ class EgxApplication : Application() {
         val settingsRepository = SettingsRepository(this, credentialStore)
         val telegramRepository = TelegramRepository(this, credentialStore)
         lateinit var state: AppState
+        // One instance: the composer reads the same shipped text the repository falls back to, and
+        // two readers of one asset that could disagree is a bug waiting for an app update.
+        val promptStore = PromptStore(assets)
         val analysisRepository = CloudAnalysisRepository(
             contentResolver = contentResolver,
             credentialStore = credentialStore,
-            promptStore = PromptStore(assets),
+            promptStore = promptStore,
             configuration = { state.cloudConfiguration },
             preferences = { state.appPreferences },
             traceFor = { requestId -> RequestTrace(this, requestId) },
@@ -37,6 +40,7 @@ class EgxApplication : Application() {
             localDataStore = localDataStore,
             telegramRepository = telegramRepository,
             priceRepository = PriceRepository(localDataStore, SymbolMap(assets)),
+            promptStore = promptStore,
             // The foreground service is what keeps the process alive; the notification is what
             // tells the user so.
             analysisRunning = { sources, model -> AnalysisService.start(this, sources, model) },

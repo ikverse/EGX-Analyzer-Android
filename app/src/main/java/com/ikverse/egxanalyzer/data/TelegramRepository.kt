@@ -433,11 +433,14 @@ class TelegramRepository(
     private data class ChannelContents(
         val reports: Map<String, ChannelFile>,
         val tombstones: Map<String, ChannelFile>,
+        /** Every revision of every rule, newest first, because the merge needs them all. */
+        val ruleRevisions: List<ChannelFile>,
     )
 
     private suspend fun contentsOf(chatId: Long): ChannelContents {
         val reports = linkedMapOf<String, ChannelFile>()
         val tombstones = linkedMapOf<String, ChannelFile>()
+        val ruleRevisions = mutableListOf<ChannelFile>()
         var fromMessageId = 0L
         while (true) {
             val page = client.getChatHistory(chatId, fromMessageId, 0, HISTORY_PAGE_SIZE, false)
@@ -455,11 +458,17 @@ class TelegramRepository(
                     tombstones.putIfAbsent(buried, file)
                     return@forEach
                 }
+                // Every revision is kept: which one wins is the merge's decision, not the order
+                // Telegram happened to return them in.
+                if (SyncedRule.ruleIdOf(name) != null) {
+                    ruleRevisions += file
+                    return@forEach
+                }
                 SyncedRun.requestIdOf(name)?.let { reports.putIfAbsent(it, file) }
             }
             fromMessageId = messages.last().id
         }
-        return ChannelContents(reports, tombstones)
+        return ChannelContents(reports, tombstones, ruleRevisions)
     }
 
     /** Every report the channel says was deleted, so no device brings one back. */
@@ -505,6 +514,47 @@ class TelegramRepository(
                             true,
                         ),
                         dev.g000sha256.tdl.dto.FormattedText("deleted $requestId", emptyArray()),
+                    ),
+                )
+            }
+        } finally {
+            staged.delete()
+        }
+    }
+
+    /** Every rule revision the channel holds, merged so each rule appears once. */
+    suspend fun syncedRules(): List<SyncedRule> {
+        val chats = (findSyncChats() + syncChatId()).distinct()
+        val revisions = chats.flatMap { chat ->
+            contentsOf(chat).ruleRevisions.mapNotNull { file ->
+                runCatching { SyncedRule.fromDocument(download(file.fileId).readText()) }.getOrNull()
+            }
+        }
+        return mergeRules(revisions)
+    }
+
+    /** Puts one rule revision in the channel. Revisions accumulate; the merge picks the winner. */
+    suspend fun uploadRule(revision: SyncedRule) {
+        val chatId = syncChatId()
+        val staged = File(context.cacheDir, revision.fileName).apply { writeText(revision.toDocument()) }
+        try {
+            execute {
+                client.sendMessage(
+                    chatId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    dev.g000sha256.tdl.dto.InputMessageDocument(
+                        dev.g000sha256.tdl.dto.InputDocument(
+                            dev.g000sha256.tdl.dto.InputFileLocal(staged.path),
+                            null,
+                            true,
+                        ),
+                        dev.g000sha256.tdl.dto.FormattedText(
+                            "${if (revision.deleted) "deleted rule" else "rule"} ${revision.rule.phrase}",
+                            emptyArray(),
+                        ),
                     ),
                 )
             }

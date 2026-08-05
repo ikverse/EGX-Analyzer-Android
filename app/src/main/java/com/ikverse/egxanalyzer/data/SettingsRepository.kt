@@ -110,6 +110,12 @@ class SettingsRepository(
         preferences.edit().putString(KEY_LAST_PRICE_REFRESH, day).apply()
     }
 
+    fun useDefaultPromptOnly(): Boolean = preferences.getBoolean(KEY_DEFAULT_PROMPT_ONLY, false)
+
+    fun saveUseDefaultPromptOnly(value: Boolean) {
+        preferences.edit().putBoolean(KEY_DEFAULT_PROMPT_ONLY, value).apply()
+    }
+
     fun promptHistory(): List<PromptSnapshot> {
         val raw = preferences.getString(KEY_PROMPT_HISTORY, "[]").orEmpty()
         return runCatching {
@@ -168,6 +174,7 @@ class SettingsRepository(
         const val KEY_RESPONSE_TIMEOUT = "response_timeout"
         const val KEY_DEFAULT_CONTENT_TYPES = "default_content_types"
         const val KEY_CUSTOM_PROMPT = "custom_system_prompt"
+        const val KEY_DEFAULT_PROMPT_ONLY = "use_default_prompt_only"
         const val KEY_INCLUDE_PHRASES = "analysis_include_phrases"
         const val KEY_EXCLUDE_PHRASES = "analysis_exclude_phrases"
         const val KEY_CORRECTION_RETRIES = "correction_retries"
