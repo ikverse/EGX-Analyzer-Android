@@ -52,6 +52,7 @@ import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
+import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
 import kotlinx.coroutines.launch
@@ -72,7 +73,6 @@ internal fun InsightsScreen(appState: AppState) {
 
     Screen(
         title = "Insights",
-        subtitle = "How every saved recommendation turned out, judged against the sessions that followed it.",
         onRefresh = { scope.launch { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
         refreshHint = "Pull down to refresh prices",
@@ -163,10 +163,10 @@ internal fun InsightsScreen(appState: AppState) {
         var openSession by remember { mutableStateOf<Any?>(null) }
         BoxWithConstraints {
             val columns = responsiveColumns(minColumnWidth = SessionCardMinWidth, maxColumns = 3)
-            // Grouped before rendering rather than while: which cards share a row depends on where
-            // the open one sits, and that cannot be decided one card at a time.
-            val bands = remember(report.sessions, openSession, columns) {
-                expandableBands(report.sessions, columns) { openSession == it.key() }
+            // Grouped before rendering rather than while: the open session interrupts the grid, and
+            // where it does so cannot be decided one card at a time.
+            val bands = remember(report.sessions, openSession) {
+                expandableBands(report.sessions) { openSession == it.key() }
             }
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 bands.forEach { (band, open) ->
@@ -175,6 +175,7 @@ internal fun InsightsScreen(appState: AppState) {
                             band.single(), report.windowSessions,
                             expanded = true,
                             onExpandedChange = { openSession = null },
+                            heldFor = appState::heldFor,
                         )
                     } else {
                         ResponsiveRows(band, columns) { session, cardModifier ->
@@ -182,6 +183,7 @@ internal fun InsightsScreen(appState: AppState) {
                                 session, report.windowSessions,
                                 expanded = false,
                                 onExpandedChange = { openSession = session.key() },
+                                heldFor = appState::heldFor,
                                 modifier = cardModifier,
                             )
                         }
@@ -332,15 +334,26 @@ private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                // A rate resting on two settled calls is still measured exactly, and still worth
+                // nothing as a verdict. It keeps its figure and loses its colour.
+                val thin = channel.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
                 Text(
                     formatPercent(channel.anyTargetRate, signed = false),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = channel.anyTargetRate.rateTone(),
+                    color = if (thin) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        channel.anyTargetRate.rateTone()
+                    },
                 )
             }
             Text(
-                "reached a target · ${channel.judged} of ${channel.calls} calls judged",
+                (if (channel.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK) {
+                    "too few judged to rank"
+                } else {
+                    "reached a target"
+                }) + " · ${channel.judged} of ${channel.calls} calls judged",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -401,6 +414,8 @@ private fun SessionCard(
     windowSessions: Int,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
+    /** The position taken on a call, so a stock actually held is marked as such. */
+    heldFor: (String, java.time.LocalDate?) -> PositionView?,
     modifier: Modifier = Modifier,
 ) {
     val ranAt = remember(run.lastRunAt) {
@@ -441,7 +456,12 @@ private fun SessionCard(
             val columns = responsiveColumns(minColumnWidth = CallCardMinWidth, maxColumns = 2)
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 ResponsiveRows(run.calls, columns, spacing = Space.s) { call, cardModifier ->
-                    ScoredCallRow(call, windowSessions, cardModifier)
+                    ScoredCallRow(
+                        call,
+                        windowSessions,
+                        heldFor(call.ticker, call.openedOn),
+                        cardModifier,
+                    )
                 }
             }
         }
@@ -449,13 +469,21 @@ private fun SessionCard(
 }
 
 @Composable
-private fun ScoredCallRow(call: ScoredCall, windowSessions: Int, modifier: Modifier = Modifier) {
+private fun ScoredCallRow(
+    call: ScoredCall,
+    windowSessions: Int,
+    held: PositionView?,
+    modifier: Modifier = Modifier,
+) {
     var expanded by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
     Card(
         modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
+        // Outlined where the user is actually in the trade, in the colour of where that stands.
+        // The figures on this card judge the channel; the outline says what it cost or made you.
+        border = heldBorder(held),
         shape = MaterialTheme.shapes.medium,
     ) {
         Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -490,6 +518,17 @@ private fun ScoredCallRow(call: ScoredCall, windowSessions: Int, modifier: Modif
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // What the outline means, in one line. Everything else on this card judges the channel
+            // on the levels it printed; this is the only figure here measured from what was paid.
+            held?.let { position ->
+                Text(
+                    "${position.status.label} · bought at " +
+                        "${formatPrice(position.position.entryPrice)} · " +
+                        formatPercent(position.returnPct),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = position.status.tone(),
+                )
+            }
             // Two groups rather than eight loose figures: what the channel asked for, and what the
             // market did about it. Colour says which is which without reading the labels.
             FigureGroup(

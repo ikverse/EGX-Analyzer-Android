@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.model
 
+
 enum class ThemeMode(val displayName: String) {
     SYSTEM("Follow system"),
     LIGHT("Light"),
@@ -12,10 +13,24 @@ enum class AnalysisLanguage(val displayName: String, val promptInstruction: Stri
     ENGLISH("English", "Write recommendation notes in English."),
 }
 
+/**
+ * How long the model may think about one chunk before the connection is hung up.
+ *
+ * The call does not stream, so the server sends nothing at all until it has finished the whole
+ * chunk - which makes this the model's thinking time, not a gap between bytes. Eight images
+ * regularly take longer than the old five-minute ceiling allowed, and hitting it used to throw the
+ * whole run away.
+ */
+object ResponseTimeout {
+    const val MIN = 30
+    const val DEFAULT = 300
+    const val MAX = 900
+}
+
 data class AppPreferences(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val analysisLanguage: AnalysisLanguage = AnalysisLanguage.BILINGUAL,
-    val responseTimeoutSeconds: Int = 180,
+    val responseTimeoutSeconds: Int = ResponseTimeout.DEFAULT,
     val defaultContentTypes: Set<AnalysisContentType> = AnalysisContentType.entries.toSet(),
     val customSystemPrompt: String = "",
     val includePhrases: String = "",

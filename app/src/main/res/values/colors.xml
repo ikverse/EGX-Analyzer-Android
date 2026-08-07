@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#050317</color>
+    <!--
+      Both sampled from the launcher artwork's own backdrop. The foreground tile is opaque, so the
+      launcher background only shows in the parallax band; the splash one is what the faded edge of
+      the splash icon dissolves into, and a mismatch there draws the tile's outline.
+    -->
+    <color name="ic_launcher_background">#000812</color>
+    <color name="splash_background">#000812</color>
 </resources>

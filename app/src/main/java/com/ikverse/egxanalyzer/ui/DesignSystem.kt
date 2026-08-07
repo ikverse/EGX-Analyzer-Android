@@ -188,18 +188,18 @@ fun <T> ColumnScope.ResponsiveRows(
  * Splits a list into grid rows and full-width open items, in the order they are drawn.
  *
  * An open item needs the whole width - half a row squeezes a table of prices onto two lines - so it
- * gets a band of its own. The item that was sitting beside it moves *below* it rather than being
- * left alone above with a gap: the open item then grows where it was tapped, whether it was on the
- * left of its row or the right, which is the whole point.
+ * gets a band of its own. Nothing else moves. Opening the second card of a row therefore leaves the
+ * first alone on a half-empty row above it, and that gap is deliberate: the list is sorted by date,
+ * so its order is the only thing telling you which run is the newest one.
  *
- * The cost, deliberately taken: while something is open, the item pushed down appears after it
- * rather than before. Closing it restores the order.
+ * An earlier version closed that gap by moving the neighbour below the open item, which put the
+ * second card of a row ahead of the first for as long as it was open - the newest report read as
+ * the second newest, which is exactly what the sort exists to prevent.
  *
  * @return each band with a flag saying whether it is the open one.
  */
 internal fun <T> expandableBands(
     items: List<T>,
-    columns: Int,
     isOpen: (T) -> Boolean,
 ): List<Pair<List<T>, Boolean>> {
     val bands = mutableListOf<Pair<List<T>, Boolean>>()
@@ -209,14 +209,9 @@ internal fun <T> expandableBands(
             closed += item
             return@forEach
         }
-        // Whatever is already in the half-finished row would have sat beside this one.
-        val beside = if (columns > 1) closed.size % columns else 0
-        val pushedDown = closed.takeLast(beside)
-        repeat(beside) { closed.removeAt(closed.lastIndex) }
         if (closed.isNotEmpty()) bands += closed.toList() to false
         closed.clear()
         bands += listOf(item) to true
-        closed += pushedDown
     }
     if (closed.isNotEmpty()) bands += closed.toList() to false
     return bands

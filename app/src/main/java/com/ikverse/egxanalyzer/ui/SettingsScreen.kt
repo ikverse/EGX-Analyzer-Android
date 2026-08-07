@@ -60,7 +60,8 @@ import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import com.ikverse.egxanalyzer.model.ThemeMode
-import com.ikverse.egxanalyzer.model.WordingRule
+import com.ikverse.egxanalyzer.model.ResponseTimeout
+import com.ikverse.egxanalyzer.model.RuleOrigin
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -102,15 +103,26 @@ internal fun SettingsScreen(appState: AppState) {
 
     Screen(
         title = "Settings",
-        subtitle = "Cloud models only. No Ollama or local-model runtime is included.",
     ) {
+        // One card for everything a run depends on, in the order a run uses it: which model,
+        // what is sent to it, the wording it is told about, the prompt that carries it, and
+        // what is checked afterwards. Five cards asked which of them a setting lived in.
         ExpandableSection(
-            "AI analysis",
+            "Analysis",
             icon = Icons.Outlined.SmartToy,
-            summary = "${appState.cloudConfiguration.provider.displayName} · ${appState.cloudConfiguration.model.ifBlank { "no model" }}",
+            summary = "${appState.cloudConfiguration.provider.displayName} · " +
+                appState.cloudConfiguration.model.ifBlank { "no model" },
+            summaryTone = if (appState.credentialVerified == false) {
+                MaterialTheme.colorScheme.error
+            } else {
+                null
+            },
             contentMaxWidth = FormWidth,
-            summaryTone = if (appState.credentialVerified == false) MaterialTheme.colorScheme.error else null,
         ) {
+            SubSection(
+                "Model",
+                summary = appState.cloudConfiguration.model.ifBlank { "No model chosen" },
+            ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Box {
                     TextButton(onClick = { providerMenuOpen = true }) {
@@ -218,106 +230,13 @@ internal fun SettingsScreen(appState: AppState) {
                     )
                 }
             }
-        }
-
-        ExpandableSection(
-            "Analysis rules",
-            icon = Icons.Outlined.Rule,
-            summary = "${appState.ruleSet.all.count(WordingRule::enabled)} of " +
-                "${appState.ruleSet.all.size} on",
-            contentMaxWidth = FormWidth,
-        ) {
-            AnalysisRulesSection(appState)
-        }
-
-        ExpandableSection(
-            "Generated prompt",
-            icon = Icons.Outlined.Description,
-            summary = if (appState.useDefaultPromptOnly) {
-                "Default only"
-            } else {
-                "v${appState.promptVersions.firstOrNull { it.id == appState.activePrompt.id }?.sequence ?: 1}"
-            },
-            contentMaxWidth = FormWidth,
-        ) {
-            GeneratedPromptSection(appState)
-        }
-
-        ExpandableSection(
-            "Prompt and validation",
-            icon = Icons.Outlined.Rule,
-            summary = if (appState.appPreferences.customSystemPrompt.isBlank()) "Canonical prompt" else "Custom prompt",
-            contentMaxWidth = FormWidth,
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Text("Correction retries: ${appState.appPreferences.correctionRetries}")
-                Slider(
-                    value = appState.appPreferences.correctionRetries.toFloat(),
-                    onValueChange = { appState.updateCorrectionRetries(it.roundToInt()) },
-                    valueRange = 0f..2f,
-                    steps = 1,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = appState.appPreferences.catalogEnrichmentEnabled,
-                        onCheckedChange = appState::updateCatalogEnrichment,
-                    )
-                    Text("Enrich results with the on-device EGX catalog")
-                }
-                OutlinedButton(onClick = {
-                    scope.launch { appState.refreshEgxCatalog() }
-                }) {
-                    Icon(Icons.Outlined.CloudDownload, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Refresh EGX catalog")
-                }
-                Text(
-                    appState.catalogMessage,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
             }
-        }
 
-        ExpandableSection(
-            "Appearance",
-            icon = Icons.Outlined.Palette,
-            summary = appState.appPreferences.themeMode.displayName,
-            contentMaxWidth = FormWidth,
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Box {
-                    OutlinedButton(onClick = { themeMenuOpen = true }) {
-                        Text("Theme: ${appState.appPreferences.themeMode.displayName}")
-                    }
-                    DropdownMenu(
-                        expanded = themeMenuOpen,
-                        onDismissRequest = { themeMenuOpen = false },
-                    ) {
-                        ThemeMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = { Text(mode.displayName) },
-                                onClick = {
-                                    appState.updateThemeMode(mode)
-                                    themeMenuOpen = false
-                                },
-                            )
-                        }
-                    }
-                }
-                Text(
-                    "The choice is applied immediately on outer and inner displays.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        ExpandableSection(
-            "Analysis defaults",
-            icon = Icons.Outlined.Tune,
-            summary = "${appState.appPreferences.analysisLanguage.displayName} · ${appState.appPreferences.defaultContentTypes.size} content types",
-            contentMaxWidth = FormWidth,
-        ) {
+            SubSection(
+                "What to send",
+                summary = "${appState.appPreferences.analysisLanguage.displayName} · " +
+                    "${appState.appPreferences.defaultContentTypes.size} content types",
+            ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Box {
                     OutlinedButton(onClick = { languageMenuOpen = true }) {
@@ -364,8 +283,106 @@ internal fun SettingsScreen(appState: AppState) {
                         val seconds = (it / 30f).roundToInt() * 30
                         appState.updateResponseTimeout(seconds)
                     },
-                    valueRange = 30f..300f,
-                    steps = 8,
+                    valueRange = ResponseTimeout.MIN.toFloat()..ResponseTimeout.MAX.toFloat(),
+                    steps = (ResponseTimeout.MAX - ResponseTimeout.MIN) / 30 - 1,
+                )
+                Text(
+                    "How long the model may think about one batch of images. It sends nothing until " +
+                        "it has finished, so a batch that needs longer than this is hung up on.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            }
+
+            SubSection(
+                "Wording",
+                summary = appState.ruleSet.all.count { it.origin == RuleOrigin.USER }.let { mine ->
+                    if (mine == 0) "Built-in wording only" else "$mine added"
+                },
+            ) {
+            AnalysisRulesSection(appState)
+            }
+
+            SubSection(
+                "Prompt",
+                summary = if (appState.useDefaultPromptOnly) {
+                    "Default only"
+                } else {
+                    "v" + (
+                        appState.promptVersions
+                            .firstOrNull { it.id == appState.activePrompt.id }?.sequence ?: 1
+                        )
+                },
+            ) {
+            GeneratedPromptSection(appState)
+            }
+
+            SubSection(
+                "Validation",
+                summary = "${appState.appPreferences.correctionRetries} correction " +
+                    if (appState.appPreferences.correctionRetries == 1) "retry" else "retries",
+            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                Text("Correction retries: ${appState.appPreferences.correctionRetries}")
+                Slider(
+                    value = appState.appPreferences.correctionRetries.toFloat(),
+                    onValueChange = { appState.updateCorrectionRetries(it.roundToInt()) },
+                    valueRange = 0f..2f,
+                    steps = 1,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = appState.appPreferences.catalogEnrichmentEnabled,
+                        onCheckedChange = appState::updateCatalogEnrichment,
+                    )
+                    Text("Enrich results with the on-device EGX catalog")
+                }
+                OutlinedButton(onClick = {
+                    scope.launch { appState.refreshEgxCatalog() }
+                }) {
+                    Icon(Icons.Outlined.CloudDownload, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Refresh EGX catalog")
+                }
+                Text(
+                    appState.catalogMessage,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+            }
+            }
+        }
+
+        ExpandableSection(
+            "Appearance",
+            icon = Icons.Outlined.Palette,
+            summary = appState.appPreferences.themeMode.displayName,
+            contentMaxWidth = FormWidth,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                Box {
+                    OutlinedButton(onClick = { themeMenuOpen = true }) {
+                        Text("Theme: ${appState.appPreferences.themeMode.displayName}")
+                    }
+                    DropdownMenu(
+                        expanded = themeMenuOpen,
+                        onDismissRequest = { themeMenuOpen = false },
+                    ) {
+                        ThemeMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.displayName) },
+                                onClick = {
+                                    appState.updateThemeMode(mode)
+                                    themeMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+                }
+                Text(
+                    "The choice is applied immediately on outer and inner displays.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

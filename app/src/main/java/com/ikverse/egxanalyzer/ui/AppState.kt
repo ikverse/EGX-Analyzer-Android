@@ -19,14 +19,17 @@ import com.ikverse.egxanalyzer.data.ComposedPrompt
 import com.ikverse.egxanalyzer.data.PromptComposer
 import com.ikverse.egxanalyzer.data.PromptStore
 import com.ikverse.egxanalyzer.model.PromptVersion
+import com.ikverse.egxanalyzer.data.SyncedPosition
 import com.ikverse.egxanalyzer.data.SyncedRule
 import com.ikverse.egxanalyzer.data.mergeRules
+import com.ikverse.egxanalyzer.data.positionsToUpload
 import com.ikverse.egxanalyzer.data.rulesToUpload
 import com.ikverse.egxanalyzer.data.AnalysisPolicy
 import com.ikverse.egxanalyzer.data.EndpointPolicy
 import com.ikverse.egxanalyzer.data.EgxCatalog
 import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.PerformanceCalculator
+import com.ikverse.egxanalyzer.data.PortfolioCalculator
 import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.SyncOutcome
@@ -42,11 +45,15 @@ import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.AnalysisRequest
 import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.AppPreferences
+import com.ikverse.egxanalyzer.model.ResponseTimeout
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.ChatKind
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.PerformanceReport
+import com.ikverse.egxanalyzer.model.Portfolio
+import com.ikverse.egxanalyzer.model.Position
+import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.Scoring
@@ -75,6 +82,9 @@ enum class AppDestination(val label: String, val shortLabel: String) {
     ANALYZE("Analyze", "AI"),
     RESULTS("Results", "RS"),
     INSIGHTS("Insights", "IN"),
+    // Between what the sources said and how the app is configured: the portfolio is read after the
+    // record it is judged against, and it is not a setting.
+    PORTFOLIO("Portfolio", "PF"),
     SETTINGS("Settings", "ST"),
 }
 
@@ -480,6 +490,226 @@ class AppState(
         private set
 
     /**
+     * The trades the user has actually taken, and what the market has since done with them.
+     *
+     * Held apart from [performance] on purpose. That report judges the sources on the levels they
+     * printed; this one judges the user's own trades on the prices they paid, and folding either
+     * into the other would leave both answering a question nobody asked.
+     */
+    var portfolio by mutableStateOf(Portfolio())
+        private set
+
+    private var positions = localDataStore.positions()
+
+    /**
+     * The position taken on one call, if there is one.
+     *
+     * Keyed by the call rather than by the stock: the same stock recommended for two sessions is two
+     * trades, and a card must only ever light up for its own.
+     */
+    fun heldFor(ticker: String, recommendationDate: LocalDate?): PositionView? =
+        portfolio.heldFor(ticker, recommendationDate)
+
+    /**
+     * Records a trade against a recommendation.
+     *
+     * The call's levels are copied in rather than referenced: the report can be deleted or replaced
+     * by a later run of the same session, and neither may rewrite a trade that has already happened.
+     * Pressing Bought again on a card that already has a position replaces it, so a mistyped price
+     * is corrected rather than duplicated.
+     */
+    fun recordPurchase(
+        ticker: String,
+        companyEnglish: String?,
+        companyArabic: String?,
+        channel: String?,
+        recommendationDate: LocalDate,
+        entryPrice: Double,
+        entryDate: LocalDate,
+        entryLow: Double?,
+        entryHigh: Double?,
+        target1: Double?,
+        target2: Double?,
+        stopLoss: Double?,
+    ) {
+        val normalized = Scoring.normalizeTicker(ticker)
+        val existing = positions.firstOrNull {
+            it.ticker == normalized && it.recommendationDate == recommendationDate
+        }
+        val position = Position(
+            ticker = normalized,
+            recommendationDate = recommendationDate,
+            companyEnglish = companyEnglish,
+            companyArabic = companyArabic,
+            channel = channel,
+            entryPrice = entryPrice,
+            entryDate = entryDate,
+            entryLow = entryLow,
+            entryHigh = entryHigh,
+            target1 = target1,
+            target2 = target2,
+            stopLoss = stopLoss,
+            // The window in force now becomes this trade's deadline and stays with it: changing the
+            // setting later must not silently move a deadline a trade was taken under.
+            windowSessions = appPreferences.scoringWindowSessions,
+            // Kept from the first purchase, so re-recording a trade does not restart its life.
+            openedAt = existing?.openedAt ?: Instant.now(),
+            updatedAt = System.currentTimeMillis(),
+            updatedBy = deviceName,
+        )
+        localDataStore.savePosition(position)
+        positions = localDataStore.positions()
+        statusMessage = StatusMessage(
+            "$normalized recorded at ${formatPrice(entryPrice)} on $entryDate.",
+            succeeded = true,
+        )
+        publishPosition(position, deleted = false)
+        appScope.launch {
+            // A stock only just named may have no stored history at all, and a position with no
+            // price says nothing until it does.
+            priceStocksWithNoHistory(listOf(normalized))
+            recomputePortfolio()
+        }
+    }
+
+    /**
+     * Closes a position at the price the user actually sold for.
+     *
+     * Immediate, whatever the recommendation's window still says: the trade is over when the user
+     * says it is over, and the window only ever decided when to stop watching.
+     */
+    fun recordSale(position: Position, exitPrice: Double, exitDate: LocalDate) {
+        val closed = position.copy(
+            exitPrice = exitPrice,
+            exitDate = exitDate,
+            closedManually = true,
+            updatedAt = System.currentTimeMillis(),
+            updatedBy = deviceName,
+        )
+        localDataStore.savePosition(closed)
+        positions = localDataStore.positions()
+        statusMessage = StatusMessage(
+            "${position.ticker} closed at ${formatPrice(exitPrice)} on $exitDate.",
+            succeeded = true,
+        )
+        publishPosition(closed, deleted = false)
+        appScope.launch { recomputePortfolio() }
+    }
+
+    /**
+     * Corrects what a trade was recorded at.
+     *
+     * The call it belongs to, its deadline and any sale are all untouched: this fixes a typed price
+     * or a misremembered date, and nothing else about the position moves.
+     */
+    fun reprice(position: Position, entryPrice: Double, entryDate: LocalDate) {
+        val corrected = position.copy(
+            entryPrice = entryPrice,
+            entryDate = entryDate,
+            updatedAt = System.currentTimeMillis(),
+            updatedBy = deviceName,
+        )
+        localDataStore.savePosition(corrected)
+        positions = localDataStore.positions()
+        statusMessage = StatusMessage(
+            "${position.ticker} entry corrected to ${formatPrice(entryPrice)}.",
+            succeeded = true,
+        )
+        publishPosition(corrected, deleted = false)
+        appScope.launch { recomputePortfolio() }
+    }
+
+    /**
+     * Removes a trade recorded by mistake, here and on every device.
+     *
+     * Buried rather than dropped: a row that simply vanished would be uploaded back by the next
+     * device that still held it, and the delete would undo itself. The report it came from is
+     * untouched either way - the recommendation is not the trade.
+     */
+    fun deletePosition(position: Position) {
+        val at = System.currentTimeMillis()
+        localDataStore.buryPosition(position.id, at, deviceName)
+        positions = localDataStore.positions()
+        statusMessage = StatusMessage("${position.ticker} removed from the portfolio.", succeeded = true)
+        publishPosition(position.copy(updatedAt = at, updatedBy = deviceName), deleted = true)
+        appScope.launch { recomputePortfolio() }
+    }
+
+    /**
+     * Puts one revision in the sync channel, without making the user wait for it.
+     *
+     * The position is already saved before this runs, so a failure here costs nothing: the next
+     * sync's diff finds the revision still unpublished and sends it then. That is why it is silent -
+     * an error message about Telegram, raised while someone is recording a trade, would be about
+     * something they did not ask for and cannot act on.
+     */
+    private fun publishPosition(position: Position, deleted: Boolean) {
+        publish { telegramRepository.uploadPosition(SyncedPosition(position, deleted)) }
+    }
+
+    /**
+     * Work that should reach the channel now but must never hold up what triggered it.
+     *
+     * Off the main thread as well as off the caller's path: publishing stages a small file before it
+     * sends, and that is a disk write on whatever thread asked for it.
+     */
+    private fun publish(block: suspend () -> Unit) {
+        appScope.launch(Dispatchers.IO) { runCatching { block() } }
+    }
+
+    /**
+     * Brings this device and the channel to the same set of positions.
+     *
+     * Revisions, not rows, exactly as the wording rules travel: a trade is edited where a report is
+     * not, so the merge decides by (updatedAt, device) rather than by who uploaded last.
+     */
+    private suspend fun syncPositions(): Boolean {
+        val mine = localDataStore.positionRevisions().map { (position, deleted) ->
+            SyncedPosition(position, deleted)
+        }
+        val theirs = runCatching { telegramRepository.syncedPositions() }.getOrNull() ?: return false
+
+        var changed = false
+        val byId = mine.associateBy { it.position.id }
+        theirs.forEach { incoming ->
+            val here = byId[incoming.position.id]
+            val newer = here == null ||
+                incoming.position.updatedAt > here.position.updatedAt ||
+                (
+                    incoming.position.updatedAt == here.position.updatedAt &&
+                        incoming.position.updatedBy > here.position.updatedBy
+                    )
+            if (newer) {
+                localDataStore.adoptPosition(incoming.position, incoming.deleted)
+                changed = true
+            }
+        }
+
+        // Only what this device knows better. Re-uploading a revision the channel already holds
+        // would grow the log without telling anyone anything.
+        positionsToUpload(mine, theirs).forEach { revision ->
+            runCatching { telegramRepository.uploadPosition(revision) }
+        }
+
+        if (changed) {
+            positions = localDataStore.positions()
+            recomputePortfolio()
+        }
+        return changed
+    }
+
+    private suspend fun recomputePortfolio() {
+        val held = positions
+        portfolio = withContext(Dispatchers.IO) {
+            PortfolioCalculator.build(
+                positions = held,
+                sessionsFor = localDataStore::sessionsFrom,
+                latestCloseFor = localDataStore::latestClose,
+            )
+        }
+    }
+
+    /**
      * The highest a stock has traded since a call was made, or null when nothing prices it yet.
      *
      * Read from the scored calls rather than recomputed, so a price ladder can never disagree with
@@ -502,6 +732,7 @@ class AppState(
         regeneratePrompt("First run")
         appScope.launch {
             recomputePerformance()
+            recomputePortfolio()
             refreshPricesIfStale()
         }
         appScope.launch {
@@ -525,10 +756,13 @@ class AppState(
                         // Deliberately no count here: READY arrives before the chat list does, so
                         // reading it now reports zero while six are about to appear. The count is
                         // announced by the collector below, when there is one.
-                        TelegramAuthStep.READY -> statusMessage = StatusMessage(
-                            "Telegram ready · loading chats…",
-                            succeeded = true,
-                        )
+                        TelegramAuthStep.READY -> {
+                            statusMessage = StatusMessage(
+                                "Telegram ready · loading chats…",
+                                succeeded = true,
+                            )
+                            catchUpOnce()
+                        }
                         TelegramAuthStep.ERROR -> statusMessage = StatusMessage(
                             state.message?.takeIf(String::isNotBlank)
                                 ?: "Telegram could not load your chats.",
@@ -573,6 +807,28 @@ class AppState(
             }
         }
     }
+
+    /**
+     * One full sync per launch, as soon as Telegram can carry it.
+     *
+     * Triggered by Telegram becoming ready rather than by the app starting: at launch there is no
+     * session yet, so a sync then would fail every time and quietly do nothing. A device left alone
+     * for a week therefore catches up on what the others published without anyone pressing anything.
+     */
+    private fun catchUpOnce() {
+        if (caughtUp) return
+        caughtUp = true
+        appScope.launch {
+            val outcome = runCatching { performSync() }.getOrNull() ?: return@launch
+            // Only when something actually moved. Reporting "already in sync" to someone who never
+            // asked is a notification about nothing.
+            if (outcome.uploaded > 0 || outcome.downloaded > 0) {
+                statusMessage = StatusMessage(outcome.summary, succeeded = true)
+            }
+        }
+    }
+
+    private var caughtUp = false
 
     fun navigate(destination: AppDestination) {
         this.destination = destination
@@ -720,7 +976,14 @@ class AppState(
 
 
     fun updateResponseTimeout(value: Int) {
-        saveAppPreferences(appPreferences.copy(responseTimeoutSeconds = value.coerceIn(30, 300)))
+        saveAppPreferences(
+            appPreferences.copy(
+                responseTimeoutSeconds = value.coerceIn(
+                    ResponseTimeout.MIN,
+                    ResponseTimeout.MAX,
+                ),
+            ),
+        )
     }
 
     fun toggleDefaultContentType(type: AnalysisContentType) {
@@ -815,10 +1078,14 @@ class AppState(
     private suspend fun refreshPricesIfStale() {
         val today = LocalDate.now(ZoneId.of(EGX_ZONE)).toString()
         if (settingsRepository.lastPriceRefreshDay() == today) return
-        if (savedResults.recommendedTickers().isEmpty()) return
+        if (pricedStocks().isEmpty()) return
         refreshPrices(announce = false)
         settingsRepository.recordPriceRefreshDay(today)
     }
+
+    /** Every stock worth a request: the ones analyses name, plus the ones actually held. */
+    private fun pricedStocks(): Set<String> =
+        savedResults.recommendedTickers() + positions.map(Position::ticker)
 
     /**
      * Fetches only the stocks with no stored history at all.
@@ -827,8 +1094,8 @@ class AppState(
      * not refetched, not so a stock named for the first time this afternoon goes unscored until
      * tomorrow. Quiet, and a failure leaves the card unpriced rather than interrupting the run.
      */
-    private suspend fun priceStocksWithNoHistory() {
-        val named = savedResults.recommendedTickers()
+    private suspend fun priceStocksWithNoHistory(also: Collection<String> = emptyList()) {
+        val named = savedResults.recommendedTickers() + also
         if (named.isEmpty()) return
         val unpriced = withContext(Dispatchers.IO) {
             val priced = localDataStore.pricedTickers()
@@ -837,11 +1104,14 @@ class AppState(
         if (unpriced.isEmpty()) return
         runCatching { priceRepository.refresh(unpriced) }
         recomputePerformance()
+        recomputePortfolio()
     }
 
     suspend fun refreshPrices(announce: Boolean = true) {
         if (pricesRefreshing) return
-        val tickers = savedResults.recommendedTickers()
+        // A held stock is priced whether or not a report still names it: deleting the analysis a
+        // trade came from must not freeze that trade's current price.
+        val tickers = pricedStocks()
         if (tickers.isEmpty()) {
             if (announce) {
                 statusMessage = StatusMessage("No saved analysis names a stock to price.", false)
@@ -858,6 +1128,7 @@ class AppState(
                 LocalDate.now(ZoneId.of(EGX_ZONE)).toString(),
             )
             recomputePerformance()
+            recomputePortfolio()
             val missing = refresh.unpriced.size
             if (announce) {
                 statusMessage = StatusMessage(
@@ -928,7 +1199,16 @@ class AppState(
     suspend fun syncReports() = runAction(
         label = "Syncing reports with Telegram",
         success = SyncOutcome::summary,
-    ) {
+    ) { performSync() }
+
+    /**
+     * The sync itself, without the progress bar and the announcement.
+     *
+     * Split out so a launch can do the same work quietly. Pressing the button is a question that
+     * deserves an answer either way; catching up in the background is not, and a snackbar reporting
+     * "already in sync" to someone who never asked is noise.
+     */
+    private suspend fun performSync(): SyncOutcome {
         // Deletions this device made while offline are carried out first, so nothing it has
         // already discarded is uploaded back a moment later.
         localDataStore.pendingDeletions().forEach { requestId ->
@@ -939,6 +1219,10 @@ class AppState(
         // Rules first: a report downloaded a moment later was judged under somebody's rules, and
         // arriving with the reports but without them is the one order that explains nothing.
         val rulesChanged = syncWordingRules()
+        // Positions before reports too. A trade arriving ahead of the analysis it was taken on is
+        // still a complete trade - it carries its own levels - where the reverse would show a
+        // recommendation the user appears never to have acted on.
+        syncPositions()
 
         val remote = telegramRepository.listSyncedReports()
         val local = localDataStore.savedRequestIds()
@@ -980,7 +1264,7 @@ class AppState(
             unreadableResults = localDataStore.unreadableResults
             recomputePerformance()
         }
-        SyncOutcome(uploaded, downloaded, local.size - toUpload.size)
+        return SyncOutcome(uploaded, downloaded, local.size - toUpload.size)
     }
 
     private fun SavedAnalysis.toSyncedRun() = SyncedRun(
@@ -1273,10 +1557,12 @@ class AppState(
             // button was pressed or the app was restarted the next day.
             priceStocksWithNoHistory()
             analysisFinished(savedResults.firstOrNull()?.id, result.recommendations.size)
-            // Published as soon as it exists, so another device only ever has to pull. A failure
-            // here is not the run failing: the report is saved, and the next sync will carry it.
+            // Published as soon as it exists, so another device only ever has to pull. In the
+            // background: a slow Telegram used to hold the tail of a run, leaving the screen on
+            // "saved" while nothing moved. A failure here is not the run failing either - the
+            // report is on disk, and the next sync's diff carries it.
             savedResults.firstOrNull { it.result.requestId == result.requestId }?.let { saved ->
-                runCatching { telegramRepository.uploadReport(saved.toSyncedRun()) }
+                publish { telegramRepository.uploadReport(saved.toSyncedRun()) }
             }
             destination = AppDestination.RESULTS
         } catch (_: CancellationException) {
@@ -1365,6 +1651,34 @@ class AppState(
                 appendLine("- Source IDs: ${recommendation.sourceIds.joinToString()}")
                 recommendation.notesArabic?.let { appendLine("- Notes: $it") }
                 appendLine()
+            }
+            // What was actually done about this session, on the prices actually paid. Closed by
+            // hand or closed by the deadline, every position for the session is listed: a record
+            // that quietly dropped the trades cut short would flatter itself.
+            val held = result.recommendationTargetDate
+                ?.let { date -> portfolio.positions.filter { it.recommendationDate == date } }
+                .orEmpty()
+            if (held.isNotEmpty()) {
+                appendLine("## Your positions")
+                appendLine()
+                held.sortedBy(PositionView::ticker).forEach { view ->
+                    val position = view.position
+                    appendLine("### ${position.ticker} — ${view.status.label}")
+                    appendLine("- Entry: ${formatPrice(position.entryPrice)} on ${position.entryDate}")
+                    appendLine(
+                        "- Exit: ${formatPrice(view.exitPrice)}" +
+                            (position.exitDate?.let { " on $it" } ?: "") +
+                            " (${if (view.realized) "realized" else "estimated"})",
+                    )
+                    appendLine("- Return: ${formatPercent(view.returnPct)}")
+                    appendLine(
+                        "- Deadline: " + (
+                            view.deadlineDate?.let { "passed $it" }
+                                ?: "${view.sessionsRemaining} of ${position.windowSessions} sessions left"
+                            ),
+                    )
+                    appendLine()
+                }
             }
         }
         return AnalysisReport(

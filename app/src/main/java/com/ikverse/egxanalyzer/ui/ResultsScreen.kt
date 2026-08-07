@@ -7,6 +7,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -18,6 +20,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Assessment
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.MoreVert
@@ -29,6 +33,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,6 +70,7 @@ import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SavedAnalysis
+import com.ikverse.egxanalyzer.model.WordingRule
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -74,7 +81,6 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
     val scope = rememberCoroutineScope()
     Screen(
         title = "Results",
-        subtitle = "Saved recommendations and their exact source traces, on this device and in your Telegram sync channel.",
         onRefresh = { scope.launch { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
         refreshHint = "Pull down to refresh prices",
@@ -166,10 +172,10 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
             }
             BoxWithConstraints {
                 val columns = responsiveColumns(minColumnWidth = SavedRunMinWidth, maxColumns = 2)
-                // Grouped before rendering rather than while: which cards share a row depends on
-                // where the open one sits, and that cannot be decided one card at a time.
-                val bands = remember(shown, openRun, columns) {
-                    expandableBands(shown, columns) { it.id == openRun }
+                // Grouped before rendering rather than while: the open run interrupts the grid, and
+                // where it does so cannot be decided one card at a time.
+                val bands = remember(shown, openRun) {
+                    expandableBands(shown) { it.id == openRun }
                 }
 
                 @Composable
@@ -177,6 +183,11 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                     SavedAnalysisCard(
                         modifier = cardModifier,
                         saved = saved,
+                        // Built per run: every card inside it dates its call from this run's target
+                        // session, which is what the scorer does too.
+                        trades = remember(appState, saved.id) {
+                            TradeBook(appState, saved.result.recommendationTargetDate)
+                        },
                         expanded = expanded,
                         onExpandedChange = { open ->
                             openRun = if (open) saved.id else null
@@ -258,6 +269,30 @@ internal enum class RunOrder(val label: String, val comparator: Comparator<Saved
  * Taken from the selection the run recorded. Analyses saved before that was stored fall back to the
  * chats their rows actually name, which understates a run that read a chat and found nothing.
  */
+/**
+ * Whether a stock answers to what was typed.
+ *
+ * Ticker, Arabic name and English name at once, because someone looking for a stock has whichever
+ * of the three they happened to read. Arabic goes through the app's own normalizer, so `المصرية`
+ * finds `المصريه` - without it a search only works when it repeats the exact spelling the channel
+ * used.
+ */
+internal fun ConsolidatedRecommendation.matches(normalizedQuery: String): Boolean {
+    if (normalizedQuery.isBlank()) return true
+    return listOfNotNull(stockCode, stockNameArabic, stockNameEnglish)
+        .any { WordingRule.normalize(it).contains(normalizedQuery) }
+}
+
+/** The channel behind an occurrence, named so it can be ticked off a list. */
+internal fun RecommendationDataPoint.channelLabel(channelFor: Map<String, String>): String =
+    channelFor[sourceMessageId]?.takeIf(String::isNotBlank) ?: "Not stated"
+
+/** Every channel this report actually contains, in the order the table lists them. */
+private fun AnalysisResult.channelLabels(channelFor: Map<String, String>): List<String> =
+    consolidated.flatMap(ConsolidatedRecommendation::dataPoints)
+        .map { it.channelLabel(channelFor) }
+        .distinct()
+
 /** What the model recorded as dating an occurrence, named so it can be ticked off a list. */
 internal fun RecommendationDataPoint.timingLabel(): String = timing(this) ?: "Not stated"
 
@@ -324,6 +359,8 @@ private fun UnreadableNotice(count: Int) {
 private fun SavedAnalysisCard(
     modifier: Modifier = Modifier,
     saved: SavedAnalysis,
+    /** Records what the user did about the calls in this run. */
+    trades: TradeBook,
     /** Held by the screen, which needs it to give an open report a row of its own. */
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
@@ -450,7 +487,9 @@ private fun SavedAnalysisCard(
                 }
             }
 
-            AnimatedVisibility(expanded) { ResultDetail(saved, peakFor) }
+            AnimatedVisibility(expanded) {
+                ResultDetail(saved, peakFor, trades, onHide = { onExpandedChange(false) })
+            }
         }
     }
 
@@ -489,7 +528,12 @@ private fun shareReport(activity: Activity, report: AnalysisReport) {
 }
 
 @Composable
-private fun ResultDetail(saved: SavedAnalysis, peakFor: (String, LocalDate?) -> Double?) {
+private fun ResultDetail(
+    saved: SavedAnalysis,
+    peakFor: (String, LocalDate?) -> Double?,
+    trades: TradeBook,
+    onHide: () -> Unit,
+) {
     var detail by remember { mutableStateOf<Pair<ConsolidatedRecommendation, RecommendationDataPoint>?>(null) }
     var showTrace by remember { mutableStateOf(false) }
     var openImage by remember { mutableStateOf<Int?>(null) }
@@ -500,34 +544,132 @@ private fun ResultDetail(saved: SavedAnalysis, peakFor: (String, LocalDate?) -> 
             .associate { it.messageId.toString() to it.channelName }
     }
 
-    // Session-only, and per report: a timing hidden here is a row someone chose not to read now,
-    // not a preference about every report they open later.
+    // Session-only, and per report: a row hidden here is one someone chose not to read now, not a
+    // preference about every report they open later.
     val timings = remember(saved.id) { saved.result.timings() }
+    val channels = remember(saved.id, channelNames) { saved.result.channelLabels(channelNames) }
     var shownTimings by remember(saved.id) { mutableStateOf(timings.toSet()) }
-    val stocks = remember(saved.id, shownTimings) {
+    var shownChannels by remember(saved.id) { mutableStateOf(channels.toSet()) }
+    var search by remember(saved.id) { mutableStateOf("") }
+    var filtersOpen by remember(saved.id) { mutableStateOf(false) }
+
+    val stocks = remember(saved.id, shownTimings, shownChannels, search, channelNames) {
+        // Timing and channel narrow the rows; the search narrows the stocks, because a name belongs
+        // to the stock rather than to any one occurrence of it.
+        val wanted = WordingRule.normalize(search)
         saved.result.consolidated
-            .map { stock -> stock.copy(dataPoints = stock.dataPoints.filter { it.timingLabel() in shownTimings }) }
-            .filter { it.dataPoints.isNotEmpty() }
+            .map { stock ->
+                stock.copy(
+                    dataPoints = stock.dataPoints.filter {
+                        it.timingLabel() in shownTimings &&
+                            it.channelLabel(channelNames) in shownChannels
+                    },
+                )
+            }
+            .filter { it.dataPoints.isNotEmpty() && it.matches(wanted) }
+    }
+
+    val narrowed = shownTimings.size < timings.size ||
+        shownChannels.size < channels.size ||
+        search.isNotBlank()
+    val clearFilters = {
+        shownTimings = timings.toSet()
+        shownChannels = channels.toSet()
+        search = ""
+    }
+
+    @Composable
+    fun Controls() {
+        // Search leads: it is the one control someone arrives at the toolbar already knowing they
+        // want, and it is also the only one that can empty the table on a single keystroke. The
+        // two dropdowns follow, in the order the table's own columns run.
+        StockFilterField(value = search, onValueChange = { search = it })
+        CheckedSetFilter(
+            label = "timings",
+            options = timings,
+            shown = shownTimings,
+            onToggle = { name ->
+                shownTimings = if (name in shownTimings) shownTimings - name else shownTimings + name
+            },
+            onSelectAll = { shownTimings = timings.toSet() },
+        )
+        CheckedSetFilter(
+            label = "channels",
+            options = channels,
+            shown = shownChannels,
+            onToggle = { name ->
+                shownChannels = if (name in shownChannels) shownChannels - name else shownChannels + name
+            },
+            onSelectAll = { shownChannels = channels.toSet() },
+        )
+    }
+
+    /**
+     * The controls that decide what the report shows, on one line.
+     *
+     * [compact] folds the three filters behind a chip: a cover screen cannot hold them beside the
+     * button, and a toolbar that wraps to three lines is worse pinned than not pinned at all.
+     */
+    @Composable
+    fun Toolbar(compact: Boolean) {
+        Column(
+            Modifier.padding(vertical = Space.s),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Weighted rather than left to its own width, so the filters wrap against the
+                // button instead of running underneath it.
+                Box(Modifier.weight(1f)) {
+                    FilterRow(active = narrowed && !compact, onClearAll = clearFilters) {
+                        if (compact) {
+                            FilterChip(
+                                selected = narrowed,
+                                onClick = { filtersOpen = !filtersOpen },
+                                label = { Text(if (narrowed) "Filters on" else "Filters") },
+                                trailingIcon = {
+                                    Icon(
+                                        if (filtersOpen) {
+                                            Icons.Outlined.ExpandLess
+                                        } else {
+                                            Icons.Outlined.ExpandMore
+                                        },
+                                        contentDescription = null,
+                                        modifier = Modifier.size(IconSize.Inline),
+                                    )
+                                },
+                            )
+                        } else {
+                            Controls()
+                        }
+                    }
+                }
+                // Hard against the right edge and apart from the filters: it closes the report
+                // rather than narrowing it, and sitting in the row with them it held the leftmost
+                // slot - the one the eye starts at, which belongs to what the table is searched by.
+                // A button rather than a text link, and short: it sits beside the filters all the
+                // way down a long table, so every pixel it takes is one the controls lose.
+                OutlinedButton(
+                    onClick = onHide,
+                    contentPadding = PaddingValues(horizontal = Space.m),
+                    modifier = Modifier.height(FilterControlHeight),
+                ) { Text("Hide") }
+            }
+            if (compact) {
+                AnimatedVisibility(filtersOpen) {
+                    FilterRow(active = narrowed, onClearAll = clearFilters) { Controls() }
+                }
+            }
+        }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-        FilterRow(
-            active = shownTimings.size < timings.size,
-            onClearAll = { shownTimings = timings.toSet() },
-        ) {
-            CheckedSetFilter(
-                label = "timings",
-                options = timings,
-                shown = shownTimings,
-                onToggle = { name ->
-                    shownTimings = if (name in shownTimings) shownTimings - name else shownTimings + name
-                },
-                onSelectAll = { shownTimings = timings.toSet() },
-            )
-        }
         if (stocks.isEmpty() && saved.result.consolidated.isNotEmpty()) {
             Text(
-                "No recommendations match these timings.",
+                "Nothing in this report matches those filters.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -543,22 +685,27 @@ private fun ResultDetail(saved: SavedAnalysis, peakFor: (String, LocalDate?) -> 
                         imagePathFor = { ref -> saved.result.imagePathFor(ref) },
                         onOpenImage = { ref -> openImage = ref },
                         onSelectPoint = { stock, point -> detail = stock to point },
+                        toolbar = { Toolbar(compact = false) },
                     )
                 } else {
                     // A sixteen-column table on a cover screen is a scroll bar with numbers behind
                     // it. The same figures as cards stay readable without any horizontal scrolling.
                     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                        Toolbar(compact = true)
                         stocks.forEach { stock ->
                             RecommendationCards(
                                 stock = stock,
                                 channelFor = { messageId -> channelNames[messageId] },
                                 peakFor = peakFor,
+                                imagePathFor = { ref -> saved.result.imagePathFor(ref) },
+                                trades = trades,
                             )
                         }
                     }
                 }
             }
         } else {
+            Toolbar(compact = true)
             saved.result.recommendations.forEach { LegacyDetail(it) }
         }
 
@@ -568,12 +715,15 @@ private fun ResultDetail(saved: SavedAnalysis, peakFor: (String, LocalDate?) -> 
         AnimatedVisibility(showTrace) { TraceAndDiagnostics(saved) }
     }
 
+
     detail?.let { (stock, point) ->
         OccurrenceSheet(
             stock = stock,
             point = point,
             imagePath = saved.result.imagePathFor(point.sourceImageRef),
             peak = peakFor(stock.stockCode, point.date),
+            channel = channelNames[point.sourceMessageId],
+            trades = trades,
             onDismiss = { detail = null },
         )
     }

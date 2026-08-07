@@ -19,6 +19,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -31,11 +32,20 @@ import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
@@ -51,7 +61,6 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun Screen(
     title: String,
-    subtitle: String,
     /** Stays put while the page scrolls. The content reserves room so it never covers anything. */
     floatingAction: (@Composable () -> Unit)? = null,
     /** Given, the page pulls down to refresh. Its spinner is [refreshing]. */
@@ -62,10 +71,33 @@ internal fun Screen(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val scroll = rememberScrollState()
+    // Where the scrolling area begins on screen, so anything inside it can pin itself there. A
+    // table header has no other way to know how far it has been scrolled past.
+    var viewportTop by remember { mutableFloatStateOf(0f) }
+    // The bottom bar gets out of the way while a page is being read, and comes back the moment it is
+    // pulled back up. Taken from this page's own scroll position rather than from the gesture, so
+    // scrolling a list inside a card - the chat list, the source list - leaves the bar alone.
+    val navBarVisible = LocalNavBarVisible.current
+    val slop = with(LocalDensity.current) { NavBarScrollSlop.toPx() }
+    LaunchedEffect(scroll, slop) {
+        var mark = scroll.value
+        snapshotFlow { scroll.value }.collect { offset ->
+            when {
+                // The top of a page always shows it: there is nothing to reclaim up here, and a
+                // page that opens with no navigation showing looks broken.
+                offset <= slop -> navBarVisible.value = true
+                offset - mark > slop -> navBarVisible.value = false
+                mark - offset > slop -> navBarVisible.value = true
+                else -> return@collect
+            }
+            mark = offset
+        }
+    }
     val page = @Composable {
         Column(
             Modifier
                 .fillMaxSize()
+                .onGloballyPositioned { viewportTop = it.positionInWindow().y }
                 .fadingScrollbar(scroll)
                 .verticalScroll(scroll)
                 .padding(horizontal = Space.l)
@@ -74,16 +106,12 @@ internal fun Screen(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                 Text(title, style = MaterialTheme.typography.headlineLarge)
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 if (onRefresh != null && refreshHint != null) PullHint(refreshHint)
             }
             content()
         }
     }
+    CompositionLocalProvider(LocalViewportTop provides viewportTop) {
     Box(Modifier.fillMaxSize()) {
         if (onRefresh == null) {
             page()
@@ -99,7 +127,28 @@ internal fun Screen(
             Box(Modifier.align(Alignment.BottomEnd).padding(inset)) { it() }
         }
     }
+    }
 }
+
+/**
+ * The top of the scrolling area, in window coordinates.
+ *
+ * Published so a header deep inside the page can hold itself against it. Measuring the window again
+ * from down there gets the top of the screen, which is not the same thing once a rail, a status bar
+ * or a pull-to-refresh indicator is in the way.
+ */
+internal val LocalViewportTop = compositionLocalOf { 0f }
+
+/**
+ * Whether the bottom navigation bar is showing.
+ *
+ * Owned by the shell and written by whichever page is on screen. The bar is drawn outside every
+ * screen, so a page being scrolled has no other way to tell it to get out of the way.
+ */
+internal val LocalNavBarVisible = staticCompositionLocalOf { mutableStateOf(true) }
+
+/** Enough movement to be a scroll rather than a wobble, so the bar does not flicker on a nudge. */
+private val NavBarScrollSlop = 6.dp
 
 /**
  * A gesture with nothing on screen to suggest it is a gesture is one nobody finds.
@@ -134,6 +183,57 @@ private val PullHintIcon = 14.dp
 /** Height of an extended action plus its margin, so the last card clears it when scrolled to. */
 private val FloatingActionInset = 88.dp
 
+/**
+ * A group inside a card, for settings that belong to one another.
+ *
+ * Deliberately lighter than [ExpandableSection]: a card drawn inside a card reads as a mistake, so
+ * this is a heading, a chevron, and a rule underneath. It keeps its own open state, because which
+ * group someone is reading is not the parent's business.
+ */
+@Composable
+internal fun SubSection(
+    title: String,
+    /** One line saying what is inside, so a closed group still informs. */
+    summary: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = Space.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                summary?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Icon(
+                if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(IconSize.Inline),
+            )
+        }
+        AnimatedVisibility(expanded) {
+            Column(
+                Modifier.padding(bottom = Space.m),
+                verticalArrangement = Arrangement.spacedBy(Space.m),
+                content = content,
+            )
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
 /** A titled group of related controls, replacing the loose outlined boxes used before. */
 @Composable
 internal fun SectionCard(
@@ -161,6 +261,10 @@ internal fun SectionCard(
                     }
                     Text(title, style = MaterialTheme.typography.titleMedium)
                 }
+                // The same hairline the chrome uses to separate the app header from the page, so a
+                // card says where its heading ends the way the app does. Only with a title: there is
+                // nothing to separate without one.
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
             content()
         }
@@ -233,13 +337,21 @@ internal fun ExpandableSection(
                 )
             }
             AnimatedVisibility(expanded) {
-                Column(
-                    Modifier
-                        .padding(start = Space.l, end = Space.l, bottom = Space.l)
-                        .then(contentMaxWidth?.let { Modifier.widthIn(max = it) } ?: Modifier),
-                    verticalArrangement = Arrangement.spacedBy(Space.s),
-                    content = content,
-                )
+                Column {
+                    // Inside the reveal rather than above it: a closed card would otherwise carry a
+                    // rule along its bottom edge with nothing under it.
+                    HorizontalDivider(
+                        Modifier.padding(horizontal = Space.l),
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                    Column(
+                        Modifier
+                            .padding(start = Space.l, end = Space.l, top = Space.s, bottom = Space.l)
+                            .then(contentMaxWidth?.let { Modifier.widthIn(max = it) } ?: Modifier),
+                        verticalArrangement = Arrangement.spacedBy(Space.s),
+                        content = content,
+                    )
+                }
             }
         }
     }

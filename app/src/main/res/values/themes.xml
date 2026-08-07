@@ -5,6 +5,12 @@
         <item name="android:navigationBarColor">#0B0F14</item>
         <item name="android:statusBarColor">#0B0F14</item>
         <item name="android:windowActionModeOverlay">true</item>
+        <!--
+          The launch window, which the platform draws itself from API 31 - minSdk here - so this
+          needs no library and no code. Without it a cold start showed a blank themed window while
+          Telegram came up, which reads as the app having failed to open.
+        -->
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_icon</item>
     </style>
 </resources>
-

@@ -8,6 +8,7 @@ import com.ikverse.egxanalyzer.model.RuleKind
 import com.ikverse.egxanalyzer.model.AnalysisDiagnostics
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AppPreferences
+import com.ikverse.egxanalyzer.model.ResponseTimeout
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SourceTrace
@@ -18,6 +19,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URL
 import java.io.FileInputStream
 import java.io.InputStream
@@ -150,10 +152,40 @@ class CloudAnalysisRepository(
             // The run's reference for each image this chunk holds, in the order it sends them.
             val globalRefs = chunk.filterIsInstance<AnalysisInput.Image>().map { globalRef += 1; globalRef }
             harvest.imagesSent += globalRefs.size
-            var answer = readChunk(
-                request, chunk, globalRefs, harvest, config, appPreferences, credential, null,
-                trace, "chunk-$chunkNumber",
-            )
+            // A chunk that never answers used to throw out of this loop and take the run with
+            // it - including every chunk already answered and already paid for. It is retried once,
+            // and if it still will not answer the run keeps what the others returned.
+            var answer = try {
+                readChunk(
+                    request, chunk, globalRefs, harvest, config, appPreferences, credential, null,
+                    trace, "chunk-$chunkNumber",
+                )
+            } catch (timeout: SocketTimeoutException) {
+                harvest.retried = true
+                runCatching {
+                    readChunk(
+                        request, chunk, globalRefs, harvest, config, appPreferences, credential, null,
+                        trace, "chunk-$chunkNumber-timeout-retry",
+                    )
+                }.getOrElse {
+                    harvest.warnings += "Chunk $chunkNumber was dropped: the model did not answer " +
+                        "within ${appPreferences.responseTimeoutSeconds}s, twice. Raise the timeout " +
+                        "in Settings, Analysis, Validation."
+                    null
+                }
+            } ?: run {
+                // Its images are named as unaccounted, the same as any the model never mentioned,
+                // so a report built without them says so rather than looking complete.
+                (1..globalRefs.size).forEach { local ->
+                    val imageTrace = request.traceForImage(chunk, local)
+                    harvest.unaccounted += UnaccountedImage(
+                        reference = globalRefs[local - 1],
+                        sourceId = imageTrace?.sourceId,
+                        caption = imageTrace?.preview,
+                    )
+                }
+                continue
+            }
             val missing = (1..globalRefs.size).filterNot(answer.cited::contains)
             if (missing.isNotEmpty()) {
                 // Retry this chunk alone rather than the run: eight images, not thirty-two. The
@@ -329,7 +361,10 @@ class CloudAnalysisRepository(
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = appPreferences.responseTimeoutSeconds.coerceIn(30, 300) * 1_000
+            readTimeout = appPreferences.responseTimeoutSeconds.coerceIn(
+                ResponseTimeout.MIN,
+                ResponseTimeout.MAX,
+            ) * 1_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Authorization", "Bearer ${String(credential)}")
@@ -375,7 +410,10 @@ class CloudAnalysisRepository(
                 .apply {
                     requestMethod = "GET"
                     connectTimeout = CONNECT_TIMEOUT_MS
-                    readTimeout = preferences().responseTimeoutSeconds.coerceIn(30, 300) * 1_000
+                    readTimeout = preferences().responseTimeoutSeconds.coerceIn(
+                        ResponseTimeout.MIN,
+                        ResponseTimeout.MAX,
+                    ) * 1_000
                     setRequestProperty("Accept", "application/json")
                     setRequestProperty("Authorization", "Bearer ${String(credential)}")
                 }

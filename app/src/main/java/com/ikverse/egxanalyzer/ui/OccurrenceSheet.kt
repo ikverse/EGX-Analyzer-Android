@@ -36,9 +36,14 @@ internal fun OccurrenceSheet(
     imagePath: String? = null,
     /** Highest the stock has traded since the call, drawn as the ladder's arrow. */
     peak: Double? = null,
+    /** The channel behind this occurrence, recorded with a trade taken on it. */
+    channel: String? = null,
+    /** Records what the user did about this call. Absent, the sheet is read-only. */
+    trades: TradeBook? = null,
     onDismiss: () -> Unit,
 ) {
     var viewingImage by remember { mutableStateOf(false) }
+    val held = trades?.heldFor(stock, point)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -76,6 +81,17 @@ internal fun OccurrenceSheet(
                     "Risk / reward  1 : ${"%.1f".format(it)}",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            // Above the source trace rather than below it: a decision to buy is made from the
+            // figures, and the evidence underneath is what you read when you doubt them.
+            if (trades != null && trades.dateOf(point) != null) {
+                TradeAction(
+                    held = held,
+                    suggestedEntry = point.entryMidpoint(),
+                    onBuy = { price, date -> trades.buy(stock, point, channel, price, date) },
+                    onSell = { price, date -> held?.let { trades.sell(it, price, date) } },
                 )
             }
 

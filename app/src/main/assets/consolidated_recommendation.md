@@ -1,4 +1,4 @@
-<!-- EGX_PROMPT_SCHEMA: 8 -->
+<!-- EGX_PROMPT_SCHEMA: 7 -->
 # EGX recommendation extraction
 
 Extract from the supplied Egyptian stock-market Telegram sources.
@@ -12,9 +12,7 @@ Images, ordinary text messages, and voice-note transcripts are equally valid sou
 Do not repair, advance, infer, or borrow dates, stock identities, evidence, image references, or prices.
 
 Managed Include phrases extend recommendation wording only. They never override exclusions, date eligibility, source isolation, or destination separation.
-
 <!-- EGX_RULES: source.keep -->
-
 <!-- EGX_RULES: source.drop -->
 
 ## 1. Highest-priority exclusions
@@ -82,9 +80,7 @@ category, count, Notes field, or source link.
 Record it in `excluded` instead, with the stock code where there is one, the date you read, and the
 reason. That array is the only place an exclusion may appear, and it is how the exclusion is shown
 to have happened rather than merely assumed.
-
 <!-- EGX_RULES: exclusion.previous -->
-
 <!-- EGX_RULES: exclusion.target-hit -->
 
 ## 2. Hard date gate
@@ -123,7 +119,6 @@ For every recommendation you return:
 to a different session, and it is checked. Copying `TARGET_DATE` into `date` while the real date
 sits in `visible_source_date` reports a recommendation you have already judged ineligible as though
 it qualified.
-
 <!-- EGX_RULES: date.explicit -->
 
 ## 3. Destination classification
@@ -160,7 +155,6 @@ For a Main recommendation, return:
 
 - `effective_date_basis`: `explicit_date`
 - `timing_evidence`: null
-
 <!-- EGX_RULES: destination.main -->
 
 ### Watching
@@ -184,7 +178,6 @@ Requirements:
 - Preserve all explicitly stated levels.
 - A Watching heading may govern the ticker immediately beneath it in the same image card.
 - Do not apply Watching wording from one stock or section to another.
-
 <!-- EGX_RULES: destination.watching -->
 
 ### T+1
@@ -205,7 +198,6 @@ Requirements:
 - Do not apply a `T+1` heading found in one section to any other section of the same image, and do not infer `T+1` from a message that merely mentions it elsewhere.
 - Where a row is both `T+1` and under Watching wording, Watching wins: it is the stronger statement about whether the call is live.
 - Preserve all explicitly stated levels.
-
 <!-- EGX_RULES: destination.t-plus-1 -->
 
 ### Main, Watching and T+1 sections in one image
@@ -230,7 +222,6 @@ Examples include:
 - `استفسارات العملاء`
 
 Do not classify a normal recommendation as an inquiry merely because the same channel posts inquiry replies elsewhere.
-
 <!-- EGX_RULES: destination.inquiry -->
 
 ### Excluded

@@ -10,6 +10,7 @@ import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
+import com.ikverse.egxanalyzer.model.callDate
 import com.ikverse.egxanalyzer.model.round
 import java.time.Instant
 import java.time.LocalDate
@@ -240,10 +241,9 @@ object PerformanceCalculator {
         val ticker = Scoring.normalizeTicker(stock.stockCode)
         // The session the run was aimed at, which is the one the recommendation is for. Reading the
         // date off the extraction instead put a back-dated analysis under whatever day its sources
-        // happened to be printed with, so scoring started from the wrong session.
-        val openedOn = targetDate ?: date ?: visibleSourceDate?.let { value ->
-            runCatching { LocalDate.parse(value.trim().take(10)) }.getOrNull()
-        } ?: return null
+        // happened to be printed with, so scoring started from the wrong session. Shared with the
+        // portfolio so a trade and the call it was taken on can never land on different dates.
+        val openedOn = callDate(targetDate) ?: return null
         if (ticker.isBlank()) return null
         return ScoredCall(
             ticker = ticker,
@@ -269,7 +269,16 @@ object PerformanceCalculator {
         )
     }
 
-    private fun channelScores(calls: List<ScoredCall>): List<ChannelScore> = calls
+    /**
+     * Judged calls a channel needs before its rate is allowed to lead.
+     *
+     * Low enough that a few weeks of history ranks something, high enough that a single session
+     * cannot. Below it the rate is still reported, exactly as measured - it simply stops sorting
+     * above channels with a record behind them.
+     */
+    const val MINIMUM_JUDGED_TO_RANK = 5
+
+    internal fun channelScores(calls: List<ScoredCall>): List<ChannelScore> = calls
         .groupBy(ScoredCall::channel)
         .map { (channel, rows) ->
             val judged = rows.filter { it.outcome.judged }
@@ -297,9 +306,12 @@ object PerformanceCalculator {
                 medianSessionsToHit = median(any.map(ScoredCall::sessionsElapsed)),
             )
         }
-        // Channels with nothing judged sort last: a perfect record over zero calls is not a record.
+        // A record needs enough behind it to be a record. Ranking on the rate alone put a channel
+        // with two settled calls above one with seven, because one good session is 100% - so the
+        // floor decides the order first and the rate decides it within.
         .sortedWith(
-            compareByDescending<ChannelScore> { it.judged > 0 }
+            compareByDescending<ChannelScore> { it.judged >= MINIMUM_JUDGED_TO_RANK }
+                .thenByDescending { it.judged > 0 }
                 .thenByDescending { it.anyTargetRate ?: 0.0 }
                 .thenByDescending(ChannelScore::judged),
         )

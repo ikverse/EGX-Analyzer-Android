@@ -4,7 +4,6 @@ import android.Manifest
 import android.app.Activity
 import android.app.DatePickerDialog
 import android.content.Intent
-import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,19 +31,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material.icons.outlined.AutoGraph
 import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Forum
-import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.TextFields
-import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -73,7 +67,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.AnalysisContentType
-import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
@@ -84,22 +77,8 @@ import java.time.ZoneId
 
 @Composable
 internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
-    var textSource by remember { mutableStateOf("") }
-    var channelMenuOpen by remember { mutableStateOf(false) }
     var modelMenuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val images = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments(),
-    ) { uris ->
-        uris.forEach { persistReadPermission(activity, it) }
-        appState.addImages(uris) { activity.contentResolver.getType(it) }
-    }
-    val voice = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            persistReadPermission(activity, uri)
-            appState.addVoice(uri, activity.contentResolver.getType(uri))
-        }
-    }
     // Android 13 and later start with notifications denied, and the app never asked. Everything
     // was built - channel, foreground service, deep link - and none of it could reach the screen,
     // which looked exactly like a broken notification rather than a missing permission.
@@ -129,8 +108,6 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
     var attempted by remember { mutableStateOf(false) }
     Screen(
         title = "Analyze",
-        subtitle = "Send selected text, images, and voice-message content to " +
-            appState.cloudConfiguration.provider.displayName + ".",
         floatingAction = {
             val big = LocalWindowWidth.current != WindowWidth.COMPACT
             val actionModifier = if (big) Modifier.height(BigActionHeight) else Modifier
@@ -241,6 +218,9 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                     Spacer(Modifier.width(Space.s))
                     Text("Content types", fontWeight = FontWeight.Bold)
                 }
+                // This card is built by hand rather than through SectionCard, so it carries the
+                // heading rule itself or it is the one card on the page without one.
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 // Three checkboxes stacked is a phone layout; anywhere wider it is three rows of
                 // empty space.
                 AdaptiveInline(minWidth = 340.dp) { horizontal ->
@@ -271,6 +251,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                     Spacer(Modifier.width(8.dp))
                     Text("Recommendation target date", fontWeight = FontWeight.Bold)
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 RecommendationDateOption(
                     selected = appState.analysisMode == AnalysisMode.NEXT_DAY,
                     title = "Current / next EGX session",
@@ -299,75 +280,6 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                         Text("Change date")
                     }
                 }
-            }
-        }
-        ExpandableSection("Advanced selection", Icons.Outlined.Tune) {
-            // Only ever labelled hand-added sources; the chat list above already says which
-            // channels a run reads from.
-        Box {
-                val activeChannel = appState.channels.firstOrNull {
-                    it.id == appState.activeSourceChannelId
-                }
-                TextButton(onClick = { channelMenuOpen = true }) {
-                    Text("Source channel: ${activeChannel?.name ?: "On-device import"}")
-                }
-                DropdownMenu(
-                    expanded = channelMenuOpen,
-                    onDismissRequest = { channelMenuOpen = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("On-device import") },
-                        onClick = {
-                            appState.selectSourceChannel(null)
-                            channelMenuOpen = false
-                        },
-                    )
-                    appState.channels.filter(ChannelSelection::selected).forEach { channel ->
-                        DropdownMenuItem(
-                            text = { Text(channel.name) },
-                            onClick = {
-                                appState.selectSourceChannel(channel.id)
-                                channelMenuOpen = false
-                            },
-                        )
-                    }
-                }
-            }
-            OutlinedTextField(
-                value = textSource,
-                onValueChange = { textSource = it },
-                label = { Text("Message text") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth().scrollableRow(),
-                horizontalArrangement = Arrangement.spacedBy(Space.s),
-            ) {
-                Button(onClick = {
-                    appState.addText(textSource)
-                    textSource = ""
-                }) {
-                    Icon(Icons.Outlined.TextFields, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Add text")
-                }
-                OutlinedButton(onClick = { images.launch(arrayOf("image/*")) }) {
-                    Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Add images")
-                }
-                OutlinedButton(onClick = { voice.launch(arrayOf("audio/*")) }) {
-                    Icon(Icons.Outlined.Mic, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Add voice")
-                }
-            }
-            // Only what was added by hand: the source preview above already shows everything
-            // loaded from Telegram, and removing one of those individually would be undone by the
-            // next load.
-            appState.manualInputs.forEach { input ->
-                SourceCard(input, onRemove = { appState.removeInput(input.sourceId) })
             }
         }
         ExpandableSection("Cloud model", Icons.Outlined.SmartToy) {
@@ -431,8 +343,6 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         )
         DuplicateAnalysisDialog(appState)
 
-        // Collapsed by default: the usual route is loading sources from Telegram, and adding one
-        // by hand is the exception.
         val analyzeDisabledReason = blockedReason
         if (appState.analysisStatus != AnalysisStatus.RUNNING) {
             analyzeDisabledReason?.let {
@@ -469,40 +379,6 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                     MaterialTheme.colorScheme.error
                 } else MaterialTheme.colorScheme.primary,
             )
-        }
-    }
-}
-
-private fun persistReadPermission(activity: Activity, uri: Uri) {
-    runCatching {
-        activity.contentResolver.takePersistableUriPermission(
-            uri,
-            Intent.FLAG_GRANT_READ_URI_PERMISSION,
-        )
-    }
-}
-
-@Composable
-private fun SourceCard(input: AnalysisInput, onRemove: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        shape = MaterialTheme.shapes.large,
-    ) {
-        Column(Modifier.padding(Space.m)) {
-            Text(
-                when (input) {
-                    is AnalysisInput.Text -> "Text · ${input.value.take(100)}"
-                    is AnalysisInput.Image -> "Image · ${input.uri.lastPathSegment}"
-                    is AnalysisInput.Voice -> "Voice · ${input.uri.lastPathSegment}"
-                },
-            )
-            Text(input.sourceId, style = MaterialTheme.typography.labelSmall)
-            TextButton(onClick = onRemove, modifier = Modifier.align(Alignment.End)) {
-                Icon(Icons.Outlined.DeleteOutline, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("Remove")
-            }
         }
     }
 }
@@ -728,7 +604,7 @@ private fun analyzeBlockedReason(appState: AppState): String? = when {
     appState.inputs.isEmpty() &&
         (appState.telegramAuthState.step != TelegramAuthStep.READY ||
             appState.channels.none(ChannelSelection::selected)) ->
-        "No sources are loaded. In Channels, select chats and load messages for a date, or add content above."
+        "No sources are loaded. In Channels, select chats and load messages for a date."
     else -> null
 }
 

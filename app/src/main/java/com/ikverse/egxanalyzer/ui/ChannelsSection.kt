@@ -65,8 +65,8 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
             TelegramAuthStep.API_CONFIGURATION -> {
                 AuthCard("Telegram application") {
                     Text(
-                        "Create an application at my.telegram.org and enter its API ID and API hash. " +
-                            "They are encrypted on this device.",
+                        "This build has no application credentials of its own, so it needs a pair " +
+                            "from my.telegram.org. They are encrypted on this device.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     AuthField(firstValue, { firstValue = it }, "API ID")
@@ -77,6 +77,7 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                             secondValue = ""
                         }
                     }) { Text("Initialize Telegram") }
+                    ApiCredentialsHelp()
                 }
             }
             TelegramAuthStep.PHONE_NUMBER -> AuthCard("Sign in to Telegram") {
@@ -94,6 +95,7 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                 Button(onClick = {
                     scope.launch { appState.submitTelegramPhone(firstValue) }
                 }) { Text("Send verification code") }
+                ApiCredentialsHelp()
             }
             TelegramAuthStep.VERIFICATION_CODE -> AuthCard("Verification code") {
                 AuthField(firstValue, { firstValue = it }, "Telegram code")
@@ -141,6 +143,7 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
                     "On a device already signed in to Telegram, open Settings, then Devices, then " +
                         "Link Desktop Device, and scan this code.",
                 )
+                ApiCredentialsHelp()
             }
             TelegramAuthStep.READY -> {
                 val selectedCount = appState.channels.count(ChannelSelection::selected)
@@ -212,6 +215,45 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
             TelegramAuthStep.ERROR -> Unit
         }
     }
+
+/**
+ * Where the two application credentials come from, for anyone who has to supply their own.
+ *
+ * Offered on the sign-in screens as well as the one with the fields: someone who has not hit the
+ * wall yet is the person best placed to read it, and a help note that only appears once you are
+ * stuck has already failed.
+ */
+@Composable
+private fun ApiCredentialsHelp() {
+    SubSection("Where do the API ID and hash come from?") {
+        HelpStep("1", "Open my.telegram.org and sign in with the phone number on your Telegram account.")
+        HelpStep("2", "Enter the code Telegram sends. It arrives in the Telegram app, not by SMS.")
+        HelpStep("3", "Choose API development tools.")
+        HelpStep("4", "Give the app a title and a short name. Platform and description do not matter.")
+        HelpStep("5", "It shows App api_id, a number, and App api_hash, 32 characters. Those are the two fields.")
+        Text(
+            "They identify the application, not you - every third-party Telegram client registers " +
+                "a pair and ships it, which is why a release of this app already has its own and " +
+                "never asks. Treat the hash like a password: anyone holding both can act as this app.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun HelpStep(number: String, text: String) {
+    Row {
+        Text(
+            number,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.width(Space.s))
+        Text(text, style = MaterialTheme.typography.bodySmall)
+    }
+}
 
 @Composable
 private fun AuthCard(title: String, content: @Composable ColumnScope.() -> Unit) {

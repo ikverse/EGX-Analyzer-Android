@@ -4,6 +4,7 @@ import android.content.Context
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.AppPreferences
+import com.ikverse.egxanalyzer.model.ResponseTimeout
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.ThemeMode
@@ -64,7 +65,8 @@ class SettingsRepository(
     fun loadPreferences(): AppPreferences = AppPreferences(
         themeMode = enumPreference(KEY_THEME_MODE, ThemeMode.SYSTEM),
         analysisLanguage = enumPreference(KEY_ANALYSIS_LANGUAGE, AnalysisLanguage.BILINGUAL),
-        responseTimeoutSeconds = preferences.getInt(KEY_RESPONSE_TIMEOUT, 180).coerceIn(30, 300),
+        responseTimeoutSeconds = preferences.getInt(KEY_RESPONSE_TIMEOUT, ResponseTimeout.DEFAULT)
+            .coerceIn(ResponseTimeout.MIN, ResponseTimeout.MAX),
         defaultContentTypes = preferences.getStringSet(
             KEY_DEFAULT_CONTENT_TYPES,
             AnalysisContentType.entries.mapTo(mutableSetOf()) { it.name },
@@ -85,7 +87,10 @@ class SettingsRepository(
         preferences.edit()
             .putString(KEY_THEME_MODE, value.themeMode.name)
             .putString(KEY_ANALYSIS_LANGUAGE, value.analysisLanguage.name)
-            .putInt(KEY_RESPONSE_TIMEOUT, value.responseTimeoutSeconds.coerceIn(30, 300))
+            .putInt(
+                KEY_RESPONSE_TIMEOUT,
+                value.responseTimeoutSeconds.coerceIn(ResponseTimeout.MIN, ResponseTimeout.MAX),
+            )
             .putStringSet(
                 KEY_DEFAULT_CONTENT_TYPES,
                 value.defaultContentTypes.mapTo(mutableSetOf()) { it.name },

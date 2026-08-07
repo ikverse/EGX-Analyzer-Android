@@ -382,7 +382,9 @@ internal fun StockFilterField(
 }
 
 /** What a filter chip stands at, and therefore what everything beside one has to stand at. */
-private val FilterControlHeight = 32.dp
-private val StockFieldWidth = 200.dp
+/** Every control in a filter row stands to this height, so the row reads as one line. */
+internal val FilterControlHeight = 32.dp
+/** A ticker is four letters; the box was sized for a sentence and ate half the toolbar. */
+private val StockFieldWidth = 150.dp
 
 internal typealias FlowRowScope = androidx.compose.foundation.layout.FlowRowScope

@@ -21,7 +21,7 @@ import org.junit.Test
 class PromptComposerTest {
 
     private val shipped = """
-        <!-- EGX_PROMPT_SCHEMA: 8 -->
+        <!-- EGX_PROMPT_SCHEMA: 7 -->
         # Prompt
 
         ## 1. Exclusions
@@ -156,8 +156,65 @@ class PromptComposerTest {
         assertNotEquals(before.id, after.id)
     }
 
+    /**
+     * The guarantee that matters most.
+     *
+     * With nothing configured, what is sent must be the shipped file exactly - not the shipped file
+     * plus the residue of markers that had nothing to put in them. Nine blank lines crept in that
+     * way once, and a prompt that drifts when you have changed nothing is a prompt nobody can
+     * reason about.
+     */
+    @Test
+    fun `nothing configured leaves no residue where the markers were`() {
+        val bare = """
+            <!-- EGX_PROMPT_SCHEMA: 7 -->
+            # Prompt
+
+            ## 1. Exclusions
+            Existing wording.
+
+            ## 3. Destinations
+            End.
+        """.trimIndent()
+
+        assertEquals(bare, compose().text)
+        assertEquals(bare, compose(rule(RuleSlot.DESTINATION_WATCHING, "x"), defaultOnly = true).text)
+    }
+
+    /**
+     * The authoring rule that keeps the guarantee true of the real file.
+     *
+     * A marker written after a blank line leaves that blank line behind when it is removed, and the
+     * prompt drifts from the shipped one by a line per marker without anyone touching a rule. Nine
+     * of them crept in exactly that way.
+     */
+    @Test
+    fun `no marker in the shipped prompt sits after a blank line`() {
+        val asset = java.io.File("src/main/assets/consolidated_recommendation.md").readText()
+        val offenders = Regex("""
+[ 	]*?
+[ 	]*<!--\s*EGX_RULES:\s*([a-z0-9.\-]+)""")
+            .findAll(asset)
+            .map { it.groupValues[1] }
+            .toList()
+
+        assertEquals(emptyList<String>(), offenders)
+    }
+
+    @Test
+    fun `every marker in the shipped prompt names a slot the app knows`() {
+        val asset = java.io.File("src/main/assets/consolidated_recommendation.md").readText()
+        val named = Regex("""<!--\s*EGX_RULES:\s*([a-z0-9.\-]+)\s*-->""")
+            .findAll(asset)
+            .map { it.groupValues[1] }
+            .toSet()
+
+        assertEquals(emptySet<String>(), named - RuleSlot.entries.map(RuleSlot::anchor).toSet())
+        assertTrue(named.isNotEmpty())
+    }
+
     @Test
     fun `the composed prompt reports the schema it was built from`() {
-        assertEquals(8, compose().schemaVersion)
+        assertEquals(7, compose().schemaVersion)
     }
 }

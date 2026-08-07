@@ -21,6 +21,7 @@ import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.cleanChannelName
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.ExcludedSource
 import com.ikverse.egxanalyzer.model.SavedAnalysis
@@ -62,6 +63,7 @@ class LocalDataStore(context: Context) :
         db.createPendingDeletions()
         db.createWordingRules()
         db.createPromptVersions()
+        db.createPositions()
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -76,8 +78,195 @@ class LocalDataStore(context: Context) :
         db.createPendingDeletions()
         db.createWordingRules()
         db.createPromptVersions()
+        db.createPositions()
+        db.addPositionRevisionColumns()
         db.addOpenColumn()
     }
+
+    /**
+     * The trades the user has actually taken.
+     *
+     * Keyed by its own id rather than by the recommendation: the trade is the thing being recorded,
+     * and it has to survive the report it came from being deleted or re-run. Every level the trade
+     * was taken on is copied in for the same reason.
+     */
+    private fun SQLiteDatabase.createPositions() = execSQL(
+        """CREATE TABLE IF NOT EXISTS positions (
+            id TEXT PRIMARY KEY,
+            ticker TEXT NOT NULL,
+            name_en TEXT,
+            name_ar TEXT,
+            channel TEXT,
+            recommendation_date TEXT NOT NULL,
+            entry_price REAL NOT NULL,
+            entry_date TEXT NOT NULL,
+            exit_price REAL,
+            exit_date TEXT,
+            closed_manually INTEGER NOT NULL DEFAULT 0,
+            entry_low REAL,
+            entry_high REAL,
+            target1 REAL,
+            target2 REAL,
+            stop_loss REAL,
+            window_sessions INTEGER NOT NULL,
+            opened_at INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL DEFAULT 0,
+            updated_by TEXT NOT NULL DEFAULT '',
+            deleted INTEGER NOT NULL DEFAULT 0
+        )""",
+    )
+
+    /**
+     * Brings a positions table written before they could travel up to date.
+     *
+     * Positions arrived one version before they synced, so a device that ran that build has the
+     * table without the three columns a revision needs. The ids are rewritten at the same time: they
+     * were random then, and a random id is one no other device could ever have agreed with.
+     */
+    private fun SQLiteDatabase.addPositionRevisionColumns() {
+        val columns = rawQuery("PRAGMA table_info(positions)", null).use { cursor ->
+            generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }.toSet()
+        }
+        if ("updated_at" in columns) return
+        execSQL("ALTER TABLE positions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")
+        execSQL("ALTER TABLE positions ADD COLUMN updated_by TEXT NOT NULL DEFAULT ''")
+        execSQL("ALTER TABLE positions ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+        // One holding per call, which is what the id says now. Nothing can collide: a second trade
+        // on the same call always replaced the first.
+        runCatching { execSQL("UPDATE positions SET id = ticker || '@' || recommendation_date") }
+    }
+
+    /** Every position this device holds, tombstoned ones excluded. */
+    fun positions(): List<Position> = readableDatabase
+        .query(
+            "positions", null, "deleted = 0", null, null, null,
+            "recommendation_date DESC, ticker ASC",
+        )
+        .use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    runCatching { cursor.toPosition() }.getOrNull()?.let(::add)
+                }
+            }
+        }
+
+    /**
+     * Every position including the buried ones.
+     *
+     * The sync needs the tombstones: a delete that is not published is a delete the next device
+     * undoes by uploading the position back.
+     */
+    fun positionRevisions(): List<Pair<Position, Boolean>> = readableDatabase
+        .query("positions", null, null, null, null, null, "updated_at ASC")
+        .use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    runCatching {
+                        cursor.toPosition() to
+                            (cursor.getInt(cursor.getColumnIndexOrThrow("deleted")) == 1)
+                    }.getOrNull()?.let(::add)
+                }
+            }
+        }
+
+    /** Writes a position exactly as the merge decided it, tombstone included. */
+    fun adoptPosition(position: Position, deleted: Boolean) {
+        savePosition(position)
+        if (deleted) {
+            writableDatabase.execSQL(
+                "UPDATE positions SET deleted = 1 WHERE id = ?",
+                arrayOf<Any>(position.id),
+            )
+        }
+    }
+
+    /**
+     * Buries a position rather than removing the row.
+     *
+     * The same reason a deleted report leaves a marker: without one, the next device to sync sees
+     * the position missing here and puts it back.
+     */
+    fun buryPosition(id: String, at: Long, by: String) {
+        writableDatabase.execSQL(
+            "UPDATE positions SET deleted = 1, updated_at = ?, updated_by = ? WHERE id = ?",
+            arrayOf<Any>(at, by, id),
+        )
+    }
+
+    fun savePosition(position: Position) {
+        writableDatabase.insertWithOnConflict(
+            "positions",
+            null,
+            ContentValues().apply {
+                put("id", position.id)
+                put("ticker", position.ticker)
+                put("name_en", position.companyEnglish)
+                put("name_ar", position.companyArabic)
+                put("channel", position.channel)
+                put("recommendation_date", position.recommendationDate.toString())
+                put("entry_price", position.entryPrice)
+                put("entry_date", position.entryDate.toString())
+                put("exit_price", position.exitPrice)
+                put("exit_date", position.exitDate?.toString())
+                put("closed_manually", if (position.closedManually) 1 else 0)
+                put("entry_low", position.entryLow)
+                put("entry_high", position.entryHigh)
+                put("target1", position.target1)
+                put("target2", position.target2)
+                put("stop_loss", position.stopLoss)
+                put("window_sessions", position.windowSessions)
+                put("opened_at", position.openedAt.toEpochMilli())
+                put("updated_at", position.updatedAt)
+                put("updated_by", position.updatedBy)
+                put("deleted", 0)
+            },
+            SQLiteDatabase.CONFLICT_REPLACE,
+        )
+    }
+
+    private fun Cursor.toPosition() = Position(
+        id = getString(getColumnIndexOrThrow("id")),
+        ticker = getString(getColumnIndexOrThrow("ticker")),
+        companyEnglish = nullableString("name_en"),
+        companyArabic = nullableString("name_ar"),
+        channel = nullableString("channel"),
+        recommendationDate = LocalDate.parse(getString(getColumnIndexOrThrow("recommendation_date"))),
+        entryPrice = getDouble(getColumnIndexOrThrow("entry_price")),
+        entryDate = LocalDate.parse(getString(getColumnIndexOrThrow("entry_date"))),
+        exitPrice = nullableDouble(getColumnIndexOrThrow("exit_price")),
+        exitDate = nullableString("exit_date")?.let(LocalDate::parse),
+        closedManually = getInt(getColumnIndexOrThrow("closed_manually")) == 1,
+        entryLow = nullableDouble(getColumnIndexOrThrow("entry_low")),
+        entryHigh = nullableDouble(getColumnIndexOrThrow("entry_high")),
+        target1 = nullableDouble(getColumnIndexOrThrow("target1")),
+        target2 = nullableDouble(getColumnIndexOrThrow("target2")),
+        stopLoss = nullableDouble(getColumnIndexOrThrow("stop_loss")),
+        windowSessions = getInt(getColumnIndexOrThrow("window_sessions")),
+        openedAt = Instant.ofEpochMilli(getLong(getColumnIndexOrThrow("opened_at"))),
+        updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
+        updatedBy = getString(getColumnIndexOrThrow("updated_by")),
+    )
+
+    private fun Cursor.nullableString(column: String): String? =
+        getColumnIndexOrThrow(column).let { if (isNull(it)) null else getString(it) }
+
+    /**
+     * The most recent close stored for a stock, which is what the app can call its current price.
+     *
+     * The daily feed is the only thing that writes prices here, so "current" means the last session
+     * that has settled rather than a live quote. A position's return moves once a day, deliberately:
+     * a figure that changed while nothing had traded would be invented.
+     */
+    fun latestClose(ticker: String): Double? = readableDatabase.query(
+        "daily_prices",
+        arrayOf("close"),
+        "ticker = ? AND close IS NOT NULL AND close > 0",
+        arrayOf(ticker),
+        null,
+        null,
+        "session_date DESC",
+        "1",
+    ).use { cursor -> if (cursor.moveToFirst()) cursor.nullableDouble(0) else null }
 
     /**
      * The wording rules, including the shipped ones once they have been changed.
@@ -753,6 +942,6 @@ class LocalDataStore(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
-        const val DATABASE_VERSION = 7
+        const val DATABASE_VERSION = 9
     }
 }

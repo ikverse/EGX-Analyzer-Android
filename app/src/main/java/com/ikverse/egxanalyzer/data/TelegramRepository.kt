@@ -56,6 +56,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.security.SecureRandom
@@ -362,7 +364,18 @@ class TelegramRepository(
      * whatever else someone keeps there, and a named chat can be found, muted or deleted without
      * touching anything else.
      */
-    private suspend fun syncChatId(): Long {
+    private suspend fun syncChatId(): Long = syncChatLock.withLock { resolveSyncChat() }
+
+    /**
+     * One caller at a time may go looking for the channel.
+     *
+     * Publishing is automatic now - a recorded trade and a finished run can reach here at the same
+     * moment - and two callers finding no channel would each create one. That is exactly how three
+     * duplicates ended up in the owner's Telegram; the lock is what stops it happening again.
+     */
+    private val syncChatLock = Mutex()
+
+    private suspend fun resolveSyncChat(): Long {
         preferences.getLong(KEY_SYNC_CHAT, 0L).takeIf { it != 0L }?.let { stored ->
             // Confirm it still exists; a chat deleted on another device must not swallow uploads.
             if (runCatching { client.getChat(stored).requireValue<Chat>() }.isSuccess) return stored
@@ -435,12 +448,15 @@ class TelegramRepository(
         val tombstones: Map<String, ChannelFile>,
         /** Every revision of every rule, newest first, because the merge needs them all. */
         val ruleRevisions: List<ChannelFile>,
+        /** Every revision of every position, for the same reason. */
+        val positionRevisions: List<ChannelFile>,
     )
 
     private suspend fun contentsOf(chatId: Long): ChannelContents {
         val reports = linkedMapOf<String, ChannelFile>()
         val tombstones = linkedMapOf<String, ChannelFile>()
         val ruleRevisions = mutableListOf<ChannelFile>()
+        val positionRevisions = mutableListOf<ChannelFile>()
         var fromMessageId = 0L
         while (true) {
             val page = client.getChatHistory(chatId, fromMessageId, 0, HISTORY_PAGE_SIZE, false)
@@ -464,11 +480,17 @@ class TelegramRepository(
                     ruleRevisions += file
                     return@forEach
                 }
+                // Before the report branch, like a rule: every name ends in .json, so a position
+                // left to fall through would be read as a report called "position-AMOC_2026-...".
+                if (SyncedPosition.positionIdOf(name) != null) {
+                    positionRevisions += file
+                    return@forEach
+                }
                 SyncedRun.requestIdOf(name)?.let { reports.putIfAbsent(it, file) }
             }
             fromMessageId = messages.last().id
         }
-        return ChannelContents(reports, tombstones, ruleRevisions)
+        return ChannelContents(reports, tombstones, ruleRevisions, positionRevisions)
     }
 
     /** Every report the channel says was deleted, so no device brings one back. */
@@ -553,6 +575,54 @@ class TelegramRepository(
                         ),
                         dev.g000sha256.tdl.dto.FormattedText(
                             "${if (revision.deleted) "deleted rule" else "rule"} ${revision.rule.phrase}",
+                            emptyArray(),
+                        ),
+                    ),
+                )
+            }
+        } finally {
+            staged.delete()
+        }
+    }
+
+    /** Every position revision the channel holds, merged so each position appears once. */
+    suspend fun syncedPositions(): List<SyncedPosition> {
+        val chats = (findSyncChats() + syncChatId()).distinct()
+        val revisions = chats.flatMap { chat ->
+            contentsOf(chat).positionRevisions.mapNotNull { file ->
+                runCatching { SyncedPosition.fromDocument(download(file.fileId).readText()) }
+                    .getOrNull()
+            }
+        }
+        return mergePositions(revisions)
+    }
+
+    /** Puts one position revision in the channel. Revisions accumulate; the merge picks the winner. */
+    suspend fun uploadPosition(revision: SyncedPosition) {
+        val chatId = syncChatId()
+        val staged = File(context.cacheDir, revision.fileName).apply {
+            writeText(revision.toDocument())
+        }
+        try {
+            execute {
+                client.sendMessage(
+                    chatId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    dev.g000sha256.tdl.dto.InputMessageDocument(
+                        dev.g000sha256.tdl.dto.InputDocument(
+                            dev.g000sha256.tdl.dto.InputFileLocal(staged.path),
+                            null,
+                            true,
+                        ),
+                        dev.g000sha256.tdl.dto.FormattedText(
+                            listOfNotNull(
+                                if (revision.deleted) "removed position" else "position",
+                                revision.position.ticker,
+                                revision.position.recommendationDate.toString(),
+                            ).joinToString(" "),
                             emptyArray(),
                         ),
                     ),

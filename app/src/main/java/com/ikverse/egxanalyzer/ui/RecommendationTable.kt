@@ -15,21 +15,28 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.math.max
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 
@@ -48,17 +55,35 @@ internal fun RecommendationTable(
     onOpenImage: (Int?) -> Unit,
     onSelectPoint: (ConsolidatedRecommendation, RecommendationDataPoint) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Drawn above the header and pinned with it.
+     *
+     * The controls that decide what the table shows belong to the table: reaching them used to mean
+     * scrolling back past every row to the top of the report.
+     */
+    toolbar: (@Composable () -> Unit)? = null,
 ) {
     if (stocks.isEmpty()) return
     val scroll = rememberScrollState()
+    // How far the table's own top has been scrolled past the top of the page's viewport. The header
+    // is pushed back down by exactly that much, so it looks pinned without leaving the table: once
+    // the last row is gone the header goes with it rather than hanging over the next card.
+    val viewportTop = LocalViewportTop.current
+    var pin by remember { mutableFloatStateOf(0f) }
+    // The toolbar and the header travel together, so the clamp is measured over both.
+    var pinnedHeight by remember { mutableFloatStateOf(0f) }
 
     // Measured here rather than from the window: the table sits inside a pane that is narrower than
     // the screen, so window width would promise room the table does not have.
     BoxWithConstraints(
         modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surfaceContainerLow),
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .onGloballyPositioned { coordinates ->
+                val top = coordinates.positionInWindow().y
+                val height = coordinates.size.height.toFloat()
+                pin = (viewportTop - top).coerceIn(0f, max(0f, height - pinnedHeight))
+            },
     ) {
         // Every width gets the trade columns, including both returns - they are the point of the
         // table. Context is added as room allows rather than a separate column set, so nothing a
@@ -68,7 +93,23 @@ internal fun RecommendationTable(
             (if (maxWidth >= NotesMinWidth) listOf(NotesColumn) else emptyList()) +
             imageColumn(imagePathFor, onOpenImage)
         Column {
-            HeaderRow(columns, scroll)
+            Column(
+                Modifier
+                    .graphicsLayer { translationY = pin }
+                    .zIndex(1f)
+                    .onGloballyPositioned { pinnedHeight = it.size.height.toFloat() },
+            ) {
+                toolbar?.let {
+                    // Opaque and full width, because it slides across the rows rather than pushing
+                    // them: a background sized to its contents let the table show through beside it.
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                    ) { it() }
+                }
+                HeaderRow(columns, scroll)
+            }
             stocks.forEach { stock ->
                 StockHeadingRow(stock)
                 stock.dataPoints.forEachIndexed { index, point ->
@@ -95,9 +136,13 @@ private val ContextMinWidth = 620.dp
 private val NotesMinWidth = 900.dp
 
 @Composable
-private fun HeaderRow(columns: List<TableColumn>, scroll: androidx.compose.foundation.ScrollState) {
+private fun HeaderRow(
+    columns: List<TableColumn>,
+    scroll: androidx.compose.foundation.ScrollState,
+    modifier: Modifier = Modifier,
+) {
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .heightIn(min = 44.dp),

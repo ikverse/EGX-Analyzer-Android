@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,9 +17,6 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.data.RuleRejection
 import com.ikverse.egxanalyzer.model.RuleKind
 import com.ikverse.egxanalyzer.model.RuleOrigin
 import com.ikverse.egxanalyzer.model.RuleScope
@@ -45,35 +44,27 @@ import com.ikverse.egxanalyzer.model.WordingRule
 import java.util.UUID
 
 /**
- * The wording the app recognises, and what recognising it does.
+ * The wording the app recognises: two lists, and nothing else to decide.
  *
- * Written to be read by someone who has just added a channel and found it phrases things
- * differently: the flow is explained at the top, every group says which decision it feeds, and
- * every row says whether it is settled here or sent to the model. Adding a channel used to mean
- * editing Kotlin.
+ * An earlier draft asked which of nine sections a phrase belonged to, whether it was settled here
+ * or sent to the model, and put twenty-one shipped phrases in front of the ones you wrote. Adding a
+ * phrase is one thought, not four - so it is one field, applied both here and in the prompt, and
+ * the shipped wording waits behind a line until it is wanted.
  */
 @Composable
 internal fun AnalysisRulesSection(appState: AppState) {
     var editing by remember { mutableStateOf<WordingRule?>(null) }
     var confirmDelete by remember { mutableStateOf<WordingRule?>(null) }
-    val rules = appState.ruleSet
+    val rules = appState.ruleSet.all
 
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
         FlowExplainer()
 
-        RuleSlot.entries.forEach { slot ->
-            SlotGroup(
-                slot = slot,
-                rules = rules.of(slot),
-                onAdd = {
-                    editing = WordingRule(
-                        id = UUID.randomUUID().toString(),
-                        slot = slot,
-                        kind = if (slot == RuleSlot.SOURCE_KEEP) RuleKind.INCLUDE else RuleKind.EXCLUDE,
-                        phrase = "",
-                        scope = RuleScope.LOCAL,
-                    )
-                },
+        RuleKind.entries.forEach { kind ->
+            WordingList(
+                kind = kind,
+                rules = rules.filter { it.kind == kind },
+                onAdd = { editing = blank(kind) },
                 onEdit = { editing = it },
                 onDelete = { confirmDelete = it },
                 onToggle = { rule, on -> appState.setWordingRuleEnabled(rule, on) },
@@ -85,9 +76,8 @@ internal fun AnalysisRulesSection(appState: AppState) {
         RuleEditor(
             rule = rule,
             existing = appState.wordingRules.any { it.id == rule.id },
-            onDismiss = { editing = null },
             onSave = { appState.saveWordingRule(it) },
-            onSaved = { editing = null },
+            onDismiss = { editing = null },
         )
     }
 
@@ -95,21 +85,41 @@ internal fun AnalysisRulesSection(appState: AppState) {
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
             title = { Text("Delete \"${rule.phrase}\"?") },
-            text = { Text("Sources containing it stop being ${rule.slot.title.lowercase()}.") },
+            text = {
+                Text(
+                    if (rule.kind == RuleKind.INCLUDE) {
+                        "Messages containing it stop being kept, here and in the prompt."
+                    } else {
+                        "Messages containing it stop being dropped, here and in the prompt."
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     appState.deleteWordingRule(rule)
                     confirmDelete = null
                 }) { Text("Delete") }
             },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = null }) { Text("Keep") }
-            },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Keep") } },
         )
     }
 }
 
-/** What happens to a message, in the order it happens, so the groups below have somewhere to sit. */
+/**
+ * A new phrase, with the decisions already made.
+ *
+ * Which list it was added from settles include or exclude, and that settles which instruction in
+ * the prompt carries it. Both places, because a phrase worth naming is worth applying wherever the
+ * judgement happens.
+ */
+private fun blank(kind: RuleKind) = WordingRule(
+    id = UUID.randomUUID().toString(),
+    slot = if (kind == RuleKind.INCLUDE) RuleSlot.SOURCE_KEEP else RuleSlot.SOURCE_DROP,
+    kind = kind,
+    phrase = "",
+    scope = RuleScope.BOTH,
+)
+
 @Composable
 private fun FlowExplainer() {
     Card(
@@ -120,85 +130,100 @@ private fun FlowExplainer() {
     ) {
         Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
             Text("How a message is judged", fontWeight = FontWeight.Bold)
-            Step("1", "Its text is read on this device, and these rules decide what can be settled here.")
-            Step("2", "Anything they drop never leaves the phone, and never costs a request.")
-            Step("3", "What is left goes to the model, along with the rules marked for the prompt.")
-            Step("4", "What comes back is scored against real prices.")
             Text(
-                "Phrases are matched loosely: spelling variants of ا, ي and ة, diacritics and " +
-                    "emoji are ignored, so one phrase covers the ways a channel writes it.",
+                "A message's text is read on this device first: an excluded phrase drops it before " +
+                    "anything is sent, an included phrase keeps it whatever else it says. What is " +
+                    "left goes to the model, and your wording goes with it.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "Matching ignores diacritics, emoji and the spelling variants of ا, ي and ة, so one " +
+                    "phrase covers the ways a channel writes it.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = Space.xs),
             )
         }
     }
 }
 
 @Composable
-private fun Step(number: String, text: String) {
-    Row {
-        Text(
-            number,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(Modifier.width(Space.s))
-        Text(text, style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-@Composable
-private fun SlotGroup(
-    slot: RuleSlot,
+private fun WordingList(
+    kind: RuleKind,
     rules: List<WordingRule>,
     onAdd: () -> Unit,
     onEdit: (WordingRule) -> Unit,
     onDelete: (WordingRule) -> Unit,
     onToggle: (WordingRule, Boolean) -> Unit,
 ) {
-    // Every shipped rule in a group carries the same reason, because the reason is what the group
-    // is for. Printed once here rather than under all twelve rows, where it buried the phrases it
-    // was meant to explain.
-    val sharedNote = rules.mapNotNull(WordingRule::note).distinct().singleOrNull()
-        ?.takeIf { note -> rules.all { it.note == null || it.note == note } }
-    SectionCard(title = slot.title) {
+    val mine = rules.filter { it.origin == RuleOrigin.USER }
+    val shipped = rules.filter { it.origin == RuleOrigin.BUILT_IN }
+    var showShipped by remember { mutableStateOf(false) }
+
+    SectionCard(title = if (kind == RuleKind.INCLUDE) "Included wordings" else "Excluded wordings") {
         Text(
-            slot.explanation,
+            if (kind == RuleKind.INCLUDE) {
+                "A message carrying one of these is analysed whatever else it says, and the model " +
+                    "is told to prioritise it."
+            } else {
+                "A message carrying one of these is dropped before anything is sent, and the model " +
+                    "is told to exclude it."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        sharedNote?.let {
+
+        if (mine.isEmpty()) {
             Text(
-                it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (rules.isEmpty()) {
-            Text(
-                "Nothing here yet.",
+                "Nothing added yet.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        rules.forEach { rule ->
+        mine.forEach { rule ->
             HorizontalDivider()
-            RuleRow(
-                rule = rule,
-                // Suppressed when the group already says it: one row differing is worth reading,
-                // twelve rows agreeing is not.
-                showNote = rule.note != null && rule.note != sharedNote,
-                onEdit = { onEdit(rule) },
-                onDelete = { onDelete(rule) },
-                onToggle = { on -> onToggle(rule, on) },
-            )
+            RuleRow(rule, onEdit = { onEdit(rule) }, onDelete = { onDelete(rule) }) { on ->
+                onToggle(rule, on)
+            }
         }
+
         OutlinedButton(onClick = onAdd, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(IconSize.Inline))
             Spacer(Modifier.width(Space.s))
             Text("Add wording")
+        }
+
+        // Out of the way but never hidden: these are load bearing, and one of them misfiring on a
+        // newly added channel is exactly the moment someone needs to find them.
+        if (shipped.isNotEmpty()) {
+            HorizontalDivider()
+            TextButton(onClick = { showShipped = !showShipped }) {
+                Text(
+                    if (showShipped) {
+                        "Hide the ${shipped.size} phrases the app ships with"
+                    } else {
+                        "${shipped.size} phrases the app ships with · " +
+                            "${shipped.count(WordingRule::enabled)} on"
+                    },
+                )
+            }
+            AnimatedVisibility(showShipped) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    // One reason per group of shipped wording, printed once rather than under every
+                    // row, where it buried the phrases it was meant to explain.
+                    shipped.groupBy(WordingRule::note).forEach { (note, group) ->
+                        note?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        group.forEach { rule ->
+                            RuleRow(rule, onEdit = {}, onDelete = {}) { on -> onToggle(rule, on) }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -206,23 +231,22 @@ private fun SlotGroup(
 @Composable
 private fun RuleRow(
     rule: WordingRule,
-    showNote: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onToggle: (Boolean) -> Unit,
 ) {
-    Row(verticalAlignment = Alignment.Top) {
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (rule.origin == RuleOrigin.BUILT_IN) {
-                    Icon(
-                        Icons.Outlined.Lock,
-                        contentDescription = "Built in",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Spacer(Modifier.width(Space.xs))
-                }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            if (rule.origin == RuleOrigin.BUILT_IN) {
+                Icon(
+                    Icons.Outlined.Lock,
+                    contentDescription = "Built in",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(Space.xs))
+            }
+            Column {
                 Text(
                     rule.phrase,
                     style = MaterialTheme.typography.bodyMedium,
@@ -232,19 +256,13 @@ private fun RuleRow(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
-            }
-            Text(
-                "${rule.kind.title} · ${rule.scope.title}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // Why this rule in particular exists, when the group's own line does not cover it.
-            rule.note?.takeIf { showNote }?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                rule.note?.takeIf { rule.origin == RuleOrigin.USER }?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         Switch(checked = rule.enabled, onCheckedChange = onToggle)
@@ -263,21 +281,21 @@ private fun RuleRow(
 private fun RuleEditor(
     rule: WordingRule,
     existing: Boolean,
+    onSave: (WordingRule) -> RuleRejection?,
     onDismiss: () -> Unit,
-    onSave: (WordingRule) -> com.ikverse.egxanalyzer.data.RuleRejection?,
-    onSaved: () -> Unit,
 ) {
     var phrase by remember(rule.id) { mutableStateOf(rule.phrase) }
-    var kind by remember(rule.id) { mutableStateOf(rule.kind) }
-    var scope by remember(rule.id) { mutableStateOf(rule.scope) }
     var note by remember(rule.id) { mutableStateOf(rule.note.orEmpty()) }
     var rejection by remember(rule.id) { mutableStateOf<String?>(null) }
-    var slotMenu by remember { mutableStateOf(false) }
-    var slot by remember(rule.id) { mutableStateOf(rule.slot) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (existing) "Edit wording" else "Add wording") },
+        title = {
+            Text(
+                (if (existing) "Edit" else "Add") +
+                    if (rule.kind == RuleKind.INCLUDE) " included wording" else " excluded wording",
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 OutlinedTextField(
@@ -290,49 +308,6 @@ private fun RuleEditor(
                     isError = rejection != null,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                androidx.compose.foundation.layout.Box {
-                    TextButton(onClick = { slotMenu = true }) { Text("Applies to: ${slot.title}") }
-                    DropdownMenu(expanded = slotMenu, onDismissRequest = { slotMenu = false }) {
-                        RuleSlot.entries.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text(option.title) },
-                                onClick = {
-                                    slot = option
-                                    slotMenu = false
-                                    rejection = null
-                                },
-                            )
-                        }
-                    }
-                }
-                Text(slot.explanation, style = MaterialTheme.typography.labelSmall)
-
-                Text("Kind", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    RuleKind.entries.forEach { option ->
-                        FilterChip(
-                            selected = kind == option,
-                            onClick = {
-                                kind = option
-                                rejection = null
-                            },
-                            label = { Text(option.title) },
-                        )
-                    }
-                }
-
-                Text("Where it applies", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    RuleScope.entries.forEach { option ->
-                        FilterChip(
-                            selected = scope == option,
-                            onClick = { scope = option },
-                            label = { Text(option.title) },
-                        )
-                    }
-                }
-                Text(scope.explanation, style = MaterialTheme.typography.labelSmall)
-
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
@@ -340,21 +315,18 @@ private fun RuleEditor(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 rejection?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                val candidate = rule.copy(
-                    slot = slot,
-                    kind = kind,
-                    phrase = phrase,
-                    scope = scope,
-                    note = note.trim().ifBlank { null },
-                )
-                val refused = onSave(candidate)
-                if (refused == null) onSaved() else rejection = refused.message
+                val refused = onSave(rule.copy(phrase = phrase, note = note.trim().ifBlank { null }))
+                if (refused == null) onDismiss() else rejection = refused.message
             }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

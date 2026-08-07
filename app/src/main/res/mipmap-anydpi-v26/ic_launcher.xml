@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The foreground carries the whole tile rather than a cut-out on a transparent field: the artwork is
+  a dark gradient with the mark glowing on it, and lifting the mark off that gradient loses the glow.
+  It sits at 66% of the 108dp layer with its content centred, which keeps every part of it - the EGX
+  wordmark most of all - inside the 66dp circle every launcher mask is guaranteed to show. The bleed
+  around it is the artwork's own edge pixels replicated outwards, so the join is invisible and the
+  parallax band a launcher may crop into is the same gradient rather than a border.
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
 </adaptive-icon>
