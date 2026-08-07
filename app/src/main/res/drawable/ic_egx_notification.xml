@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Three ascending bars. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M5,13.1h3.2v6.4H5zM10.4,10.7h3.2v8.8h-3.2zM15.8,8.2H19v11.3h-3.2z" />
+    <!-- Detached rising arrow. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4.8,11.8L9.8,7.5L12.7,10.2L17.8,5.8L16.4,5.8L16.4,4.2L20.7,4.2L20.7,8.5L19.1,8.5L19.1,7.1L12.7,12.5L9.8,9.8L5.9,13.1z" />
+</vector>

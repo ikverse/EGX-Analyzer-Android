@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
@@ -14,12 +13,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,175 +45,180 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.selection.selectable
 
+/** The Telegram half of the Analyze screen: the chat list once signed in, the way in before that. */
 @Composable
 internal fun ColumnScope.ChannelsSection(appState: AppState) {
+    if (appState.telegramAuthState.step == TelegramAuthStep.READY) {
+        TelegramChats(appState)
+    } else {
+        TelegramSignIn(appState)
+    }
+}
+
+/**
+ * Every step of signing in to Telegram, from application credentials through to registration.
+ *
+ * Shared by Analyze and by Settings rather than owned by either: signing out is on the Settings
+ * card, and a sign-out that can only be undone by leaving for another screen is a trap.
+ *
+ * [boxed] is how one step sits on the page - a card of its own on Analyze, where it stands alone,
+ * and a plain titled block in Settings, where it is already inside the Telegram card and a card
+ * within a card reads as two unrelated things. Draws nothing once signed in.
+ */
+@Composable
+internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = true) {
     val scope = rememberCoroutineScope()
     var firstValue by remember(appState.telegramAuthState.step) { mutableStateOf("") }
     var secondValue by remember(appState.telegramAuthState.step) { mutableStateOf("") }
-        // Only while signing in. Once ready the Telegram card says so itself, and a loose line
-        // above it pushed this column out of step with the one beside it.
-        if (appState.telegramAuthState.step != TelegramAuthStep.READY) {
-            Text(
-                appState.telegramAuthState.message,
-                color = if (appState.telegramAuthState.step == TelegramAuthStep.ERROR) {
-                    MaterialTheme.colorScheme.error
-                } else MaterialTheme.colorScheme.primary,
-            )
-        }
-        when (appState.telegramAuthState.step) {
-            TelegramAuthStep.API_CONFIGURATION -> {
-                AuthCard("Telegram application") {
-                    Text(
-                        "This build has no application credentials of its own, so it needs a pair " +
-                            "from my.telegram.org. They are encrypted on this device.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    AuthField(firstValue, { firstValue = it }, "API ID")
-                    AuthField(secondValue, { secondValue = it }, "API hash", secret = true)
-                    Button(onClick = {
-                        scope.launch {
-                            appState.saveTelegramApiConfiguration(firstValue, secondValue)
-                            secondValue = ""
-                        }
-                    }) { Text("Initialize Telegram") }
-                    ApiCredentialsHelp()
-                }
-            }
-            TelegramAuthStep.PHONE_NUMBER -> AuthCard("Sign in to Telegram") {
-                // Scanning is offered first: it is the shorter path on any device, and on a tablet
-                // typing a phone number and then a code is the worst part of setting the app up.
-                Button(onClick = {
-                    scope.launch { appState.startTelegramQrSignIn() }
-                }) { Text("Sign in by QR code") }
+    // Only while signing in. Once ready the chat card says so itself, and a loose line above it
+    // pushed this column out of step with the one beside it.
+    if (appState.telegramAuthState.step != TelegramAuthStep.READY) {
+        Text(
+            appState.telegramAuthState.message,
+            color = if (appState.telegramAuthState.step == TelegramAuthStep.ERROR) {
+                MaterialTheme.colorScheme.error
+            } else MaterialTheme.colorScheme.primary,
+        )
+    }
+    when (appState.telegramAuthState.step) {
+        TelegramAuthStep.API_CONFIGURATION -> {
+            AuthCard("Telegram application", boxed) {
                 Text(
-                    "Or sign in with your phone number:",
-                    style = MaterialTheme.typography.bodySmall,
+                    "This build has no application credentials of its own, so it needs a pair " +
+                        "from my.telegram.org. They are encrypted on this device.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                AuthField(firstValue, { firstValue = it }, "Phone number with country code")
-                Button(onClick = {
-                    scope.launch { appState.submitTelegramPhone(firstValue) }
-                }) { Text("Send verification code") }
-                ApiCredentialsHelp()
-            }
-            TelegramAuthStep.VERIFICATION_CODE -> AuthCard("Verification code") {
-                AuthField(firstValue, { firstValue = it }, "Telegram code")
-                Button(onClick = {
-                    scope.launch { appState.submitTelegramCode(firstValue) }
-                }) { Text("Verify code") }
-            }
-            TelegramAuthStep.TWO_FACTOR_PASSWORD -> AuthCard("Two-step verification") {
-                appState.telegramAuthState.hint?.takeIf(String::isNotBlank)?.let {
-                    Text("Hint: $it")
-                }
-                AuthField(firstValue, { firstValue = it }, "Telegram password", secret = true)
+                AuthField(firstValue, { firstValue = it }, "API ID")
+                AuthField(secondValue, { secondValue = it }, "API hash", secret = true)
                 Button(onClick = {
                     scope.launch {
-                        appState.submitTelegramPassword(firstValue)
-                        firstValue = ""
+                        appState.saveTelegramApiConfiguration(firstValue, secondValue)
+                        secondValue = ""
                     }
-                }) { Text("Continue") }
-            }
-            TelegramAuthStep.EMAIL_ADDRESS -> AuthCard("Login email") {
-                AuthField(firstValue, { firstValue = it }, "Email address")
-                Button(onClick = {
-                    scope.launch { appState.submitTelegramEmail(firstValue) }
-                }) { Text("Send email code") }
-            }
-            TelegramAuthStep.EMAIL_CODE -> AuthCard("Email verification") {
-                AuthField(firstValue, { firstValue = it }, "Email code")
-                Button(onClick = {
-                    scope.launch { appState.submitTelegramEmailCode(firstValue) }
-                }) { Text("Verify email") }
-            }
-            TelegramAuthStep.REGISTRATION -> AuthCard("Finish registration") {
-                AuthField(firstValue, { firstValue = it }, "First name")
-                AuthField(secondValue, { secondValue = it }, "Last name")
-                Button(onClick = {
-                    scope.launch { appState.registerTelegram(firstValue, secondValue) }
-                }) { Text("Register") }
-            }
-            TelegramAuthStep.OTHER_DEVICE_CONFIRMATION -> AuthCard("Scan with Telegram") {
-                val link = appState.telegramAuthState.link.orEmpty()
-                if (link.isNotBlank()) {
-                    QrCode(link)
-                }
-                Text(
-                    "On a device already signed in to Telegram, open Settings, then Devices, then " +
-                        "Link Desktop Device, and scan this code.",
-                )
+                }) { Text("Initialize Telegram") }
                 ApiCredentialsHelp()
             }
-            TelegramAuthStep.READY -> {
-                val selectedCount = appState.channels.count(ChannelSelection::selected)
-                val busy = appState.busyLabel != null
-                val chats = appState.channels
-                // Everything Telegram in one card. The status, the actions and the list were three
-                // loose blocks, which read as three unrelated things and left the column beside
-                // them starting higher than this one.
-                SectionCard(title = "Telegram", icon = Icons.Outlined.Forum) {
-                    Text(
-                        if (chats.isEmpty()) {
-                            "Signed in. No chats loaded yet."
-                        } else {
-                            "Signed in · $selectedCount of ${chats.size} chats selected"
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    // With the chats rather than under the page title: the pull refreshes this
-                    // card, not the screen, and a hint at the top would promise something else.
-                    PullHint("Pull down to refresh chats")
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(Space.s),
-                        verticalArrangement = Arrangement.spacedBy(Space.s),
-                    ) {
-                        TextButton(
-                            enabled = !busy,
-                            onClick = {
-                                scope.launch {
-                                    appState.runAction(
-                                        label = "Signing out",
-                                        success = { "Signed out of Telegram." },
-                                    ) { appState.logoutTelegram() }
-                                }
-                            },
-                        ) { Text("Sign out") }
-                    }
+        }
+        TelegramAuthStep.PHONE_NUMBER -> AuthCard("Sign in to Telegram", boxed) {
+            // Scanning is offered first: it is the shorter path on any device, and on a tablet
+            // typing a phone number and then a code is the worst part of setting the app up.
+            Button(onClick = {
+                scope.launch { appState.startTelegramQrSignIn() }
+            }) { Text("Sign in by QR code") }
+            Text(
+                "Or sign in with your phone number:",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            AuthField(firstValue, { firstValue = it }, "Phone number with country code")
+            Button(onClick = {
+                scope.launch { appState.submitTelegramPhone(firstValue) }
+            }) { Text("Send verification code") }
+            ApiCredentialsHelp()
+        }
+        TelegramAuthStep.VERIFICATION_CODE -> AuthCard("Verification code", boxed) {
+            AuthField(firstValue, { firstValue = it }, "Telegram code")
+            Button(onClick = {
+                scope.launch { appState.submitTelegramCode(firstValue) }
+            }) { Text("Verify code") }
+        }
+        TelegramAuthStep.TWO_FACTOR_PASSWORD -> AuthCard("Two-step verification", boxed) {
+            appState.telegramAuthState.hint?.takeIf(String::isNotBlank)?.let {
+                Text("Hint: $it")
+            }
+            AuthField(firstValue, { firstValue = it }, "Telegram password", secret = true)
+            Button(onClick = {
+                scope.launch {
+                    appState.submitTelegramPassword(firstValue)
+                    firstValue = ""
+                }
+            }) { Text("Continue") }
+        }
+        TelegramAuthStep.EMAIL_ADDRESS -> AuthCard("Login email", boxed) {
+            AuthField(firstValue, { firstValue = it }, "Email address")
+            Button(onClick = {
+                scope.launch { appState.submitTelegramEmail(firstValue) }
+            }) { Text("Send email code") }
+        }
+        TelegramAuthStep.EMAIL_CODE -> AuthCard("Email verification", boxed) {
+            AuthField(firstValue, { firstValue = it }, "Email code")
+            Button(onClick = {
+                scope.launch { appState.submitTelegramEmailCode(firstValue) }
+            }) { Text("Verify email") }
+        }
+        TelegramAuthStep.REGISTRATION -> AuthCard("Finish registration", boxed) {
+            AuthField(firstValue, { firstValue = it }, "First name")
+            AuthField(secondValue, { secondValue = it }, "Last name")
+            Button(onClick = {
+                scope.launch { appState.registerTelegram(firstValue, secondValue) }
+            }) { Text("Register") }
+        }
+        TelegramAuthStep.OTHER_DEVICE_CONFIRMATION -> AuthCard("Scan with Telegram", boxed) {
+            val link = appState.telegramAuthState.link.orEmpty()
+            if (link.isNotBlank()) {
+                QrCode(link)
+            }
+            Text(
+                "On a device already signed in to Telegram, open Settings, then Devices, then " +
+                    "Link Desktop Device, and scan this code.",
+            )
+            ApiCredentialsHelp()
+        }
+        TelegramAuthStep.READY,
+        TelegramAuthStep.INITIALIZING,
+        TelegramAuthStep.LOGGING_OUT,
+        TelegramAuthStep.ERROR -> Unit
+    }
+}
 
-                    // Every chat is offered, broadcast channel or not: recommendations also arrive
-                    // in groups and direct messages, and hiding those decided for the user which
-                    // sources were worth reading.
-                    if (chats.isEmpty()) {
-                        EmptyState(
-                            icon = Icons.Outlined.Forum,
-                            title = "No chats loaded",
-                            detail = "Refresh to pull your Telegram chat list onto this device.",
-                        )
-                    } else {
-                        // Bounded and scrolled in place: a long chat list otherwise pushes the
-                        // whole run out of reach.
-                        BoxWithConstraints {
-                            val columns = responsiveColumns(minColumnWidth = 300.dp, maxColumns = 3)
-                            Column(
-                                Modifier
-                                    .heightIn(max = ChatListMaxHeight)
-                                    .scrollableColumn(),
-                                verticalArrangement = Arrangement.spacedBy(Space.xs),
-                            ) {
-                                ResponsiveRows(chats, columns, spacing = Space.xs) { chat, cardModifier ->
-                                    ChannelCard(chat, appState, chats, cardModifier)
-                                }
-                            }
-                        }
+/** The chats a run reads from, and how many of them are picked. */
+@Composable
+private fun TelegramChats(appState: AppState) {
+    val selectedCount = appState.channels.count(ChannelSelection::selected)
+    val chats = appState.channels
+    // The list, and the count that summarizes it. Being signed in and signing out are facts about
+    // the account rather than steps of a run, so they sit in Settings under Telegram; here they
+    // only competed with the chats for the top of the card.
+    SectionCard(title = "Telegram", icon = Icons.Outlined.Forum) {
+        if (chats.isNotEmpty()) {
+            Text(
+                "$selectedCount of ${chats.size} chats selected",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        // With the chats rather than under the page title: the pull refreshes this card, not the
+        // screen, and a hint at the top would promise something else.
+        PullHint("Pull down to refresh chats")
+
+        // Every chat is offered, broadcast channel or not: recommendations also arrive in groups
+        // and direct messages, and hiding those decided for the user which sources were worth
+        // reading.
+        if (chats.isEmpty()) {
+            EmptyState(
+                icon = Icons.Outlined.Forum,
+                title = "No chats loaded",
+                detail = "Refresh to pull your Telegram chat list onto this device.",
+            )
+        } else {
+            // Bounded and scrolled in place: a long chat list otherwise pushes the whole run out
+            // of reach.
+            BoxWithConstraints {
+                val columns = responsiveColumns(minColumnWidth = 300.dp, maxColumns = 3)
+                Column(
+                    Modifier
+                        .heightIn(max = ChatListMaxHeight)
+                        .scrollableColumn(),
+                    verticalArrangement = Arrangement.spacedBy(Space.xs),
+                ) {
+                    ResponsiveRows(chats, columns, spacing = Space.xs) { chat, cardModifier ->
+                        ChannelCard(chat, appState, chats, cardModifier)
                     }
                 }
             }
-            TelegramAuthStep.INITIALIZING,
-            TelegramAuthStep.LOGGING_OUT,
-            TelegramAuthStep.ERROR -> Unit
         }
     }
+}
 
 /**
  * Where the two application credentials come from, for anyone who has to supply their own.
@@ -255,9 +259,27 @@ private fun HelpStep(number: String, text: String) {
     }
 }
 
+/**
+ * One step of the sign-in flow.
+ *
+ * Boxed it is a card in its own right; unboxed it keeps the same heading and hairline but no
+ * surface of its own, for the caller that has already drawn one around it.
+ */
 @Composable
-private fun AuthCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    SectionCard(title = title, content = content)
+private fun AuthCard(
+    title: String,
+    boxed: Boolean,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    if (boxed) {
+        SectionCard(title = title, content = content)
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            content()
+        }
+    }
 }
 
 @Composable

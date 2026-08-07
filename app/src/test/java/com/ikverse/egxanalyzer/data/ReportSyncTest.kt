@@ -67,9 +67,10 @@ class ReportSyncTest {
 
     @Test
     fun `what moved is reported in plain words`() {
-        assertEquals("Already in sync.", SyncOutcome(0, 0, 4).summary)
-        assertEquals("Uploaded 1 analysis.", SyncOutcome(1, 0, 3).summary)
-        assertEquals("Downloaded 2 analyses.", SyncOutcome(0, 2, 3).summary)
+        assertEquals("Already in sync", SyncOutcome(0, 0, 4).summary)
+        assertEquals("1 run uploaded", SyncOutcome(1, 0, 3).summary)
+        assertEquals("2 runs downloaded", SyncOutcome(0, 2, 3).summary)
+        assertEquals("1 up, 2 down", SyncOutcome(1, 2, 3).summary)
     }
 
     /**

@@ -33,13 +33,15 @@ data class SyncOutcome(
 ) {
     val summary: String
         get() = when {
-            uploaded == 0 && downloaded == 0 -> "Already in sync."
-            downloaded == 0 -> "Uploaded $uploaded ${runs(uploaded)}."
-            uploaded == 0 -> "Downloaded $downloaded ${runs(downloaded)}."
-            else -> "Uploaded $uploaded and downloaded $downloaded ${runs(downloaded)}."
+            uploaded == 0 && downloaded == 0 -> "Already in sync"
+            downloaded == 0 -> "$uploaded ${runs(uploaded)} uploaded"
+            uploaded == 0 -> "$downloaded ${runs(downloaded)} downloaded"
+            // Both directions named rather than spelled out: the arrows a sentence would need are
+            // longer than the two figures anyone reads this for.
+            else -> "$uploaded up, $downloaded down"
         }
 
-    private fun runs(count: Int) = if (count == 1) "analysis" else "analyses"
+    private fun runs(count: Int) = if (count == 1) "run" else "runs"
 }
 
 /** One run as it travels: the file name carries its identity, so nothing needs opening to skip it. */

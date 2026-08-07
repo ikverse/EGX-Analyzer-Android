@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -63,6 +64,19 @@ object IconSize {
     val Inline: Dp = 20.dp
     val Action: Dp = 24.dp
 }
+
+/**
+ * The hairline a card is drawn with.
+ *
+ * The same width and colour as the stroke around the page well, on purpose: the edge of a card and
+ * the edge of the page it sits on are then one line rather than two that happen to agree. Defined
+ * once so the three places that draw a card cannot drift apart.
+ */
+val cardOutline: BorderStroke
+    @Composable get() = BorderStroke(
+        1.dp,
+        androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant,
+    )
 
 /**
  * Colour carries meaning for a price, not decoration.

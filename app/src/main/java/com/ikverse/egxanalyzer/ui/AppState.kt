@@ -176,7 +176,7 @@ class AppState(
             throw error
         } catch (error: Throwable) {
             statusMessage = StatusMessage(
-                error.message?.takeIf(String::isNotBlank) ?: "$label failed.",
+                error.message?.takeIf(String::isNotBlank) ?: "$label failed",
                 succeeded = false,
             )
         } finally {
@@ -559,10 +559,7 @@ class AppState(
         )
         localDataStore.savePosition(position)
         positions = localDataStore.positions()
-        statusMessage = StatusMessage(
-            "$normalized recorded at ${formatPrice(entryPrice)} on $entryDate.",
-            succeeded = true,
-        )
+        statusMessage = StatusMessage("$normalized bought at ${formatPrice(entryPrice)}", true)
         publishPosition(position, deleted = false)
         appScope.launch {
             // A stock only just named may have no stored history at all, and a position with no
@@ -588,10 +585,7 @@ class AppState(
         )
         localDataStore.savePosition(closed)
         positions = localDataStore.positions()
-        statusMessage = StatusMessage(
-            "${position.ticker} closed at ${formatPrice(exitPrice)} on $exitDate.",
-            succeeded = true,
-        )
+        statusMessage = StatusMessage("${position.ticker} closed at ${formatPrice(exitPrice)}", true)
         publishPosition(closed, deleted = false)
         appScope.launch { recomputePortfolio() }
     }
@@ -611,10 +605,7 @@ class AppState(
         )
         localDataStore.savePosition(corrected)
         positions = localDataStore.positions()
-        statusMessage = StatusMessage(
-            "${position.ticker} entry corrected to ${formatPrice(entryPrice)}.",
-            succeeded = true,
-        )
+        statusMessage = StatusMessage("${position.ticker} entry now ${formatPrice(entryPrice)}", true)
         publishPosition(corrected, deleted = false)
         appScope.launch { recomputePortfolio() }
     }
@@ -630,7 +621,7 @@ class AppState(
         val at = System.currentTimeMillis()
         localDataStore.buryPosition(position.id, at, deviceName)
         positions = localDataStore.positions()
-        statusMessage = StatusMessage("${position.ticker} removed from the portfolio.", succeeded = true)
+        statusMessage = StatusMessage("${position.ticker} removed", succeeded = true)
         publishPosition(position.copy(updatedAt = at, updatedBy = deviceName), deleted = true)
         appScope.launch { recomputePortfolio() }
     }
@@ -752,20 +743,17 @@ class AppState(
                     announced = state.step
                     when (state.step) {
                         TelegramAuthStep.INITIALIZING ->
-                            statusMessage = StatusMessage("Loading Telegram chats…", succeeded = true)
+                            statusMessage = StatusMessage("Connecting to Telegram…", succeeded = true)
                         // Deliberately no count here: READY arrives before the chat list does, so
                         // reading it now reports zero while six are about to appear. The count is
                         // announced by the collector below, when there is one.
                         TelegramAuthStep.READY -> {
-                            statusMessage = StatusMessage(
-                                "Telegram ready · loading chats…",
-                                succeeded = true,
-                            )
+                            statusMessage = StatusMessage("Telegram ready", succeeded = true)
                             catchUpOnce()
                         }
                         TelegramAuthStep.ERROR -> statusMessage = StatusMessage(
                             state.message?.takeIf(String::isNotBlank)
-                                ?: "Telegram could not load your chats.",
+                                ?: "Telegram could not load chats",
                             succeeded = false,
                         )
                         else -> Unit
@@ -779,7 +767,7 @@ class AppState(
                 .distinctUntilChanged()
                 .filter { it > 0 }
                 .collect { count ->
-                    statusMessage = StatusMessage("$count Telegram chats loaded.", succeeded = true)
+                    statusMessage = StatusMessage("$count chats loaded", succeeded = true)
                 }
         }
         // Nothing about a previous session carries into this one: a restart starts from the
@@ -913,15 +901,19 @@ class AppState(
             val models = analysisRepository.listModels()
             credentialVerified = true
             availableModels = models
+            // The card keeps the sentence and the toast gets the short form of it: this only ever
+            // runs from Settings, so the fuller wording is already on screen behind the toast.
             settingsMessage = "API key verified. ${models.size} models available."
-            statusMessage = StatusMessage(settingsMessage!!, succeeded = true)
+            statusMessage = StatusMessage("Key verified · ${models.size} models", succeeded = true)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
             credentialVerified = false
+            // Whatever the provider said about the rejection stays on the card, where there is room
+            // for "no credit" or "wrong key" to be read and acted on.
             settingsMessage = error.message?.takeIf(String::isNotBlank)
                 ?: "The provider rejected this API key."
-            statusMessage = StatusMessage(settingsMessage!!, succeeded = false)
+            statusMessage = StatusMessage("API key rejected", succeeded = false)
         } finally {
             busyLabel = null
         }
@@ -1114,7 +1106,7 @@ class AppState(
         val tickers = pricedStocks()
         if (tickers.isEmpty()) {
             if (announce) {
-                statusMessage = StatusMessage("No saved analysis names a stock to price.", false)
+                statusMessage = StatusMessage("No stocks to price", false)
             }
             return
         }
@@ -1132,9 +1124,8 @@ class AppState(
             val missing = refresh.unpriced.size
             if (announce) {
                 statusMessage = StatusMessage(
-                    "Priced ${refresh.priced} of ${refresh.requested} stocks " +
-                        "over ${refresh.sessionsStored} sessions" +
-                        if (missing > 0) " · $missing have no price history." else ".",
+                    "Priced ${refresh.priced}/${refresh.requested}" +
+                        if (missing > 0) " · $missing unpriced" else "",
                     succeeded = missing == 0,
                 )
             }
@@ -1143,7 +1134,7 @@ class AppState(
         } catch (error: Throwable) {
             if (announce) {
                 statusMessage = StatusMessage(
-                    error.message?.takeIf(String::isNotBlank) ?: "Could not fetch prices.",
+                    error.message?.takeIf(String::isNotBlank) ?: "Could not fetch prices",
                     succeeded = false,
                 )
             }
@@ -1277,7 +1268,7 @@ class AppState(
 
     suspend fun startTelegramQrSignIn() = runAction(
         label = "Preparing a Telegram sign-in code",
-        success = { "Scan the code with Telegram on a signed-in device." },
+        success = { "Scan the code in Telegram" },
     ) { telegramRepository.startQrSignIn() }
 
     suspend fun submitTelegramPhone(phone: String) =

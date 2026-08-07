@@ -55,7 +55,6 @@ import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.BuildConfig
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
-import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
@@ -451,9 +450,10 @@ internal fun SettingsScreen(appState: AppState) {
             summaryTone = if (appState.telegramAuthState.step == TelegramAuthStep.READY) null else MaterialTheme.colorScheme.error,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Text(appState.telegramAuthState.message)
-                Text("${appState.channels.count(ChannelSelection::selected)} chats selected")
                 if (appState.telegramAuthState.step == TelegramAuthStep.READY) {
+                    // No status line of its own: the summary above this card already says signed
+                    // in and how many chats there are, and saying it again a few pixels below made
+                    // the two counts look like two different figures.
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(Space.s),
                         verticalArrangement = Arrangement.spacedBy(Space.s),
@@ -461,14 +461,24 @@ internal fun SettingsScreen(appState: AppState) {
                         OutlinedButton(onClick = {
                             scope.launch { appState.refreshTelegramChats() }
                         }) { Text("Refresh chats") }
-                        OutlinedButton(onClick = {
-                            scope.launch { appState.logoutTelegram() }
-                        }) { Text("Sign out") }
+                        // Through runAction like everywhere else: signing out tears down the
+                        // Telegram client, and without the busy label nothing on screen says so.
+                        OutlinedButton(
+                            enabled = appState.busyLabel == null,
+                            onClick = {
+                                scope.launch {
+                                    appState.runAction(
+                                        label = "Signing out",
+                                        success = { "Signed out" },
+                                    ) { appState.logoutTelegram() }
+                                }
+                            },
+                        ) { Text("Sign out") }
                     }
                 } else {
-                    Button(onClick = { appState.navigate(AppDestination.ANALYZE) }) {
-                        Text("Open Telegram sign-in")
-                    }
+                    // The flow itself rather than a trip to Analyze for it: signing out is a
+                    // button on this card, so signing back in has to be reachable from it too.
+                    TelegramSignIn(appState, boxed = false)
                 }
             }
         }

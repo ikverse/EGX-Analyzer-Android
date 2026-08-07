@@ -193,8 +193,25 @@ private val NavigationIconSize = 28.dp
  */
 private val NavigationBarHeight = 64.dp
 
+/** Room above the items, so the bar does not start hard against the page. */
+private val BarTopPadding = 8.dp
+
 /** Room under the items, so they clear the gesture bar rather than sitting straight on it. */
 private val BarBottomPadding = 12.dp
+
+/**
+ * The room a page gets back when the bar hides.
+ *
+ * The bar's own height and its padding, and deliberately not the gesture strip's inset: with the bar
+ * there the page consumes that inset and the bar holds the strip, and with the bar gone the page
+ * stops consuming it and pads itself by it instead. The strip is held either way, so only this much
+ * ever changes hands.
+ *
+ * Published because a page has to know it before it hides the bar. A page with less than this left
+ * to scroll cannot use the room, and hiding the bar there takes away the scroll that would bring it
+ * back.
+ */
+internal val NavBarReclaimedHeight = NavigationBarHeight + BarTopPadding + BarBottomPadding
 
 /** Material's own icon size. The bar is short enough that the rail's 28dp would crowd the label. */
 private val BarIconSize = 24.dp
@@ -231,7 +248,7 @@ private fun AppHeader() {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                painterResource(R.drawable.ic_app_mark),
+                painterResource(R.drawable.ic_egx_notification),
                 // The name is right beside it, and a reader announcing both says it twice.
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
@@ -289,14 +306,16 @@ private fun AppNavigation(
             //
             // Shorter than Material's 80dp. The gesture bar's inset is added rather than absorbed:
             // fixing the height alone leaves the items squeezed into what the system leaves over.
-            // Padded rather than made taller: the room is wanted under the labels, and raising
-            // NavigationBarHeight would put half of it above them as well. The bar is sized from
-            // the same insets it pads itself with, so the two cannot drift apart.
+            // Padded rather than made taller, so the room above the items and the room below them
+            // are set apart from each other - a bigger NavigationBarHeight would only ever split
+            // the difference evenly. The bar is sized from the same insets it pads itself with, so
+            // the two cannot drift apart.
             val barInsets = NavigationBarDefaults.windowInsets
-                .add(WindowInsets(bottom = BarBottomPadding))
+                .add(WindowInsets(top = BarTopPadding, bottom = BarBottomPadding))
             NavigationBar(
                 Modifier.height(
-                    NavigationBarHeight + barInsets.asPaddingValues().calculateBottomPadding(),
+                    NavigationBarHeight + barInsets.asPaddingValues()
+                        .let { it.calculateTopPadding() + it.calculateBottomPadding() },
                 ),
                 windowInsets = barInsets,
             ) {
@@ -338,11 +357,12 @@ private fun AppContent(activity: Activity, appState: AppState) {
     val navBarVisible = LocalNavBarVisible.current
     LaunchedEffect(appState.destination) { navBarVisible.value = true }
 
-    // Actions report their outcome once, in plain language, then the message is cleared so it
-    // cannot reappear on the next recomposition.
+    // Actions report their outcome once, in a few words, then the message is cleared so it cannot
+    // reappear on the next recomposition. Raised as visuals rather than as a bare string, which is
+    // what carries whether it worked through to the toast.
     LaunchedEffect(appState.statusMessage) {
         appState.statusMessage?.let { message ->
-            snackbarHost.showSnackbar(message.text, withDismissAction = true)
+            snackbarHost.showSnackbar(ToastVisuals(message.text, message.succeeded))
             appState.consumeStatusMessage()
         }
     }
@@ -352,7 +372,7 @@ private fun AppContent(activity: Activity, appState: AppState) {
         // bar and any cutout.
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        snackbarHost = { SnackbarHost(snackbarHost) },
+        snackbarHost = { SnackbarHost(snackbarHost) { AppToast(it) } },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             AppHeader()

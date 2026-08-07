@@ -81,7 +81,7 @@ class AnalysisNotifier(private val context: Context) {
     fun cancelled() = manager.cancel(NOTIFICATION_ID)
 
     private fun base() = NotificationCompat.Builder(context, CHANNEL_ID)
-        .setSmallIcon(R.drawable.ic_stat_analysis)
+        .setSmallIcon(R.drawable.ic_egx_notification)
         .setPriority(NotificationCompat.PRIORITY_LOW)
         .setOnlyAlertOnce(true)
 

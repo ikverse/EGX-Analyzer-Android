@@ -22,12 +22,19 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarData
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarVisuals
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.runtime.getValue
@@ -48,6 +55,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -79,14 +87,30 @@ internal fun Screen(
     // scrolling a list inside a card - the chat list, the source list - leaves the bar alone.
     val navBarVisible = LocalNavBarVisible.current
     val slop = with(LocalDensity.current) { NavBarScrollSlop.toPx() }
-    LaunchedEffect(scroll, slop) {
+    // Less scroll than this and the bar stays: the page has less to give than the bar hands back, so
+    // hiding it shows nothing new and leaves too little scroll to bring it back.
+    val worthHiding = with(LocalDensity.current) { NavBarReclaimedHeight.toPx() } + slop
+    LaunchedEffect(scroll, slop, worthHiding) {
         var mark = scroll.value
-        snapshotFlow { scroll.value }.collect { offset ->
+        var extent = scroll.maxValue
+        snapshotFlow { scroll.value to scroll.maxValue }.collect { (offset, max) ->
+            // A change in how far the page can scroll is the layout moving the page, not the reader
+            // scrolling it. The bar leaving hands its height back, the page grows by it, and the
+            // scroll range shrinks by it; at the foot of a page the offset is then clamped to the
+            // shorter range and drops the height of the bar. Read as a scroll that would be a scroll
+            // upwards, which fetches the bar straight back, and the next scroll down sends it away
+            // again - the bar flickering on and off at the end of every page.
+            val relaid = max != extent
+            extent = max
             when {
                 // The top of a page always shows it: there is nothing to reclaim up here, and a
-                // page that opens with no navigation showing looks broken.
+                // page that opens with no navigation showing looks broken. Ahead of the relayout
+                // check, so content shrinking under a hidden bar cannot strand it hidden up here -
+                // and safe there because a page short enough for the clamp to reach the top is a
+                // page the bar never hides on.
                 offset <= slop -> navBarVisible.value = true
-                offset - mark > slop -> navBarVisible.value = false
+                relaid -> Unit
+                offset - mark > slop && max > worthHiding -> navBarVisible.value = false
                 mark - offset > slop -> navBarVisible.value = true
                 else -> return@collect
             }
@@ -246,6 +270,7 @@ internal fun SectionCard(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = MaterialTheme.shapes.large,
+        border = cardOutline,
     ) {
         Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             if (title != null) {
@@ -300,6 +325,7 @@ internal fun ExpandableSection(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = MaterialTheme.shapes.large,
+        border = cardOutline,
     ) {
         Column {
             Row(
@@ -399,6 +425,95 @@ internal fun StatusPill(text: String, tone: StatusTone = StatusTone.NEUTRAL) {
         )
     }
 }
+
+/**
+ * What an action reports, and whether it worked.
+ *
+ * Material's snackbar carries a string and nothing else, so a tone the state already knows is lost
+ * on the way to the toast that draws it unless it travels as visuals.
+ */
+internal class ToastVisuals(
+    override val message: String,
+    val succeeded: Boolean,
+) : SnackbarVisuals {
+    override val actionLabel: String? = null
+
+    // Drawn by the toast itself as a glyph. Material's dismiss action is a text button, which is
+    // wider than most of these messages are.
+    override val withDismissAction: Boolean = false
+
+    /** A confirmation gets out of the way; a failure stays long enough to be read. */
+    override val duration: SnackbarDuration =
+        if (succeeded) SnackbarDuration.Short else SnackbarDuration.Long
+}
+
+/**
+ * The app's own toast, in the app's own colours.
+ *
+ * Material draws its snackbar on `inverseSurface`, which a dark scheme leaves as the baseline
+ * near-white: a light slab in the middle of a dark app. This is the card recipe instead - a
+ * container step, a hairline, the medium corner - so a message reads as part of the screen it
+ * interrupts rather than as something pasted over it.
+ *
+ * Whether the action worked is carried by one tinted glyph. Colouring the whole bar would make
+ * every routine confirmation the loudest thing on screen, and there is one after almost every tap.
+ */
+@Composable
+internal fun AppToast(data: SnackbarData) {
+    // Anything not raised through ToastVisuals is a plain message with nothing to report against it.
+    val succeeded = (data.visuals as? ToastVisuals)?.succeeded != false
+    Box(Modifier.fillMaxWidth().padding(Space.m)) {
+        Surface(
+            // Sized to its message and left where the content starts, rather than stretched across
+            // it: on the inner display and on a tablet a full-width bar for three words is a stripe.
+            Modifier.widthIn(max = ToastMaxWidth).clickable { data.dismiss() },
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            shape = MaterialTheme.shapes.medium,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            shadowElevation = ToastElevation,
+        ) {
+            Row(
+                Modifier.padding(horizontal = Space.m, vertical = Space.s),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (succeeded) Icons.Outlined.CheckCircle else Icons.Outlined.ErrorOutline,
+                    // The message says what happened; a reader announcing the tone as well says it
+                    // twice.
+                    contentDescription = null,
+                    tint = if (succeeded) MaterialTheme.colorScheme.tertiary
+                    else MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(IconSize.Inline),
+                )
+                Text(
+                    data.visuals.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    // Two lines is the ceiling. Anything needing more than that is a screen, not a
+                    // toast, and a provider's own error message can run to a paragraph.
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    // fill = false so a short message keeps a short toast: weight alone would pad
+                    // every one of them out to the full width.
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Icon(
+                    Icons.Outlined.Close,
+                    contentDescription = "Dismiss",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(IconSize.Inline),
+                )
+            }
+        }
+    }
+}
+
+/** Wide enough for two lines of a short message, and no wider. */
+private val ToastMaxWidth = 400.dp
+
+/** Enough to lift it off the page it covers. The hairline does the rest of the separating. */
+private val ToastElevation = 6.dp
 
 /** Placeholder for a screen with nothing to show yet, so empty states explain themselves. */
 @Composable

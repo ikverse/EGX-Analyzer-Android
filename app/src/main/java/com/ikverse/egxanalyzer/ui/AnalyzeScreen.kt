@@ -7,7 +7,6 @@ import android.content.Intent
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +35,9 @@ import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.TextFields
@@ -51,6 +53,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
@@ -64,11 +67,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.ChannelSelection
+import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -182,7 +188,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 scope.launch {
                     appState.runAction(
                         label = "Refreshing chats",
-                        success = { "Chat list updated: ${appState.channels.size} channels found." },
+                        success = { "${appState.channels.size} chats found" },
                     ) { appState.refreshTelegramChats() }
                 }
             }
@@ -199,13 +205,14 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 ChannelsSection(appState)
                 // The reason a run cannot start sits with the button that loads what it is
                 // missing, rather than as a loose line under the card it is about.
-                SourcePreview(appState, scope, blockedReason, attempted)
+                MessagesPreview(appState, scope, blockedReason, attempted)
             },
             side = {
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             shape = MaterialTheme.shapes.large,
+            border = cardOutline,
         ) {
             Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -244,6 +251,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             shape = MaterialTheme.shapes.large,
+            border = cardOutline,
         ) {
             Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -350,7 +358,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                     // The chat list now sits at the top of this screen, so there is nowhere to send
                     // the user - only somewhere to point them.
                     Text(
-                        "Select chats at the top of this screen and load the source window.",
+                        "Select chats at the top of this screen, then load them in Messages preview.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -449,7 +457,7 @@ private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState
  * paid request can be seen first, and so the window can be sanity-checked against the chats.
  */
 @Composable
-private fun SourcePreview(
+private fun MessagesPreview(
     appState: AppState,
     scope: kotlinx.coroutines.CoroutineScope,
     /** Why a run cannot start, or nothing when it can. */
@@ -459,13 +467,24 @@ private fun SourcePreview(
 ) {
     val selected = appState.channels.count(ChannelSelection::selected)
     val sources = appState.telegramSources
-    SectionCard(title = "Source preview", icon = Icons.Outlined.Preview) {
-        Text(
-            appState.telegramSyncMessage
-                ?: "Check which messages the target date and content types actually select.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    val loading = appState.busyLabel != null
+    SectionCard(title = "Messages preview", icon = Icons.Outlined.Preview) {
+        // With messages on screen the standing line only restates the list, so it gives way to the
+        // count. With none, telegramSyncMessage is the only thing that can say why - read forty and
+        // none fell in the window, Telegram refused - and none of that is anywhere else.
+        if (sources.isEmpty()) {
+            Text(
+                appState.telegramSyncMessage ?: "See exactly which messages a run will send.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                "${sources.size} messages · ${appState.inputs.size} model inputs",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         blockedReason?.let {
             Text(
                 it,
@@ -481,52 +500,117 @@ private fun SourcePreview(
             onClick = {
                 scope.launch {
                     appState.runAction(
-                        label = "Loading sources from Telegram",
-                        success = { "Loaded ${appState.inputs.size} sources ready to analyze." },
+                        label = "Loading messages from Telegram",
+                        success = { "${appState.inputs.size} sources ready" },
                     ) { appState.syncTelegramSources() }
                 }
             },
-            enabled = selected > 0 && appState.busyLabel == null,
+            enabled = selected > 0 && !loading,
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (sources.isEmpty()) "Preview sources" else "Refresh preview") }
+        ) {
+            // Greying out says the button is unavailable without saying why, and something else
+            // already holding the Telegram connection is the usual reason.
+            if (loading) {
+                CircularProgressIndicator(
+                    Modifier.size(IconSize.Inline),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Icon(
+                    if (sources.isEmpty()) Icons.Outlined.Preview else Icons.Outlined.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(IconSize.Inline),
+                )
+            }
+            Spacer(Modifier.width(Space.s))
+            Text(
+                when {
+                    loading -> "Loading…"
+                    sources.isEmpty() -> "Preview messages"
+                    else -> "Refresh messages"
+                },
+            )
+        }
 
         if (sources.isNotEmpty()) {
             // Bounded like the chat list, so a busy day does not bury the Analyze button.
             Column(
                 Modifier
-                    .heightIn(max = SourceListMaxHeight)
+                    .heightIn(max = MessageListMaxHeight)
                     .scrollableColumn(),
                 verticalArrangement = Arrangement.spacedBy(Space.s),
             ) {
-                sources.forEach { source ->
-                    Column {
-                        Text(
-                            "${source.channelName} · ${source.contentType.name.lowercase()}",
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                        Text(
-                            source.timestamp.atZone(java.time.ZoneId.systemDefault())
-                                .format(java.time.format.DateTimeFormatter.ofPattern("d MMM HH:mm")),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        source.preview.takeIf(String::isNotBlank)?.let {
-                            Text(
-                                it.take(120),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        HorizontalDivider()
-                    }
-                }
+                sources.forEach { source -> MessageTile(source) }
             }
         }
     }
 }
 
+/**
+ * One message, as a tile rather than four stacked lines under a rule.
+ *
+ * A step up in container colour is what makes a message read as something sitting in the card
+ * rather than another paragraph of it, which is the job a column of dividers was doing badly.
+ */
+@Composable
+private fun MessageTile(source: SourceTrace) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.s),
+            verticalArrangement = Arrangement.spacedBy(Space.xs),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    contentTypeIcon(source.contentType),
+                    contentDescription = source.contentType.name.lowercase(),
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(IconSize.Inline),
+                )
+                Spacer(Modifier.width(Space.s))
+                Text(
+                    source.channelName,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(Space.s))
+                Text(
+                    MessageTimeFormat.format(source.timestamp.atZone(ZoneId.systemDefault())),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // An image or a voice note carries no text of its own, and drawing the blank left a
+            // gap that read as a message which had failed to load.
+            source.preview.takeIf(String::isNotBlank)?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** What kind of message it is, as a glyph: the word for it, repeated down a column, is noise. */
+private fun contentTypeIcon(type: AnalysisContentType): ImageVector = when (type) {
+    AnalysisContentType.TEXT -> Icons.Outlined.TextFields
+    AnalysisContentType.IMAGES -> Icons.Outlined.Image
+    AnalysisContentType.AUDIO -> Icons.Outlined.Mic
+}
+
+/** Built once. The formatter this replaces was constructed per message, per recomposition. */
+private val MessageTimeFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM · HH:mm")
+
 /** Enough to scan the window without pushing the run off the screen. */
-private val SourceListMaxHeight = 260.dp
+private val MessageListMaxHeight = 320.dp
 
 /**
  * Asks before repeating an analysis that has already been paid for.
@@ -604,7 +688,7 @@ private fun analyzeBlockedReason(appState: AppState): String? = when {
     appState.inputs.isEmpty() &&
         (appState.telegramAuthState.step != TelegramAuthStep.READY ||
             appState.channels.none(ChannelSelection::selected)) ->
-        "No sources are loaded. In Channels, select chats and load messages for a date."
+        "No messages are loaded. Select chats in Telegram, then load them in Messages preview."
     else -> null
 }
 
