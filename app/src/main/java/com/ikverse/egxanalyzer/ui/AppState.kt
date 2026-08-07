@@ -1680,7 +1680,8 @@ class AppState(
 }
 
 /** Cairo, so "today" turns over with the exchange rather than with the device's timezone. */
-private const val EGX_ZONE = "Africa/Cairo"
+/** Shared, so a screen naming a session "today" and the app storing one agree on where today is. */
+internal const val EGX_ZONE = "Africa/Cairo"
 
 /** Outcome of a finished action, shown once and dismissed. */
 data class StatusMessage(val text: String, val succeeded: Boolean)

@@ -8,6 +8,7 @@ import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -39,8 +40,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -74,6 +77,7 @@ import com.ikverse.egxanalyzer.model.WordingRule
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -83,7 +87,6 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
         title = "Results",
         onRefresh = { scope.launch { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
-        refreshHint = "Pull down to refresh prices",
     ) {
         UnreadableNotice(appState.unreadableResults)
         // Session-only, deliberately: a filter that survived a restart would hide runs from someone
@@ -165,6 +168,16 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
             // row to show its table - half of one is under the width the table needs and falls back
             // to cards - and a card cannot give itself a row.
             var openRun by remember { mutableStateOf(appState.pendingResultId) }
+            // The newest run held for each session, so a card can tell whether it is the current
+            // reading of its session or an earlier one a re-run has since covered.
+            val newestRunFor = remember(appState.savedResults) {
+                appState.savedResults
+                    .mapNotNull { saved ->
+                        saved.result.recommendationTargetDate?.let { it to saved.result.completedAt }
+                    }
+                    .groupBy({ it.first }, { it.second })
+                    .mapValues { (_, runAt) -> runAt.max() }
+            }
             // A run arriving from a notification opens itself, whether the screen was already
             // showing or not.
             LaunchedEffect(appState.pendingResultId) {
@@ -196,6 +209,8 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                         },
                         highlighted = saved.id == appState.pendingResultId,
                         onHighlightShown = { appState.consumePendingResult() },
+                        newerRunExists = saved.result.recommendationTargetDate
+                            ?.let { newestRunFor[it]?.isAfter(saved.result.completedAt) } == true,
                         onShare = { shareReport(activity, appState.reportFor(saved)) },
                         onDelete = { appState.deleteResult(saved) },
                         report = { appState.reportFor(saved) },
@@ -321,6 +336,7 @@ private fun UnreadableNotice(count: Int) {
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
         shape = MaterialTheme.shapes.large,
+        border = cardOutline,
     ) {
         Row(
             Modifier.fillMaxWidth().padding(Space.l),
@@ -367,6 +383,8 @@ private fun SavedAnalysisCard(
     /** Opened from a notification: its edge flashes briefly. */
     highlighted: Boolean = false,
     onHighlightShown: () -> Unit = {},
+    /** Whether a later run covered the same session, which makes this report the older reading. */
+    newerRunExists: Boolean = false,
     onShare: () -> Unit,
     onDelete: () -> Unit,
     report: () -> AnalysisReport,
@@ -380,6 +398,17 @@ private fun SavedAnalysisCard(
     var confirmDelete by remember { mutableStateOf(false) }
     val stockCount = saved.result.consolidated.size.takeIf { it > 0 }
         ?: saved.result.recommendations.map(RecommendationResult::ticker).distinct().size
+    // Every occurrence in the report, which is what the table below actually lists: one stock named
+    // by three channels is three readings to check, not one.
+    val callCount = saved.result.consolidated.sumOf { it.dataPoints.size }
+        .takeIf { it > 0 } ?: saved.result.recommendations.size
+    // Positions rather than occurrences: a stock two channels called on the same session is one
+    // trade, because a position's identity is the call it was taken on. Deliberately not
+    // remembered - recording a trade has to change the figure while the card is on screen.
+    val tradedCount = saved.result.consolidated
+        .flatMap { stock -> stock.dataPoints.mapNotNull { trades.heldFor(stock, it)?.position?.id } }
+        .distinct()
+        .size
 
     // A flash rather than a permanent tint: it answers "which one" on arrival and then gets out
     // of the way, instead of leaving a card looking special long after the reason has passed.
@@ -403,21 +432,44 @@ private fun SavedAnalysisCard(
         border = if (highlighted) {
             BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = edge))
         } else {
-            null
+            cardOutline
         },
         shape = MaterialTheme.shapes.large,
     ) {
         Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Top-aligned: the heading below runs to two lines and a menu centred against both sits
+            // level with neither.
+            Row(verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(Space.s),
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        // The session the report is about, which is the first thing anyone reads a
+                        // card for and was previously the raw stored date.
+                        Text(
+                            saved.result.recommendationTargetDate?.format(TARGET_FORMAT)
+                                ?: "Target not recorded",
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                        saved.result.recommendationTargetDate?.let(::relativeSession)?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                    // Both dates on one line and each labelled. The run time used to sit four rows
+                    // below the target session with nothing to say which was which.
                     Text(
-                        saved.result.recommendationTargetDate?.toString() ?: "Target not recorded",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        "${saved.provider.displayName} · ${saved.model}",
+                        "${saved.provider.displayName} · ${saved.model} · ran " +
+                            saved.result.completedAt.atZone(ZoneId.systemDefault())
+                                .format(COMPLETED_FORMAT),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 Box {
@@ -444,11 +496,18 @@ private fun SavedAnalysisCard(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-                StatTile(stockCount.toString(), "stocks", tone = MaterialTheme.colorScheme.primary)
-                StatTile(saved.result.sources.size.toString(), "sources")
-                StatTile("${saved.result.diagnostics.durationMilliseconds / 1000}s", "took")
-            }
+            // Only where a later run covered the same session. A re-run leaves an older report
+            // looking exactly as current as the newest one, which is the same trap the unreadable
+            // notice exists for. Worded as a fact rather than "superseded": an older run keeps the
+            // chats the newer one never read, which is how the scoring treats it too.
+            if (newerRunExists) StatusPill("Newer run exists")
+
+            ReportFigures(
+                stocks = stockCount,
+                calls = callCount,
+                sources = saved.result.sources.size,
+                traded = tradedCount,
+            )
 
             saved.channelNames().takeIf(List<String>::isNotEmpty)?.let { names ->
                 Text(
@@ -465,12 +524,6 @@ private fun SavedAnalysisCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-
-            Text(
-                saved.result.completedAt.atZone(ZoneId.systemDefault()).format(COMPLETED_FORMAT),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
 
             FilledTonalButton(
                 onClick = { onExpandedChange(!expanded) },
@@ -515,6 +568,71 @@ private fun SavedAnalysisCard(
                 TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
             },
         )
+    }
+}
+
+/**
+ * What the run amounts to, as one instrument rather than four loose numbers.
+ *
+ * Bounded and divided because these figures are read against each other - twelve stocks from
+ * twenty-eight readings is a different report from twelve out of twelve - and numbers floating in
+ * open space with 28dp between them read as three unrelated facts.
+ *
+ * [traded] is dropped entirely when the user is in none of the run's calls, rather than shown as a
+ * zero: a nought under a label is a figure to work out, where an absent cell is nothing to read.
+ */
+@Composable
+private fun ReportFigures(stocks: Int, calls: Int, sources: Int, traded: Int) {
+    val figures = buildList {
+        add(stocks.toString() to "stocks")
+        add(calls.toString() to "calls")
+        add(sources.toString() to "sources")
+        if (traded > 0) add(traded.toString() to "traded")
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.small,
+        border = cardOutline,
+    ) {
+        // Intrinsic height so the dividers run the full depth of the row rather than the height
+        // Material would otherwise give a divider with nothing to measure against.
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            figures.forEachIndexed { index, (value, label) ->
+                if (index > 0) VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                StatTile(
+                    value = value,
+                    label = label,
+                    modifier = Modifier.weight(1f).padding(vertical = Space.s, horizontal = Space.xs),
+                    // The stock count leads, as it did before: it is the figure that says how much
+                    // report there is.
+                    tone = if (index == 0) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    alignment = Alignment.CenterHorizontally,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A session named the way it would be said aloud, where that is shorter than the date.
+ *
+ * Only within the week either way. A next-day run targets a session that has not happened yet, so
+ * this reads forwards as well as back; past a week "in 43 days" is noise beside the date itself,
+ * and nothing is drawn.
+ */
+private fun relativeSession(target: LocalDate): String? {
+    val today = LocalDate.now(ZoneId.of(EGX_ZONE))
+    return when (val days = ChronoUnit.DAYS.between(today, target)) {
+        0L -> "Today"
+        1L -> "Tomorrow"
+        -1L -> "Yesterday"
+        in 2L..6L -> "in $days days"
+        in -6L..-2L -> "${-days} days ago"
+        else -> null
     }
 }
 
@@ -857,7 +975,11 @@ private fun LegacyDetail(recommendation: RecommendationResult) {
     HorizontalDivider()
 }
 
-private val COMPLETED_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm")
+/** Weekday first: which session a report is about is read as a day before it is read as a date. */
+private val TARGET_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM yyyy")
+
+/** Sits inside a sentence now, so the interpunct that used to separate it would read as a divider. */
+private val COMPLETED_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm")
 
 /** IMAGE_REF is one-based over the images sent with the request. */
 private fun AnalysisResult.imagePathFor(reference: Int?): String? =

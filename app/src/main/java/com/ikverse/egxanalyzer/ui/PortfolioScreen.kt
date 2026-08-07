@@ -61,7 +61,6 @@ internal fun PortfolioScreen(appState: AppState) {
         title = "Portfolio",
         onRefresh = { scope.launch { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
-        refreshHint = "Pull down to refresh prices",
     ) {
         if (portfolio.isEmpty) {
             EmptyState(

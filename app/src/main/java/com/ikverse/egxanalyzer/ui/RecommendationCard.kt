@@ -65,8 +65,8 @@ internal fun RecommendationCards(
     if (points.isEmpty()) {
         Card(
             modifier = modifier.fillMaxWidth(),
-            colors = CardDefaults.elevatedCardColors(),
-            elevation = CardDefaults.elevatedCardElevation(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+            border = cardOutline,
         ) {
             Column(Modifier.padding(Space.l)) {
                 StockHeader(stock, point = null, channel = null, page = 0, pageCount = 0)
@@ -153,11 +153,14 @@ private fun RecommendationCard(
 
     Card(
         modifier = modifier.fillMaxWidth().clickable { expanded = !expanded },
-        colors = CardDefaults.elevatedCardColors(),
-        elevation = CardDefaults.elevatedCardElevation(),
+        // A step up in container rather than a shadow. These sit inside the report's own card, which
+        // is why they were elevated; the step is what separates them now that nothing on the page
+        // casts a shadow.
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         // A stock the user is actually in is outlined in the colour of where it stands, so a page
-        // of calls can be read for what is held before any card is opened.
-        border = heldBorder(held),
+        // of calls can be read for what is held before any card is opened. Everything else carries
+        // the hairline every other card on the page is drawn with.
+        border = heldBorder(held) ?: cardOutline,
     ) {
         Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
             StockHeader(stock, point, channel, page, pageCount)

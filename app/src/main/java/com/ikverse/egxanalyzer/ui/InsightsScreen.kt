@@ -75,7 +75,6 @@ internal fun InsightsScreen(appState: AppState) {
         title = "Insights",
         onRefresh = { scope.launch { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
-        refreshHint = "Pull down to refresh prices",
     ) {
         PricesBar(full.windowSessions)
 

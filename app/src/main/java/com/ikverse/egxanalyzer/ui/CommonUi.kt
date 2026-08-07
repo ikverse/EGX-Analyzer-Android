@@ -31,7 +31,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -74,8 +73,6 @@ internal fun Screen(
     /** Given, the page pulls down to refresh. Its spinner is [refreshing]. */
     onRefresh: (() -> Unit)? = null,
     refreshing: Boolean = false,
-    /** Says what the pull does. Carried with [onRefresh] so it cannot appear on a page without it. */
-    refreshHint: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val scroll = rememberScrollState()
@@ -128,10 +125,7 @@ internal fun Screen(
                 .padding(top = Space.l, bottom = if (floatingAction == null) Space.xl else FloatingActionInset),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                Text(title, style = MaterialTheme.typography.headlineLarge)
-                if (onRefresh != null && refreshHint != null) PullHint(refreshHint)
-            }
+            Text(title, style = MaterialTheme.typography.headlineLarge)
             content()
         }
     }
@@ -173,36 +167,6 @@ internal val LocalNavBarVisible = staticCompositionLocalOf { mutableStateOf(true
 
 /** Enough movement to be a scroll rather than a wobble, so the bar does not flicker on a nudge. */
 private val NavBarScrollSlop = 6.dp
-
-/**
- * A gesture with nothing on screen to suggest it is a gesture is one nobody finds.
- *
- * Drawn here rather than only under a page title, because the pull does not always belong to the
- * page as a whole - on Analyze it refreshes one card's contents, and the hint belongs with them.
- */
-@Composable
-internal fun PullHint(text: String, modifier: Modifier = Modifier) {
-    Row(
-        modifier,
-        horizontalArrangement = Arrangement.spacedBy(Space.xs),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Outlined.ArrowDownward,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(PullHintIcon),
-        )
-        Text(
-            text,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-/** Sized to the label beside it rather than to the icon grid, which would tower over it. */
-private val PullHintIcon = 14.dp
 
 /** Height of an extended action plus its margin, so the last card clears it when scrolled to. */
 private val FloatingActionInset = 88.dp
@@ -390,8 +354,14 @@ internal fun StatTile(
     label: String,
     modifier: Modifier = Modifier,
     tone: Color = MaterialTheme.colorScheme.onSurface,
+    /** Centred where the tile is one cell of a divided strip, so figures line up under each other. */
+    alignment: Alignment.Horizontal = Alignment.Start,
 ) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+    Column(
+        modifier,
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
+        horizontalAlignment = alignment,
+    ) {
         Text(value, style = MaterialTheme.typography.headlineSmall, color = tone)
         Text(
             label.uppercase(),
@@ -522,6 +492,7 @@ internal fun EmptyState(icon: ImageVector, title: String, detail: String) {
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         shape = MaterialTheme.shapes.large,
+        border = cardOutline,
     ) {
         Column(
             Modifier.fillMaxWidth().padding(vertical = 32.dp, horizontal = 24.dp),

@@ -187,10 +187,6 @@ private fun TelegramChats(appState: AppState) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        // With the chats rather than under the page title: the pull refreshes this card, not the
-        // screen, and a hint at the top would promise something else.
-        PullHint("Pull down to refresh chats")
-
         // Every chat is offered, broadcast channel or not: recommendations also arrive in groups
         // and direct messages, and hiding those decided for the user which sources were worth
         // reading.
