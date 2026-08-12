@@ -84,7 +84,21 @@ jobs:
           EGX_KEYSTORE_PASSWORD: ${{ secrets.EGX_KEYSTORE_PASSWORD }}
           EGX_KEY_ALIAS: ${{ secrets.EGX_KEY_ALIAS }}
           EGX_KEY_PASSWORD: ${{ secrets.EGX_KEY_PASSWORD }}
+          # local.properties is gitignored, so a build here has none of it. Without these the app
+          # cannot reach Telegram at all and asks its user to register an application at
+          # my.telegram.org before it will show a sign-in code.
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: ./gradlew :app:assembleRelease -PabiSplits --no-daemon
+
+      # A release that cannot sign in to Telegram does nothing this app is for, and the failure only
+      # surfaces on a phone after an install. Cheaper to refuse the release than to publish one.
+      - name: Refuse a release with no Telegram credentials
+        run: |
+          if ! grep -q 'TELEGRAM_API_ID = [1-9]' app/build/generated/source/buildConfig/release/com/ikverse/egxanalyzer/BuildConfig.java; then
+            echo "The release build has no Telegram api_id; set the TELEGRAM_API_ID and TELEGRAM_API_HASH secrets." >&2
+            exit 1
+          fi
 
       # Named for the version and the architecture, because those names are what the app matches
       # against its own device and what a person picks from when installing by hand.

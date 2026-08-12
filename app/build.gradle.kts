@@ -27,6 +27,10 @@ val localProperties: Map<String, String> = rootProject.file("local.properties")
     ?.toMap()
     .orEmpty()
 
+/** A setting from `local.properties` on a developer machine, or the environment on CI. */
+fun buildSetting(name: String): String? =
+    (localProperties[name] ?: System.getenv(name))?.takeIf(String::isNotBlank)
+
 /**
  * The Telegram application credentials.
  *
@@ -34,13 +38,19 @@ val localProperties: Map<String, String> = rootProject.file("local.properties")
  * client registers one at my.telegram.org and ships it. Asking each user to register their own was
  * a form standing between them and a phone number for no reason. Absent, the app falls back to
  * asking, so a checkout without the file still builds and still works.
+ *
+ * Read from the environment as well as from `local.properties`, because the file is gitignored and
+ * so a build made anywhere but this machine had neither. The first release built by CI shipped
+ * without them and asked its user to register an application at my.telegram.org before it would
+ * show a sign-in code - which is the form this bundling exists to remove, reappearing in the one
+ * build that matters.
  */
-val telegramApiId: String = localProperties["telegramApiId"] ?: "0"
-val telegramApiHash: String = localProperties["telegramApiHash"] ?: ""
-
-/** A setting from `local.properties` on a developer machine, or the environment on CI. */
-fun buildSetting(name: String): String? =
-    (localProperties[name] ?: System.getenv(name))?.takeIf(String::isNotBlank)
+val telegramApiId: String = buildSetting("telegramApiId")
+    ?: buildSetting("TELEGRAM_API_ID")
+    ?: "0"
+val telegramApiHash: String = buildSetting("telegramApiHash")
+    ?: buildSetting("TELEGRAM_API_HASH")
+    ?: ""
 
 /**
  * The key release builds are signed with.
