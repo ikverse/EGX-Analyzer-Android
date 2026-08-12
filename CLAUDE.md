@@ -275,14 +275,18 @@ phone only by plugging it into the machine that built it. It reads one public UR
 - Versions compare **as numbers** (`AppVersion`): 1.0.10 is the release after 1.0.9, and as text it
   sorts before it. A release with no APK attached — a tag pushed while the build was still running —
   is not an update, and neither is a draft or a pre-release.
-- **A release is three APKs, and the app picks its own.** Most of the size is TDLib's native
-  libraries, so `arm64-v8a` is 72MB against the universal build's 134MB. One version, one build, one
-  signature — only the libraries inside differ, and the versionCode is deliberately **not** offset
-  per ABI, so nothing can read as a different version. `preferredApkName` takes the first entry of
+- **A release is two APKs — `arm64-v8a` and `x86_64` — and the app picks its own.** Most of the size
+  is TDLib's native libraries, so arm64 is 72MB where a universal build is 134MB. One version, one
+  build, one signature; only the libraries inside differ, and the versionCode is deliberately **not**
+  offset per ABI, so nothing can read as a different version. **No universal APK is published** —
+  it was 134MB of upload for devices that do not exist here, and it made every release wait on it.
+  Installing by hand means taking `arm64-v8a`. `preferredApkName` takes the first entry of
   `Build.SUPPORTED_ABIS` that a name matches, then universal, then an APK named for no architecture
-  at all — which is what lets a phone update from a release cut before the split. An APK for
-  another architecture is never a fallback: Android refuses to install one, so offering it would
-  promise an update that cannot happen after a download the size of the whole app.
+  at all — the last two are dormant now but keep a release that does carry one working, and are what
+  let a phone update from a release cut before the split. An APK for another architecture is never a
+  fallback: Android refuses to install one, so offering it would promise an update that cannot happen
+  after a download the size of the whole app. A device that is neither of the two is told there is no
+  update, which is true.
 - **The launch check speaks only when there is something new**, exactly like the launch sync. It is
   independent of Telegram, so it does not wait for a session. Failures are silent: being offline is
   not news. Switchable off in Settings, and the switch travels with the rest.

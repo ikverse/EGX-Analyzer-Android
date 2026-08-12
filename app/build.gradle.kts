@@ -113,11 +113,14 @@ android {
             isEnable = project.hasProperty("abiSplits")
             reset()
             // The two devices here are arm64; x86_64 is the emulator. armeabi-v7a is not built -
-            // nothing this app runs on is 32-bit, and the universal APK covers anything missed.
+            // nothing this app runs on is 32-bit.
             include("arm64-v8a", "x86_64")
-            // The fallback the app downloads when it recognises none of the others, and the one to
-            // reach for when installing by hand without checking what a device is.
-            isUniversalApk = true
+            // No universal APK. It was 134MB of an upload that carries 145MB of APKs anyone would
+            // actually install, and it made every release wait on a file for devices that do not
+            // exist here. The cost is that a device which is neither of the two above is told there
+            // is no update - which is true, since there would be nothing it could install. The
+            // fallback in preferredApkName stays, so a release that does carry one still works.
+            isUniversalApk = false
         }
     }
 
