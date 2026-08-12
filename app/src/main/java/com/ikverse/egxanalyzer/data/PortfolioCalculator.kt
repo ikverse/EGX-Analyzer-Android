@@ -33,6 +33,8 @@ object PortfolioCalculator {
         latestCloseFor: (ticker: String) -> Double?,
         /** Passed in rather than read here, so how overdue a trade is can be tested at all. */
         today: LocalDate = LocalDate.now(),
+        /** The sessions on which each stock's prices changed scale - a split, a bonus issue. */
+        priceBreaksFor: (ticker: String) -> Set<LocalDate> = { emptySet() },
     ): Portfolio {
         val views = positions.map { position ->
             evaluate(
@@ -40,6 +42,7 @@ object PortfolioCalculator {
                 sessions = sessionsFor(position.ticker, position.recommendationDate),
                 currentPrice = latestCloseFor(position.ticker),
                 today = today,
+                priceBreaks = priceBreaksFor(position.ticker),
             )
         }
         return Portfolio(groups = views.grouped(), stats = stats(views))
@@ -57,6 +60,7 @@ object PortfolioCalculator {
         sessions: List<DailySession>,
         currentPrice: Double?,
         today: LocalDate = LocalDate.now(),
+        priceBreaks: Set<LocalDate> = emptySet(),
     ): PositionView {
         // The deadline set: the recommendation's own window, counted from its own session.
         val window = sessions.take(position.windowSessions)
@@ -78,8 +82,13 @@ object PortfolioCalculator {
             // What the window still owes once the sessions before the entry are taken off, so the
             // scorer calls the window complete exactly when the recommendation's deadline passes.
             windowSessions = (position.windowSessions - skipped).coerceAtLeast(1),
+            priceBreaks = priceBreaks,
         )
 
+        // The prices moved scale under this trade. Every figure on the card would be measured
+        // across that - the return from an entry paid in the old money to a close quoted in the
+        // new - so the trade stays open and says why rather than being valued on it.
+        val priceScaleChanged = scored.outcome == Outcome.PRICE_BREAK
         val marketStatus = scored.outcome.asPositionStatus()
         val settledByMarket = when (marketStatus) {
             PositionStatus.FULL_TARGET_HIT, PositionStatus.STOPPED_OUT -> true
@@ -104,11 +113,18 @@ object PortfolioCalculator {
             deadlineDate != null &&
             marketStatus != PositionStatus.FULL_TARGET_HIT &&
             marketStatus != PositionStatus.STOPPED_OUT &&
-            !scored.stoppedAfterPartial
+            !scored.stoppedAfterPartial &&
+            // Nagging someone daily about a trade the app has just admitted it cannot read would be
+            // asking them to answer for the price feed.
+            !priceScaleChanged
 
         val exit = when {
-            // The user's own price, and the only figure here that is not an estimate.
+            // The user's own price, and the only figure here that is not an estimate. Both ends are
+            // theirs, so a split between them is already reflected in what they actually got.
             soldByHand -> position.exitPrice
+            // Nothing to measure to. The entry was paid in the old money and every price since is
+            // quoted in the new, so any figure here would be a percentage of two different things.
+            priceScaleChanged -> null
             open -> currentPrice
             else -> position.estimatedExit(scored.outcome, scored.stoppedAfterPartial, window)
         }
@@ -136,6 +152,7 @@ object PortfolioCalculator {
             settledOn = scored.settledOn,
             ranOutOfTime = ranOutOfTime,
             overdueDays = overdueDays(ranOutOfTime, deadlineDate, today),
+            priceScaleChanged = priceScaleChanged,
         )
     }
 

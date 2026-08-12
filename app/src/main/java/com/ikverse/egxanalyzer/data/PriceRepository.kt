@@ -22,6 +22,19 @@ data class PriceRefresh(
     val priced: Int,
     val sessionsStored: Int,
     val unpriced: List<String>,
+    /**
+     * Stocks whose series changes scale partway through and did not come back onto one scale when
+     * the whole history was refetched. Their calls are reported rather than judged.
+     */
+    val suspect: List<String> = emptyList(),
+    /**
+     * Stocks whose newest session is older than the exchange's own calendar explains.
+     *
+     * Reported separately from [unpriced], which means no history at all. A feed that answers every
+     * request with a history frozen three weeks ago is the harder of the two to notice, and the one
+     * that has actually happened here.
+     */
+    val stale: List<String> = emptyList(),
 )
 
 /**
@@ -63,8 +76,10 @@ class PriceRepository(
         neededFrom: (ticker: String) -> LocalDate? = { null },
     ): PriceRefresh = coroutineScope {
         val normalized = tickers.map(Scoring::normalizeTicker).filter(String::isNotBlank).distinct()
+        // The whole session rather than its date alone: a change of scale falls exactly between the
+        // newest stored session and the first one fetched, so the check needs the price too.
         val newest = withContext(Dispatchers.IO) {
-            normalized.associateWith(localDataStore::latestSessionDate)
+            normalized.associateWith(localDataStore::latestSession)
         }
         val today = LocalDate.now(ZoneId.of("UTC"))
         // A few at a time rather than all at once: this is an undocumented public endpoint and
@@ -72,24 +87,103 @@ class PriceRepository(
         val limit = Semaphore(CONCURRENCY)
         val fetched = normalized
             .map { ticker ->
-                val from = fetchFrom(newest[ticker], neededFrom(ticker), today)
-                async { ticker to limit.withPermit { fetchAllFeeds(ticker, from, today) } }
+                val previous = newest[ticker]
+                val from = fetchFrom(previous?.date, neededFrom(ticker), today)
+                async { limit.withPermit { fetchChecked(ticker, previous, from, today) } }
             }
             .map { it.await() }
 
-        val stored = fetched.flatMap { (_, days) -> days }
-        if (stored.isNotEmpty()) {
-            withContext(Dispatchers.IO) { localDataStore.saveSessions(stored, SOURCE) }
+        val stored = fetched.flatMap(Fetched::sessions)
+        withContext(Dispatchers.IO) {
+            // A healed series replaces what is on disk rather than merging with it: the rows it is
+            // replacing are the ones on the old scale, and leaving them would keep exactly the
+            // mixture this went to the trouble of refetching to get rid of.
+            fetched.filter(Fetched::healed).forEach { result ->
+                localDataStore.deleteSessions(result.ticker)
+                localDataStore.clearPriceBreaks(result.ticker)
+            }
+            if (stored.isNotEmpty()) localDataStore.saveSessions(stored, SOURCE)
+            localDataStore.savePriceBreaks(fetched.flatMap(Fetched::breaks))
         }
         PriceRefresh(
             requested = normalized.size,
-            priced = fetched.count { (_, days) -> days.isNotEmpty() },
+            priced = fetched.count { it.sessions.isNotEmpty() },
             sessionsStored = stored.size,
             // A ticker that fails is skipped rather than aborting the run: one delisted symbol
             // should not cost the rest of the list.
-            unpriced = fetched.filter { (_, days) -> days.isEmpty() }.map { (ticker, _) -> ticker },
+            unpriced = fetched.filter { it.sessions.isEmpty() }.map(Fetched::ticker),
+            suspect = fetched.filter { it.breaks.isNotEmpty() }.map(Fetched::ticker),
+            stale = fetched.filter(Fetched::stale).map(Fetched::ticker),
         )
     }
+
+    /** One stock's fetch, and what the sanity pass made of it. */
+    private data class Fetched(
+        val ticker: String,
+        val sessions: List<DailySession>,
+        val breaks: List<PriceBreak>,
+        /**
+         * The whole history was refetched to put it back on one scale, so what is on disk is the
+         * old mixture and has to go before this is written over it.
+         */
+        val healed: Boolean,
+        val stale: Boolean,
+    )
+
+    /**
+     * Fetches one stock and checks that the result is all in the same money.
+     *
+     * The usual cause of a break is not a bad feed but this app's own incrementalism: a refresh
+     * asks only for what it is missing, so after a split the stored half stays in the old prices
+     * while the fetched half arrives in the new ones. Yahoo rewrites its own history when a stock
+     * splits, which means the fix is simply to ask for all of it again - and then the break is gone,
+     * because it was never in the feed.
+     *
+     * What survives that is a genuine discontinuity: a bad series, or a split the feed itself has
+     * not applied. Recorded rather than corrected. Guessing a ratio and rescaling a year of prices
+     * on it would be the app inventing history, and a call it cannot judge is a better answer than
+     * a call it judges against numbers it made up.
+     */
+    private suspend fun fetchChecked(
+        ticker: String,
+        previous: DailySession?,
+        from: LocalDate?,
+        today: LocalDate,
+    ): Fetched {
+        val days = fetchAllFeeds(ticker, from, today)
+        // The whole stored series rather than its last session alone. The boundary between disk and
+        // this fetch is where a break usually falls, but it is not the only place one can be: a
+        // split that happened while an earlier version of this app was storing prices is already
+        // buried inside the history, and checking only the boundary would never look at it. Reading
+        // it back costs one indexed query against a table this same call is about to write to.
+        val history = if (previous == null) emptyList() else withContext(Dispatchers.IO) {
+            localDataStore.allSessions(ticker)
+        }
+        val found = PriceSanity.breaks(ticker, history + days)
+        // Nothing to heal, or nothing a refetch could heal: with no stored history this fetch was
+        // already the whole of it, so asking again would return the same series and cost a request.
+        if (found.isEmpty() || from == null) {
+            return Fetched(ticker, days, found, healed = false, isStale(previous, days, today))
+        }
+
+        val full = fetchAllFeeds(ticker, null, today)
+        // The refetch failed. Keep what was fetched and let the break stand: reporting a stock as
+        // suspect is recoverable, and the next refresh tries again.
+        if (full.isEmpty()) {
+            return Fetched(ticker, days, found, healed = false, isStale(previous, days, today))
+        }
+
+        return Fetched(
+            ticker = ticker,
+            sessions = full,
+            breaks = PriceSanity.breaks(ticker, full),
+            healed = true,
+            stale = isStale(null, full, today),
+        )
+    }
+
+    private fun isStale(previous: DailySession?, days: List<DailySession>, today: LocalDate) =
+        PriceSanity.isStale(listOfNotNull(previous) + days, today)
 
     /**
      * Reads every feed that carries this stock and merges them under the exchange's own code.

@@ -809,11 +809,15 @@ class AppState(
         // a day further behind simply for having crossed a time zone.
         val today = LocalDate.now(ZoneId.of(EGX_ZONE))
         portfolio = withContext(Dispatchers.IO) {
+            // Read once for the whole rebuild rather than per position: it is one small table, and
+            // a trade must be judged on the same reading of the feed as the call it came from.
+            val breaks = localDataStore.priceBreakDates()
             PortfolioCalculator.build(
                 positions = held,
                 sessionsFor = localDataStore::sessionsFrom,
                 latestCloseFor = localDataStore::latestClose,
                 today = today,
+                priceBreaksFor = { ticker -> breaks[ticker].orEmpty() },
             )
         }
     }
@@ -1054,7 +1058,20 @@ class AppState(
 
     /** Puts the card back to the button, after an answer has been read. */
     fun dismissUpdate() {
+        // Whatever the installer was given read access to, it no longer needs.
+        (updateState as? UpdateState.Ready)?.let { updateRepository?.revokeInstallAccess(it.file) }
         updateState = UpdateState.Idle
+    }
+
+    /**
+     * Says why a button could not do what it says, without throwing away what the card holds.
+     *
+     * Android refusing to open the installer used to be invisible: the system closed it without a
+     * word and the phone looked like it had ignored the press. A downloaded update is still a
+     * downloaded update afterwards, so this speaks rather than resetting anything.
+     */
+    fun reportUpdateProblem(reason: String) {
+        statusMessage = StatusMessage(reason, succeeded = false)
     }
 
     /** True once the user has allowed this app to install apps; Android is the only one who can ask. */
@@ -1434,10 +1451,20 @@ class AppState(
             recomputePortfolio()
             val missing = refresh.unpriced.size
             if (announce) {
+                // A stock whose prices changed scale, and one whose feed has stopped moving, are
+                // both worth saying out loud: neither shows up as a failure, and the app's own
+                // figures go quiet about the stock rather than wrong about it.
+                val notes = buildList {
+                    if (missing > 0) add("$missing unpriced")
+                    if (refresh.suspect.isNotEmpty()) {
+                        add("${refresh.suspect.size} changed scale")
+                    }
+                    if (refresh.stale.isNotEmpty()) add("${refresh.stale.size} stale")
+                }
                 statusMessage = StatusMessage(
                     "Priced ${refresh.priced}/${refresh.requested}" +
-                        if (missing > 0) " · $missing unpriced" else "",
-                    succeeded = missing == 0,
+                        if (notes.isEmpty()) "" else " · ${notes.joinToString(" · ")}",
+                    succeeded = notes.isEmpty(),
                 )
             }
         } catch (error: CancellationException) {
@@ -1459,12 +1486,14 @@ class AppState(
         val analyses = savedResults
         val window = appPreferences.scoringWindowSessions
         performance = withContext(Dispatchers.IO) {
+            val breaks = localDataStore.priceBreakDates()
             PerformanceCalculator.report(
                 analyses = analyses,
                 pricesFrom = localDataStore.earliestSessionDate(),
                 windowSessions = window,
                 sessionsFor = localDataStore::sessionsFrom,
                 pricedTickers = localDataStore.pricedTickers(),
+                priceBreaksFor = { ticker -> breaks[ticker].orEmpty() },
             )
         }
     }

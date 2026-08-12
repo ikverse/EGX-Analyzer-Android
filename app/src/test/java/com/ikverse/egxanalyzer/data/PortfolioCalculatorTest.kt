@@ -705,6 +705,69 @@ class PortfolioCalculatorTest {
         keepOpen = keepOpen,
     )
 
+    @Test
+    fun `a split under a trade neither closes it nor values it`() {
+        // Bought at 10 and the stock splits two-for-one on the third session. The prices from there
+        // on are half what they were for reasons that have nothing to do with this trade, and the
+        // stop sits above all of them - so without this the trade is closed as a stop-out and
+        // reported at roughly -50%, a loss the user never took.
+        val sessions = listOf(
+            session(called, high = 10.4, low = 9.8),
+            session(called.plusDays(1), high = 10.6, low = 10.1),
+            session(called.plusDays(2), high = 5.4, low = 5.2),
+            session(called.plusDays(3), high = 5.5, low = 5.3),
+        )
+
+        val stopped = PortfolioCalculator.evaluate(
+            position = position(windowSessions = 4),
+            sessions = sessions,
+            currentPrice = 5.4,
+        )
+        assertEquals(PositionStatus.STOPPED_OUT, stopped.status)
+
+        val view = PortfolioCalculator.evaluate(
+            position = position(windowSessions = 4),
+            sessions = sessions,
+            currentPrice = 5.4,
+            priceBreaks = setOf(called.plusDays(2)),
+        )
+
+        assertTrue(view.priceScaleChanged)
+        assertTrue(view.open)
+        assertEquals(PositionStatus.OPEN, view.status)
+        // No return at all rather than a wrong one: the entry is in the old money and every price
+        // since is in the new, so any percentage would be of two different things.
+        assertNull(view.returnPct)
+        assertNull(view.exitPrice)
+    }
+
+    @Test
+    fun `a trade the app cannot read is not chased for being overdue`() {
+        // The deadline has passed and nothing closed the trade, which is ordinarily exactly what
+        // the overdue reminder exists for. Asking the user daily to account for a trade the app
+        // has just said it cannot read would be handing them the feed's problem.
+        val sessions = (0 until 4).map { day ->
+            if (day < 2) {
+                session(called.plusDays(day.toLong()), high = 10.4, low = 9.9)
+            } else {
+                session(called.plusDays(day.toLong()), high = 5.2, low = 5.0)
+            }
+        }
+
+        val view = PortfolioCalculator.evaluate(
+            position = position(windowSessions = 4, stopLoss = 1.0, target1 = 50.0, target2 = 60.0),
+            sessions = sessions,
+            currentPrice = 5.1,
+            today = called.plusDays(30),
+            priceBreaks = setOf(called.plusDays(2)),
+        )
+
+        assertTrue(view.priceScaleChanged)
+        assertFalse(view.ranOutOfTime)
+        assertFalse(view.overdue)
+        assertEquals(0L, view.overdueDays)
+    }
+
     /** Sessions that go nowhere, for the cases where only the entry and the mark matter. */
     private fun flat(price: Double) = listOf(session(called, high = price, low = price))
 

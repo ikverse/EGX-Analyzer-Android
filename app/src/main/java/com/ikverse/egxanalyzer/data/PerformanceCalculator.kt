@@ -29,6 +29,14 @@ object PerformanceCalculator {
         windowSessions: Int,
         sessionsFor: (ticker: String, from: LocalDate) -> List<DailySession>,
         pricedTickers: Set<String> = emptySet(),
+        /**
+         * The sessions on which each stock's prices changed scale.
+         *
+         * A call whose window contains one is reported rather than judged: a split is not a channel
+         * being wrong, and scoring one as a 50% collapse would take the rate away from whichever
+         * source happened to call that stock.
+         */
+        priceBreaksFor: (ticker: String) -> Set<LocalDate> = { emptySet() },
     ): PerformanceReport {
         val window = Scoring.clampWindow(windowSessions)
         if (pricesFrom == null) return PerformanceReport(windowSessions = window)
@@ -45,6 +53,7 @@ object PerformanceCalculator {
                         target2 = call.target2,
                         stopLoss = call.stopLoss,
                         windowSessions = window,
+                        priceBreaks = priceBreaksFor(call.ticker),
                     )
                     call.copy(
                         outcome = scored.outcome,

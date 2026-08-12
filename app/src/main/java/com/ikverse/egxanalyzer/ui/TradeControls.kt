@@ -33,6 +33,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
+import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
@@ -159,6 +160,7 @@ internal fun TradeAction(
             // a deadline that has passed with nothing recorded is worth seeing wherever the stock
             // is being looked at, not only on the tab the user has to remember to open.
             if (held.overdue) OverdueChip(held.overdueDays)
+            if (held.priceScaleChanged) PriceScaleChip()
             if (held.awaitingSale) {
                 // The estimate before the live price: they are the same while the trade is open,
                 // and once the deadline has closed it the estimate is the better guess at what the
@@ -203,6 +205,26 @@ internal fun OverdueChip(days: Long) {
             "Overdue $days ${days.dayWord()}",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+    }
+}
+
+/**
+ * Says that the stock split under this trade, so nothing here is being valued.
+ *
+ * Neutral rather than a warning colour, and deliberately the same neutral the unjudged outcomes wear
+ * in Insights: nothing has gone wrong with the trade, and nothing about it is known either. The
+ * wording is [Outcome.PRICE_BREAK]'s own label rather than a second phrasing of it, so a card and the
+ * report it came from can never end up describing this two different ways.
+ */
+@Composable
+internal fun PriceScaleChip() {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = CircleShape) {
+        Text(
+            Outcome.PRICE_BREAK.label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }

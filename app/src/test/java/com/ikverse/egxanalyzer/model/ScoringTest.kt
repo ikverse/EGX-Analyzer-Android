@@ -463,4 +463,107 @@ class ScoringTest {
 
         assertEquals(Outcome.OPEN, scored.outcome)
     }
+
+    /**
+     * A split inside the window, which is the whole point of the outcome.
+     *
+     * Without it this is the worst kind of wrong the app can be: the prices halve, every level the
+     * channel printed is suddenly far above the market, and the call is filed as a stop-out. The
+     * channel loses the call, the ranking moves, and nothing anywhere looks broken.
+     */
+    @Test
+    fun `a split inside the window is not a stop-out`() {
+        val split = sessions(10.0 to 9.5, 11.0 to 10.0, 5.5 to 5.0)
+
+        val judged = Scoring.score(
+            sessions = split,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+        // What it does without being told, and what it must stop doing.
+        assertEquals(Outcome.STOPPED, judged.outcome)
+
+        val scored = Scoring.score(
+            sessions = split,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+            priceBreaks = setOf(start.plusDays(2)),
+        )
+
+        assertEquals(Outcome.PRICE_BREAK, scored.outcome)
+        assertEquals(false, scored.outcome.judged)
+        // Nothing is reported that would have been measured across the break.
+        assertNull(scored.returnPct)
+        assertNull(scored.peakHigh)
+        assertNull(scored.troughLow)
+        assertNull(scored.settledOn)
+    }
+
+    @Test
+    fun `a split after the window closes leaves the call judged`() {
+        // The window is three sessions long here and the split lands later, so the levels and every
+        // price they were compared with are in the same money. Un-judging it would throw away a
+        // verdict the app is entitled to.
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 12.5 to 11.0, 14.5 to 12.0),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 3,
+            priceBreaks = setOf(start.plusDays(9)),
+        )
+
+        assertEquals(Outcome.FULL_HIT, scored.outcome)
+    }
+
+    @Test
+    fun `a split before the call was made does not touch it`() {
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 12.5 to 11.0, 14.5 to 12.0),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 3,
+            priceBreaks = setOf(start.minusDays(1)),
+        )
+
+        assertEquals(Outcome.FULL_HIT, scored.outcome)
+    }
+
+    @Test
+    fun `a split on the first session of the window still costs the call`() {
+        // Deliberate, and the one case where this can take a call it did not have to. The levels
+        // were printed before that session opened, so they are in the old money whatever the
+        // sessions say. A rate missing a call is honest; a rate counting a phantom loss is not.
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 12.5 to 11.0),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 3,
+            priceBreaks = setOf(start),
+        )
+
+        assertEquals(Outcome.PRICE_BREAK, scored.outcome)
+    }
+
+    @Test
+    fun `a stock with no break scores exactly as it did before`() {
+        // The default is empty, so every existing caller is unaffected.
+        val withoutArgument = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 12.5 to 11.0, 14.5 to 12.0),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+        val withEmptySet = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 12.5 to 11.0, 14.5 to 12.0),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+            priceBreaks = emptySet(),
+        )
+
+        assertEquals(withoutArgument, withEmptySet)
+        assertEquals(Outcome.FULL_HIT, withoutArgument.outcome)
+    }
 }

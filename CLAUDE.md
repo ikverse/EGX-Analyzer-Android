@@ -97,7 +97,14 @@ adjustable in Settings).
 - Prices that are not positive are stripped before scoring. A session in progress can arrive with a
   high of zero, which force-stopped every call on that stock.
 - **Judged** outcomes are full hit, partial hit, stopped, expired. Still open, entry never traded,
-  ambiguous and not priced say nothing about the channel and are excluded from every rate.
+  ambiguous, not priced and **prices changed scale** say nothing about the channel and are excluded
+  from every rate.
+- A **split or bonus issue inside the window** makes the call unjudgeable rather than a loss. The
+  levels were printed in the old money and every price after the split is quoted in the new, so a
+  2-for-1 reads as a 50% collapse and files the call as a stop-out — silently, and against whichever
+  channel happened to call that stock. A break dated on the window's *first* session still costs the
+  call, because the levels were printed before that session opened; that can take a call made after
+  the split, and it is the right direction to err in.
 - A channel needs `MINIMUM_JUDGED_TO_RANK` (5) settled calls before its rate is allowed to lead.
   Without it, two good calls beat a month of evidence.
 
@@ -290,6 +297,15 @@ phone only by plugging it into the machine that built it. It reads one public UR
   with, or signed by another key is deleted there rather than offered — all three end at an
   installer refusing it. Nothing else deletes downloads: `check()` used to clear them when GitHub
   offered nothing, which would throw away a good file over a release page briefly missing an entry.
+- **The installer is granted read access by package, not only by the intent flag.**
+  `FLAG_GRANT_READ_URI_PERMISSION` grants to the activity receiving the intent; Samsung's installer
+  takes it in `InstallStart`, hands off to `InstallLaunch`, and only then reads the APK to build its
+  staging session — by which point that grant is gone. It failed with *"Permission Denial: opening
+  provider androidx.core.content.FileProvider … that is not exported"* and **closed without a word**,
+  so the phone looked like it had ignored the button. The handler is resolved rather than named
+  (this device answers `com.google.android.packageinstaller`, others `com.android.packageinstaller`),
+  which needs the `<queries>` element in the manifest — package visibility hides the installer
+  otherwise and the lookup returns nothing. Revoked when the card leaves Ready.
 - The button reads **Allow installs** before the permission exists and **Install** after, refreshed
   by a `LifecycleResumeEffect` because returning from a system page does not recompose a card on its
   own. A button saying Install that opens a settings page is how someone grants the permission,
@@ -328,7 +344,7 @@ phone only by plugging it into the machine that built it. It reads one public UR
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 10.
+  `onUpgrade`. Currently 12.
 - **Migrations are tested** — `LocalDataStoreMigrationTest` runs under Robolectric, which supplies
   enough of Android for a real SQLite database in a plain unit test. It writes the version-9 table
   by hand and upgrades it, deliberately: a test that builds its "old" schema from today's code
@@ -343,6 +359,21 @@ phone only by plugging it into the machine that built it. It reads one public UR
   completes, so it never expires and never shows as overdue. A stock with an open trade is fetched
   from that trade's call date instead, which heals holes that already exist. An empty dated response
   falls back to `range=1y`, so the change cannot do worse than the fixed range it replaced.
+- **Every fetch is checked for a change of scale before it is stored** — `PriceSanity`, called from
+  `PriceRepository`. A move beyond 30% between two sessions no more than a week apart is not
+  something the exchange permits, so it is a corporate action: a split or a bonus issue. The check
+  runs across the **boundary between what is stored and what was just fetched**, because that is
+  where it always falls — incremental fetching is what leaves the two halves in different money, and
+  Yahoo rewrites its own history when a stock splits. So the first response is to **refetch the
+  whole year and replace the stored series** (`deleteSessionsFrom` + `clearPriceBreaks`), which
+  heals it. Only a break that survives that is recorded, in `price_events`, and it is recorded
+  rather than corrected: guessing a ratio and rescaling a year of prices would be the app inventing
+  history. Breaks are **local and deliberately not synced** — every device fetches the same public
+  feed and reaches the same conclusion, and a device's opinion about a feed is not evidence.
+- **A frozen feed is not the same as an unpriced stock, and is harder to see.** `unpriced` means no
+  history at all; `stale` means the series answers every request while its newest session stays put.
+  That has happened here — the ISIN migration — and nothing noticed. Seven days, which clears the
+  Friday–Saturday weekend plus a public holiday.
 - Scrollbar overlays must be applied **outside** the scrolling node, or they are measured against
   the content and slide away with it.
 - `NavigationSuiteScaffoldLayout` does **not** consume window insets for its content; the full

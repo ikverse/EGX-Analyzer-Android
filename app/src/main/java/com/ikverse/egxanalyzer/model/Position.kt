@@ -157,6 +157,15 @@ data class PositionView(
      * expires, so the pill starts the day after - expiring today is not being late.
      */
     val overdueDays: Long,
+    /**
+     * The stock's prices changed scale inside this trade's window - a split, or a bonus issue.
+     *
+     * The trade is neither closed nor valued while this is true, and it is not chased for being
+     * overdue: the entry was paid in the old money and every price since is quoted in the new, so
+     * a return measured across it would be a percentage of two different things. The card says so
+     * instead, which is the one honest thing available.
+     */
+    val priceScaleChanged: Boolean = false,
 ) {
     val ticker: String get() = position.ticker
     val recommendationDate: LocalDate get() = position.recommendationDate

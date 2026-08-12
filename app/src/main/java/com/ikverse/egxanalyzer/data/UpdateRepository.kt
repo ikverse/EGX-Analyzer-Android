@@ -240,12 +240,42 @@ class UpdateRepository(
         Uri.parse("package:${context.packageName}"),
     )
 
-    /** Hands the APK to Android's installer, which does the asking and the installing. */
+    /**
+     * Hands the APK to Android's installer, which does the asking and the installing.
+     *
+     * The intent flag alone is not enough, and this is the whole of why pressing Install used to do
+     * nothing at all. `FLAG_GRANT_READ_URI_PERMISSION` grants to the activity that receives the
+     * intent; Samsung's installer takes it in `InstallStart`, hands off to `InstallLaunch`, and only
+     * then reads the file to build its staging session - by which point that grant is gone. It fails
+     * with "Permission Denial: opening provider androidx.core.content.FileProvider ... that is not
+     * exported" and closes without a word, so the phone looks like it ignored the button.
+     *
+     * Granting to the package outlives the handoff. It is revoked in [revokeInstallAccess] once the
+     * install is no longer on offer.
+     */
     fun installIntent(file: File): Intent {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}$AUTHORITY_SUFFIX", file)
-        return Intent(Intent.ACTION_VIEW)
+        val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, APK_MIME_TYPE)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // Whoever actually handles it, rather than a name: this device answers with
+        // com.google.android.packageinstaller and others with com.android.packageinstaller.
+        context.packageManager.resolveActivity(intent, 0)?.activityInfo?.packageName?.let { installer ->
+            context.grantUriPermission(installer, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        return intent
+    }
+
+    /** Takes back what [installIntent] granted, once there is nothing left to install. */
+    fun revokeInstallAccess(file: File) {
+        runCatching {
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}$AUTHORITY_SUFFIX",
+                file,
+            )
+            context.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
     }
 
     /** The release page, for reading what changed somewhere with more room than a settings card. */

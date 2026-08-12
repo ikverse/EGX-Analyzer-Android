@@ -647,7 +647,14 @@ private fun UpdateControls(appState: AppState) {
                         } else {
                             appState.installPermissionIntent()
                         }
-                        intent?.let(context::startActivity)
+                        // A refusal here was invisible: Android closed the installer without a word
+                        // and the phone looked like it had ignored the button.
+                        runCatching { intent?.let(context::startActivity) }.onFailure { error ->
+                            appState.reportUpdateProblem(
+                                error.message?.takeIf(String::isNotBlank)
+                                    ?: "Android would not open the installer.",
+                            )
+                        }
                     },
                     // Two taps, and the label says which one this is. "Install" on a button that
                     // opens a settings page is how someone grants the permission, comes back, and

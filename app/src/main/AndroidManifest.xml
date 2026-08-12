@@ -10,6 +10,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!-- Package visibility hides every other app from this one since Android 11, and that includes
+         the installer. Without this, asking which package will handle the APK returns nothing, and
+         the read access it needs to build its staging session is granted to nobody. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+    </queries>
+
     <application
         android:name=".EgxApplication"
         android:allowBackup="false"

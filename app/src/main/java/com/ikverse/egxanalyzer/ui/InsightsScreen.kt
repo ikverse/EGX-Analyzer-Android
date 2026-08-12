@@ -257,6 +257,12 @@ private fun ScoredCall.reason(windowSessions: Int): String {
         Outcome.ENTRY_NOT_REACHED -> "The buy zone never traded in the window."
         Outcome.OPEN -> "Still inside its window, nothing settled yet."
         Outcome.UNPRICED -> "No stored prices for this stock yet."
+        // Named as the company's doing rather than the feed's, because that is what it usually is,
+        // and because a line blaming the data would read as the app apologising for itself when the
+        // stock has simply split.
+        Outcome.PRICE_BREAK ->
+            "The share price changed scale inside the window - a split or a bonus issue - so the " +
+                "levels and the prices are in different money. Not counted for or against."
         Outcome.AMBIGUOUS -> when (ambiguity) {
             Ambiguity.ENTRY_AND_TARGET -> "Opened above the buy zone, target hit that day."
             // Scored before the reason was recorded, so only the fact survives.

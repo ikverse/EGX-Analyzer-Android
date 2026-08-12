@@ -61,6 +61,12 @@ object Scoring {
         target2: Double?,
         stopLoss: Double?,
         windowSessions: Int,
+        /**
+         * Sessions on which this stock's prices changed scale - a split, a bonus issue.
+         *
+         * Empty by default, so a caller with no price history to consult scores exactly as before.
+         */
+        priceBreaks: Set<LocalDate> = emptySet(),
     ): Scored {
         val window = clampWindow(windowSessions)
         // A session in progress can arrive with a high or low of zero. Stored once, it stopped
@@ -68,6 +74,24 @@ object Scoring {
         // besides. A price that is not positive is not a price, whatever the feed says.
         val considered = sessions.map(DailySession::traded).take(window)
         if (considered.isEmpty()) return Scored(Outcome.UNPRICED, null, null, 0, null, null, null, null, null)
+
+        // A split inside the window puts the levels and the prices in different money, and every
+        // comparison below - the entry, the targets, the stop - is then between two numbers that
+        // were never the same kind of thing. Judged on it, a 2-for-1 split reads as a 50% collapse
+        // and the call is recorded as a stop-out the channel never earned.
+        //
+        // The test is `>=` rather than `>` on the first session deliberately. A break dated on the
+        // very first session of the window still leaves the call's own levels on the old scale,
+        // since they were printed before that session opened. It can cost a call that was genuinely
+        // made after the split, and that is the direction to err in: a rate that is missing a call
+        // is honest, a rate that counts a phantom loss is not.
+        val breakInside = priceBreaks.any { it >= considered.first().date && it <= considered.last().date }
+        if (breakInside) {
+            // No peak, no trough, no return: every one of them would be measured across the break.
+            return Scored(
+                Outcome.PRICE_BREAK, null, null, considered.size, null, null, null, null, null,
+            )
+        }
 
         // A call quoting only one target has nothing further to reach, so that target is the full
         // one rather than a partial step toward a second that was never named.
@@ -283,6 +307,15 @@ enum class Outcome(val label: String, val judged: Boolean) {
     OPEN("Still open", judged = false),
     AMBIGUOUS("Ambiguous", judged = false),
     UNPRICED("No price data", judged = false),
+
+    /**
+     * The stock's prices changed scale inside the window - a split, or a bonus issue.
+     *
+     * Unjudged for the same reason as the rest: it says nothing about whether the source was right.
+     * A company handing out bonus shares halves the printed price without anyone being wrong about
+     * anything, and a channel must never lose a call to it.
+     */
+    PRICE_BREAK("Prices changed scale", judged = false),
     ;
 
     /** Reached the second target. */

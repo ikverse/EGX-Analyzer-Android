@@ -60,6 +60,7 @@ class LocalDataStore(context: Context) :
             )""",
         )
         db.createDailyPrices()
+        db.createPriceEvents()
         db.createPendingDeletions()
         db.createWordingRules()
         db.createPromptVersions()
@@ -75,6 +76,7 @@ class LocalDataStore(context: Context) :
             )""",
         )
         db.createDailyPrices()
+        db.createPriceEvents()
         db.createPendingDeletions()
         db.createWordingRules()
         db.createPromptVersions()
@@ -436,6 +438,128 @@ class LocalDataStore(context: Context) :
         }
         if (!hasOpen) execSQL("ALTER TABLE daily_prices ADD COLUMN open REAL")
     }
+
+    /**
+     * The sessions on which a stock's prices changed scale.
+     *
+     * Kept rather than recomputed on the way past, because scoring has to consult it on every
+     * recompute and re-deriving it would mean reading a year of prices per stock to answer a
+     * question whose answer changes about once a decade per company.
+     *
+     * Local, and deliberately not synced. Prices are fetched per device from the same public feed,
+     * so each device reaches the same conclusion on its own; sending this through the sync channel
+     * would put a device's opinion about a feed into another device's evidence.
+     */
+    private fun SQLiteDatabase.createPriceEvents() = execSQL(
+        """CREATE TABLE IF NOT EXISTS price_events (
+            ticker TEXT NOT NULL,
+            session_date TEXT NOT NULL,
+            previous_close REAL NOT NULL,
+            opening_price REAL NOT NULL,
+            detected_at INTEGER NOT NULL,
+            PRIMARY KEY (ticker, session_date)
+        )""",
+    )
+
+    /** Records a change of scale, replacing any earlier reading of the same session. */
+    fun savePriceBreaks(breaks: List<PriceBreak>) {
+        if (breaks.isEmpty()) return
+        writableDatabase.beginTransaction()
+        try {
+            breaks.forEach { event ->
+                writableDatabase.insertWithOnConflict(
+                    "price_events",
+                    null,
+                    ContentValues().apply {
+                        put("ticker", event.ticker)
+                        put("session_date", event.date.toString())
+                        put("previous_close", event.previousClose)
+                        put("opening_price", event.openingPrice)
+                        put("detected_at", System.currentTimeMillis())
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            }
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    /**
+     * Forgets every change of scale recorded for one stock.
+     *
+     * Called before a healed series is stored: the whole history has just been refetched onto one
+     * scale, so a break found against the old mixture is no longer a fact about what is on disk.
+     */
+    fun clearPriceBreaks(ticker: String) {
+        writableDatabase.delete("price_events", "ticker = ?", arrayOf(ticker))
+    }
+
+    /** Every stock that has one, so a recompute reads them once rather than per call. */
+    fun priceBreakDates(): Map<String, Set<LocalDate>> = readableDatabase
+        .query("price_events", arrayOf("ticker", "session_date"), null, null, null, null, null)
+        .use { cursor ->
+            buildMap<String, MutableSet<LocalDate>> {
+                while (cursor.moveToNext()) {
+                    val date = runCatching { LocalDate.parse(cursor.getString(1)) }.getOrNull()
+                        ?: continue
+                    getOrPut(cursor.getString(0)) { mutableSetOf() }.add(date)
+                }
+            }
+        }
+
+    /**
+     * The newest session stored for a stock, prices and all.
+     *
+     * The date alone is what a fetch window needs; a scale check needs the price beside it, because
+     * the break it is looking for falls exactly between this session and the next one fetched.
+     */
+    fun latestSession(ticker: String): DailySession? = readableDatabase.query(
+        "daily_prices",
+        arrayOf("ticker", "session_date", "high", "low", "close", "volume", "open"),
+        "ticker = ?",
+        arrayOf(ticker),
+        null,
+        null,
+        "session_date DESC",
+        "1",
+    ).use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+        DailySession(
+            ticker = cursor.getString(0),
+            date = runCatching { LocalDate.parse(cursor.getString(1)) }.getOrNull()
+                ?: return@use null,
+            high = cursor.nullableDouble(2),
+            low = cursor.nullableDouble(3),
+            close = cursor.nullableDouble(4),
+            volume = cursor.nullableDouble(5),
+            open = cursor.nullableDouble(6),
+        )
+    }
+
+    /**
+     * Drops everything stored for one stock.
+     *
+     * Only ever used to replace a series that has changed scale partway through, and deliberately
+     * the whole series rather than the part the refetch covers. The refetch reaches back a year;
+     * leaving anything older than that in place would leave the old money sitting behind the new
+     * with a seam between them, which is the same break in a different position - found again on the
+     * next refresh, healed again, and never settling. Prices older than a year cannot be refetched
+     * and cannot be compared with a level printed after the split, so there is nothing to keep.
+     */
+    fun deleteSessions(ticker: String) {
+        writableDatabase.delete("daily_prices", "ticker = ?", arrayOf(ticker))
+    }
+
+    /**
+     * Everything stored for one stock, oldest first.
+     *
+     * Dates are ISO strings, so the earliest possible one compares below every real session and the
+     * query needs no special case for "from the beginning".
+     */
+    fun allSessions(ticker: String): List<DailySession> =
+        sessionsFrom(ticker, LocalDate.of(1900, 1, 1))
 
     /** Sessions for one stock from the day a call was made onward, oldest first. */
     fun sessionsFrom(ticker: String, from: LocalDate): List<DailySession> = readableDatabase.query(
@@ -1034,11 +1158,11 @@ class LocalDataStore(context: Context) :
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
         /**
-         * 11 rather than 10 because a phone already ran a 10.
+         * 12 for `price_events`, which records where a stock's prices changed scale.
          *
-         * `onUpgrade` fires only when the stored number is lower than this one, so adding columns
+         * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 11
+        const val DATABASE_VERSION = 12
     }
 }

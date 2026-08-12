@@ -440,6 +440,7 @@ private fun PositionCard(
                 ) {
                     if (view.overdue) OverdueChip(view.overdueDays)
                     if (view.keptOpen) KeptOpenChip()
+                    if (view.priceScaleChanged) PriceScaleChip()
                 }
                 position.keepOpenNote?.takeIf(String::isNotBlank)?.let { why ->
                     Text(
