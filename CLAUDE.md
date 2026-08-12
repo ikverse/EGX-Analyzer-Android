@@ -239,6 +239,16 @@ Everything travels through a private Telegram channel titled `EGX Analyzer sync`
 - Fields an older app does not understand are kept and written back untouched. They are **stored**,
   in the `unknown` column, rather than only surviving inside one sync — before that, `publishPosition`
   sent `{}` and this device erased a newer version's data simply by editing a trade's price.
+- **A Telegram database with no key left to open it is deleted, not handed a new one.** TDLib's
+  database is encrypted with a 32-byte key in Android Keystore; if the key goes missing while the
+  database survives, nothing on the device will ever open it — and generating a replacement made it
+  permanent, because the new key was then stored as though it were the right one. The tablet sat on
+  "error 401: Wrong database encryption key" every launch with no way out but clearing its storage.
+  Now the orphaned directory goes when the key has to be generated, and a 401 naming an encryption
+  key wipes it and re-initializes once. It costs a QR sign-in and nothing else: no report, trade,
+  rule or setting has ever lived in `filesDir/tdlib`. `isWrongDatabaseKey` checks the **message**,
+  not only the code — 401 is also what an ordinary signed-out session reports, and wiping over one
+  of those would sign someone out for no reason.
 - `searchChatsOnServer` does not find private supergroups. Read `chatCache` instead — getting this
   wrong created three duplicate sync channels in the owner's Telegram.
 - **Settings travel as one revision each**, newest wins, tie broken by device — the same rule as

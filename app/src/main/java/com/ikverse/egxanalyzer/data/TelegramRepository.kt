@@ -883,25 +883,64 @@ class TelegramRepository(
     private suspend fun initializeTdlib(apiId: Int, apiHash: String) {
         setState(TelegramAuthStep.INITIALIZING, "Initializing encrypted Telegram storage…")
         val encryptionKey = databaseEncryptionKey()
-        execute {
-            client.setTdlibParameters(
-                useTestDc = false,
-                databaseDirectory = File(context.filesDir, "tdlib/database").apply(File::mkdirs).path,
-                filesDirectory = File(context.filesDir, "tdlib/files").apply(File::mkdirs).path,
-                databaseEncryptionKey = encryptionKey,
-                useFileDatabase = true,
-                useChatInfoDatabase = true,
-                useMessageDatabase = true,
-                useSecretChats = false,
-                apiId = apiId,
-                apiHash = apiHash,
-                systemLanguageCode = context.resources.configuration.locales[0].toLanguageTag(),
-                deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
-                systemVersion = "Android ${Build.VERSION.RELEASE}",
-                applicationVersion = "0.1.0",
+        try {
+            val outcome = setTdlibParameters(apiId, apiHash, encryptionKey)
+            if (outcome !is TdlResult.Failure) return
+            if (!isWrongDatabaseKey(outcome.code, outcome.message)) {
+                showError(IllegalStateException("Telegram error ${outcome.code}: ${outcome.message}"))
+                return
+            }
+            // The database on disk was written with a key this device no longer holds, so nothing
+            // will ever open it again - and the app used to report that on every launch forever,
+            // with no way out but clearing its storage. A new session costs one sign-in: no report,
+            // trade, rule or setting has ever been kept in there.
+            setState(
+                TelegramAuthStep.INITIALIZING,
+                "Telegram's local database could not be opened, so it has been reset. " +
+                    "Sign in again to continue.",
             )
+            wipeTelegramDatabase()
+            val retried = setTdlibParameters(apiId, apiHash, encryptionKey)
+            if (retried is TdlResult.Failure) {
+                showError(IllegalStateException("Telegram error ${retried.code}: ${retried.message}"))
+            }
+        } finally {
+            encryptionKey.fill(0)
         }
-        encryptionKey.fill(0)
+    }
+
+    private suspend fun setTdlibParameters(
+        apiId: Int,
+        apiHash: String,
+        encryptionKey: ByteArray,
+    ): TdlResult<*> = client.setTdlibParameters(
+        useTestDc = false,
+        databaseDirectory = File(tdlibDirectory(), "database").apply(File::mkdirs).path,
+        filesDirectory = File(tdlibDirectory(), "files").apply(File::mkdirs).path,
+        databaseEncryptionKey = encryptionKey,
+        useFileDatabase = true,
+        useChatInfoDatabase = true,
+        useMessageDatabase = true,
+        useSecretChats = false,
+        apiId = apiId,
+        apiHash = apiHash,
+        systemLanguageCode = context.resources.configuration.locales[0].toLanguageTag(),
+        deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
+        systemVersion = "Android ${Build.VERSION.RELEASE}",
+        applicationVersion = "0.1.0",
+    )
+
+    private fun tdlibDirectory() = File(context.filesDir, "tdlib")
+
+    /**
+     * Throws away the local Telegram session, and nothing else.
+     *
+     * Only TDLib's own database and its cached media live in here. Everything the app keeps is in
+     * SQLite beside it, and in the sync channel besides - which is what makes this recoverable by
+     * signing in again rather than by losing anything.
+     */
+    private fun wipeTelegramDatabase() {
+        tdlibDirectory().deleteRecursively()
     }
 
     private fun databaseEncryptionKey(): ByteArray {
@@ -911,6 +950,13 @@ class TelegramRepository(
             } finally {
                 stored.fill('\u0000')
             }
+        }
+        // Nothing stored, so whatever is on disk was encrypted with a key that no longer exists and
+        // nothing here will ever open it. Handing TDLib a fresh key over the top of it is what
+        // produced "error 401: Wrong database encryption key" on every launch afterwards -
+        // permanently, because the fresh key was then saved as though it were the right one.
+        if (telegramDatabaseIsOrphaned(hasStoredKey = false, databaseExists = tdlibDirectory().exists())) {
+            wipeTelegramDatabase()
         }
         val generated = ByteArray(32).also(SecureRandom()::nextBytes)
         secretStore.saveSecret(
@@ -1055,3 +1101,25 @@ internal fun String.asPreview(): String {
     }
     return preview.toString()
 }
+
+/**
+ * Whether a Telegram database on disk is one nobody can open.
+ *
+ * A database is encrypted with a 32-byte key kept in Android Keystore. If that key is ever missing
+ * while the database is not, no combination of anything on the device opens it - and generating a
+ * replacement makes it permanent, because the new key is then stored as though it were the right
+ * one. So the database goes instead. Nothing is lost with it: TDLib's directory holds the session
+ * and its cached media, never a report, a trade, a rule or a setting.
+ */
+fun telegramDatabaseIsOrphaned(hasStoredKey: Boolean, databaseExists: Boolean): Boolean =
+    !hasStoredKey && databaseExists
+
+/**
+ * Whether TDLib refused because the database was written with a different key.
+ *
+ * 401 alone is not enough - it is Telegram's code for unauthorized, which a signed-out session
+ * reports too. The message is what separates a session that has ended from a database that cannot
+ * be read, and only the second one is worth throwing anything away over.
+ */
+fun isWrongDatabaseKey(code: Int, message: String): Boolean =
+    code == 401 && message.contains("encryption key", ignoreCase = true)
