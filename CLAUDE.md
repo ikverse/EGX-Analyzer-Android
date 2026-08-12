@@ -321,6 +321,13 @@ phone only by plugging it into the machine that built it. It reads one public UR
 - **Two deliberate taps, Download then Install**, in Settings → About. The second hands the APK to
   Android's package installer, which asks again in its own words. `REQUEST_INSTALL_PACKAGES` only
   makes the app eligible to ask; the user still grants "install unknown apps" on a system page.
+- **A download is finished only when its byte count matches the release.** A connection closed early
+  reads as end-of-file with no exception, so "the stream ended" and "the file arrived" were the same
+  event: a truncated APK was renamed to a finished one, failed its signature check because half an
+  APK has no certificates, and the app reported that the release was **signed with a different key**
+  — true of nothing, and it sent the search a long way from the network fault behind it. Hence
+  `DownloadedApk`: damaged and wrong-key are separate answers, because one means fetch it again and
+  the other means uninstall by hand.
 - **A download resumes and retries.** 70MB on a phone loses its connection — a Wi-Fi handover, a
   lift, a screen locking — and "Software caused connection abort" used to delete the part file and
   start from zero, so the download had to win a coin toss in one go. The part file is the progress

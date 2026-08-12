@@ -2,6 +2,8 @@ package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.AppVersion
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -220,6 +222,33 @@ class UpdateReleaseTest {
         assertEquals(75_000_000L, totalBytes(contentLength = 75_000_000, resumeFrom = 0, offeredSize = 75_000_000))
         // A response that will not say falls back to what the release said it was.
         assertEquals(75_000_000L, totalBytes(contentLength = -1, resumeFrom = 0, offeredSize = 75_000_000))
+    }
+
+    /**
+     * The check that was missing, and what it cost.
+     *
+     * A connection closed early reads as end-of-file with no exception, so a truncated file looked
+     * exactly like a finished one. It was renamed to a complete APK, failed its signature check
+     * because half an APK has no certificates, and the app reported that the release was signed
+     * with a different key - which was true of nothing at all.
+     */
+    @Test
+    fun `a download shorter than the release said is not finished`() {
+        assertTrue(downloadIsShort(bytesOnDisk = 50_000_000, expectedBytes = 75_000_000))
+    }
+
+    @Test
+    fun `a download of the size the release said is finished`() {
+        assertFalse(downloadIsShort(bytesOnDisk = 75_000_000, expectedBytes = 75_000_000))
+        // Longer than stated is not short. Whatever that is, resuming would not mend it.
+        assertFalse(downloadIsShort(bytesOnDisk = 80_000_000, expectedBytes = 75_000_000))
+    }
+
+    /** A release that stated no size cannot be checked, and unverifiable is not failed. */
+    @Test
+    fun `a release with no size to check against is left alone`() {
+        assertFalse(downloadIsShort(bytesOnDisk = 1, expectedBytes = 0))
+        assertFalse(downloadIsShort(bytesOnDisk = 0, expectedBytes = 0))
     }
 
     @Test

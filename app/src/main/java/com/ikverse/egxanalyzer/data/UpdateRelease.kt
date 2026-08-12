@@ -157,6 +157,37 @@ fun downloadedUpdateVersion(fileName: String, currentVersionName: String): AppVe
     return downloaded.takeIf { it > current }
 }
 
+/**
+ * Whether a download that appears to have ended is actually incomplete.
+ *
+ * A connection closed early reads as end-of-file with no exception, so "the stream ended" and "the
+ * file arrived" are the same event to a reader. The release states the byte count, which is the
+ * only thing that tells them apart. A release that stated no size at all cannot be checked, and an
+ * unverifiable download is not a failed one.
+ */
+fun downloadIsShort(bytesOnDisk: Long, expectedBytes: Long): Boolean =
+    expectedBytes > 0 && bytesOnDisk < expectedBytes
+
+/**
+ * What a downloaded APK turned out to be.
+ *
+ * Damaged and wrong-key were one answer before, and it was the alarming one: a truncated file
+ * cannot be read, an unreadable file has no certificates, and no certificates compares unequal to
+ * this build's. So an ordinary interrupted download reported that the release was signed by someone
+ * else - which was true of nothing, and sent the search a long way from the network fault that
+ * caused it.
+ */
+enum class DownloadedApk {
+    /** Signed by the key this build was signed with. The only one worth installing. */
+    MATCHES,
+
+    /** Readable, and signed by something else. Nothing to do but uninstall by hand. */
+    WRONG_KEY,
+
+    /** Not a readable APK at all. Fetch it again. */
+    DAMAGED,
+}
+
 private const val APK_SUFFIX = ".apk"
 private const val UNIVERSAL_SUFFIX = "-universal$APK_SUFFIX"
 private const val DOWNLOAD_PREFIX = "egx-analyzer-"

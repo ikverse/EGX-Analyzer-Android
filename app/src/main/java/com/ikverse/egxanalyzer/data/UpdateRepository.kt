@@ -97,7 +97,7 @@ class UpdateRepository(
         val version = downloadedUpdateVersion(file.name, currentVersionName)
         // The signature last, because it digests the whole file - no point paying for 70MB of it to
         // learn the name was wrong.
-        if (version == null || !signedLikeThisApp(file)) {
+        if (version == null || inspect(file) != DownloadedApk.MATCHES) {
             file.delete()
             return@withContext null
         }
@@ -135,6 +135,17 @@ class UpdateRepository(
             attempt++
             try {
                 fetchInto(partial, update, onProgress)
+                // A stream that ends is not a download that finished. A connection closed early
+                // reads as end-of-file with no exception at all, so this used to rename a half APK
+                // to a finished one - and the signature check then failed on it and reported a
+                // wrong signing key, which was true of nothing and sent the search somewhere else
+                // entirely. The release says how many bytes there should be; this is that check.
+                if (downloadIsShort(partial.length(), update.sizeBytes)) {
+                    throw IOException(
+                        "The download ended early at ${byteLabel(partial.length())} of " +
+                            "${byteLabel(update.sizeBytes)}.",
+                    )
+                }
                 break
             } catch (error: HttpFailure) {
                 // The server said no, and it will say no again. Rate limits and missing files are
@@ -143,8 +154,8 @@ class UpdateRepository(
             } catch (error: IOException) {
                 if (attempt >= DOWNLOAD_ATTEMPTS) {
                     throw IOException(
-                        "The download stopped at ${byteLabel(partial.length())}. Press Download " +
-                            "to carry on from there.",
+                        "The download stopped at ${byteLabel(partial.length())} of " +
+                            "${byteLabel(update.sizeBytes)}. Press Download to carry on from there.",
                         error,
                     )
                 }
@@ -218,21 +229,30 @@ class UpdateRepository(
      * mismatch is otherwise a dialog saying "App not installed" with no reason given, which looks
      * like a broken download and invites someone to try again forever.
      */
-    fun signedLikeThisApp(file: File): Boolean = runCatching {
-        val installed = context.packageManager
-            .getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-            .signingInfo
-            ?.apkContentsSigners
-            ?.digests()
-            .orEmpty()
-        val downloaded = context.packageManager
-            .getPackageArchiveInfo(file.path, PackageManager.GET_SIGNING_CERTIFICATES)
-            ?.signingInfo
-            ?.apkContentsSigners
-            ?.digests()
-            .orEmpty()
-        installed.isNotEmpty() && installed == downloaded
-    }.getOrDefault(false)
+    fun inspect(file: File): DownloadedApk {
+        val downloaded = runCatching {
+            context.packageManager
+                .getPackageArchiveInfo(file.path, PackageManager.GET_SIGNING_CERTIFICATES)
+                ?.signingInfo
+                ?.apkContentsSigners
+                ?.digests()
+        }.getOrNull().orEmpty()
+        // Nothing to read means nothing arrived intact, which is a different problem with a
+        // different answer: fetch it again, rather than go and uninstall the app by hand.
+        if (downloaded.isEmpty()) return DownloadedApk.DAMAGED
+        val installed = runCatching {
+            context.packageManager
+                .getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                .signingInfo
+                ?.apkContentsSigners
+                ?.digests()
+        }.getOrNull().orEmpty()
+        return if (installed.isNotEmpty() && installed == downloaded) {
+            DownloadedApk.MATCHES
+        } else {
+            DownloadedApk.WRONG_KEY
+        }
+    }
 
     /** True once the user has allowed this app to install apps. Android asks; nothing else can. */
     fun canInstall(): Boolean = context.packageManager.canRequestPackageInstalls()

@@ -21,6 +21,7 @@ import com.ikverse.egxanalyzer.data.PromptComposer
 import com.ikverse.egxanalyzer.data.PromptStore
 import com.ikverse.egxanalyzer.model.PromptVersion
 import com.ikverse.egxanalyzer.data.AvailableUpdate
+import com.ikverse.egxanalyzer.data.DownloadedApk
 import com.ikverse.egxanalyzer.data.SettingsSnapshot
 import com.ikverse.egxanalyzer.data.SyncedPosition
 import com.ikverse.egxanalyzer.data.SyncedPromptVersion
@@ -1038,15 +1039,27 @@ class AppState(
                 val file = updates.download(update) { progress ->
                     updateState = UpdateState.Downloading(update, progress)
                 }
-                if (updates.signedLikeThisApp(file)) {
-                    UpdateState.Ready(update, file)
-                } else {
-                    file.delete()
-                    UpdateState.Failed(
-                        "Version ${update.versionName} is signed with a different key, so Android " +
-                            "will not install it over this build. Uninstall this one and install " +
-                            "that release by hand.",
-                    )
+                when (updates.inspect(file)) {
+                    DownloadedApk.MATCHES -> UpdateState.Ready(update, file)
+                    // Damaged and wrong-key used to be the same sentence, and it was this one -
+                    // so an interrupted download accused the release of being signed by someone
+                    // else, which was true of nothing and sent the search a long way from the
+                    // network fault that caused it.
+                    DownloadedApk.WRONG_KEY -> {
+                        file.delete()
+                        UpdateState.Failed(
+                            "Version ${update.versionName} is signed with a different key, so " +
+                                "Android will not install it over this build. Uninstall this one " +
+                                "and install that release by hand.",
+                        )
+                    }
+                    DownloadedApk.DAMAGED -> {
+                        file.delete()
+                        UpdateState.Failed(
+                            "The download of version ${update.versionName} arrived damaged. " +
+                                "Press Download to fetch it again.",
+                        )
+                    }
                 }
             }.getOrElse { error ->
                 UpdateState.Failed(
