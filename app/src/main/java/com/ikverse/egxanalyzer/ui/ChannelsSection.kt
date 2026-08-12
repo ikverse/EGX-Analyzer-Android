@@ -2,22 +2,21 @@ package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -27,19 +26,26 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.ChannelSelection
+import com.ikverse.egxanalyzer.model.ChatKind
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import kotlinx.coroutines.launch
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
@@ -183,8 +189,15 @@ private fun TelegramChats(appState: AppState) {
     // only competed with the chats for the top of the card.
     SectionCard(title = "Telegram", icon = Icons.Outlined.Forum) {
         if (chats.isNotEmpty()) {
+            // Only the figure is coloured. The whole line in primary would read as a message about
+            // something having gone right, where all it is saying is how many are ticked.
             Text(
-                "$selectedCount of ${chats.size} chats selected",
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                        append(selectedCount.toString())
+                    }
+                    append(" of ${chats.size} chats selected")
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -207,9 +220,9 @@ private fun TelegramChats(appState: AppState) {
                     Modifier
                         .heightIn(max = ChatListMaxHeight)
                         .scrollableColumn(),
-                    verticalArrangement = Arrangement.spacedBy(Space.xs),
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
-                    ResponsiveRows(chats, columns, spacing = Space.xs) { chat, cardModifier ->
+                    ResponsiveRows(chats, columns, spacing = Space.s) { chat, cardModifier ->
                         ChannelCard(chat, appState, chats, cardModifier)
                     }
                 }
@@ -342,7 +355,7 @@ private fun ChannelCard(
             allChannels.count { it.baseName() == channel.baseName() } > 1
     }
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
             .selectable(
@@ -354,51 +367,91 @@ private fun ChannelCard(
             containerColor = if (channel.selected) {
                 MaterialTheme.colorScheme.primaryContainer
             } else {
-                MaterialTheme.colorScheme.surfaceContainer
+                // A step above the card behind it. At surfaceContainer the two were the same
+                // colour with no hairline between them, so a dozen chats read as one slab.
+                MaterialTheme.colorScheme.surfaceContainerHigh
             },
         ),
         shape = MaterialTheme.shapes.medium,
     ) {
         Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            Modifier.padding(Space.m),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            Checkbox(checked = channel.selected, onCheckedChange = null)
-            Spacer(Modifier.width(12.dp))
+            KindBadge(channel)
             Column(Modifier.weight(1f)) {
                 // Not truncated: chats can differ only by a trailing emoji, so cutting the name
                 // short can make two different chats look identical.
                 Text(channel.displayName, style = MaterialTheme.typography.titleSmall)
+                // Stated for every chat, channels included. Shown only on the ones that were not
+                // channels, it read as a warning about those rather than as what kind of chat this
+                // is - and the line it replaces, the chat's id, is a number no one here has ever
+                // needed to read.
                 Text(
-                    channel.id.toString(),
-                    style = if (ambiguous) {
-                        MaterialTheme.typography.labelLarge
+                    channel.kind.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (channel.selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
                     } else {
-                        MaterialTheme.typography.bodySmall
-                    },
-                    color = when {
-                        ambiguous -> MaterialTheme.colorScheme.tertiary
-                        channel.selected -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
-                if (!channel.isChannel) {
-                    Text(
-                        channel.kind.label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                // The one place the id still earns its keep: two rows carrying the same words and
+                // the same kind cannot be told apart by anything else on the card.
                 if (ambiguous) {
                     Text(
-                        "Another chat has the same name",
+                        "Another chat has the same name · ${channel.id}",
                         style = MaterialTheme.typography.labelSmall,
+                        fontFamily = TabularFigures,
                         color = MaterialTheme.colorScheme.tertiary,
                     )
                 }
             }
+            Checkbox(checked = channel.selected, onCheckedChange = null)
         }
     }
+}
+
+/**
+ * The chat's kind as a glyph, at the head of its row.
+ *
+ * Selection is easiest to read down the left edge, where every row starts, rather than from a tick
+ * at the right; the badge carries it as a fill so the checkbox is confirming what the row already
+ * says. It repeats the kind named beside it on purpose - the word is what is precise, the glyph is
+ * what makes a list of a dozen chats sortable at a glance.
+ */
+@Composable
+private fun KindBadge(channel: ChannelSelection) {
+    Surface(
+        shape = CircleShape,
+        color = if (channel.selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+    ) {
+        Icon(
+            channel.kind.icon(),
+            contentDescription = null,
+            tint = if (channel.selected) {
+                MaterialTheme.colorScheme.onPrimary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            modifier = Modifier.padding(BadgePadding).size(IconSize.Inline),
+        )
+    }
+}
+
+/** Big enough to read as an avatar rather than a stray icon, small enough for a two-line row. */
+private val BadgePadding = 8.dp
+
+private fun ChatKind.icon(): ImageVector = when (this) {
+    ChatKind.CHANNEL -> Icons.Outlined.Campaign
+    ChatKind.SUPERGROUP -> Icons.Outlined.Groups
+    ChatKind.GROUP -> Icons.Outlined.Group
+    ChatKind.DIRECT -> Icons.Outlined.Person
 }
 
 /** Name reduced to its letters and digits, so emoji and punctuation do not hide a clash. */

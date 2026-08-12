@@ -143,9 +143,23 @@ object PriceRole {
     /** Supporting context: dates, notes, counts. */
     val muted: Color @Composable get() = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
 
-    /** A figure the app worked out rather than read from a source. */
-    val derived: Color
-        @Composable get() = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+    /**
+     * A figure the app worked out rather than read from a source: the role's own colour, softened.
+     *
+     * Not a colour of its own. Drawn in [muted] it came out the exact grey of the notes and dates
+     * beside it, and a column holding both kinds of figure was left in two different hues - which
+     * one a row got depending only on whether its channel happened to print the number. Hue stays
+     * the role, opacity carries the provenance, and the column reads as one column again.
+     */
+    fun derived(of: Color): Color = of.copy(alpha = DerivedAlpha)
+
+    /**
+     * How far a derived figure is softened.
+     *
+     * Shared with the Excel export, which mixes it onto the page by hand because an xlsx font
+     * colour carries no alpha. Two constants would drift apart the first time either was adjusted.
+     */
+    const val DerivedAlpha = 0.6f
 
     @Composable
     fun forReturn(value: Double?): Color = when {

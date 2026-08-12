@@ -216,9 +216,6 @@ data class PortfolioGroup(
     val closed: List<PositionView>
         get() = positions.filter { !it.open && !it.ranOutOfTime }
 
-    /** Holds something still running, so the card opens rather than folding its trades away. */
-    val hasOpen: Boolean get() = positions.any(PositionView::open)
-
     /** Holds something past its deadline with no sale recorded, and so wants reading first. */
     val hasOverdue: Boolean get() = positions.any(PositionView::overdue)
 

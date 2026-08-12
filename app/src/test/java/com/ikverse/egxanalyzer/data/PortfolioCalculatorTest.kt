@@ -478,7 +478,6 @@ class PortfolioCalculatorTest {
         assertEquals(listOf("BBBB", "DDDD"), group.open.map(PositionView::ticker))
         assertEquals(listOf("AAAA"), group.expired.map(PositionView::ticker))
         assertEquals(listOf("CCCC"), group.closed.map(PositionView::ticker))
-        assertTrue(group.hasOpen)
         // Two trades are past a deadline with nothing recorded: the expired one and the kept-open
         // one. Which section they are drawn in does not change that.
         assertEquals(2, portfolio.stats.overdueCount)

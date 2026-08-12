@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -10,8 +11,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
@@ -30,6 +35,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +45,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,7 +57,9 @@ import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.PortfolioStats
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.callIds
 import com.ikverse.egxanalyzer.ui.theme.extraColors
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
@@ -60,6 +71,7 @@ import java.time.LocalDate
  * channel printed. Positions are grouped by the session their recommendation was for, because that
  * is what dates them - not when the user got round to buying.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun PortfolioScreen(appState: AppState) {
     val scope = rememberCoroutineScope()
@@ -154,6 +166,7 @@ private fun ColumnScope.PortfolioSummary(stats: PortfolioStats) {
  * folds away exactly as a settled analysis does in Insights, so the record stays readable however
  * many sessions have been traded.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: AppState) {
     // Session-only, deliberately, and for the reason Results gives beside its own: a filter that
@@ -162,6 +175,14 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
     // than a search for trades that look as though they have gone.
     var dateFilter by remember { mutableStateOf<String?>(null) }
     val order = appState.appPreferences.portfolioOrder
+    // Which session cards are open, held here rather than inside each card. A card cannot open
+    // itself on someone else's behalf, and arriving from a call on the Insights tab has to open the
+    // one holding that trade. Keyed by session date rather than by position in the list, so
+    // re-sorting no longer moves which card is open onto whichever card took its place.
+    var openGroups by remember { mutableStateOf(emptySet<LocalDate>()) }
+    // Every call the record still holds, so a card knows whether it has anywhere to go back to.
+    // Asked once per report: a trade whose analysis was deleted has no call left to open.
+    val scoredCalls = remember(appState.performance) { appState.performance.callIds }
 
     // Set in like the page name above it: both are text on the page rather than in a card, and a
     // heading that starts left of the one above it is what makes a page look unaligned.
@@ -209,6 +230,38 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
             .map { it.copy(positions = it.positions.sortedWith(order.positions)) }
             .sortedWith(order.groups)
     }
+
+    // Arriving from a call pressed on the Insights tab: open the session holding that trade and
+    // scroll to it. The date filter is cleared only when it is what hides the trade, for the reason
+    // Insights gives beside its own - a link that lands on an empty screen is a broken link, and a
+    // filter thrown away on a trip the reader is about to make back is a filter they have to set
+    // again.
+    val pendingPosition = appState.pendingPositionId
+    val reveal = remember { BringIntoViewRequester() }
+    LaunchedEffect(pendingPosition, groups, dateFilter) {
+        if (pendingPosition == null) return@LaunchedEffect
+        val target = groups.firstOrNull { group ->
+            group.positions.any { it.position.id == pendingPosition }
+        }
+        if (target == null) {
+            // The trade was deleted - here or on another device - between the press and the
+            // arrival. Dropped rather than left waiting, or recording it again months later would
+            // flash a card for a press nobody remembers making.
+            appState.consumePendingPosition()
+            return@LaunchedEffect
+        }
+        if (dateFilter != null && dateFilter != target.recommendationDate.toString()) {
+            dateFilter = null
+            // The list is about to be rebuilt around the cleared filter; this effect restarts on it.
+            return@LaunchedEffect
+        }
+        openGroups = openGroups + target.recommendationDate
+        // The card is unfolding as this runs, and a scroll measured against a height it is about to
+        // leave behind stops short of the trade that was asked for.
+        delay(REVEAL_SETTLE_MS)
+        reveal.bringIntoView()
+    }
+
     if (shown.isEmpty()) {
         EmptyState(
             icon = Icons.Outlined.AccountBalanceWallet,
@@ -219,24 +272,63 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
         return
     }
 
+    // Built once for the whole screen rather than per card. A fresh bundle each time would be a new
+    // argument to every section below it, which is a list of positions redrawn on every
+    // recomposition of the page around them.
+    val jump = remember(appState, scoredCalls, pendingPosition, reveal) {
+        PositionJump(
+            scoredCalls = scoredCalls,
+            onOpenCall = appState::openCall,
+            revealPosition = pendingPosition,
+            onRevealShown = appState::consumePendingPosition,
+            reveal = reveal,
+        )
+    }
     shown.forEach { group ->
         ExpandableSection(
             title = group.recommendationDate.toString(),
             icon = Icons.Outlined.AccountBalanceWallet,
             summaryContent = { GroupSummary(group) },
-            // A session with a trade still running opens; one that is all history stays folded.
-            // Open positions have never been hidden behind a header and this does not start.
-            initiallyExpanded = group.hasOpen,
+            // Every card starts folded, a session still running included. Once enough sessions
+            // have been traded, the ones that opened themselves were most of the screen, and the
+            // list of dates is what makes the record readable - the summary line says how each
+            // session went, so nothing is hidden that a fold does not offer back in one tap.
+            expandedState = group.recommendationDate in openGroups,
+            onExpandedChange = { open ->
+                openGroups = if (open) {
+                    openGroups + group.recommendationDate
+                } else {
+                    openGroups - group.recommendationDate
+                }
+            },
         ) {
             // Expired above closed: everything in it is a trade the app stopped tracking without
             // being told how it ended, which is the only part of a session still asking for
             // something. Closed is the record and goes last.
-            PositionSubSection("Open", group.open, OpenTone, appState)
-            PositionSubSection("Expired", group.expired, ExpiredTone, appState)
-            PositionSubSection("Closed", group.closed, ClosedTone, appState)
+            PositionSubSection("Open", group.open, OpenTone, appState, jump)
+            PositionSubSection("Expired", group.expired, ExpiredTone, appState, jump)
+            PositionSubSection("Closed", group.closed, ClosedTone, appState, jump)
         }
     }
 }
+
+/**
+ * What a position card needs to lead back to the call it was taken on.
+ *
+ * Five parameters that always travel together, through two layers that do nothing with them but
+ * hand them on. Bundled so those two layers say "the jump" rather than repeating the list, and
+ * marked immutable so passing it down does not cost those layers the ability to skip.
+ */
+@Immutable
+private class PositionJump(
+    /** Every call the Insights record still holds, by trade key. */
+    val scoredCalls: Set<String>,
+    val onOpenCall: (String) -> Unit,
+    /** The trade the reader has just pressed their way here from, if this is that arrival. */
+    val revealPosition: String?,
+    val onRevealShown: () -> Unit,
+    val reveal: BringIntoViewRequester,
+)
 
 /**
  * One line saying what a session's trades came to, so a folded card still informs.
@@ -286,6 +378,7 @@ private fun ColumnScope.PositionSubSection(
     views: List<PositionView>,
     tone: Color,
     appState: AppState,
+    jump: PositionJump,
 ) {
     if (views.isEmpty()) return
     Text(
@@ -294,7 +387,7 @@ private fun ColumnScope.PositionSubSection(
         style = MaterialTheme.typography.labelSmall,
         color = tone,
     )
-    PositionGrid(views, appState)
+    PositionGrid(views, appState, jump)
 }
 
 /**
@@ -311,14 +404,29 @@ private val ExpiredTone: Color
 private val ClosedTone: Color
     @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ColumnScope.PositionGrid(views: List<PositionView>, appState: AppState) {
+private fun ColumnScope.PositionGrid(
+    views: List<PositionView>,
+    appState: AppState,
+    jump: PositionJump,
+) {
     BoxWithConstraints {
         val columns = responsiveColumns(minColumnWidth = PositionCardMinWidth, maxColumns = 2)
         Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
             ResponsiveRows(views, columns) { view, cardModifier ->
+                val revealed = view.position.id == jump.revealPosition
                 PositionCard(
                     view = view,
+                    // A trade whose analysis has since been deleted leads nowhere, so it does not
+                    // answer a press: the call it was taken on is no longer in the record.
+                    onOpenCall = if (view.position.id in jump.scoredCalls) {
+                        { jump.onOpenCall(view.position.id) }
+                    } else {
+                        null
+                    },
+                    highlighted = revealed,
+                    onHighlightShown = jump.onRevealShown,
                     onSell = { price, date -> appState.recordSale(view.position, price, date) },
                     onEditTrade = { price, date, window ->
                         // The dialog cannot confirm with an unparsable window while it is showing
@@ -334,7 +442,11 @@ private fun ColumnScope.PositionGrid(views: List<PositionView>, appState: AppSta
                         appState.setKeepOpen(view.position, keep, note)
                     },
                     onRemove = { appState.deletePosition(view.position) },
-                    modifier = cardModifier,
+                    modifier = if (revealed) {
+                        cardModifier.bringIntoViewRequester(jump.reveal)
+                    } else {
+                        cardModifier
+                    },
                 )
             }
         }
@@ -348,6 +460,10 @@ private fun ColumnScope.PositionGrid(views: List<PositionView>, appState: AppSta
 @Composable
 private fun PositionCard(
     view: PositionView,
+    /** Opens the call this trade was taken on, in Insights. Absent once its analysis is gone. */
+    onOpenCall: (() -> Unit)?,
+    highlighted: Boolean,
+    onHighlightShown: () -> Unit,
     onSell: (Double, LocalDate) -> Unit,
     onEditTrade: (Double, LocalDate, Int?) -> Unit,
     onKeepOpen: (keep: Boolean, note: String?) -> Unit,
@@ -359,14 +475,12 @@ private fun PositionCard(
     var editing by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
 
-    Card(
-        modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-        border = heldBorder(view),
-        shape = MaterialTheme.shapes.medium,
-    ) {
+    val colors = CardDefaults.cardColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    )
+    // The arrival flash takes the edge for as long as it runs, then the status outline has it back.
+    val border = arrivalFlash(highlighted, onHighlightShown) ?: heldBorder(view)
+    val body: @Composable ColumnScope.() -> Unit = {
         Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             // A fixed two lines for the name, so a company whose name wraps does not make its card
             // taller than the one beside it.
@@ -421,14 +535,35 @@ private fun PositionCard(
                 }
             }
 
-            Text(
-                listOfNotNull(
-                    position.channel?.takeIf(String::isNotBlank),
-                    "called ${position.recommendationDate}",
-                ).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // The line that names the call, which is exactly what a press on this card opens.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    listOfNotNull(
+                        position.channel?.takeIf(String::isNotBlank),
+                        "called ${position.recommendationDate}",
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // fill = false so the arrow sits against the end of the line rather than out at
+                    // the card's edge, where it would read as unrelated to it.
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                // The one hint that the card leads somewhere: a whole card being pressable is
+                // invisible otherwise.
+                if (onOpenCall != null) {
+                    Icon(
+                        Icons.AutoMirrored.Outlined.ArrowForward,
+                        // The press is described where it is declared; a reader announcing the
+                        // glyph as well would say it twice.
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(IconSize.Inline),
+                    )
+                }
+            }
 
             // Its own row rather than the header, which is held to a fixed height so cards beside
             // each other start level. Drawn only when there is something to say, so an ordinary
@@ -506,6 +641,31 @@ private fun PositionCard(
                 }
             }
         }
+    }
+
+    // Two overloads over one body rather than a clickable wrapped round the card: Material's own
+    // pressable card is what keeps the ripple inside the corners, and a trade whose call is gone
+    // must not answer a press at all. The menu, Sold and Keep Open take their own taps as before.
+    if (onOpenCall == null) {
+        Card(
+            modifier.fillMaxWidth(),
+            colors = colors,
+            border = border,
+            shape = MaterialTheme.shapes.medium,
+            content = body,
+        )
+    } else {
+        Card(
+            onClick = onOpenCall,
+            // A pressable card announces itself as "activate" and nothing more, which says nothing
+            // about where the press goes. The action itself is Material's; only its name is ours.
+            modifier = modifier.fillMaxWidth()
+                .semantics { onClick(label = "Open this call in Insights", action = null) },
+            colors = colors,
+            border = border,
+            shape = MaterialTheme.shapes.medium,
+            content = body,
+        )
     }
 
     if (editing) {

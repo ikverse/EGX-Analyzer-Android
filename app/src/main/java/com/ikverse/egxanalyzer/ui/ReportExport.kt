@@ -21,6 +21,7 @@ import com.ikverse.egxanalyzer.model.SavedAnalysis
 import java.io.File
 import java.io.IOException
 import java.time.ZoneId
+import kotlin.math.roundToInt
 
 /**
  * A saved report as a spreadsheet, in the colours the table draws it in.
@@ -248,19 +249,35 @@ private fun percent(value: Double?, colour: String): Cell =
 /**
  * A return percentage, worked out where the source did not print one.
  *
- * The same rule the table's own cell follows: a derived figure is drawn muted, because a figure the
- * app calculated and one a channel published are not the same claim.
+ * The same rule the table's own cell follows: a derived figure is drawn softer than a published
+ * one, because a figure the app calculated and one a channel printed are not the same claim - but
+ * in the colour its sign earns, not in grey. Most rows are derived, so a grey for those and a green
+ * for the rest left one column in two hues.
  */
 private fun returnCell(point: RecommendationDataPoint, stated: Double?, target: Double?): Cell {
     val value = stated ?: returnFrom(point, target)
-    val colour = when {
-        stated == null -> Muted
+    val role = when {
         value == null -> Muted
         value > 0 -> Target
         value < 0 -> Stop
         else -> OnSurface
     }
-    return percent(value, colour)
+    return percent(value, if (value != null && stated == null) derivedTint(role) else role)
+}
+
+/**
+ * [role] as the table softens a derived figure, mixed onto the page.
+ *
+ * An xlsx font colour carries no alpha, so the blend Compose does at draw time is done here instead,
+ * against the white a spreadsheet is read on, at the same `PriceRole.DerivedAlpha` the table uses.
+ * Shared rather than a second set of constants, which would drift the first time either was
+ * adjusted - the same reason `returnFrom` is shared and not copied.
+ */
+private fun derivedTint(role: String): String = (1..3).joinToString("", prefix = "FF") { channel ->
+    val start = channel * 2
+    val value = role.substring(start, start + 2).toInt(16)
+    val mixed = value * PriceRole.DerivedAlpha + 0xFF * (1 - PriceRole.DerivedAlpha)
+    "%02X".format(mixed.roundToInt())
 }
 
 /** Puts a stock's band behind a cell without disturbing anything else about how it is drawn. */

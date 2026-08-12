@@ -1,7 +1,10 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Insights
@@ -34,6 +38,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +47,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -55,6 +62,9 @@ import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
+import com.ikverse.egxanalyzer.model.positionId
+import com.ikverse.egxanalyzer.model.sessionFor
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -66,6 +76,7 @@ import java.time.format.DateTimeFormatter
  * everything else explains it. Calls that could not be judged are shown apart from the rate rather
  * than folded into it: a stock with no price history says nothing about the source that named it.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun InsightsScreen(appState: AppState) {
     val scope = rememberCoroutineScope()
@@ -154,6 +165,23 @@ internal fun InsightsScreen(appState: AppState) {
             }
         }
 
+        // Arriving from a trade pressed on the Portfolio tab. The filters this screen was left on
+        // know nothing about where the reader has just come from, and a link that lands on "nothing
+        // matches these filters" is a broken link. Cleared only when they actually hide the call,
+        // and only when the record still holds it, so pressing back and forth between the two cards
+        // does not throw away a filter that was set on purpose.
+        val pendingCall = appState.pendingCallId
+        LaunchedEffect(pendingCall, report) {
+            if (pendingCall != null &&
+                report.sessionFor(pendingCall) == null &&
+                full.sessionFor(pendingCall) != null
+            ) {
+                channels = emptySet()
+                outcomes = emptySet()
+                stock = ""
+            }
+        }
+
         if (report.tracked == 0) {
             EmptyState(
                 icon = Icons.Outlined.Insights,
@@ -171,6 +199,26 @@ internal fun InsightsScreen(appState: AppState) {
         // Collapsed cards share a row; an open one takes the whole width, because its contents are
         // a table of figures and half a row squeezes every price onto two lines.
         var openSession by remember { mutableStateOf<Any?>(null) }
+        // Where the call being pointed at sits, so the page can scroll to it inside whichever
+        // session card holds it.
+        val reveal = remember { BringIntoViewRequester() }
+        LaunchedEffect(pendingCall, report) {
+            if (pendingCall == null) return@LaunchedEffect
+            val session = report.sessionFor(pendingCall)
+            if (session == null) {
+                // Hidden by a filter, which the effect above is already clearing - or gone, if the
+                // analysis behind that trade was deleted between the press and the arrival. Gone is
+                // dropped rather than left waiting: a re-run of that session months later would
+                // otherwise flash a card for a press nobody remembers making.
+                if (full.sessionFor(pendingCall) == null) appState.consumePendingCall()
+                return@LaunchedEffect
+            }
+            openSession = session.key()
+            // The card is unfolding as this runs, and a scroll measured against a height it is
+            // about to leave behind stops short of the card that was asked for.
+            delay(REVEAL_SETTLE_MS)
+            reveal.bringIntoView()
+        }
         BoxWithConstraints {
             val columns = responsiveColumns(minColumnWidth = SessionCardMinWidth, maxColumns = 3)
             // Grouped before rendering rather than while: the open session interrupts the grid, and
@@ -186,6 +234,10 @@ internal fun InsightsScreen(appState: AppState) {
                             expanded = true,
                             onExpandedChange = { openSession = null },
                             heldFor = appState::heldFor,
+                            onOpenTrade = appState::openPosition,
+                            revealCall = pendingCall,
+                            onRevealShown = appState::consumePendingCall,
+                            reveal = reveal,
                         )
                     } else {
                         ResponsiveRows(band, columns) { session, cardModifier ->
@@ -194,6 +246,12 @@ internal fun InsightsScreen(appState: AppState) {
                                 expanded = false,
                                 onExpandedChange = { openSession = session.key() },
                                 heldFor = appState::heldFor,
+                                onOpenTrade = appState::openPosition,
+                                // A folded card draws none of its calls, so the highlight only ever
+                                // lands on the one this arrival opened.
+                                revealCall = pendingCall,
+                                onRevealShown = appState::consumePendingCall,
+                                reveal = reveal,
                                 modifier = cardModifier,
                             )
                         }
@@ -406,6 +464,7 @@ private fun ScoredSession.key(): Any = targetDate ?: lastRunAt
 /** Two lines of channel name, so a row of source cards stays level. */
 private val ChannelHeaderHeight = 44.dp
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SessionCard(
     run: ScoredSession,
@@ -414,6 +473,12 @@ private fun SessionCard(
     onExpandedChange: (Boolean) -> Unit,
     /** The position taken on a call, so a stock actually held is marked as such. */
     heldFor: (String, java.time.LocalDate?) -> PositionView?,
+    /** Opens a held call's trade on the Portfolio tab, by the id the two share. */
+    onOpenTrade: (String) -> Unit,
+    /** The trade the reader has just pressed their way here from, if this is that arrival. */
+    revealCall: String?,
+    onRevealShown: () -> Unit,
+    reveal: BringIntoViewRequester,
     modifier: Modifier = Modifier,
 ) {
     val ranAt = remember(run.lastRunAt) {
@@ -452,13 +517,29 @@ private fun SessionCard(
         // one per row leaves half the session card empty.
         BoxWithConstraints {
             val columns = responsiveColumns(minColumnWidth = CallCardMinWidth, maxColumns = 2)
+            // Two channels naming one stock for one session are two cards and one holding, so both
+            // of them flash - each really is a call behind that trade. Only the first is scrolled
+            // to, because a requester pointed at two places would travel to one and then the other.
+            val scrollTo = remember(run.calls, revealCall) {
+                revealCall?.let { id -> run.calls.firstOrNull { it.positionId == id } }
+            }
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 ResponsiveRows(run.calls, columns, spacing = Space.s) { call, cardModifier ->
+                    val held = heldFor(call.ticker, call.openedOn)
                     ScoredCallRow(
                         call,
                         windowSessions,
-                        heldFor(call.ticker, call.openedOn),
-                        cardModifier,
+                        held,
+                        // Only a call the user is actually in leads anywhere: there is no trade to
+                        // open for one they read and left alone.
+                        onOpenTrade = held?.let { { onOpenTrade(it.position.id) } },
+                        highlighted = revealCall != null && call.positionId == revealCall,
+                        onHighlightShown = onRevealShown,
+                        modifier = if (call === scrollTo) {
+                            cardModifier.bringIntoViewRequester(reveal)
+                        } else {
+                            cardModifier
+                        },
                     )
                 }
             }
@@ -471,19 +552,21 @@ private fun ScoredCallRow(
     call: ScoredCall,
     windowSessions: Int,
     held: PositionView?,
+    /** Opens the trade taken on this call. Absent where none was, which is most cards. */
+    onOpenTrade: (() -> Unit)?,
+    highlighted: Boolean,
+    onHighlightShown: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
-    Card(
-        modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-        // Outlined where the user is actually in the trade, in the colour of where that stands.
-        // The figures on this card judge the channel; the outline says what it cost or made you.
-        border = heldBorder(held),
-        shape = MaterialTheme.shapes.medium,
-    ) {
+    val colors = CardDefaults.cardColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    )
+    // The arrival flash takes the edge for as long as it runs, then the held outline has it back.
+    // Outlined where the user is actually in the trade, in the colour of where that stands: the
+    // figures on this card judge the channel, and the outline says what it cost or made you.
+    val border = arrivalFlash(highlighted, onHighlightShown) ?: heldBorder(held)
+    val body: @Composable ColumnScope.() -> Unit = {
         Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             // A fixed two lines for the name, so a company whose name wraps does not make its card
             // taller than the one beside it. This is what left the pair ragged when they sat
@@ -519,13 +602,33 @@ private fun ScoredCallRow(
             // What the outline means, in one line. Everything else on this card judges the channel
             // on the levels it printed; this is the only figure here measured from what was paid.
             held?.let { position ->
-                Text(
-                    "${position.status.label} · bought at " +
-                        "${formatPrice(position.position.entryPrice)} · " +
-                        formatPercent(position.returnPct),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = position.status.tone(),
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${position.status.label} · bought at " +
+                            "${formatPrice(position.position.entryPrice)} · " +
+                            formatPercent(position.returnPct),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = position.status.tone(),
+                        // fill = false so the arrow sits against the end of the line rather than
+                        // out at the card's edge, where it would read as unrelated to it.
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    // The one hint that the card leads somewhere. A whole card being pressable is
+                    // invisible otherwise, and this is the line the trade is named on.
+                    if (onOpenTrade != null) {
+                        Icon(
+                            Icons.AutoMirrored.Outlined.ArrowForward,
+                            // The press is described where it is declared; a reader announcing the
+                            // glyph as well would say it twice.
+                            contentDescription = null,
+                            tint = position.status.tone(),
+                            modifier = Modifier.size(IconSize.Inline),
+                        )
+                    }
+                }
             }
             // Two groups rather than eight loose figures: what the channel asked for, and what the
             // market did about it. Colour says which is which without reading the labels.
@@ -581,6 +684,31 @@ private fun ScoredCallRow(
                 AnimatedVisibility(expanded) { SessionTable(call.sessions) }
             }
         }
+    }
+
+    // Two overloads over one body rather than a clickable wrapped round the card: Material's own
+    // pressable card is what keeps the ripple inside the corners, and an unheld call must not
+    // answer a press at all - there is nothing to open.
+    if (onOpenTrade == null) {
+        Card(
+            modifier.fillMaxWidth(),
+            colors = colors,
+            border = border,
+            shape = MaterialTheme.shapes.medium,
+            content = body,
+        )
+    } else {
+        Card(
+            onClick = onOpenTrade,
+            // A pressable card announces itself as "activate" and nothing more, which says nothing
+            // about where the press goes. The action itself is Material's; only its name is ours.
+            modifier = modifier.fillMaxWidth()
+                .semantics { onClick(label = "Open this trade in the Portfolio", action = null) },
+            colors = colors,
+            border = border,
+            shape = MaterialTheme.shapes.medium,
+            content = body,
+        )
     }
 }
 

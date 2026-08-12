@@ -26,10 +26,7 @@ data class TelegramChat(
     val id: Long,
     val title: String,
     val kind: ChatKind,
-) {
-    /** Broadcast channel, as opposed to a group or a private chat. */
-    val isChannel: Boolean get() = kind == ChatKind.CHANNEL
-}
+)
 
 data class TelegramSourceBatch(
     val inputs: List<AnalysisInput>,

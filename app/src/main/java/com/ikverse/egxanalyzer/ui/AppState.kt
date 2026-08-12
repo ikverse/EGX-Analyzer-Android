@@ -467,6 +467,42 @@ class AppState(
         pendingResultId = null
     }
 
+    /**
+     * A trade to reveal on the Portfolio tab, named by its position id.
+     *
+     * The two tabs answer different questions about one call - what the channel's levels did, and
+     * what the user's own money did - and reading one used to mean finding the other by hand. A
+     * card that has a counterpart carries a press to it, and the counterpart presses back.
+     */
+    var pendingPositionId by mutableStateOf<String?>(null)
+        private set
+
+    /** A call to reveal on the Insights tab, named by the same id: one call is one holding. */
+    var pendingCallId by mutableStateOf<String?>(null)
+        private set
+
+    fun openPosition(id: String) {
+        // The trip the user just made is over. Left set, a highlight still counting down on the tab
+        // being left would fire again the moment they pressed their way back to it.
+        pendingCallId = null
+        pendingPositionId = id
+        destination = AppDestination.PORTFOLIO
+    }
+
+    fun consumePendingPosition() {
+        pendingPositionId = null
+    }
+
+    fun openCall(id: String) {
+        pendingPositionId = null
+        pendingCallId = id
+        destination = AppDestination.INSIGHTS
+    }
+
+    fun consumePendingCall() {
+        pendingCallId = null
+    }
+
     /** A saved analysis covering exactly this session and these chats, awaiting a decision. */
     var duplicateOfSelection by mutableStateOf<SavedAnalysis?>(null)
         private set

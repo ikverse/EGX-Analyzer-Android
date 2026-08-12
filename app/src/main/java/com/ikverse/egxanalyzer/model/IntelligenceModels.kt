@@ -115,3 +115,27 @@ data class PerformanceReport(
     val channels: List<ChannelScore> = emptyList(),
     val sessions: List<ScoredSession> = emptyList(),
 )
+
+/**
+ * The trade this call would be recorded as, whether or not one was.
+ *
+ * The same key [Portfolio.heldFor] matches on, deliberately: it is what puts the held outline on a
+ * call's card, so a link built from anything else could send a card somewhere its own outline
+ * disagreed with. Two channels calling one stock for one session share it, because that is one
+ * holding rather than two - both their cards point at the same trade, and it points back at both.
+ */
+val ScoredCall.positionId: String get() = positionId(Scoring.normalizeTicker(ticker), openedOn)
+
+/** The session card holding the call a trade was taken on, if the record still has one. */
+fun PerformanceReport.sessionFor(positionId: String): ScoredSession? =
+    sessions.firstOrNull { session -> session.calls.any { it.positionId == positionId } }
+
+/**
+ * Every call in the report, by trade key.
+ *
+ * Asked once per report rather than once per position card: a report deleted since a trade was
+ * recorded leaves that trade with nowhere to jump to, and the Portfolio has to know that about every
+ * card it draws.
+ */
+val PerformanceReport.callIds: Set<String>
+    get() = sessions.flatMapTo(mutableSetOf()) { session -> session.calls.map(ScoredCall::positionId) }

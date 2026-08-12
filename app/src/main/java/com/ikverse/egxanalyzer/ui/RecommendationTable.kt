@@ -325,16 +325,23 @@ private fun PriceCell(value: Double?, width: Dp, tone: Color, emphasis: Boolean 
  * The prompt tells the model to leave it null unless the card states it, and says the application
  * works out the rest - which it never did, so the column was blank on most rows. A derived figure
  * is shown dimmer than a printed one, because the two are not the same claim.
+ *
+ * Dimmer, not grey. Since the prompt leaves the figure null unless a card prints one, most rows are
+ * derived - so a grey for derived and a green for stated put two colours in one column, and the
+ * grey was the same one the notes and dates are drawn in, which read as context rather than as a
+ * return. The sign decides the hue on every row now and derivation only softens it.
  */
 @Composable
 private fun ReturnCell(point: RecommendationDataPoint, stated: Double?, target: Double?, width: Dp) {
-    val derived = stated == null
     val value = stated ?: returnFrom(point, target)
+    val tone = PriceRole.forReturn(value)
     TextCell(
         formatPercent(value),
         width,
         TextAlign.End,
-        if (derived) PriceRole.derived else PriceRole.forReturn(value),
+        // Only a figure is softened: with no target there is nothing derived, just the dash every
+        // other column draws for an absent value.
+        if (value != null && stated == null) PriceRole.derived(tone) else tone,
         tabular = true,
     )
 }

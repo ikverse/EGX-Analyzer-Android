@@ -28,7 +28,12 @@ import androidx.compose.material3.SnackbarVisuals
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
@@ -58,6 +63,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
 /**
  * Standard page frame: a large title that scrolls away with the content.
@@ -373,6 +379,53 @@ internal fun ExpandableSection(
         }
     }
 }
+
+/**
+ * The edge a card wears when the app has just brought the reader to it.
+ *
+ * A flash rather than a permanent tint: it answers "which one" on arrival and then gets out of the
+ * way, instead of leaving a card looking special long after the reason has passed. Null when there
+ * is nothing to point out, so a card falls back to whatever edge it draws for itself - the held
+ * outline on a traded call, the hairline everywhere else.
+ *
+ * The animation is composed only while it is wanted. Left running behind every card it would be a
+ * frame callback each, on screens that draw dozens of them, to animate nothing.
+ *
+ * @param onShown fires once the flash has run, so the caller can forget the arrival.
+ */
+@Composable
+internal fun arrivalFlash(highlighted: Boolean, onShown: () -> Unit): BorderStroke? {
+    if (!highlighted) return null
+    val flash = rememberInfiniteTransition(label = "arrival")
+    val edge by flash.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(FlashHalfCycleMs), RepeatMode.Reverse),
+        label = "edge",
+    )
+    LaunchedEffect(Unit) {
+        delay(FlashDurationMs)
+        onShown()
+    }
+    return BorderStroke(FlashOutline, MaterialTheme.colorScheme.primary.copy(alpha = edge))
+}
+
+/** The same weight as the held outline, so a flash does not resize the card it lands on. */
+private val FlashOutline = 2.dp
+
+private const val FlashHalfCycleMs = 420
+
+/** Long enough to be caught by someone whose eyes are still moving, short enough not to nag. */
+private const val FlashDurationMs = 2_400L
+
+/**
+ * How long to let a card's own reveal finish before scrolling to it.
+ *
+ * A jump opens the section holding the card and scrolls to it in one go, and a request made while
+ * that section is still unfolding is measured against a height it is about to leave behind - which
+ * lands the reader short of the card they asked for. Material's default reveal is 300ms.
+ */
+internal const val REVEAL_SETTLE_MS = 320L
 
 /** A single figure with its label, for wherever a screen summarises counts or totals. */
 @Composable

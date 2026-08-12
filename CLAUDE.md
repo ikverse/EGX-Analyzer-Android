@@ -127,7 +127,19 @@ trade is then managed, in whatever state it has reached.
 - **Channel hit rates are deliberately not affected.** Insights judges the source on the levels it
   printed, not on what the user did about them — the two answer different questions, and a channel's
   record must not move because someone bought late or sold early. A card the user is in gets an
-  outline and one extra line, and nothing else moves.
+  outline, one extra line, and a press that leads to the trade; no figure on it moves.
+- **The two cards for one call press through to each other.** A held call in Insights opens its
+  trade in the Portfolio, and that trade opens the call back — the two tabs answer different
+  questions about one recommendation, and reading both used to mean finding the second by hand. The
+  key is `ScoredCall.positionId`, which is `positionId(normalizeTicker(ticker), openedOn)`: the same
+  key `heldFor` matches on, so a card can never lead somewhere its own outline disagreed with. Only
+  a card with a counterpart is pressable at all — an untraded call and a trade whose analysis has
+  been deleted answer no press, because there is nothing to open. Arriving opens the section holding
+  the card, scrolls to it, and flashes its edge (`arrivalFlash`, shared with the report a
+  notification opens). **A filter is cleared only when it is what hides the target**: a link landing
+  on "nothing matches these filters" is broken, and a filter thrown away on a trip the reader is
+  about to make back is one they have to set again. Two channels calling one stock on one session
+  are two cards and one holding, so both flash and the first is scrolled to.
 - A trade **snapshots its levels and its window**. Deleting the report, re-running the session, or
   changing the global scoring window afterwards must not rewrite a trade that already happened. The
   window is editable **by hand and only by hand**, from Edit trade on the position's card — that is
@@ -160,8 +172,10 @@ trade is then managed, in whatever state it has reached.
   tab overnight does not go on showing yesterday's count.
 - **One card per session, holding that session's trades in every state**, with **Open**, **Expired**
   and **Closed** as sections inside it. A day's trades were one decision, and splitting them across
-  an open list and a closed one meant scrolling to find the other half. A card holding something
-  still running starts expanded; the rest start folded. Its summary names all three counts, each in
+  an open list and a closed one meant scrolling to find the other half. **Every card starts
+  folded**, one holding a running trade included — enough traded sessions and the cards that opened
+  themselves were most of the screen, where the list of dates is what makes the record readable.
+  Its summary is what a folded card informs with: it names all three counts, each in
   its state's colour — open is `primary`, expired is the **amber in `ExtraColors`**, closed is
   `onSurfaceVariant`, and the chips in `TradeControls` use the same three so a section and the trades
   under it agree. Expired is deliberately neither red nor purple: a trade that ran out of time can be
@@ -234,8 +248,12 @@ through the filter dropdowns on row 1.
   numeric column turns it to text and files under its own heading in the filter dropdown.
 - **The light palette, whatever the phone's theme.** A spreadsheet is read on a white page. The
   roles are unchanged: green is a target, red is a stop, cyan a price the market reached, grey
-  context, and a derived return is muted exactly as `ReturnCell` mutes it. `returnFrom` is shared
-  with the table rather than copied, so the two can never report different returns for one row.
+  context, and a derived return is softened exactly as `ReturnCell` softens it — its sign's own
+  colour at `PriceRole.DerivedAlpha`, mixed onto white by `derivedTint` because an xlsx font colour
+  carries no alpha. **Softened, never greyed**: the prompt leaves the percentage null unless a card
+  prints one, so most rows are derived, and a grey for those against a green for the rest left one
+  column in two hues with the grey ones reading as context. `returnFrom` and the alpha are both
+  shared with the table rather than copied, so the two can never disagree about one row.
 - Every column is written, including the context and notes the table drops below 620dp and 900dp: a
   sheet has no width to run out of. The **source image column is not exported** — a picture in a
   cell means media parts, a drawing and anchor geometry, for something a spreadsheet is not read for.

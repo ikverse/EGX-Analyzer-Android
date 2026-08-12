@@ -47,16 +47,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -453,30 +446,10 @@ private fun SavedAnalysisCard(
         .distinct()
         .size
 
-    // A flash rather than a permanent tint: it answers "which one" on arrival and then gets out
-    // of the way, instead of leaving a card looking special long after the reason has passed.
-    val flash = rememberInfiniteTransition(label = "arrival")
-    val edge by flash.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(FlashHalfCycleMs), RepeatMode.Reverse),
-        label = "edge",
-    )
-    LaunchedEffect(highlighted) {
-        if (highlighted) {
-            delay(FlashDurationMs)
-            onHighlightShown()
-        }
-    }
-
     Card(
         modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        border = if (highlighted) {
-            BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = edge))
-        } else {
-            cardOutline
-        },
+        border = arrivalFlash(highlighted, onHighlightShown) ?: cardOutline,
         shape = MaterialTheme.shapes.large,
     ) {
         Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
@@ -1110,10 +1083,6 @@ private val COMPLETED_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("d
 /** IMAGE_REF is one-based over the images sent with the request. */
 private fun AnalysisResult.imagePathFor(reference: Int?): String? =
     reference?.let { imagePaths.getOrNull(it - 1) }
-
-/** Long enough to catch the eye on arrival, short enough not to become decoration. */
-private const val FlashHalfCycleMs = 420
-private const val FlashDurationMs = 2_400L
 
 /** Below this a table can only be read by scrolling it sideways, which is not reading. */
 private val TableMinWidth = 600.dp

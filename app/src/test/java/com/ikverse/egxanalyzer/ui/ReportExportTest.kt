@@ -124,8 +124,16 @@ class ReportExportTest {
 
         // Entry midpoint 9.9 to target 12.0 is 21.2%, the same basis the table and the scorer use.
         assertEquals(21.2, (row[heading("TP1 %")] as Cell.Number).value, 0.05)
-        // Derived is drawn muted; a figure the channel published keeps the target's own green.
+        // Derived is drawn softer than a figure the channel published, which keeps the target's
+        // own green outright.
         assertTrue(row[heading("TP1 %")].style.colour != stated[heading("TP1 %")].style.colour)
+        // ...but not in the grey the notes and dates are drawn in. Most rows are derived, so a grey
+        // for those put two unrelated hues in one column and made a return read as context.
+        assertTrue(row[heading("TP1 %")].style.colour != row[heading("Notes")].style.colour)
+        // The target's own green at 60%, mixed onto the white a spreadsheet is read on because an
+        // xlsx font colour carries no alpha. Held outright: a blend reading the wrong bytes is
+        // still a colour, and every other assertion here would pass on one.
+        assertEquals("FF71A48B", row[heading("TP1 %")].style.colour)
     }
 
     @Test
