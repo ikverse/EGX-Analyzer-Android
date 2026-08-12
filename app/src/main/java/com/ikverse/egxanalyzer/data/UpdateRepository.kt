@@ -1,14 +1,17 @@
 package com.ikverse.egxanalyzer.data
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.IntentSender
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.content.pm.Signature
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.core.content.FileProvider
 import com.ikverse.egxanalyzer.BuildConfig
+import com.ikverse.egxanalyzer.data.UpdateInstallReceiver.Companion.ACTION_INSTALL_STATUS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -241,42 +244,55 @@ class UpdateRepository(
     )
 
     /**
-     * Hands the APK to Android's installer, which does the asking and the installing.
+     * Installs the APK by writing it into a session the system owns.
      *
-     * The intent flag alone is not enough, and this is the whole of why pressing Install used to do
-     * nothing at all. `FLAG_GRANT_READ_URI_PERMISSION` grants to the activity that receives the
-     * intent; Samsung's installer takes it in `InstallStart`, hands off to `InstallLaunch`, and only
-     * then reads the file to build its staging session - by which point that grant is gone. It fails
-     * with "Permission Denial: opening provider androidx.core.content.FileProvider ... that is not
-     * exported" and closes without a word, so the phone looks like it ignored the button.
+     * The file never crosses a process boundary as a URI, which is the whole point. Handing the
+     * installer a `content://` URI failed three releases running - "Permission Denial: opening
+     * provider androidx.core.content.FileProvider ... that is not exported" - because the grant an
+     * intent carries belongs to the activity that receives it, and Samsung's installer reads the
+     * file later, from its staging layer, by which time that grant is gone. It closed without a
+     * word, so the phone looked like it had ignored the button. Nothing here depends on provider
+     * export rules, on a grant outliving a handoff, on package visibility, or on which of several
+     * apps the resolver picks.
      *
-     * Granting to the package outlives the handoff. It is revoked in [revokeInstallAccess] once the
-     * install is no longer on offer.
+     * Android still asks the user before it installs anything - that confirmation arrives as
+     * [PackageInstaller.STATUS_PENDING_USER_ACTION] and is shown by [UpdateInstallReceiver].
      */
-    fun installIntent(file: File): Intent {
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}$AUTHORITY_SUFFIX", file)
-        val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, APK_MIME_TYPE)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        // Whoever actually handles it, rather than a name: this device answers with
-        // com.google.android.packageinstaller and others with com.android.packageinstaller.
-        context.packageManager.resolveActivity(intent, 0)?.activityInfo?.packageName?.let { installer ->
-            context.grantUriPermission(installer, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    suspend fun install(file: File) = withContext(Dispatchers.IO) {
+        val installer = context.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(
+            PackageInstaller.SessionParams.MODE_FULL_INSTALL,
+        ).apply {
+            setAppPackageName(context.packageName)
+            setSize(file.length())
         }
-        return intent
+        val sessionId = installer.createSession(params)
+        installer.openSession(sessionId).use { session ->
+            session.openWrite(APK_ENTRY, 0, file.length()).use { sink ->
+                file.inputStream().use { source -> source.copyTo(sink) }
+                // Without this the bytes can still be in flight when the session is committed, and
+                // the install fails on a file the app has already finished writing.
+                session.fsync(sink)
+            }
+            session.commit(statusSender(sessionId))
+        }
     }
 
-    /** Takes back what [installIntent] granted, once there is nothing left to install. */
-    fun revokeInstallAccess(file: File) {
-        runCatching {
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}$AUTHORITY_SUFFIX",
-                file,
-            )
-            context.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-    }
+    /**
+     * Where the system reports what became of the install.
+     *
+     * Mutable because the system fills the result in; a broadcast to this package only, so nothing
+     * else can answer for it.
+     */
+    private fun statusSender(sessionId: Int): IntentSender = PendingIntent.getBroadcast(
+        context,
+        sessionId,
+        Intent(ACTION_INSTALL_STATUS).setPackage(context.packageName),
+        PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    ).intentSender
+
+    /** Removes a downloaded update once it has been installed and is no longer worth keeping. */
+    fun forgetDownloads() = clearDownloads()
 
     /** The release page, for reading what changed somewhere with more room than a settings card. */
     fun releasesPageIntent(): Intent =
@@ -340,11 +356,11 @@ class UpdateRepository(
             "https://api.github.com/repos/$REPOSITORY/releases/latest"
         const val RELEASES_PAGE_URL = "https://github.com/$REPOSITORY/releases"
 
-        /** Matches the provider declared in the manifest. */
-        private const val AUTHORITY_SUFFIX = ".updates"
         private const val DOWNLOAD_DIRECTORY = "updates"
         private const val APK_SUFFIX = ".apk"
-        private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
+
+        /** The name the APK is written under inside the install session; nothing reads it back. */
+        private const val APK_ENTRY = "update.apk"
         private const val GITHUB_MEDIA_TYPE = "application/vnd.github+json"
 
         /** An asset is a file, not the API. Asking it for JSON was harmless and still a lie. */

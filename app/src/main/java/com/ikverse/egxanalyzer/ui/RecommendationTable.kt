@@ -339,8 +339,14 @@ private fun ReturnCell(point: RecommendationDataPoint, stated: Double?, target: 
     )
 }
 
-/** Entry midpoint to target, the same basis the scorer uses, so the two never disagree. */
-private fun returnFrom(point: RecommendationDataPoint, target: Double?): Double? {
+/**
+ * Entry midpoint to target, the same basis the scorer uses, so the two never disagree.
+ *
+ * Shared with the Excel export rather than copied into it: a second definition of what a call is
+ * worth would drift from this one the first time either is adjusted, and the two would then be
+ * reporting different returns for the same row.
+ */
+internal fun returnFrom(point: RecommendationDataPoint, target: Double?): Double? {
     if (target == null) return null
     val low = point.buyPriceLow ?: point.buyPrice
     val high = point.buyPriceHigh ?: point.buyPrice

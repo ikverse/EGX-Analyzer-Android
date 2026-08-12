@@ -77,6 +77,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/AnalysisPolicy.kt` + `data/RuleSet.kt` + `data/BuiltInRules.kt` — the local wording filter.
 - `data/PromptComposer.kt` — generates the prompt sent to the model.
 - `data/ReportSync.kt` + `data/RuleSync.kt` + `data/PositionSync.kt` — what travels between devices.
+- `data/XlsxWriter.kt` + `ui/ReportExport.kt` — a report as a spreadsheet, from the ⋮ menu on its
+  card. See below.
 - `ui/PortfolioScreen.kt` + `ui/TradeControls.kt` — the Portfolio tab, and the Bought button and
   closing controls that sit on a recommendation card.
 - `ui/` — one file per screen, plus `CommonUi.kt` and `DesignSystem.kt` for shared pieces.
@@ -207,6 +209,44 @@ trade is then managed, in whatever state it has reached.
   not the screen draws them, so a new figure is a UI change. There are no trade sizes, so every
   total is an average of percentages; a money total would be invented.
 
+## Exporting a report to Excel
+
+**Export to Excel** on a report card's ⋮ menu writes the results table as an `.xlsx` and hands it to
+a chooser. The file is the whole report, not what the screen is filtered to: the menu is there
+whether the card is open or shut, and a file that quietly held a subset is the wrong default for a
+record. Narrowing happens in Excel instead, through the filter dropdowns on row 1.
+
+- **No dependency.** An xlsx is a zip of XML parts, and the corner of it needed here is small enough
+  to write outright. Apache POI is about 12MB of dex, drags xmlbeans and needs desugaring, all for
+  one sheet. Written by hand the whole export is plain Kotlin with no Android in it, which is what
+  lets it be tested without a device — the same reason the scoring code is testable.
+- **Three deliberate differences from the table on screen**, each forced by making the filters work.
+  **No stock heading rows**: an autofilter needs uniform rows under one header, and filtering would
+  hide a heading and strand the stocks under it, so the code and both names lead every row instead.
+  **Banding by stock, not by row**: with the headings gone a tint per stock is what shows where one
+  ends, where the table's alternating stripe would say nothing once a filter has hidden half of what
+  it was counting. **Entry as low and high**: `1.2 – 1.35` in one cell can be neither sorted nor
+  added up, and single-price rows landing beside it as numbers would turn the column to text.
+- **Prices and dates go in as numbers and dates**, never as their printed form, or the column cannot
+  be sorted, filtered or totalled — which is the whole reason to export a spreadsheet rather than a
+  table of text. An absent figure is an **empty cell**, not the em dash the table draws: a dash in a
+  numeric column turns it to text and files under its own heading in the filter dropdown.
+- **The light palette, whatever the phone's theme.** A spreadsheet is read on a white page. The
+  roles are unchanged: green is a target, red is a stop, cyan a price the market reached, grey
+  context, and a derived return is muted exactly as `ReturnCell` mutes it. `returnFrom` is shared
+  with the table rather than copied, so the two can never report different returns for one row.
+- Every column is written, including the context and notes the table drops below 620dp and 900dp: a
+  sheet has no width to run out of. The **source image column is not exported** — a picture in a
+  cell means media parts, a drawing and anchor geometry, for something a spreadsheet is not read for.
+- The file lands in `filesDir/exports/`, which is **emptied on every export**, and travels through a
+  third FileProvider authority, `${applicationId}.exports`. Not another path on the traces or updates
+  provider, for the reason the manifest already gives twice.
+- Fill indices **0 and 1 are reserved** by the format for "none" and "gray125". A real fill at either
+  shifts every other fill by one, which draws the sheet a column out rather than failing outright.
+- The output was checked by loading it with an independent reader (openpyxl, warnings as errors),
+  not only by asserting on our own XML: a hand-written workbook that Excel rejects says so with one
+  dialog and no reason, which no test over our own strings would catch.
+
 ## Wording rules and the generated prompt
 
 The 21 Arabic and English phrases that drop old or already-hit cards used to be Kotlin lists. They
@@ -297,7 +337,15 @@ phone only by plugging it into the machine that built it. It reads one public UR
   with, or signed by another key is deleted there rather than offered — all three end at an
   installer refusing it. Nothing else deletes downloads: `check()` used to clear them when GitHub
   offered nothing, which would throw away a good file over a release page briefly missing an entry.
-- **The installer is granted read access by package, not only by the intent flag.**
+- **The APK is written into a `PackageInstaller` session, never shared as a URI.** The file does not
+  cross a process boundary, so nothing depends on provider export rules, on a grant outliving a
+  handoff, on package visibility, or on which app the resolver picks — the chain that killed three
+  releases in a row. The system reports the outcome to `UpdateInstallReceiver`:
+  `STATUS_PENDING_USER_ACTION` is Android's own confirmation dialog, which the app launches and the
+  user still approves. **The app finally knows whether an install happened**, which it never did.
+  `STATUS_SUCCESS` usually never arrives — installing this app replaces this process.
+- Superseded, kept as the reason the above exists: **granting the installer read access by package**
+  did not work either.
   `FLAG_GRANT_READ_URI_PERMISSION` grants to the activity receiving the intent; Samsung's installer
   takes it in `InstallStart`, hands off to `InstallLaunch`, and only then reads the APK to build its
   staging session — by which point that grant is gone. It failed with *"Permission Denial: opening

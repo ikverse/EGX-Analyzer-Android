@@ -1058,9 +1058,26 @@ class AppState(
 
     /** Puts the card back to the button, after an answer has been read. */
     fun dismissUpdate() {
-        // Whatever the installer was given read access to, it no longer needs.
-        (updateState as? UpdateState.Ready)?.let { updateRepository?.revokeInstallAccess(it.file) }
         updateState = UpdateState.Idle
+    }
+
+    /**
+     * Hands the downloaded APK to Android to install.
+     *
+     * The confirmation is Android's own and arrives a moment later, through
+     * [com.ikverse.egxanalyzer.data.UpdateInstallReceiver]. A failure to even start says so here,
+     * because a button that appears to do nothing is what this whole path cost three releases.
+     */
+    fun installUpdate(file: File) {
+        val updates = updateRepository ?: return
+        appScope.launch {
+            runCatching { updates.install(file) }.onFailure { error ->
+                reportUpdateProblem(
+                    error.message?.takeIf(String::isNotBlank)
+                        ?: "The install could not be started.",
+                )
+            }
+        }
     }
 
     /**
@@ -1076,8 +1093,6 @@ class AppState(
 
     /** True once the user has allowed this app to install apps; Android is the only one who can ask. */
     fun canInstallUpdates(): Boolean = updateRepository?.canInstall() ?: false
-
-    fun updateInstallIntent(file: File): Intent? = updateRepository?.installIntent(file)
 
     fun installPermissionIntent(): Intent? = updateRepository?.permissionIntent()
 

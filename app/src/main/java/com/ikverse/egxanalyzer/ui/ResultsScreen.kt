@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -52,8 +53,10 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -231,6 +234,7 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                         newerRunExists = saved.result.recommendationTargetDate
                             ?.let { newestRunFor[it]?.isAfter(saved.result.completedAt) } == true,
                         onShare = { shareReport(activity, appState.reportFor(saved)) },
+                        onExport = { scope.launch { exportReport(activity, appState, saved) } },
                         onDelete = { appState.deleteResult(saved) },
                         report = { appState.reportFor(saved) },
                         peakFor = appState::peakSince,
@@ -417,6 +421,8 @@ private fun SavedAnalysisCard(
     /** Whether a later run covered the same session, which makes this report the older reading. */
     newerRunExists: Boolean = false,
     onShare: () -> Unit,
+    /** The same table as a spreadsheet, handed to whatever the user picks. */
+    onExport: () -> Unit,
     onDelete: () -> Unit,
     report: () -> AnalysisReport,
     /** Highest a stock has traded since the call, for the ladder's arrow. */
@@ -520,6 +526,11 @@ private fun SavedAnalysisCard(
                             text = { Text("Share") },
                             leadingIcon = { Icon(Icons.Outlined.Share, contentDescription = null) },
                             onClick = { menuOpen = false; onShare() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Export to Excel") },
+                            leadingIcon = { Icon(Icons.Outlined.TableChart, contentDescription = null) },
+                            onClick = { menuOpen = false; onExport() },
                         )
                         DropdownMenuItem(
                             text = { Text("Delete") },
@@ -683,6 +694,37 @@ private fun shareReport(activity: Activity, report: AnalysisReport) {
         putExtra(Intent.EXTRA_TEXT, report.markdown)
     }
     activity.startActivity(Intent.createChooser(intent, "Share EGX analysis report"))
+}
+
+/**
+ * Writes the report as a spreadsheet and offers it onward.
+ *
+ * Off the main thread, because it builds and zips the whole table. The chooser is the confirmation
+ * when it works - a toast behind a full-screen chooser is talking to nobody - so only a refusal and
+ * a failure say anything.
+ */
+private suspend fun exportReport(activity: Activity, appState: AppState, saved: SavedAnalysis) {
+    // Analyses saved before the consolidated contract have no table to export, only the flat list
+    // the screen falls back to. An empty sheet of eighteen headings is a worse answer than saying so.
+    if (saved.result.consolidated.isEmpty()) {
+        appState.statusMessage = StatusMessage(
+            "This run predates the table, so there is nothing to export.",
+            succeeded = false,
+        )
+        return
+    }
+    runCatching { withContext(Dispatchers.IO) { writeExport(activity, saved) } }
+        .onSuccess { file ->
+            activity.startActivity(
+                Intent.createChooser(exportIntent(activity, file), "Export EGX analysis"),
+            )
+        }
+        .onFailure {
+            appState.statusMessage = StatusMessage(
+                "Could not write the Excel file: ${it.message ?: "unknown error"}",
+                succeeded = false,
+            )
+        }
 }
 
 @Composable

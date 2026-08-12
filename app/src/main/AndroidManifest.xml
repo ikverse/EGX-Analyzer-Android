@@ -10,16 +10,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
-    <!-- Package visibility hides every other app from this one since Android 11, and that includes
-         the installer. Without this, asking which package will handle the APK returns nothing, and
-         the read access it needs to build its staging session is granted to nobody. -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:mimeType="application/vnd.android.package-archive" />
-        </intent>
-    </queries>
-
     <application
         android:name=".EgxApplication"
         android:allowBackup="false"
@@ -59,18 +49,29 @@
                 android:resource="@xml/trace_paths" />
         </provider>
 
-        <!-- Lets Android's package installer read the APK the app downloaded for itself. A second
-             provider rather than another path on the one above: that one is named for traces and
-             shares them outward on request, and an authority whose name is a lie about what it
-             carries is how the wrong file gets granted to the wrong app. -->
+        <!-- What became of an install. The APK is written into a session the system owns rather
+             than shared as a URI, so there is no provider for updates: handing the installer a
+             content:// URI failed for three releases on a grant that does not outlive the handoff
+             into its staging session, and closed without a word every time. -->
+        <receiver
+            android:name=".data.UpdateInstallReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.ikverse.egxanalyzer.INSTALL_STATUS" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Lets whatever the user picks read a report exported as a spreadsheet. A third provider
+             for the same reason as the second: each authority is named for what it shares, and one
+             whose name covers two unrelated directories is a grant nobody can reason about. -->
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.updates"
+            android:authorities="${applicationId}.exports"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/update_paths" />
+                android:resource="@xml/export_paths" />
         </provider>
     </application>
 </manifest>

@@ -642,14 +642,15 @@ private fun UpdateControls(appState: AppState) {
                     onClick = {
                         // Read at the tap as well as on resume: whichever way the permission was
                         // granted, the button must do the right thing the moment it is pressed.
-                        val intent = if (appState.canInstallUpdates()) {
-                            appState.updateInstallIntent(state.file)
-                        } else {
-                            appState.installPermissionIntent()
+                        if (appState.canInstallUpdates()) {
+                            appState.installUpdate(state.file)
+                            return@Button
                         }
-                        // A refusal here was invisible: Android closed the installer without a word
-                        // and the phone looked like it had ignored the button.
-                        runCatching { intent?.let(context::startActivity) }.onFailure { error ->
+                        // A refusal here was invisible: Android closed the page without a word and
+                        // the phone looked like it had ignored the button.
+                        runCatching {
+                            appState.installPermissionIntent()?.let(context::startActivity)
+                        }.onFailure { error ->
                             appState.reportUpdateProblem(
                                 error.message?.takeIf(String::isNotBlank)
                                     ?: "Android would not open the installer.",
