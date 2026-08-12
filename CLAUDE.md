@@ -77,8 +77,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/AnalysisPolicy.kt` + `data/RuleSet.kt` + `data/BuiltInRules.kt` — the local wording filter.
 - `data/PromptComposer.kt` — generates the prompt sent to the model.
 - `data/ReportSync.kt` + `data/RuleSync.kt` + `data/PositionSync.kt` — what travels between devices.
-- `data/XlsxWriter.kt` + `ui/ReportExport.kt` — a report as a spreadsheet, from the ⋮ menu on its
-  card. See below.
+- `data/XlsxWriter.kt` + `ui/ReportExport.kt` — a report as a spreadsheet, saved to Downloads or
+  sent onward from the ⋮ menu on its card. See below.
 - `ui/PortfolioScreen.kt` + `ui/TradeControls.kt` — the Portfolio tab, and the Bought button and
   closing controls that sit on a recommendation card.
 - `ui/` — one file per screen, plus `CommonUi.kt` and `DesignSystem.kt` for shared pieces.
@@ -211,10 +211,11 @@ trade is then managed, in whatever state it has reached.
 
 ## Exporting a report to Excel
 
-**Export to Excel** on a report card's ⋮ menu writes the results table as an `.xlsx` and hands it to
-a chooser. The file is the whole report, not what the screen is filtered to: the menu is there
-whether the card is open or shut, and a file that quietly held a subset is the wrong default for a
-record. Narrowing happens in Excel instead, through the filter dropdowns on row 1.
+A report card's ⋮ menu writes the results table as an `.xlsx`, two ways: **Save to Downloads** puts
+it on the phone, **Send as Excel** hands the same file to a chooser. The file is the whole report,
+not what the screen is filtered to: the menu is there whether the card is open or shut, and a file
+that quietly held a subset is the wrong default for a record. Narrowing happens in Excel instead,
+through the filter dropdowns on row 1.
 
 - **No dependency.** An xlsx is a zip of XML parts, and the corner of it needed here is small enough
   to write outright. Apache POI is about 12MB of dex, drags xmlbeans and needs desugaring, all for
@@ -238,9 +239,17 @@ record. Narrowing happens in Excel instead, through the filter dropdowns on row 
 - Every column is written, including the context and notes the table drops below 620dp and 900dp: a
   sheet has no width to run out of. The **source image column is not exported** — a picture in a
   cell means media parts, a drawing and anchor geometry, for something a spreadsheet is not read for.
-- The file lands in `filesDir/exports/`, which is **emptied on every export**, and travels through a
-  third FileProvider authority, `${applicationId}.exports`. Not another path on the traces or updates
-  provider, for the reason the manifest already gives twice.
+- **Saving goes through `MediaStore.Downloads`, not a path.** From API 29 that needs no storage
+  permission and no picker, and the file is registered as it lands, so the Files app and every
+  spreadsheet app see it at once rather than after the next media scan. The write is `IS_PENDING`
+  until it is whole and the entry is deleted if it fails, or a part-written spreadsheet sits in
+  Downloads looking exactly like a finished one. MediaStore renames a second export of one session
+  to `... (1).xlsx` rather than overwriting, and **the toast names what Downloads actually created**,
+  not what was asked for - the two differ precisely when a re-run's earlier reading is already
+  saved. Nothing opens afterwards, so that toast is the only sign it worked.
+- Sending stages the file in `filesDir/exports/`, which is **emptied on every export**, and grants it
+  through `${applicationId}.exports`. Its own authority rather than another path on the traces
+  provider, for the reason the manifest gives beside it. Saving needs no provider at all.
 - Fill indices **0 and 1 are reserved** by the format for "none" and "gray125". A real fill at either
   shifts every other fill by one, which draws the sheet a column out rather than failing outright.
 - The output was checked by loading it with an independent reader (openpyxl, warnings as errors),

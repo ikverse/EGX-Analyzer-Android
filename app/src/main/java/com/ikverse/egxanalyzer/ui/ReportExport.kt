@@ -1,7 +1,12 @@
 package com.ikverse.egxanalyzer.ui
 
+import android.content.ContentResolver
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.provider.MediaStore
+import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
 import com.ikverse.egxanalyzer.data.Cell
 import com.ikverse.egxanalyzer.data.CellAlign
@@ -14,6 +19,7 @@ import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import java.io.File
+import java.io.IOException
 import java.time.ZoneId
 
 /**
@@ -76,18 +82,65 @@ internal fun exportFileName(saved: SavedAnalysis): String {
     return "EGX-analysis-$date.xlsx"
 }
 
+/** The report as a spreadsheet, so the two places it can be put agree on what it is. */
+internal fun reportBytes(saved: SavedAnalysis): ByteArray = writeXlsx(reportSheet(saved))
+
 /**
- * Writes the export and hands back the file.
+ * Saves the report to the phone's own Downloads folder, and hands back what it ended up called.
  *
- * The directory is emptied first. Every export is a fresh reading of a report that is already on
- * disk, so keeping the last one buys nothing and lets a private directory grow without bound.
+ * Through MediaStore rather than by writing a path: from API 29 that needs no storage permission
+ * and no picker, and the file is registered as it lands, so the Files app and every spreadsheet app
+ * see it at once rather than after the next media scan.
+ *
+ * The name is what was asked for unless Android had to change it. Exporting the same session twice
+ * gives `... (1).xlsx` rather than overwriting, which matters most for the case worth protecting: a
+ * re-run of a session whose earlier reading someone has already saved.
  */
-internal fun writeExport(context: Context, saved: SavedAnalysis): File {
+internal fun saveToDownloads(context: Context, saved: SavedAnalysis): String {
+    val requested = exportFileName(saved)
+    val resolver = context.contentResolver
+    val pending = ContentValues().apply {
+        put(MediaStore.Downloads.DISPLAY_NAME, requested)
+        put(MediaStore.Downloads.MIME_TYPE, XLSX_MIME_TYPE)
+        // Nothing else may open it until it is whole. Without this a failure part way through
+        // leaves a truncated spreadsheet in Downloads that looks exactly like a finished one.
+        put(MediaStore.Downloads.IS_PENDING, 1)
+    }
+    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, pending)
+        ?: throw IOException("Android would not open a file in Downloads")
+    try {
+        resolver.openOutputStream(uri)?.use { it.write(reportBytes(saved)) }
+            ?: throw IOException("Android would not write to the file it had just made")
+        val finished = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+        resolver.update(uri, finished, null, null)
+    } catch (error: Throwable) {
+        // The entry exists from the insert onwards, so an abandoned one has to be removed here or
+        // Downloads keeps a nought-byte file named as though the export had worked.
+        runCatching { resolver.delete(uri, null, null) }
+        throw error
+    }
+    return savedName(resolver, uri) ?: requested
+}
+
+/** What Downloads actually called the file, which is not always what was asked for. */
+private fun savedName(resolver: ContentResolver, uri: Uri): String? = runCatching {
+    resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+    }
+}.getOrNull()
+
+/**
+ * Writes the export where it can be handed to another app, and returns the file.
+ *
+ * A private directory rather than Downloads, because this copy exists only to be passed on: it is
+ * emptied on every export, and a report is already on disk in the form that matters.
+ */
+internal fun stageExport(context: Context, saved: SavedAnalysis): File {
     val directory = File(context.filesDir, EXPORT_DIRECTORY)
     directory.mkdirs()
     directory.listFiles()?.forEach { it.delete() }
     val file = File(directory, exportFileName(saved))
-    file.writeBytes(writeXlsx(reportSheet(saved)))
+    file.writeBytes(reportBytes(saved))
     return file
 }
 
@@ -95,8 +148,9 @@ internal fun writeExport(context: Context, saved: SavedAnalysis): File {
  * Offers the written file to whatever the user picks.
  *
  * Through a provider of its own rather than another path on the trace provider, for the reason the
- * manifest already gives twice: an authority whose name lies about what it carries is how the wrong
- * file gets granted to the wrong app.
+ * manifest gives beside it: an authority whose name lies about what it carries is how the wrong
+ * file gets granted to the wrong app. [saveToDownloads] needs none of this - a file the user owns
+ * in a folder they chose is not this app's to grant.
  */
 internal fun exportIntent(context: Context, file: File): Intent {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}$EXPORT_AUTHORITY_SUFFIX", file)

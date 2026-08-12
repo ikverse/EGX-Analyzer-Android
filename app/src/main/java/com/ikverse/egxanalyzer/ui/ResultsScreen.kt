@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.TableChart
@@ -234,6 +235,7 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                         newerRunExists = saved.result.recommendationTargetDate
                             ?.let { newestRunFor[it]?.isAfter(saved.result.completedAt) } == true,
                         onShare = { shareReport(activity, appState.reportFor(saved)) },
+                        onSaveLocally = { scope.launch { saveReport(activity, appState, saved) } },
                         onExport = { scope.launch { exportReport(activity, appState, saved) } },
                         onDelete = { appState.deleteResult(saved) },
                         report = { appState.reportFor(saved) },
@@ -421,7 +423,9 @@ private fun SavedAnalysisCard(
     /** Whether a later run covered the same session, which makes this report the older reading. */
     newerRunExists: Boolean = false,
     onShare: () -> Unit,
-    /** The same table as a spreadsheet, handed to whatever the user picks. */
+    /** The same table as a spreadsheet, written to the phone's own Downloads folder. */
+    onSaveLocally: () -> Unit,
+    /** The same file again, handed to whatever the user picks to send it with. */
     onExport: () -> Unit,
     onDelete: () -> Unit,
     report: () -> AnalysisReport,
@@ -528,7 +532,12 @@ private fun SavedAnalysisCard(
                             onClick = { menuOpen = false; onShare() },
                         )
                         DropdownMenuItem(
-                            text = { Text("Export to Excel") },
+                            text = { Text("Save to Downloads") },
+                            leadingIcon = { Icon(Icons.Outlined.Download, contentDescription = null) },
+                            onClick = { menuOpen = false; onSaveLocally() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Send as Excel") },
                             leadingIcon = { Icon(Icons.Outlined.TableChart, contentDescription = null) },
                             onClick = { menuOpen = false; onExport() },
                         )
@@ -697,35 +706,57 @@ private fun shareReport(activity: Activity, report: AnalysisReport) {
 }
 
 /**
+ * Writes the report as a spreadsheet into the phone's own Downloads folder.
+ *
+ * Off the main thread, because it builds and zips the whole table. Nothing opens afterwards, so the
+ * toast is the only sign it happened - and it names the file Downloads actually created rather than
+ * the one that was asked for, which are not the same when a session has been exported before.
+ */
+private suspend fun saveReport(activity: Activity, appState: AppState, saved: SavedAnalysis) {
+    if (!exportable(appState, saved)) return
+    runCatching { withContext(Dispatchers.IO) { saveToDownloads(activity, saved) } }
+        .onSuccess {
+            appState.statusMessage = StatusMessage("Saved to Downloads/$it", succeeded = true)
+        }
+        .onFailure { appState.statusMessage = failed("save", it) }
+}
+
+/**
  * Writes the report as a spreadsheet and offers it onward.
  *
- * Off the main thread, because it builds and zips the whole table. The chooser is the confirmation
- * when it works - a toast behind a full-screen chooser is talking to nobody - so only a refusal and
- * a failure say anything.
+ * The chooser is the confirmation when this one works - a toast behind a full-screen chooser is
+ * talking to nobody - so only a refusal and a failure say anything.
  */
 private suspend fun exportReport(activity: Activity, appState: AppState, saved: SavedAnalysis) {
-    // Analyses saved before the consolidated contract have no table to export, only the flat list
-    // the screen falls back to. An empty sheet of eighteen headings is a worse answer than saying so.
-    if (saved.result.consolidated.isEmpty()) {
-        appState.statusMessage = StatusMessage(
-            "This run predates the table, so there is nothing to export.",
-            succeeded = false,
-        )
-        return
-    }
-    runCatching { withContext(Dispatchers.IO) { writeExport(activity, saved) } }
+    if (!exportable(appState, saved)) return
+    runCatching { withContext(Dispatchers.IO) { stageExport(activity, saved) } }
         .onSuccess { file ->
             activity.startActivity(
-                Intent.createChooser(exportIntent(activity, file), "Export EGX analysis"),
+                Intent.createChooser(exportIntent(activity, file), "Send EGX analysis"),
             )
         }
-        .onFailure {
-            appState.statusMessage = StatusMessage(
-                "Could not write the Excel file: ${it.message ?: "unknown error"}",
-                succeeded = false,
-            )
-        }
+        .onFailure { appState.statusMessage = failed("write", it) }
 }
+
+/**
+ * Whether there is a table to export at all, and the toast when there is not.
+ *
+ * Analyses saved before the consolidated contract have only the flat list the screen falls back to.
+ * An empty sheet of eighteen headings is a worse answer than saying so.
+ */
+private fun exportable(appState: AppState, saved: SavedAnalysis): Boolean {
+    if (saved.result.consolidated.isNotEmpty()) return true
+    appState.statusMessage = StatusMessage(
+        "This run predates the table, so there is nothing to export.",
+        succeeded = false,
+    )
+    return false
+}
+
+private fun failed(verb: String, error: Throwable) = StatusMessage(
+    "Could not $verb the Excel file: ${error.message ?: "unknown error"}",
+    succeeded = false,
+)
 
 @Composable
 private fun ResultDetail(

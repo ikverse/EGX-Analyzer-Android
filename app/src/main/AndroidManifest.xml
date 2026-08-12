@@ -61,9 +61,10 @@
             </intent-filter>
         </receiver>
 
-        <!-- Lets whatever the user picks read a report exported as a spreadsheet. A third provider
-             for the same reason as the second: each authority is named for what it shares, and one
-             whose name covers two unrelated directories is a grant nobody can reason about. -->
+        <!-- Lets whatever the user picks read a report exported as a spreadsheet. Its own authority
+             rather than another path on the traces one above: each is named for what it shares, and
+             an authority whose name covers two unrelated directories is a grant nobody can reason
+             about. Saving to Downloads needs none of this - that goes through MediaStore. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.exports"
