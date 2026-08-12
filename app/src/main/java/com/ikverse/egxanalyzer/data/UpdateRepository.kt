@@ -63,15 +63,48 @@ class UpdateRepository(
         val document = fetch(releaseUrl)
         // The device's own list, best first, so a release split by architecture hands this phone
         // the build for its chip rather than the libraries for four of them.
-        val offered = updateOffered(
+        // Nothing is deleted here. [downloaded] decides what is worth keeping, on every launch and
+        // against the version actually running - where this only ever knew what GitHub had, and a
+        // release page briefly missing its newest entry would have thrown away a good download.
+        updateOffered(
             currentVersionName,
             document,
             Build.SUPPORTED_ABIS?.toList().orEmpty(),
         )
-        // An install that has caught up has no use for the APK it was updated from, and this is the
-        // first moment anything knows that: the file was written by the version before this one.
-        if (offered == null) clearDownloads()
-        offered
+    }
+
+    /**
+     * An update already fetched and still waiting to be installed, or null when there is none.
+     *
+     * This is what makes the permission trip survivable. Granting "install unknown apps" restarts
+     * the app on some phones, and everything it knew about the download used to die with the
+     * process - leaving 70MB on disk that nothing would ever look at again, and a card back at
+     * "Check for updates" as if the download had never happened. The file is the record now.
+     *
+     * Anything that cannot be read, has been caught up with, or was not signed by this build's key
+     * is deleted rather than offered: all three would end at an installer refusing it.
+     */
+    suspend fun downloaded(): Pair<AvailableUpdate, File>? = withContext(Dispatchers.IO) {
+        val file = File(context.filesDir, DOWNLOAD_DIRECTORY)
+            .listFiles()
+            ?.firstOrNull { it.isFile && it.name.endsWith(APK_SUFFIX) }
+            ?: return@withContext null
+        val version = downloadedUpdateVersion(file.name, currentVersionName)
+        // The signature last, because it digests the whole file - no point paying for 70MB of it to
+        // learn the name was wrong.
+        if (version == null || !signedLikeThisApp(file)) {
+            file.delete()
+            return@withContext null
+        }
+        AvailableUpdate(
+            version = version,
+            versionName = version.toString(),
+            // Empty on purpose: the notes were read when it was offered, and there is nothing left
+            // to download. Only the file matters from here.
+            notes = "",
+            downloadUrl = "",
+            sizeBytes = file.length(),
+        ) to file
     }
 
     /**
@@ -89,7 +122,7 @@ class UpdateRepository(
         // One at a time. A half-finished download is worth nothing, and a phone should not carry
         // every version it was ever offered.
         clearDownloads()
-        val target = File(directory, "egx-analyzer-${update.versionName}.apk")
+        val target = File(directory, downloadFileName(update.versionName))
         val partial = File(directory, "${target.name}.part")
 
         val connection = open(update.downloadUrl)
@@ -230,6 +263,7 @@ class UpdateRepository(
         /** Matches the provider declared in the manifest. */
         private const val AUTHORITY_SUFFIX = ".updates"
         private const val DOWNLOAD_DIRECTORY = "updates"
+        private const val APK_SUFFIX = ".apk"
         private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
         private const val GITHUB_MEDIA_TYPE = "application/vnd.github+json"
         private const val TIMEOUT_MILLISECONDS = 20_000

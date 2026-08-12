@@ -263,8 +263,19 @@ phone only by plugging it into the machine that built it. It reads one public UR
 
 - **Two deliberate taps, Download then Install**, in Settings → About. The second hands the APK to
   Android's package installer, which asks again in its own words. `REQUEST_INSTALL_PACKAGES` only
-  makes the app eligible to ask; the user still grants "install unknown apps" on a system page, and
-  `canInstall()` is read **at the tap**, because returning from that page does not recompose.
+  makes the app eligible to ask; the user still grants "install unknown apps" on a system page.
+- **Granting that permission force-stops the app** on Samsung, and everything the app knew about the
+  70MB it had just fetched died with the process while the file sat in `filesDir/updates/`
+  untouched. So the **file is the record**: its name carries the version, `downloaded()` reads it
+  back on every launch, and the card returns as Ready to install. A download survives the permission
+  grant that was needed to install it, and is never paid for twice. Anything unreadable, caught up
+  with, or signed by another key is deleted there rather than offered — all three end at an
+  installer refusing it. Nothing else deletes downloads: `check()` used to clear them when GitHub
+  offered nothing, which would throw away a good file over a release page briefly missing an entry.
+- The button reads **Allow installs** before the permission exists and **Install** after, refreshed
+  by a `LifecycleResumeEffect` because returning from a system page does not recompose a card on its
+  own. A button saying Install that opens a settings page is how someone grants the permission,
+  comes back, and concludes the install silently failed.
 - The APK lands in `filesDir/updates/` and reaches the installer through a **second FileProvider**,
   authority `${applicationId}.updates`. Not another path on the traces provider: that one is named
   for what it shares outward, and an authority whose name lies about what it carries is how the

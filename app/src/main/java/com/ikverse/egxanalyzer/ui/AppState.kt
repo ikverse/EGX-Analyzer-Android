@@ -983,9 +983,24 @@ class AppState(
      */
     private fun checkForUpdateQuietly() {
         val updates = updateRepository ?: return
-        if (!appPreferences.updateChecksEnabled) return
         appScope.launch {
+            // The disk before the network, and whatever the setting says: an update already fetched
+            // was asked for by someone, and the only thing left to do with it is install it. This is
+            // what carries a download through the app being restarted by the permission grant that
+            // was needed to install it.
+            val waiting = runCatching { updates.downloaded() }.getOrNull()
+            if (waiting != null) {
+                updateState = UpdateState.Ready(waiting.first, waiting.second)
+                statusMessage = StatusMessage(
+                    "Version ${waiting.first.versionName} is downloaded and ready to install",
+                    succeeded = true,
+                )
+            }
+            if (!appPreferences.updateChecksEnabled) return@launch
             val update = runCatching { updates.check() }.getOrNull() ?: return@launch
+            // A download in hand beats an offer of the same version, and loses to a newer one.
+            val ready = (updateState as? UpdateState.Ready)?.update?.version
+            if (ready != null && ready >= update.version) return@launch
             updateState = UpdateState.Available(update)
             statusMessage = StatusMessage(
                 "Version ${update.versionName} is available",
@@ -1007,6 +1022,12 @@ class AppState(
         updateState = UpdateState.Downloading(update, 0f)
         appScope.launch {
             updateState = runCatching {
+                // Nothing to fetch if it is already here. A download interrupted by the permission
+                // grant used to be paid for twice, at seventy megabytes a time.
+                val waiting = runCatching { updates.downloaded() }.getOrNull()
+                if (waiting != null && waiting.first.version >= update.version) {
+                    return@runCatching UpdateState.Ready(waiting.first, waiting.second)
+                }
                 // The progress callback arrives on the thread doing the reading. Compose state
                 // takes a write from any thread, and marshalling each percent back to the main one
                 // would cost a coroutine per percent to move a number nobody is racing for.

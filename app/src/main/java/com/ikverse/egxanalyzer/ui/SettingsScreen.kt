@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ikverse.egxanalyzer.BuildConfig
 import com.ikverse.egxanalyzer.data.UpdateState
 import com.ikverse.egxanalyzer.model.AnalysisContentType
@@ -566,6 +567,15 @@ private fun UpdateControls(appState: AppState) {
     val state = appState.updateState
     val busy = state is UpdateState.Checking || state is UpdateState.Downloading
 
+    // Re-read on the way back rather than only at composition. The permission is granted on a
+    // system page, and returning from one does not recompose a card on its own - so the button went
+    // on saying the thing it said before the user did what it asked.
+    var canInstall by remember { mutableStateOf(appState.canInstallUpdates()) }
+    LifecycleResumeEffect(Unit) {
+        canInstall = appState.canInstallUpdates()
+        onPauseOrDispose { }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         when (state) {
             UpdateState.Idle -> Unit
@@ -620,18 +630,18 @@ private fun UpdateControls(appState: AppState) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (!appState.canInstallUpdates()) {
+                if (!canInstall) {
                     Text(
-                        "Android needs your permission for this app to install apps. Install opens " +
-                            "that setting first.",
+                        "Android has to allow this app to install apps first. The button opens that " +
+                            "setting; come back here afterwards and press Install.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Button(
                     onClick = {
-                        // Read at the tap rather than at composition: the permission is granted on
-                        // a system page, and coming back from it does not recompose this card.
+                        // Read at the tap as well as on resume: whichever way the permission was
+                        // granted, the button must do the right thing the moment it is pressed.
                         val intent = if (appState.canInstallUpdates()) {
                             appState.updateInstallIntent(state.file)
                         } else {
@@ -639,7 +649,10 @@ private fun UpdateControls(appState: AppState) {
                         }
                         intent?.let(context::startActivity)
                     },
-                ) { Text("Install") }
+                    // Two taps, and the label says which one this is. "Install" on a button that
+                    // opens a settings page is how someone grants the permission, comes back, and
+                    // believes the install has silently failed.
+                ) { Text(if (canInstall) "Install" else "Allow installs") }
             }
 
             is UpdateState.Failed -> Text(state.reason, color = MaterialTheme.colorScheme.error)

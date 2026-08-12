@@ -150,6 +150,42 @@ class UpdateReleaseTest {
         assertNull(chosen)
     }
 
+    /**
+     * A download has to outlive the app being restarted.
+     *
+     * Granting "install unknown apps" force-stops the app on some phones, so everything it knew
+     * about the 70MB it had just fetched died with the process while the file sat there. The name
+     * is what survives, so the name carries the version.
+     */
+    @Test
+    fun `a kept APK is found again by its name`() {
+        val name = downloadFileName("1.0.2")
+
+        assertEquals("egx-analyzer-1.0.2.apk", name)
+        assertEquals("1.0.2", downloadedVersionName(name))
+    }
+
+    @Test
+    fun `a file that is not a kept APK is ignored rather than guessed at`() {
+        assertNull(downloadedVersionName("egx-analyzer-1.0.2.apk.part"))
+        assertNull(downloadedVersionName("egx-analyzer-latest.apk"))
+        assertNull(downloadedVersionName("holiday-photo.jpg"))
+        assertNull(downloadedVersionName("1.0.2.apk"))
+    }
+
+    /** Installing what this build has already caught up with would walk someone backwards. */
+    @Test
+    fun `only a kept APK newer than this build is worth offering`() {
+        assertEquals(
+            AppVersion(1, 0, 2),
+            downloadedUpdateVersion("egx-analyzer-1.0.2.apk", "1.0.1"),
+        )
+        assertNull(downloadedUpdateVersion("egx-analyzer-1.0.2.apk", "1.0.2"))
+        assertNull(downloadedUpdateVersion("egx-analyzer-1.0.2.apk", "1.0.3"))
+        // The build that installed it now calls itself the same version, suffix and all.
+        assertNull(downloadedUpdateVersion("egx-analyzer-1.0.2.apk", "1.0.2-debug"))
+    }
+
     @Test
     fun `a size is reported in the unit someone decides with`() {
         assertEquals("23.4 MB", readRelease(release(size = 24_500_000))?.sizeLabel)

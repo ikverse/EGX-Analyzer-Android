@@ -70,19 +70,21 @@ internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = tru
     val scope = rememberCoroutineScope()
     var firstValue by remember(appState.telegramAuthState.step) { mutableStateOf("") }
     var secondValue by remember(appState.telegramAuthState.step) { mutableStateOf("") }
-    // Only while signing in. Once ready the chat card says so itself, and a loose line above it
-    // pushed this column out of step with the one beside it.
-    if (appState.telegramAuthState.step != TelegramAuthStep.READY) {
-        Text(
-            appState.telegramAuthState.message,
-            color = if (appState.telegramAuthState.step == TelegramAuthStep.ERROR) {
-                MaterialTheme.colorScheme.error
-            } else MaterialTheme.colorScheme.primary,
-        )
+    val step = appState.telegramAuthState.step
+    // Loose on the column only for the steps that draw no card, where the message is the whole of
+    // what the screen has to say. Every step that does draw one carries it inside instead: above
+    // the card it set this column 36dp below the one beside it once the panes sit side by side,
+    // and two headings meant to read as one row did not. Once READY the chat card speaks for
+    // itself, which is why nothing is drawn here at all.
+    if (step == TelegramAuthStep.INITIALIZING ||
+        step == TelegramAuthStep.LOGGING_OUT ||
+        step == TelegramAuthStep.ERROR
+    ) {
+        AuthMessage(appState)
     }
-    when (appState.telegramAuthState.step) {
+    when (step) {
         TelegramAuthStep.API_CONFIGURATION -> {
-            AuthCard("Telegram application", boxed) {
+            AuthCard("Telegram application", boxed, appState) {
                 Text(
                     "This build has no application credentials of its own, so it needs a pair " +
                         "from my.telegram.org. They are encrypted on this device.",
@@ -99,7 +101,7 @@ internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = tru
                 ApiCredentialsHelp()
             }
         }
-        TelegramAuthStep.PHONE_NUMBER -> AuthCard("Sign in to Telegram", boxed) {
+        TelegramAuthStep.PHONE_NUMBER -> AuthCard("Sign in to Telegram", boxed, appState) {
             // Scanning is offered first: it is the shorter path on any device, and on a tablet
             // typing a phone number and then a code is the worst part of setting the app up.
             Button(onClick = {
@@ -116,13 +118,13 @@ internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = tru
             }) { Text("Send verification code") }
             ApiCredentialsHelp()
         }
-        TelegramAuthStep.VERIFICATION_CODE -> AuthCard("Verification code", boxed) {
+        TelegramAuthStep.VERIFICATION_CODE -> AuthCard("Verification code", boxed, appState) {
             AuthField(firstValue, { firstValue = it }, "Telegram code")
             Button(onClick = {
                 scope.launch { appState.submitTelegramCode(firstValue) }
             }) { Text("Verify code") }
         }
-        TelegramAuthStep.TWO_FACTOR_PASSWORD -> AuthCard("Two-step verification", boxed) {
+        TelegramAuthStep.TWO_FACTOR_PASSWORD -> AuthCard("Two-step verification", boxed, appState) {
             appState.telegramAuthState.hint?.takeIf(String::isNotBlank)?.let {
                 Text("Hint: $it")
             }
@@ -134,26 +136,26 @@ internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = tru
                 }
             }) { Text("Continue") }
         }
-        TelegramAuthStep.EMAIL_ADDRESS -> AuthCard("Login email", boxed) {
+        TelegramAuthStep.EMAIL_ADDRESS -> AuthCard("Login email", boxed, appState) {
             AuthField(firstValue, { firstValue = it }, "Email address")
             Button(onClick = {
                 scope.launch { appState.submitTelegramEmail(firstValue) }
             }) { Text("Send email code") }
         }
-        TelegramAuthStep.EMAIL_CODE -> AuthCard("Email verification", boxed) {
+        TelegramAuthStep.EMAIL_CODE -> AuthCard("Email verification", boxed, appState) {
             AuthField(firstValue, { firstValue = it }, "Email code")
             Button(onClick = {
                 scope.launch { appState.submitTelegramEmailCode(firstValue) }
             }) { Text("Verify email") }
         }
-        TelegramAuthStep.REGISTRATION -> AuthCard("Finish registration", boxed) {
+        TelegramAuthStep.REGISTRATION -> AuthCard("Finish registration", boxed, appState) {
             AuthField(firstValue, { firstValue = it }, "First name")
             AuthField(secondValue, { secondValue = it }, "Last name")
             Button(onClick = {
                 scope.launch { appState.registerTelegram(firstValue, secondValue) }
             }) { Text("Register") }
         }
-        TelegramAuthStep.OTHER_DEVICE_CONFIRMATION -> AuthCard("Scan with Telegram", boxed) {
+        TelegramAuthStep.OTHER_DEVICE_CONFIRMATION -> AuthCard("Scan with Telegram", boxed, appState) {
             val link = appState.telegramAuthState.link.orEmpty()
             if (link.isNotBlank()) {
                 QrCode(link)
@@ -260,22 +262,50 @@ private fun HelpStep(number: String, text: String) {
  *
  * Boxed it is a card in its own right; unboxed it keeps the same heading and hairline but no
  * surface of its own, for the caller that has already drawn one around it.
+ *
+ * Carries the step's message under its heading. Both forms do, so the card and the block inside
+ * Settings say the same thing in the same place.
  */
 @Composable
 private fun AuthCard(
     title: String,
     boxed: Boolean,
+    appState: AppState,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     if (boxed) {
-        SectionCard(title = title, content = content)
+        SectionCard(title = title) {
+            AuthMessage(appState)
+            content()
+        }
     } else {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            AuthMessage(appState)
             content()
         }
     }
+}
+
+/**
+ * What the sign-in has to say right now: an instruction, or what went wrong.
+ *
+ * Drawn nothing at all when there is nothing to say, rather than an empty line - blank, it still
+ * took a line's height and moved everything under it for no reason.
+ */
+@Composable
+private fun AuthMessage(appState: AppState) {
+    val state = appState.telegramAuthState
+    if (state.message.isBlank()) return
+    Text(
+        state.message,
+        color = if (state.step == TelegramAuthStep.ERROR) {
+            MaterialTheme.colorScheme.error
+        } else {
+            MaterialTheme.colorScheme.primary
+        },
+    )
 }
 
 @Composable

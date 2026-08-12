@@ -107,8 +107,39 @@ fun updateOffered(
     return readRelease(document, abis)?.takeIf { it.version > current }
 }
 
+/**
+ * The name a fetched APK is kept under while it waits to be installed.
+ *
+ * The version is in the name because the name is all that survives. Granting "install unknown apps"
+ * restarts the app on some phones - Samsung force-stops it - and everything the app knew about the
+ * download dies with the process while the file itself sits there. Read back out of the name, a
+ * download outlives the permission grant that was needed to install it.
+ */
+fun downloadFileName(versionName: String): String = "$DOWNLOAD_PREFIX$versionName$APK_SUFFIX"
+
+/** The version a kept APK names, or null when the file is not one this app wrote. */
+fun downloadedVersionName(fileName: String): String? = fileName
+    .takeIf { it.startsWith(DOWNLOAD_PREFIX) && it.endsWith(APK_SUFFIX) }
+    ?.removePrefix(DOWNLOAD_PREFIX)
+    ?.removeSuffix(APK_SUFFIX)
+    ?.takeIf { AppVersion.parse(it) != null }
+
+/**
+ * The version a kept APK would install, or null when there is no reason to keep it.
+ *
+ * Anything this build has already caught up with is rubbish: the file was written by the version
+ * before this one, and offering to install it would walk someone backwards. A half-finished
+ * download - still named `.part` - is not one of ours either.
+ */
+fun downloadedUpdateVersion(fileName: String, currentVersionName: String): AppVersion? {
+    val downloaded = downloadedVersionName(fileName)?.let(AppVersion::parse) ?: return null
+    val current = AppVersion.parse(currentVersionName) ?: return null
+    return downloaded.takeIf { it > current }
+}
+
 private const val APK_SUFFIX = ".apk"
 private const val UNIVERSAL_SUFFIX = "-universal$APK_SUFFIX"
+private const val DOWNLOAD_PREFIX = "egx-analyzer-"
 
 /**
  * The architectures a file name might be named for.
