@@ -13,12 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The project targets JDK 17 bytecode via Android Studio's bundled JBR; 17 is the
-      # matching LTS on CI.
+      # 21, because Robolectric refuses to build a sandbox for Android SDK 36 on anything older -
+      # "requires Java 21 (have Java 17)" - and the migration and settings tests are Robolectric.
+      # It is also what Android Studio's bundled JBR runs locally, so both sides agree.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - uses: gradle/actions/setup-gradle@v4
 
@@ -59,7 +60,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - uses: gradle/actions/setup-gradle@v4
 

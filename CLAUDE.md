@@ -301,7 +301,9 @@ phone only by plugging it into the machine that built it. It reads one public UR
   by hand and upgrades it, deliberately: a test that builds its "old" schema from today's code
   tests nothing, because both sides move together. Add a case there for every version bump. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it
-  went in.
+  went in. **Robolectric needs Java 21** to stand up a sandbox for SDK 36 — it refuses on 17 with
+  "requires Java 21 (have Java 17)", which is a green run locally on the JBR and a red one anywhere
+  pinned lower. CI pins 21 for that reason.
 - `PriceRepository` fetches **from where a stock's stored history stops**, via `period1`/`period2`,
   not a fixed range. It used to ask for `5d`: a phone left shut for a week got a hole that every
   later refresh stepped straight over, permanently — and a call whose window contains a hole never
