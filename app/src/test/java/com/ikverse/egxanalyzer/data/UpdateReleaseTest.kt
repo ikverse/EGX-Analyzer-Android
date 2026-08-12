@@ -186,6 +186,42 @@ class UpdateReleaseTest {
         assertNull(downloadedUpdateVersion("egx-analyzer-1.0.2.apk", "1.0.2-debug"))
     }
 
+    /**
+     * A dropped connection costs the last few megabytes, not all seventy.
+     *
+     * "Software caused connection abort" on a phone is a moment - a handover, a lift, a screen
+     * locking - and the first version of this deleted the part file and started again, so the
+     * download had to win a coin toss in one go.
+     */
+    @Test
+    fun `a resumed download carries on from what is already on disk`() {
+        // 206: the server honoured the range and is sending the rest.
+        assertEquals(50_000_000L, resumeOffset(206, 50_000_000))
+    }
+
+    /**
+     * The case that would corrupt an APK rather than merely waste a download.
+     *
+     * A server that ignores the range header answers 200 with the whole file. Appending that to
+     * what is on disk builds a file that is neither, and only says so after another seventy
+     * megabytes, at the signature check, with nothing to explain it.
+     */
+    @Test
+    fun `a server that ignores the range starts the file over`() {
+        assertEquals(0L, resumeOffset(200, 50_000_000))
+        // Nothing on disk is nothing to resume, whatever the answer says.
+        assertEquals(0L, resumeOffset(206, 0))
+    }
+
+    /** A resumed response describes what is left, so the progress bar has to add back the rest. */
+    @Test
+    fun `the size of the whole file counts what has already arrived`() {
+        assertEquals(75_000_000L, totalBytes(contentLength = 25_000_000, resumeFrom = 50_000_000, offeredSize = 75_000_000))
+        assertEquals(75_000_000L, totalBytes(contentLength = 75_000_000, resumeFrom = 0, offeredSize = 75_000_000))
+        // A response that will not say falls back to what the release said it was.
+        assertEquals(75_000_000L, totalBytes(contentLength = -1, resumeFrom = 0, offeredSize = 75_000_000))
+    }
+
     @Test
     fun `a size is reported in the unit someone decides with`() {
         assertEquals("23.4 MB", readRelease(release(size = 24_500_000))?.sizeLabel)

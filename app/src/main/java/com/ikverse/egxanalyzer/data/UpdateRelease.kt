@@ -21,18 +21,38 @@ data class AvailableUpdate(
      * one of the two rendering as Arabic-Indic digits while the other does not reads as a fault in
      * the app.
      */
-    val sizeLabel: String
-        get() = when {
-            sizeBytes <= 0 -> "size unknown"
-            sizeBytes >= BYTES_PER_MB ->
-                String.format(Locale.US, "%.1f MB", sizeBytes.toDouble() / BYTES_PER_MB)
-            else -> "${sizeBytes / 1024} KB"
-        }
-
-    private companion object {
-        const val BYTES_PER_MB = 1024 * 1024
-    }
+    val sizeLabel: String get() = byteLabel(sizeBytes)
 }
+
+/** A count of bytes as someone on mobile data would say it. US digits, for the reason above. */
+fun byteLabel(bytes: Long): String = when {
+    bytes <= 0 -> "size unknown"
+    bytes >= BYTES_PER_MB -> String.format(Locale.US, "%.1f MB", bytes.toDouble() / BYTES_PER_MB)
+    else -> "${bytes / 1024} KB"
+}
+
+/**
+ * Where an interrupted download carries on from, given what the server answered.
+ *
+ * Only a 206 means the server honoured the range and is sending the rest. A 200 is the whole file
+ * again - some servers ignore the header, and a CDN can answer a resumed request with a fresh copy
+ * - and appending that to what is already on disk builds a file that is neither, downloads another
+ * seventy megabytes to do it, and fails its signature check at the end with nothing to explain it.
+ */
+fun resumeOffset(responseCode: Int, bytesOnDisk: Long): Long =
+    if (responseCode == PARTIAL_CONTENT && bytesOnDisk > 0) bytesOnDisk else 0L
+
+/**
+ * How big the whole file is, given a response that may only be describing what is left of it.
+ *
+ * A resumed request's Content-Length counts the remainder, not the file, so the bytes already on
+ * disk have to be added back or the progress bar reports 40% as 100%.
+ */
+fun totalBytes(contentLength: Long, resumeFrom: Long, offeredSize: Long): Long =
+    if (contentLength > 0) contentLength + resumeFrom else offeredSize
+
+private const val BYTES_PER_MB = 1024 * 1024
+private const val PARTIAL_CONTENT = 206
 
 /**
  * Which of a release's APKs this device should download.

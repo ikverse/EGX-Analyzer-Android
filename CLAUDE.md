@@ -264,6 +264,14 @@ phone only by plugging it into the machine that built it. It reads one public UR
 - **Two deliberate taps, Download then Install**, in Settings → About. The second hands the APK to
   Android's package installer, which asks again in its own words. `REQUEST_INSTALL_PACKAGES` only
   makes the app eligible to ask; the user still grants "install unknown apps" on a system page.
+- **A download resumes and retries.** 70MB on a phone loses its connection — a Wi-Fi handover, a
+  lift, a screen locking — and "Software caused connection abort" used to delete the part file and
+  start from zero, so the download had to win a coin toss in one go. The part file is the progress
+  now: three attempts, each sending `Range: bytes=<what is on disk>-`. **A 200 rather than a 206
+  starts the file over**, because a server that ignored the range is sending the whole thing again
+  and appending it would build a corrupt APK that only says so at the signature check, seventy
+  megabytes later. An HTTP refusal (`HttpFailure`) is never retried — a rate limit does not improve
+  by being asked three times in ten seconds.
 - **Granting that permission force-stops the app** on Samsung, and everything the app knew about the
   70MB it had just fetched died with the process while the file sat in `filesDir/updates/`
   untouched. So the **file is the record**: its name carries the version, `downloaded()` reads it

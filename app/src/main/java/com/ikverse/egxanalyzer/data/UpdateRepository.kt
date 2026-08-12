@@ -10,8 +10,10 @@ import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.ikverse.egxanalyzer.BuildConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -119,22 +121,67 @@ class UpdateRepository(
         onProgress: (Float) -> Unit,
     ): File = withContext(Dispatchers.IO) {
         val directory = File(context.filesDir, DOWNLOAD_DIRECTORY).apply { mkdirs() }
-        // One at a time. A half-finished download is worth nothing, and a phone should not carry
-        // every version it was ever offered.
-        clearDownloads()
         val target = File(directory, downloadFileName(update.versionName))
-        val partial = File(directory, "${target.name}.part")
+        val partial = File(directory, "${target.name}$PARTIAL_SUFFIX")
+        // Everything except this download's own part file, which is the whole point: a connection
+        // that dies at sixty megabytes should cost the last ten, not all seventy.
+        clearDownloads(keep = partial.name)
 
-        val connection = open(update.downloadUrl)
-        try {
-            if (connection.responseCode !in 200..299) {
-                throw IOException(failureFor(connection.responseCode, "The download"))
+        var attempt = 0
+        while (true) {
+            attempt++
+            try {
+                fetchInto(partial, update, onProgress)
+                break
+            } catch (error: HttpFailure) {
+                // The server said no, and it will say no again. Rate limits and missing files are
+                // not made better by asking three times in ten seconds.
+                throw error
+            } catch (error: IOException) {
+                if (attempt >= DOWNLOAD_ATTEMPTS) {
+                    throw IOException(
+                        "The download stopped at ${byteLabel(partial.length())}. Press Download " +
+                            "to carry on from there.",
+                        error,
+                    )
+                }
+                // A moment, rather than straight back into a network that has just dropped.
+                delay(RETRY_DELAY_MILLISECONDS * attempt)
             }
-            val total = connection.contentLengthLong.takeIf { it > 0 } ?: update.sizeBytes
-            var written = 0L
+        }
+
+        if (!partial.renameTo(target)) {
+            partial.delete()
+            throw IOException("The download could not be saved.")
+        }
+        target
+    }
+
+    /**
+     * One attempt, carrying on from whatever is already on disk.
+     *
+     * Throws on a dropped connection and leaves the part file where it is - that file is the
+     * progress, and deleting it is what used to turn one bad moment on a train into another
+     * seventy megabytes.
+     */
+    private fun fetchInto(partial: File, update: AvailableUpdate, onProgress: (Float) -> Unit) {
+        val onDisk = partial.length()
+        val connection = open(
+            url = update.downloadUrl,
+            accept = ANY_MEDIA_TYPE,
+            rangeFrom = onDisk.takeIf { it > 0 },
+        )
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) throw HttpFailure(failureFor(code, "The download"))
+            val resumeFrom = resumeOffset(code, onDisk)
+            val total = totalBytes(connection.contentLengthLong, resumeFrom, update.sizeBytes)
+            var written = resumeFrom
             var reported = -1
             connection.inputStream.use { source ->
-                partial.outputStream().use { sink ->
+                // Appending only when the server actually agreed to resume. Otherwise this
+                // truncates, because what is arriving is the file from the beginning again.
+                FileOutputStream(partial, resumeFrom > 0).use { sink ->
                     val buffer = ByteArray(BUFFER_BYTES)
                     while (true) {
                         val read = source.read(buffer)
@@ -153,19 +200,13 @@ class UpdateRepository(
                     }
                 }
             }
-        } catch (error: Throwable) {
-            partial.delete()
-            throw error
         } finally {
             connection.disconnect()
         }
-
-        if (!partial.renameTo(target)) {
-            partial.delete()
-            throw IOException("The download could not be saved.")
-        }
-        target
     }
+
+    /** A refusal from the server, as opposed to a connection that fell over. Never retried. */
+    private class HttpFailure(message: String) : IOException(message)
 
     /**
      * Whether the downloaded APK was signed with the key this build was signed with.
@@ -212,8 +253,10 @@ class UpdateRepository(
         Intent(Intent.ACTION_VIEW, Uri.parse(RELEASES_PAGE_URL))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-    private fun clearDownloads() {
-        File(context.filesDir, DOWNLOAD_DIRECTORY).listFiles()?.forEach { it.delete() }
+    private fun clearDownloads(keep: String? = null) {
+        File(context.filesDir, DOWNLOAD_DIRECTORY)
+            .listFiles()
+            ?.forEach { if (it.name != keep) it.delete() }
     }
 
     private fun fetch(url: String): String {
@@ -228,12 +271,19 @@ class UpdateRepository(
         }
     }
 
-    private fun open(url: String): HttpURLConnection =
+    private fun open(
+        url: String,
+        accept: String = GITHUB_MEDIA_TYPE,
+        rangeFrom: Long? = null,
+    ): HttpURLConnection =
         (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            setRequestProperty("Accept", GITHUB_MEDIA_TYPE)
+            setRequestProperty("Accept", accept)
             // GitHub refuses a request that does not name what is asking.
             setRequestProperty("User-Agent", "EGXAnalyzer/$currentVersionName")
+            // Carry on from what is already on disk. A server that ignores this answers 200 rather
+            // than 206, which is why the answer is read rather than assumed.
+            if (rangeFrom != null) setRequestProperty("Range", "bytes=$rangeFrom-")
             connectTimeout = TIMEOUT_MILLISECONDS
             readTimeout = TIMEOUT_MILLISECONDS
         }
@@ -266,7 +316,21 @@ class UpdateRepository(
         private const val APK_SUFFIX = ".apk"
         private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
         private const val GITHUB_MEDIA_TYPE = "application/vnd.github+json"
+
+        /** An asset is a file, not the API. Asking it for JSON was harmless and still a lie. */
+        private const val ANY_MEDIA_TYPE = "*/*"
+        private const val PARTIAL_SUFFIX = ".part"
         private const val TIMEOUT_MILLISECONDS = 20_000
         private const val BUFFER_BYTES = 64 * 1024
+
+        /**
+         * How many times a dropped connection is picked back up before the user is told.
+         *
+         * Three, because the failure this exists for is a moment - a handover between Wi-Fi and
+         * mobile, a lift, a screen locking - and not a network that is down. Each attempt resumes,
+         * so the cost of one more try is seconds rather than another seventy megabytes.
+         */
+        private const val DOWNLOAD_ATTEMPTS = 3
+        private const val RETRY_DELAY_MILLISECONDS = 2_000L
     }
 }
