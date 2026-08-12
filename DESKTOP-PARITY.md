@@ -1,10 +1,15 @@
-# Desktop parity backlog
+# Desktop parity backlog — closed
 
-Changes proven on Android that the desktop still needs. Android leads because it is quick to
-rebuild and install; the desktop ships through a tagged release and a PyInstaller sidecar, so
-porting is batched rather than continuous.
+> **Closed on 2026-08-12.** The desktop app was retired at v0.1.126 with none of this ported, so
+> nothing below is a task any more. Kept as the record of where the two apps diverged and why
+> Android's version of each behaviour is shaped the way it is — item 1 in particular explains why
+> Android carries a symbol map the desktop never had.
 
-Ordered by what it costs to leave alone.
+Changes proven on Android that the desktop still needed. Android led because it was quick to
+rebuild and install; the desktop shipped through a tagged release and a PyInstaller sidecar, so
+porting was batched rather than continuous.
+
+Ordered by what it cost to leave alone.
 
 ## 1. Yahoo dropped the legacy symbols — desktop has no prices after 29 July 2026
 

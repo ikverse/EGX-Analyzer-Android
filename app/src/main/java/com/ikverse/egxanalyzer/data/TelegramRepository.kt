@@ -450,6 +450,17 @@ class TelegramRepository(
         val ruleRevisions: List<ChannelFile>,
         /** Every revision of every position, for the same reason. */
         val positionRevisions: List<ChannelFile>,
+        /**
+         * Every settings revision, by file name.
+         *
+         * By name rather than as a list, because the name carries both facts the merge decides on -
+         * when they were written and by which device. Settings change far more often than they are
+         * read, so downloading every revision to find the newest would grow into the slowest part
+         * of a sync for an answer one file name already gives.
+         */
+        val settingsRevisions: Map<String, ChannelFile>,
+        /** Every generated prompt, by id. A prompt never changes, so one copy is the whole story. */
+        val promptVersions: Map<String, ChannelFile>,
     )
 
     private suspend fun contentsOf(chatId: Long): ChannelContents {
@@ -457,6 +468,8 @@ class TelegramRepository(
         val tombstones = linkedMapOf<String, ChannelFile>()
         val ruleRevisions = mutableListOf<ChannelFile>()
         val positionRevisions = mutableListOf<ChannelFile>()
+        val settingsRevisions = linkedMapOf<String, ChannelFile>()
+        val promptVersions = linkedMapOf<String, ChannelFile>()
         var fromMessageId = 0L
         while (true) {
             val page = client.getChatHistory(chatId, fromMessageId, 0, HISTORY_PAGE_SIZE, false)
@@ -486,11 +499,29 @@ class TelegramRepository(
                     positionRevisions += file
                     return@forEach
                 }
+                // Settings and prompts before the report branch for the same reason as the two
+                // above: every one of these names ends in .json, so anything left to fall through
+                // is read as a report called "settings-..." and downloaded as one.
+                if (SettingsSnapshot.stampOf(name) != null) {
+                    settingsRevisions.putIfAbsent(name, file)
+                    return@forEach
+                }
+                SyncedPromptVersion.promptIdOf(name)?.let {
+                    promptVersions.putIfAbsent(it, file)
+                    return@forEach
+                }
                 SyncedRun.requestIdOf(name)?.let { reports.putIfAbsent(it, file) }
             }
             fromMessageId = messages.last().id
         }
-        return ChannelContents(reports, tombstones, ruleRevisions, positionRevisions)
+        return ChannelContents(
+            reports,
+            tombstones,
+            ruleRevisions,
+            positionRevisions,
+            settingsRevisions,
+            promptVersions,
+        )
     }
 
     /** Every report the channel says was deleted, so no device brings one back. */
@@ -663,6 +694,109 @@ class TelegramRepository(
     /** Reads one report back out of the channel. */
     suspend fun downloadReport(fileId: Int): SyncedRun? =
         SyncedRun.fromDocument(download(fileId).readText())
+
+    /**
+     * The settings the channel holds, or null when nobody has published any.
+     *
+     * Only the newest revision in each channel is downloaded, and which one that is comes out of
+     * the file names: settings change far more often than they are read, so a channel carrying a
+     * year of them costs one download rather than hundreds. Read across duplicate channels like
+     * reports are, and merged rather than picked, so a newest file that will not parse loses one
+     * channel's answer instead of all of them.
+     */
+    suspend fun syncedSettings(): SettingsSnapshot? {
+        val chats = (findSyncChats() + syncChatId()).distinct()
+        val newestInEach = chats.mapNotNull { chat ->
+            contentsOf(chat).settingsRevisions.entries
+                .mapNotNull { (name, file) -> SettingsSnapshot.stampOf(name)?.let { it to file } }
+                .maxByOrNull { (stamp, _) -> stamp }
+                ?.second
+        }
+        return mergeSettings(
+            newestInEach.mapNotNull { file ->
+                runCatching { SettingsSnapshot.fromDocument(download(file.fileId).readText()) }
+                    .getOrNull()
+            },
+        )
+    }
+
+    /** Puts one settings revision in the channel. Revisions accumulate; the newest one wins. */
+    suspend fun uploadSettings(snapshot: SettingsSnapshot) {
+        val chatId = syncChatId()
+        val staged = File(context.cacheDir, snapshot.fileName).apply {
+            writeText(snapshot.toDocument())
+        }
+        try {
+            execute {
+                client.sendMessage(
+                    chatId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    dev.g000sha256.tdl.dto.InputMessageDocument(
+                        dev.g000sha256.tdl.dto.InputDocument(
+                            dev.g000sha256.tdl.dto.InputFileLocal(staged.path),
+                            null,
+                            true,
+                        ),
+                        dev.g000sha256.tdl.dto.FormattedText(
+                            "settings from ${snapshot.updatedBy}",
+                            emptyArray(),
+                        ),
+                    ),
+                )
+            }
+        } finally {
+            staged.delete()
+        }
+    }
+
+    /** Every generated prompt anywhere under this name, by the id its file name carries. */
+    suspend fun listSyncedPromptVersions(): Map<String, Int> {
+        val chats = (findSyncChats() + syncChatId()).distinct()
+        return chats.fold(linkedMapOf()) { all, chat ->
+            contentsOf(chat).promptVersions.forEach { (id, file) ->
+                all.putIfAbsent(id, file.fileId)
+            }
+            all
+        }
+    }
+
+    suspend fun downloadPromptVersion(fileId: Int): SyncedPromptVersion? =
+        SyncedPromptVersion.fromDocument(download(fileId).readText())
+
+    /** Puts one generated prompt in the channel. The id is the identity; it is never rewritten. */
+    suspend fun uploadPromptVersion(version: SyncedPromptVersion) {
+        val chatId = syncChatId()
+        val staged = File(context.cacheDir, version.fileName).apply {
+            writeText(version.toDocument())
+        }
+        try {
+            execute {
+                client.sendMessage(
+                    chatId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    dev.g000sha256.tdl.dto.InputMessageDocument(
+                        dev.g000sha256.tdl.dto.InputDocument(
+                            dev.g000sha256.tdl.dto.InputFileLocal(staged.path),
+                            null,
+                            true,
+                        ),
+                        dev.g000sha256.tdl.dto.FormattedText(
+                            "prompt v${version.version.sequence}",
+                            emptyArray(),
+                        ),
+                    ),
+                )
+            }
+        } finally {
+            staged.delete()
+        }
+    }
 
     private suspend fun download(fileId: Int): File {
         val downloaded = client.downloadFile(fileId, 16, 0, 0, true)

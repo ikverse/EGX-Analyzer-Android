@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import android.content.Intent
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -19,9 +20,15 @@ import com.ikverse.egxanalyzer.data.ComposedPrompt
 import com.ikverse.egxanalyzer.data.PromptComposer
 import com.ikverse.egxanalyzer.data.PromptStore
 import com.ikverse.egxanalyzer.model.PromptVersion
+import com.ikverse.egxanalyzer.data.AvailableUpdate
+import com.ikverse.egxanalyzer.data.SettingsSnapshot
 import com.ikverse.egxanalyzer.data.SyncedPosition
+import com.ikverse.egxanalyzer.data.SyncedPromptVersion
 import com.ikverse.egxanalyzer.data.SyncedRule
+import com.ikverse.egxanalyzer.data.UpdateRepository
+import com.ikverse.egxanalyzer.data.UpdateState
 import com.ikverse.egxanalyzer.data.mergeRules
+import com.ikverse.egxanalyzer.data.settingsWorthUploading
 import com.ikverse.egxanalyzer.data.positionsToUpload
 import com.ikverse.egxanalyzer.data.rulesToUpload
 import com.ikverse.egxanalyzer.data.AnalysisPolicy
@@ -52,6 +59,7 @@ import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.Portfolio
+import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.PromptSnapshot
@@ -66,6 +74,7 @@ import com.ikverse.egxanalyzer.model.resolveAnalysisWindow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.Job
@@ -73,6 +82,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -90,6 +100,14 @@ enum class AppDestination(val label: String, val shortLabel: String) {
 
 enum class AnalysisStatus { IDLE, RUNNING, COMPLETED, FAILED, CANCELLED }
 
+/**
+ * How long settings have to stop changing before they are published.
+ *
+ * Long enough to cover a slider being dragged and a checkbox being reconsidered, short enough that
+ * a phone put down straight after a change still sends them.
+ */
+private const val SETTINGS_PUBLISH_DELAY_MILLISECONDS = 3_000L
+
 class AppState(
     private val settingsRepository: SettingsRepository,
     private val analysisRepository: AnalysisRepository,
@@ -98,12 +116,22 @@ class AppState(
     private val priceRepository: PriceRepository,
     /** The shipped prompt, which every generated version is composed from. */
     private val promptStore: PromptStore,
+    /**
+     * Where a newer build is found and fetched from.
+     *
+     * Null in tests and nowhere else: it reaches the network and the package manager, neither of
+     * which a unit test has, and every path here treats its absence as "no update to offer" rather
+     * than as a failure.
+     */
+    private val updateRepository: UpdateRepository? = null,
     /** Announces a run that has started; supplied by the app so this class stays testable. */
     private val analysisRunning: (sources: Int, model: String) -> Unit = { _, _ -> },
     /** Announces a finished run and the analysis it saved. */
     private val analysisFinished: (resultId: Long?, recommendations: Int) -> Unit = { _, _ -> },
     /** Withdraws the running announcement, with a reason when it failed. */
     private val analysisStopped: (reason: String?) -> Unit = {},
+    /** Books or cancels the daily overdue check; supplied by the app so this class stays testable. */
+    private val overdueRemindersChanged: (enabled: Boolean) -> Unit = {},
 ) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     var destination by mutableStateOf(AppDestination.ANALYZE)
@@ -128,7 +156,9 @@ class AppState(
         private set
     var catalogMessage by mutableStateOf("${EgxCatalog.size()} seed stocks available offline.")
         private set
-    var availableModels by mutableStateOf<List<String>>(emptyList())
+    // Seeded from disk rather than empty: the picker is the only safe way to choose a model, and a
+    // list that died with the process meant every cold start offered a text field instead.
+    var availableModels by mutableStateOf(settingsRepository.modelList(cloudConfiguration.provider))
         private set
     var modelListLoading by mutableStateOf(false)
         private set
@@ -270,6 +300,7 @@ class AppState(
     fun usePromptDefaultOnly(value: Boolean) {
         useDefaultPromptOnly = value
         settingsRepository.saveUseDefaultPromptOnly(value)
+        publishSettings()
         regeneratePrompt(if (value) "Switched to the default prompt" else "Custom wording re-enabled")
     }
 
@@ -531,11 +562,14 @@ class AppState(
         target1: Double?,
         target2: Double?,
         stopLoss: Double?,
+        /** What the dialog offered, or whatever the user typed over it. */
+        windowSessions: Int = appPreferences.scoringWindowSessions,
     ) {
         val normalized = Scoring.normalizeTicker(ticker)
         val existing = positions.firstOrNull {
             it.ticker == normalized && it.recommendationDate == recommendationDate
         }
+        val window = Scoring.clampWindow(windowSessions)
         val position = Position(
             ticker = normalized,
             recommendationDate = recommendationDate,
@@ -549,9 +583,15 @@ class AppState(
             target1 = target1,
             target2 = target2,
             stopLoss = stopLoss,
-            // The window in force now becomes this trade's deadline and stays with it: changing the
-            // setting later must not silently move a deadline a trade was taken under.
-            windowSessions = appPreferences.scoringWindowSessions,
+            // The window becomes this trade's deadline and stays with it: changing the global
+            // setting later must not silently move a deadline a trade was taken under. Only an
+            // edit of this trade can move it, which is the user doing it on purpose.
+            windowSessions = window,
+            // Custom means the user typed over what they were offered, which here is the global
+            // setting. Recorded rather than recomputed later: the setting moves, the choice did not.
+            windowCustom = window != appPreferences.scoringWindowSessions,
+            // Re-recording a mistyped price must not quietly cancel a Keep Open already set.
+            keepOpen = existing?.keepOpen ?: false,
             // Kept from the first purchase, so re-recording a trade does not restart its life.
             openedAt = existing?.openedAt ?: Instant.now(),
             updatedAt = System.currentTimeMillis(),
@@ -591,22 +631,76 @@ class AppState(
     }
 
     /**
-     * Corrects what a trade was recorded at.
+     * Corrects what a trade was recorded at, and how long it was given.
      *
-     * The call it belongs to, its deadline and any sale are all untouched: this fixes a typed price
-     * or a misremembered date, and nothing else about the position moves.
+     * The call it belongs to and any recorded sale are untouched. The window is not: a deadline
+     * misjudged at the moment of buying is worth correcting, and this is the only thing allowed to
+     * move one. Changing it moves the deadline, so it can close a position that was running or
+     * reopen one the deadline had closed - which is the point of being asked for it.
      */
-    fun reprice(position: Position, entryPrice: Double, entryDate: LocalDate) {
+    fun reprice(
+        position: Position,
+        entryPrice: Double,
+        entryDate: LocalDate,
+        windowSessions: Int = position.windowSessions,
+    ) {
+        val window = Scoring.clampWindow(windowSessions)
+        val movedWindow = window != position.windowSessions
         val corrected = position.copy(
             entryPrice = entryPrice,
             entryDate = entryDate,
+            windowSessions = window,
+            // Here the offered value is the trade's own window rather than the global setting, so
+            // custom means the same thing it means at purchase: typed over what was on screen. A
+            // trade already marked stays marked - editing only its price is not un-choosing.
+            windowCustom = position.windowCustom || movedWindow,
             updatedAt = System.currentTimeMillis(),
             updatedBy = deviceName,
         )
         localDataStore.savePosition(corrected)
         positions = localDataStore.positions()
-        statusMessage = StatusMessage("${position.ticker} entry now ${formatPrice(entryPrice)}", true)
+        statusMessage = StatusMessage(
+            if (movedWindow) {
+                "${position.ticker} now runs $window ${window.sessionWord()}"
+            } else {
+                "${position.ticker} entry now ${formatPrice(entryPrice)}"
+            },
+            true,
+        )
         publishPosition(corrected, deleted = false)
+        appScope.launch { recomputePortfolio() }
+    }
+
+    /**
+     * Lets a trade outlive its deadline, or stops letting it.
+     *
+     * Almost nothing else closes a position carrying this - not the deadline, not target 1, not the
+     * stop - so the Sold button becomes the way out, which is what the user asked for by pressing
+     * it. Target 2 is the exception, and ends the trade regardless: it did what it was bought to do.
+     * Turning this back off hands the position to the deadline again, and one already past it
+     * settles on the next recompute.
+     */
+    fun setKeepOpen(position: Position, keepOpen: Boolean, note: String? = null) {
+        if (position.keepOpen == keepOpen && position.keepOpenNote == note) return
+        val updated = position.copy(
+            keepOpen = keepOpen,
+            // Cleared when the trade goes back to its deadline: a reason for keeping something open
+            // is nonsense on a trade that is no longer being kept open.
+            keepOpenNote = if (keepOpen) note?.trim()?.takeIf(String::isNotBlank) else null,
+            updatedAt = System.currentTimeMillis(),
+            updatedBy = deviceName,
+        )
+        localDataStore.savePosition(updated)
+        positions = localDataStore.positions()
+        statusMessage = StatusMessage(
+            if (keepOpen) {
+                "${position.ticker} stays open until you sell it"
+            } else {
+                "${position.ticker} follows its deadline again"
+            },
+            true,
+        )
+        publishPosition(updated, deleted = false)
         appScope.launch { recomputePortfolio() }
     }
 
@@ -635,7 +729,10 @@ class AppState(
      * something they did not ask for and cannot act on.
      */
     private fun publishPosition(position: Position, deleted: Boolean) {
-        publish { telegramRepository.uploadPosition(SyncedPosition(position, deleted)) }
+        // Read back rather than sent as `{}`: whatever a newer app version wrote against this trade
+        // has to travel with every revision, or this device erases it simply by editing the price.
+        val unknown = localDataStore.unknownFor(position.id)
+        publish { telegramRepository.uploadPosition(SyncedPosition(position, deleted, unknown)) }
     }
 
     /**
@@ -655,8 +752,8 @@ class AppState(
      * not, so the merge decides by (updatedAt, device) rather than by who uploaded last.
      */
     private suspend fun syncPositions(): Boolean {
-        val mine = localDataStore.positionRevisions().map { (position, deleted) ->
-            SyncedPosition(position, deleted)
+        val mine = localDataStore.positionRevisions().map { revision ->
+            SyncedPosition(revision.position, revision.deleted, revision.unknown)
         }
         val theirs = runCatching { telegramRepository.syncedPositions() }.getOrNull() ?: return false
 
@@ -671,7 +768,11 @@ class AppState(
                         incoming.position.updatedBy > here.position.updatedBy
                     )
             if (newer) {
-                localDataStore.adoptPosition(incoming.position, incoming.deleted)
+                localDataStore.adoptPosition(
+                    incoming.position,
+                    incoming.deleted,
+                    incoming.unknown,
+                )
                 changed = true
             }
         }
@@ -689,13 +790,30 @@ class AppState(
         return changed
     }
 
+    /**
+     * Recounts how overdue everything is, without touching the network.
+     *
+     * How late a trade is depends on today's date, and nothing tells the app the date has changed.
+     * Left open overnight it would go on showing yesterday's count until something else happened to
+     * recompute; called when the app comes back to the foreground, it is right whenever it is read.
+     * Deliberately not a price refresh - the count is worked out from the stored deadline, so this
+     * costs a database read and no requests.
+     */
+    fun refreshOverdue() {
+        appScope.launch { recomputePortfolio() }
+    }
+
     private suspend fun recomputePortfolio() {
         val held = positions
+        // The exchange's own calendar, not the phone's: a user abroad must not see a trade fall
+        // a day further behind simply for having crossed a time zone.
+        val today = LocalDate.now(ZoneId.of(EGX_ZONE))
         portfolio = withContext(Dispatchers.IO) {
             PortfolioCalculator.build(
                 positions = held,
                 sessionsFor = localDataStore::sessionsFrom,
                 latestCloseFor = localDataStore::latestClose,
+                today = today,
             )
         }
     }
@@ -718,6 +836,9 @@ class AppState(
 
     init {
         adoptLegacyPhrases()
+        // Before the first sync, or this device's own settings would look like an empty install's
+        // and be quietly overwritten by the other phone's rather than merged with them.
+        settingsRepository.claimSettingsIfUnstamped(deviceName)
         // Recorded on first launch too, so the very first run has a version to name rather than
         // a gap where one should be.
         regeneratePrompt("First run")
@@ -770,6 +891,9 @@ class AppState(
                     statusMessage = StatusMessage("$count chats loaded", succeeded = true)
                 }
         }
+        // Independent of Telegram, unlike the sync: this is one public URL, so it does not have to
+        // wait for a session that may never arrive on a phone whose owner has not signed in.
+        checkForUpdateQuietly()
         // Nothing about a previous session carries into this one: a restart starts from the
         // chat list Telegram reports now, with nothing selected.
         localDataStore.forgetChannelSelections()
@@ -818,6 +942,114 @@ class AppState(
 
     private var caughtUp = false
 
+    /** How far the app has got with finding, fetching and checking a newer build. */
+    var updateState by mutableStateOf<UpdateState>(UpdateState.Idle)
+        private set
+
+    /**
+     * Asks GitHub whether a newer build exists, and answers either way.
+     *
+     * The button is a question, so "you are on the newest version" is an answer worth giving. The
+     * launch check is not, which is why it is [checkForUpdateQuietly] and not this.
+     */
+    fun checkForUpdate() {
+        val updates = updateRepository ?: return
+        if (updateState is UpdateState.Checking || updateState is UpdateState.Downloading) return
+        updateState = UpdateState.Checking
+        appScope.launch {
+            updateState = runCatching { updates.check() }.fold(
+                onSuccess = { update ->
+                    if (update == null) {
+                        UpdateState.UpToDate(updates.currentVersionName)
+                    } else {
+                        UpdateState.Available(update)
+                    }
+                },
+                onFailure = { error ->
+                    UpdateState.Failed(
+                        error.message?.takeIf(String::isNotBlank) ?: "The update check failed.",
+                    )
+                },
+            )
+        }
+    }
+
+    /**
+     * The launch check, which speaks only when there is something new.
+     *
+     * The same rule the launch sync follows: telling someone who never asked that nothing has
+     * changed is a notification about nothing. A failure is silent for the same reason - the phone
+     * was offline, which is not news either.
+     */
+    private fun checkForUpdateQuietly() {
+        val updates = updateRepository ?: return
+        if (!appPreferences.updateChecksEnabled) return
+        appScope.launch {
+            val update = runCatching { updates.check() }.getOrNull() ?: return@launch
+            updateState = UpdateState.Available(update)
+            statusMessage = StatusMessage(
+                "Version ${update.versionName} is available",
+                succeeded = true,
+            )
+        }
+    }
+
+    /**
+     * Fetches the APK and checks it before offering to install it.
+     *
+     * The signing check is what turns Android's "App not installed" into a sentence that says what
+     * to do about it. It is not a second opinion on Android's own check - it is the same check,
+     * made early enough to be explained.
+     */
+    fun downloadUpdate(update: AvailableUpdate) {
+        val updates = updateRepository ?: return
+        if (updateState is UpdateState.Downloading) return
+        updateState = UpdateState.Downloading(update, 0f)
+        appScope.launch {
+            updateState = runCatching {
+                // The progress callback arrives on the thread doing the reading. Compose state
+                // takes a write from any thread, and marshalling each percent back to the main one
+                // would cost a coroutine per percent to move a number nobody is racing for.
+                val file = updates.download(update) { progress ->
+                    updateState = UpdateState.Downloading(update, progress)
+                }
+                if (updates.signedLikeThisApp(file)) {
+                    UpdateState.Ready(update, file)
+                } else {
+                    file.delete()
+                    UpdateState.Failed(
+                        "Version ${update.versionName} is signed with a different key, so Android " +
+                            "will not install it over this build. Uninstall this one and install " +
+                            "that release by hand.",
+                    )
+                }
+            }.getOrElse { error ->
+                UpdateState.Failed(
+                    error.message?.takeIf(String::isNotBlank) ?: "The download failed.",
+                )
+            }
+        }
+    }
+
+    /** Puts the card back to the button, after an answer has been read. */
+    fun dismissUpdate() {
+        updateState = UpdateState.Idle
+    }
+
+    /** True once the user has allowed this app to install apps; Android is the only one who can ask. */
+    fun canInstallUpdates(): Boolean = updateRepository?.canInstall() ?: false
+
+    fun updateInstallIntent(file: File): Intent? = updateRepository?.installIntent(file)
+
+    fun installPermissionIntent(): Intent? = updateRepository?.permissionIntent()
+
+    fun releasesPageIntent(): Intent? = updateRepository?.releasesPageIntent()
+
+    fun updateAutomaticUpdateChecks(enabled: Boolean) {
+        if (enabled == appPreferences.updateChecksEnabled) return
+        persistPreferences(appPreferences.copy(updateChecksEnabled = enabled))
+    }
+
     fun navigate(destination: AppDestination) {
         this.destination = destination
     }
@@ -848,12 +1080,16 @@ class AppState(
     fun selectProvider(provider: CloudProvider) {
         cloudConfiguration = settingsRepository.configurationFor(provider)
         settingsMessage = null
-        availableModels = emptyList()
+        // Each provider keeps its own list, so switching back to one already loaded finds it there.
+        availableModels = settingsRepository.modelList(provider)
         modelListMessage = null
     }
 
     fun updateEndpoint(endpoint: String) {
         cloudConfiguration = cloudConfiguration.copy(endpoint = endpoint)
+        // A different endpoint is a different catalogue - regions do not carry the same models - so
+        // the stored list stops being an answer about this connection.
+        settingsRepository.clearModelList(cloudConfiguration.provider)
         availableModels = emptyList()
         modelListMessage = null
     }
@@ -874,6 +1110,9 @@ class AppState(
             chars?.fill('\u0000')
         }
         cloudConfiguration = settingsRepository.load()
+        // The connection travels; the key does not. Another device gets the endpoint and the model
+        // it should be using and asks for the key itself - see SettingsSnapshot.
+        publishSettings()
         if (!cloudConfiguration.hasCredential) {
             credentialVerified = null
             settingsMessage = "Connection saved. Enter the provider API key to finish."
@@ -886,6 +1125,7 @@ class AppState(
     fun persistModelChoice() {
         settingsRepository.save(cloudConfiguration, null)
         cloudConfiguration = settingsRepository.load()
+        publishSettings()
     }
 
     /**
@@ -901,6 +1141,10 @@ class AppState(
             val models = analysisRepository.listModels()
             credentialVerified = true
             availableModels = models
+            settingsRepository.saveModelList(cloudConfiguration.provider, models)
+            // Published with the rest: the list is what makes the model picker usable, and a
+            // restored install with no list is back to asking for a model name from memory.
+            publishSettings()
             // The card keeps the sentence and the toast gets the short form of it: this only ever
             // runs from Settings, so the fuller wording is already on screen behind the toast.
             settingsMessage = "API key verified. ${models.size} models available."
@@ -932,13 +1176,16 @@ class AppState(
         modelListMessage = "Loading models from ${cloudConfiguration.provider.displayName}…"
         try {
             availableModels = analysisRepository.listModels()
+            settingsRepository.saveModelList(cloudConfiguration.provider, availableModels)
             modelListMessage = if (availableModels.isEmpty()) {
                 "The provider returned no selectable models. You can still enter a model manually."
             } else {
                 "Loaded ${availableModels.size} models."
             }
         } catch (error: Exception) {
-            availableModels = emptyList()
+            // The stored list is left alone. It is still what this provider last answered, and
+            // emptying it over a dropped connection takes the picker away at the moment the user
+            // is least able to type a model name from memory.
             modelListMessage = error.message ?: "Could not load models."
         } finally {
             modelListLoading = false
@@ -947,13 +1194,19 @@ class AppState(
 
     fun removeCredential() {
         settingsRepository.removeCredential(cloudConfiguration.provider)
+        // A different key can be a different account with a different catalogue.
+        settingsRepository.clearModelList(cloudConfiguration.provider)
+        availableModels = emptyList()
         cloudConfiguration = settingsRepository.configurationFor(cloudConfiguration.provider)
         credentialVerified = null
         settingsMessage = "Saved credential removed."
     }
 
     fun resetProviderConfiguration() {
+        // Clears the stored list too, so the endpoint the reset restores is not left with the
+        // catalogue of the one it replaced.
         settingsRepository.resetProviderConfiguration(cloudConfiguration.provider)
+        availableModels = emptyList()
         cloudConfiguration = settingsRepository.configurationFor(cloudConfiguration.provider)
         settingsMessage = "Provider endpoint and model reset to defaults."
     }
@@ -1046,11 +1299,35 @@ class AppState(
      * Takes effect on everything already scored, not only future analyses: the outcome of a past
      * call under a shorter window is a fact about that call, so re-scoring is the honest answer.
      */
+    /**
+     * Turns the daily overdue reminder on or off.
+     *
+     * The scheduling follows the preference rather than being booked once at startup: a user who
+     * turns it off wants the phone to stop waking up for it, not to keep waking up and decide each
+     * time that it has nothing to say.
+     */
+    fun updateOverdueReminders(enabled: Boolean) {
+        if (enabled == appPreferences.overdueRemindersEnabled) return
+        persistPreferences(appPreferences.copy(overdueRemindersEnabled = enabled))
+        overdueRemindersChanged(enabled)
+    }
+
+    /**
+     * Remembers the order the Portfolio is being read in.
+     *
+     * Kept rather than held for the session, because it hides nothing: a user who chose oldest-first
+     * to work back through a month wants it still that way tomorrow, and finding it so costs them a
+     * moment. The date filter beside it is deliberately not kept - see [AppPreferences.portfolioOrder].
+     */
+    fun updatePortfolioOrder(order: PortfolioOrder) {
+        if (order == appPreferences.portfolioOrder) return
+        persistPreferences(appPreferences.copy(portfolioOrder = order))
+    }
+
     fun updateScoringWindow(sessions: Int) {
         val clamped = Scoring.clampWindow(sessions)
         if (clamped == appPreferences.scoringWindowSessions) return
-        settingsRepository.savePreferences(appPreferences.copy(scoringWindowSessions = clamped))
-        appPreferences = settingsRepository.loadPreferences()
+        persistPreferences(appPreferences.copy(scoringWindowSessions = clamped))
         appScope.launch { recomputePerformance() }
     }
 
@@ -1078,6 +1355,17 @@ class AppState(
     /** Every stock worth a request: the ones analyses name, plus the ones actually held. */
     private fun pricedStocks(): Set<String> =
         savedResults.recommendedTickers() + positions.map(Position::ticker)
+
+    /**
+     * The oldest session a stock still needs on disk, which is the oldest open trade in it.
+     *
+     * A trade cannot reach its deadline until every session of its window has been stored, so a
+     * hole inside that window has to be fetched again rather than stepped over. Closed trades are
+     * left out: their verdict is settled and refetching them would only widen every request.
+     */
+    private fun oldestOpenCall(ticker: String): LocalDate? = portfolio.positions
+        .filter { it.open && it.ticker == ticker }
+        .minOfOrNull(PositionView::recommendationDate)
 
     /**
      * Fetches only the stocks with no stored history at all.
@@ -1113,9 +1401,11 @@ class AppState(
         pricesRefreshing = true
         busyLabel = if (announce) "Fetching prices" else null
         try {
-            // A stock with no history is fetched in full; one already stored only needs the
-            // sessions since, so a daily refresh stays small however long the history grows.
-            val refresh = priceRepository.refresh(tickers)
+            // A stock with no history is fetched in full; one already stored is fetched from where
+            // its history stops, so a daily refresh stays small however long the history grows -
+            // and a gap left by a phone that was not opened for a fortnight is filled rather than
+            // stepped over, which is what an open trade needs to reach its deadline at all.
+            val refresh = priceRepository.refresh(tickers, ::oldestOpenCall)
             settingsRepository.recordPriceRefreshDay(
                 LocalDate.now(ZoneId.of(EGX_ZONE)).toString(),
             )
@@ -1159,9 +1449,111 @@ class AppState(
     }
 
     private fun saveAppPreferences(value: AppPreferences) {
+        persistPreferences(value)
+        settingsMessage = "App preferences saved."
+    }
+
+    /**
+     * Writes preferences, marks this device as the one that changed them, and publishes them.
+     *
+     * Every path that saves a preference goes through here. Three of them used to write straight to
+     * the repository, which was harmless while settings stayed on one phone and is not harmless now:
+     * a setting saved without a stamp is a setting the merge believes was never changed, and the
+     * other device's older copy would overtake it on the next sync.
+     */
+    private fun persistPreferences(value: AppPreferences) {
         settingsRepository.savePreferences(value)
         appPreferences = settingsRepository.loadPreferences()
-        settingsMessage = "App preferences saved."
+        publishSettings()
+    }
+
+    /**
+     * Puts the settings in the channel, a moment after they stop changing.
+     *
+     * Coalesced rather than sent per change, because a slider is dragged: the scoring window alone
+     * would otherwise upload a document for every value it passes through on its way to the one the
+     * user wanted. Waiting costs nothing - the settings are already on disk, and the next sync would
+     * carry them anyway if this never ran at all.
+     */
+    private fun publishSettings() {
+        settingsRepository.recordSettingsChange(deviceName)
+        settingsPublishJob?.cancel()
+        settingsPublishJob = appScope.launch {
+            delay(SETTINGS_PUBLISH_DELAY_MILLISECONDS)
+            val snapshot = settingsRepository.snapshot()
+            withContext(Dispatchers.IO) {
+                runCatching { telegramRepository.uploadSettings(snapshot) }
+            }
+        }
+    }
+
+    private var settingsPublishJob: Job? = null
+
+    /**
+     * Brings this device's settings into line with the newest anyone has saved.
+     *
+     * Last writer wins, as with rules and trades. The case this exists for is the reinstalled phone,
+     * whose stamp is zero: it has nothing to defend, so it takes everything and comes back
+     * configured as its owner left it rather than as the app ships. Returns whether anything here
+     * changed, because a scoring window arriving re-scores the whole record.
+     */
+    private suspend fun syncSettings(): Boolean {
+        val mine = settingsRepository.snapshot()
+        val theirs = runCatching { telegramRepository.syncedSettings() }.getOrNull()
+        if (theirs == null || theirs.stamp <= mine.stamp) {
+            if (settingsWorthUploading(mine, theirs)) {
+                runCatching { telegramRepository.uploadSettings(mine) }
+            }
+            return false
+        }
+        adoptSettings(theirs)
+        return true
+    }
+
+    private fun adoptSettings(snapshot: SettingsSnapshot) {
+        val remindersWere = appPreferences.overdueRemindersEnabled
+        settingsRepository.adopt(snapshot)
+        appPreferences = settingsRepository.loadPreferences()
+        // The Analyze screen seeds its content types from the preference at launch, which on a
+        // reinstalled phone happens before this arrives. Left alone it would show the shipped
+        // default until the next restart - and what it is being set to is the user's own choice.
+        selectedContentTypes = appPreferences.defaultContentTypes
+        cloudConfiguration = settingsRepository.load()
+        availableModels = settingsRepository.modelList(cloudConfiguration.provider)
+        useDefaultPromptOnly = settingsRepository.useDefaultPromptOnly()
+        promptHistory = settingsRepository.promptHistory()
+        // The daily check is booked with the system, not with this class: a device that adopts
+        // "off" has to have the work cancelled, or it goes on waking up to say nothing.
+        if (appPreferences.overdueRemindersEnabled != remindersWere) {
+            overdueRemindersChanged(appPreferences.overdueRemindersEnabled)
+        }
+        regeneratePrompt("Settings arrived from another device")
+    }
+
+    /**
+     * Brings the generated prompts into line, in both directions.
+     *
+     * A union like reports: an id is a hash of what produced the prompt, so a version never changes
+     * and there is nothing to merge. Without it a restored install holds reports that name a prompt
+     * version nothing on the device can show.
+     */
+    private suspend fun syncPromptVersions() {
+        val remote = runCatching { telegramRepository.listSyncedPromptVersions() }.getOrNull()
+            ?: return
+        val mine = promptVersions.associateBy { SyncedPromptVersion.keyFor(it.id) }
+        var adopted = false
+        (remote.keys - mine.keys).forEach { key ->
+            val fileId = remote[key] ?: return@forEach
+            val version = runCatching { telegramRepository.downloadPromptVersion(fileId) }
+                .getOrNull() ?: return@forEach
+            localDataStore.rememberPromptVersion(version.version)
+            adopted = true
+        }
+        (mine.keys - remote.keys).forEach { key ->
+            val version = mine[key] ?: return@forEach
+            runCatching { telegramRepository.uploadPromptVersion(SyncedPromptVersion(version)) }
+        }
+        if (adopted) promptVersions = localDataStore.promptVersions()
     }
 
     fun addChannel(idText: String, name: String): Boolean {
@@ -1207,6 +1599,11 @@ class AppState(
                 .onSuccess { localDataStore.clearDeletion(requestId) }
         }
 
+        // Settings before everything, and for the same reason rules come before reports: the whole
+        // record that follows is scored against the window these carry. A reinstalled phone that
+        // downloaded its record first would show it judged over ten sessions because that is what
+        // the app ships with, and correct itself a moment later.
+        val settingsChanged = syncSettings()
         // Rules first: a report downloaded a moment later was judged under somebody's rules, and
         // arriving with the reports but without them is the one order that explains nothing.
         val rulesChanged = syncWordingRules()
@@ -1214,6 +1611,8 @@ class AppState(
         // still a complete trade - it carries its own levels - where the reverse would show a
         // recommendation the user appears never to have acted on.
         syncPositions()
+        // After the rules, because a prompt version names the rules that composed it.
+        syncPromptVersions()
 
         val remote = telegramRepository.listSyncedReports()
         val local = localDataStore.savedRequestIds()
@@ -1254,6 +1653,11 @@ class AppState(
             savedResults = localDataStore.results()
             unreadableResults = localDataStore.unreadableResults
             recomputePerformance()
+        } else if (settingsChanged) {
+            // A scoring window that arrived from another device re-judges every call already here,
+            // whether or not a single report moved.
+            recomputePerformance()
+            recomputePortfolio()
         }
         return SyncOutcome(uploaded, downloaded, local.size - toUpload.size)
     }
@@ -1666,7 +2070,16 @@ class AppState(
                         "- Deadline: " + (
                             view.deadlineDate?.let { "passed $it" }
                                 ?: "${view.sessionsRemaining} of ${position.windowSessions} sessions left"
-                            ),
+                            ) +
+                            (if (position.windowCustom) " (window set by hand)" else "") +
+                            (
+                                if (view.overdue) {
+                                    " · ${view.overdueDays} ${view.overdueDays.dayWord()} overdue"
+                                } else {
+                                    ""
+                                }
+                                ) +
+                            (if (position.keepOpen) " · kept open until sold" else ""),
                     )
                     appendLine()
                 }

@@ -102,10 +102,14 @@ internal fun RecommendationTable(
                 toolbar?.let {
                     // Opaque and full width, because it slides across the rows rather than pushing
                     // them: a background sized to its contents let the table show through beside it.
+                    // Inset after the background, so the fill still runs edge to edge. The same
+                    // 8dp the header cells use, which lines the search field up with the "Source"
+                    // label directly under it.
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                            .padding(horizontal = Space.s),
                     ) { it() }
                 }
                 HeaderRow(columns, scroll)

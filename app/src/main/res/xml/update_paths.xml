@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Only the directory the downloaded APK lands in. The installer needs to read that one file
+         and nothing else the app holds. -->
+    <files-path name="updates" path="updates/" />
+</paths>

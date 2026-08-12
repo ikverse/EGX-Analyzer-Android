@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -24,6 +26,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -35,12 +38,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.PortfolioGroup
+import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.PortfolioStats
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.ui.theme.extraColors
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
@@ -75,23 +83,7 @@ internal fun PortfolioScreen(appState: AppState) {
 
         PortfolioSummary(portfolio.stats)
 
-        PositionSection(
-            title = "Open positions",
-            empty = "Nothing open. Every trade you recorded has been closed.",
-            groups = portfolio.open,
-            // Open positions are the ones a decision might still be made about, so they are never
-            // folded away behind a header.
-            collapsible = false,
-            appState = appState,
-        )
-        PositionSection(
-            title = "Closed positions",
-            empty = "Nothing closed yet. Positions land here when you sell, or when the " +
-                "recommendation's sessions run out.",
-            groups = portfolio.closed,
-            collapsible = true,
-            appState = appState,
-        )
+        PositionSection(groups = portfolio.groups, appState = appState)
     }
 }
 
@@ -110,11 +102,22 @@ private fun ColumnScope.PortfolioSummary(stats: PortfolioStats) {
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             StatTile(stats.openCount.toString(), "open", tone = MaterialTheme.colorScheme.primary)
-            StatTile(stats.closedCount.toString(), "closed")
+            // Settled rather than closed: it counts the expired trades too, and the card below this
+            // one now keeps "closed" for the ones that ended somewhere in particular.
+            StatTile(stats.settledCount.toString(), "settled")
+            // Only when there is one. A permanent "0 overdue" is a figure nobody reads, and this
+            // tile earns its place by being unusual.
+            if (stats.overdueCount > 0) {
+                StatTile(
+                    stats.overdueCount.toString(),
+                    "overdue",
+                    tone = MaterialTheme.colorScheme.error,
+                )
+            }
             StatTile(
-                formatPercent(stats.realizedReturnPct),
-                "average closed",
-                tone = PriceRole.forReturn(stats.realizedReturnPct),
+                formatPercent(stats.settledReturnPct),
+                "average settled",
+                tone = PriceRole.forReturn(stats.settledReturnPct),
             )
             StatTile(
                 formatPercent(stats.openReturnPct),
@@ -143,66 +146,193 @@ private fun ColumnScope.PortfolioSummary(stats: PortfolioStats) {
 }
 
 /**
- * One half of the screen: open or closed, grouped by the session each call was made for.
+ * The trades, one card per session the calls were made for.
  *
- * Closed groups fold away, exactly as a settled analysis does in Insights - the record stays
- * readable however many sessions have been traded - while open ones stay put.
+ * One card rather than the same date appearing under an open heading and a closed one: a day's
+ * trades were a single decision, and reading how it went meant scrolling past everything else to
+ * find its other half. Open, expired and closed are sections inside the card now, and every card
+ * folds away exactly as a settled analysis does in Insights, so the record stays readable however
+ * many sessions have been traded.
  */
 @Composable
-private fun ColumnScope.PositionSection(
-    title: String,
-    empty: String,
-    groups: List<PortfolioGroup>,
-    collapsible: Boolean,
-    appState: AppState,
-) {
-    Text(title, style = MaterialTheme.typography.titleLarge)
+private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: AppState) {
+    // Session-only, deliberately, and for the reason Results gives beside its own: a filter that
+    // survived a restart would hide trades from someone who had forgotten it was on. The order is
+    // kept instead - it hides nothing, so finding it as you left it costs a moment's thought rather
+    // than a search for trades that look as though they have gone.
+    var dateFilter by remember { mutableStateOf<String?>(null) }
+    val order = appState.appPreferences.portfolioOrder
+
+    // Set in like the page name above it: both are text on the page rather than in a card, and a
+    // heading that starts left of the one above it is what makes a page look unaligned.
+    Text(
+        "Positions",
+        Modifier.padding(start = PageTextInset),
+        style = MaterialTheme.typography.titleLarge,
+    )
     if (groups.isEmpty()) {
         Text(
-            empty,
+            "Nothing recorded yet.",
+            Modifier.padding(start = PageTextInset),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         return
     }
-    groups.forEach { group ->
-        if (collapsible) {
-            ExpandableSection(
-                title = group.recommendationDate.toString(),
-                icon = Icons.Outlined.AccountBalanceWallet,
-                summary = group.summary(),
-                summaryTone = PriceRole.forReturn(group.averageReturnPct),
-            ) {
-                PositionGrid(group, appState)
-            }
-        } else {
-            SectionCard(title = group.recommendationDate.toString()) {
-                Text(
-                    group.summary(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = PriceRole.forReturn(group.averageReturnPct),
-                )
-                PositionGrid(group, appState)
-            }
+
+    val allDates = remember(groups) {
+        groups.map { it.recommendationDate.toString() }.distinct().sortedDescending()
+    }
+    FilterRow(active = dateFilter != null, onClearAll = { dateFilter = null }) {
+        SingleSelectFilter(
+            label = "dates",
+            options = allDates,
+            selected = dateFilter,
+            onSelect = { dateFilter = it },
+        )
+        // Outside the clear-all, exactly as in Results: an order is not something a list can be
+        // cleared of, and resetting it would look like a filter had gone missing.
+        SortFilter(
+            options = PortfolioOrder.entries,
+            selected = order,
+            label = PortfolioOrder::label,
+            onSelect = appState::updatePortfolioOrder,
+        )
+    }
+
+    // Filtered here rather than in the calculator. The whole record has other readers - the overdue
+    // worker raises the daily reminder off it - and a date someone picked on this screen must not
+    // silence a notification about a trade they scrolled past.
+    val shown = remember(groups, dateFilter, order) {
+        groups
+            .filter { dateFilter == null || it.recommendationDate.toString() == dateFilter }
+            .map { it.copy(positions = it.positions.sortedWith(order.positions)) }
+            .sortedWith(order.groups)
+    }
+    if (shown.isEmpty()) {
+        EmptyState(
+            icon = Icons.Outlined.AccountBalanceWallet,
+            title = "Nothing called on $dateFilter",
+            detail = "No trade you recorded belongs to that session. Clear the filter to see the " +
+                "rest of your positions.",
+        )
+        return
+    }
+
+    shown.forEach { group ->
+        ExpandableSection(
+            title = group.recommendationDate.toString(),
+            icon = Icons.Outlined.AccountBalanceWallet,
+            summaryContent = { GroupSummary(group) },
+            // A session with a trade still running opens; one that is all history stays folded.
+            // Open positions have never been hidden behind a header and this does not start.
+            initiallyExpanded = group.hasOpen,
+        ) {
+            // Expired above closed: everything in it is a trade the app stopped tracking without
+            // being told how it ended, which is the only part of a session still asking for
+            // something. Closed is the record and goes last.
+            PositionSubSection("Open", group.open, OpenTone, appState)
+            PositionSubSection("Expired", group.expired, ExpiredTone, appState)
+            PositionSubSection("Closed", group.closed, ClosedTone, appState)
         }
     }
 }
 
-/** One line saying what a session's trades came to, so a folded group still informs. */
-private fun PortfolioGroup.summary(): String =
-    "${positions.size} ${if (positions.size == 1) "position" else "positions"} · " +
-        "average ${formatPercent(averageReturnPct)}"
+/**
+ * One line saying what a session's trades came to, so a folded card still informs.
+ *
+ * All three states are named and counted rather than two of them, so the line accounts for every
+ * position in the card: a reader who wants to know how many expired should not have to subtract.
+ * Each count carries its own state's colour, which is the same colour the section below it and the
+ * chip on the trade itself are drawn in.
+ */
+@Composable
+private fun GroupSummary(group: PortfolioGroup) {
+    val counts = listOf(
+        Triple(group.open.size, "open", OpenTone),
+        Triple(group.expired.size, "expired", ExpiredTone),
+        Triple(group.closed.size, "closed", ClosedTone),
+    )
+    val averageTone = PriceRole.forReturn(group.averageReturnPct)
+    val line = buildAnnotatedString {
+        val held = group.positions.size
+        append("$held ${if (held == 1) "position" else "positions"}")
+        counts.forEach { (size, word, tone) ->
+            if (size == 0) return@forEach
+            append(" · ")
+            withStyle(SpanStyle(color = tone)) { append("$size $word") }
+        }
+        append(" · ")
+        withStyle(SpanStyle(color = averageTone)) {
+            append("average ${formatPercent(group.averageReturnPct)}")
+        }
+    }
+    Text(
+        line,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * One state's trades inside a session's card, under a label saying which state it is.
+ *
+ * Drawn only when it holds something: an empty "Expired" heading on a session that went perfectly
+ * is three words of nothing, on every card, forever.
+ */
+@Composable
+private fun ColumnScope.PositionSubSection(
+    label: String,
+    views: List<PositionView>,
+    tone: Color,
+    appState: AppState,
+) {
+    if (views.isEmpty()) return
+    Text(
+        "$label · ${views.size}".uppercase(),
+        Modifier.padding(top = Space.s),
+        style = MaterialTheme.typography.labelSmall,
+        color = tone,
+    )
+    PositionGrid(views, appState)
+}
+
+/**
+ * A colour per section, borrowed from the status chips rather than invented beside them.
+ *
+ * Open is the primary hue every running figure in the app uses, expired is the amber the palette
+ * gained for exactly this, and closed is the muted one that says finished business. Read as
+ * properties so they resolve against the theme in force, light or dark.
+ */
+private val OpenTone: Color
+    @Composable get() = MaterialTheme.colorScheme.primary
+private val ExpiredTone: Color
+    @Composable get() = extraColors.expired
+private val ClosedTone: Color
+    @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
 
 @Composable
-private fun ColumnScope.PositionGrid(group: PortfolioGroup, appState: AppState) {
+private fun ColumnScope.PositionGrid(views: List<PositionView>, appState: AppState) {
     BoxWithConstraints {
         val columns = responsiveColumns(minColumnWidth = PositionCardMinWidth, maxColumns = 2)
         Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-            ResponsiveRows(group.positions, columns) { view, cardModifier ->
+            ResponsiveRows(views, columns) { view, cardModifier ->
                 PositionCard(
                     view = view,
                     onSell = { price, date -> appState.recordSale(view.position, price, date) },
-                    onEditEntry = { price, date -> appState.reprice(view.position, price, date) },
+                    onEditTrade = { price, date, window ->
+                        // The dialog cannot confirm with an unparsable window while it is showing
+                        // the field, so the fallback is only ever reached if it stops showing one.
+                        appState.reprice(
+                            view.position,
+                            price,
+                            date,
+                            window ?: view.position.windowSessions,
+                        )
+                    },
+                    onKeepOpen = { keep, note ->
+                        appState.setKeepOpen(view.position, keep, note)
+                    },
                     onRemove = { appState.deletePosition(view.position) },
                     modifier = cardModifier,
                 )
@@ -219,7 +349,8 @@ private fun ColumnScope.PositionGrid(group: PortfolioGroup, appState: AppState) 
 private fun PositionCard(
     view: PositionView,
     onSell: (Double, LocalDate) -> Unit,
-    onEditEntry: (Double, LocalDate) -> Unit,
+    onEditTrade: (Double, LocalDate, Int?) -> Unit,
+    onKeepOpen: (keep: Boolean, note: String?) -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -263,10 +394,24 @@ private fun PositionCard(
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
-                            text = { Text("Edit entry") },
+                            text = { Text("Edit trade") },
                             leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
                             onClick = { menuOpen = false; editing = true },
                         )
+                        // Undoing Keep Open lives here rather than beside Sold. The pill already
+                        // says the trade is being kept open, and a button repeating it took the
+                        // place where the user looks for the one action that ends a position. It
+                        // has to stay reachable somewhere, though: without it a mistaken press
+                        // could only be undone by deleting the trade and recording it again.
+                        if (view.keptOpen) {
+                            DropdownMenuItem(
+                                text = { Text("Follow the deadline again") },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.HourglassEmpty, contentDescription = null)
+                                },
+                                onClick = { menuOpen = false; onKeepOpen(false, null) },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Remove") },
                             leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
@@ -284,6 +429,28 @@ private fun PositionCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            // Its own row rather than the header, which is held to a fixed height so cards beside
+            // each other start level. Drawn only when there is something to say, so an ordinary
+            // position is exactly as tall as it was.
+            if (view.overdue || view.keptOpen) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
+                    verticalArrangement = Arrangement.spacedBy(Space.xs),
+                ) {
+                    if (view.overdue) OverdueChip(view.overdueDays)
+                    if (view.keptOpen) KeptOpenChip()
+                }
+                position.keepOpenNote?.takeIf(String::isNotBlank)?.let { why ->
+                    Text(
+                        why,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
 
             FigureRow(
                 listOf(
@@ -314,31 +481,49 @@ private fun PositionCard(
                 color = PriceRole.forReturn(view.returnPct),
             )
             // Selling early is the point of the button, so it stays available for as long as no
-            // sale has been recorded - including on a position the deadline closed while the user
-            // was still holding it.
+            // sale has been recorded - including on a trade that reached target 2, where recording
+            // what the user actually got out at turns an estimate into a fact, and on one the
+            // deadline closed while they were still holding it.
             if (view.awaitingSale) {
-                SellButton(
-                    suggestedExit = view.currentPrice,
-                    onSell = onSell,
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
+                    verticalArrangement = Arrangement.spacedBy(Space.xs),
                     modifier = Modifier.padding(top = Space.xs),
-                )
+                ) {
+                    // The estimate rather than today's close. While the trade is open the two are
+                    // the same thing; once the deadline has closed it, today's price is the least
+                    // likely figure the user sold at, and the estimate is already marked at the
+                    // stop, the target, or the last close of the window.
+                    SellButton(
+                        suggestedExit = view.exitPrice ?: view.currentPrice,
+                        onSell = onSell,
+                    )
+                    // Not on a trade already being kept open - the pill says that, and the menu
+                    // undoes it - and not on one that reached target 2, which is the single ending
+                    // Keep Open cannot argue with.
+                    if (!view.keptOpen && !view.finished) KeepOpenButton(onKeepOpen = onKeepOpen)
+                }
             }
         }
     }
 
     if (editing) {
         TradeDialog(
-            title = "Edit the entry",
-            explanation = "Corrects what this trade was recorded at. Everything the position " +
-                "reports is measured from it.",
+            title = "Edit the trade",
+            explanation = "Corrects what this trade was recorded at, and how long it runs. " +
+                "Everything the position reports is measured from the entry; changing the window " +
+                "moves the deadline, so it can close a running trade or reopen a finished one.",
             priceLabel = "Entry price",
             dateLabel = "Entry date",
             confirmLabel = "Save",
             initialPrice = position.entryPrice,
+            initialWindow = position.windowSessions,
+            windowHelp = "Trading sessions from ${position.recommendationDate}, the session this " +
+                "call was made for.",
             onDismiss = { editing = false },
-            onConfirm = { price, date ->
+            onConfirm = { price, date, window ->
                 editing = false
-                onEditEntry(price, date)
+                onEditTrade(price, date, window)
             },
         )
     }
@@ -369,10 +554,34 @@ private fun PositionCard(
  * How long the recommendation has left, counted in the sessions it is judged in.
  *
  * Trading sessions rather than days, and counted from the session the call was made for: a stock
- * does not move at the weekend, and the user's entry date never enters into it.
+ * does not move at the weekend, and the user's entry date never enters into it. A window the user
+ * set themselves says so here rather than in a chip of its own - the figure it qualifies is this
+ * one, and a reader wondering why a trade has fifteen sessions is already looking at it.
  */
-private fun PositionView.deadline(): String = deadlineDate?.let { "passed $it" }
-    ?: "$sessionsRemaining of ${position.windowSessions} left"
+private fun PositionView.deadline(): String {
+    val left = deadlineDate?.let { "passed $it" }
+        ?: "$sessionsRemaining of ${position.windowSessions} left"
+    return if (position.windowCustom) "$left · custom" else left
+}
+
+/**
+ * Says why a trade is still running after its deadline, next to how late it is.
+ *
+ * This carries the state on its own - there is no button repeating it. The instruction in it is the
+ * point: the way to end a trade being kept open is to sell it, and the card's menu holds the way to
+ * hand it back to its deadline instead.
+ */
+@Composable
+private fun KeptOpenChip() {
+    Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = CircleShape) {
+        Text(
+            "Keep open · sell to close",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+    }
+}
 
 /**
  * The one line that says what the position is worth, and how much of that is a fact.
@@ -389,7 +598,7 @@ private fun PositionView.profitLine(): String {
         open -> "Estimated $amount · marked at $at"
         status == PositionStatus.STOPPED_OUT -> "Estimated $amount · stopped at $at"
         status == PositionStatus.FULL_TARGET_HIT -> "Estimated $amount · target reached at $at"
-        else -> "Estimated $amount · closed at $at"
+        else -> "Estimated $amount · expired at $at"
     } + if (marketStatus != status) " · the call itself: ${marketStatus.label.lowercase()}" else ""
 }
 

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AddShoppingCart
+import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Sell
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
@@ -35,7 +36,9 @@ import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
+import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.callDate
+import com.ikverse.egxanalyzer.ui.theme.extraColors
 import java.time.LocalDate
 
 /**
@@ -57,12 +60,21 @@ internal class TradeBook(
     fun heldFor(stock: ConsolidatedRecommendation, point: RecommendationDataPoint): PositionView? =
         appState.heldFor(stock.stockCode, dateOf(point))
 
+    /**
+     * What a new trade's window is offered as, which is the global scoring setting.
+     *
+     * Read at the moment the dialog opens rather than captured earlier: a user who has just changed
+     * the setting means the new one.
+     */
+    val defaultWindowSessions: Int get() = appState.appPreferences.scoringWindowSessions
+
     fun buy(
         stock: ConsolidatedRecommendation,
         point: RecommendationDataPoint,
         channel: String?,
         price: Double,
         date: LocalDate,
+        windowSessions: Int,
     ) {
         // A call with no date at all cannot be scored and so cannot be held; the button is not
         // offered for one, and this is the belt to that brace.
@@ -80,6 +92,7 @@ internal class TradeBook(
             target1 = point.target1,
             target2 = point.target2,
             stopLoss = point.stopLoss,
+            windowSessions = windowSessions,
         )
     }
 
@@ -116,9 +129,11 @@ internal fun TradeAction(
     held: PositionView?,
     /** Prefills the entry dialog: the call's own entry, which is what most fills are near. */
     suggestedEntry: Double?,
+    /** Offered as the new trade's window, and overwritable in the dialog. */
+    defaultWindow: Int,
     /** Prefills the sale dialog with the latest close, which is the likeliest sale price. */
     suggestedExit: Double? = null,
-    onBuy: (price: Double, date: LocalDate) -> Unit,
+    onBuy: (price: Double, date: LocalDate, windowSessions: Int) -> Unit,
     onSell: (price: Double, date: LocalDate) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -140,8 +155,15 @@ internal fun TradeAction(
             }
         } else {
             PositionStatusChip(held)
+            // The same warning the Portfolio card carries, on the card the trade was taken from:
+            // a deadline that has passed with nothing recorded is worth seeing wherever the stock
+            // is being looked at, not only on the tab the user has to remember to open.
+            if (held.overdue) OverdueChip(held.overdueDays)
             if (held.awaitingSale) {
-                SellButton(suggestedExit ?: held.currentPrice, onSell)
+                // The estimate before the live price: they are the same while the trade is open,
+                // and once the deadline has closed it the estimate is the better guess at what the
+                // user actually got out at.
+                SellButton(suggestedExit ?: held.exitPrice ?: held.currentPrice, onSell)
             }
         }
     }
@@ -150,19 +172,117 @@ internal fun TradeAction(
         TradeDialog(
             title = "Record the purchase",
             explanation = "The price you actually paid, which is what every figure for this " +
-                "position is measured from. The recommendation's deadline is unchanged: it still " +
-                "runs from the session the call was made for.",
+                "position is measured from. The deadline still runs from the session the call was " +
+                "made for - buying late does not buy extra time - but how many sessions it runs " +
+                "for is yours to set.",
             priceLabel = "Entry price",
             dateLabel = "Entry date",
             confirmLabel = "Save",
             initialPrice = suggestedEntry,
+            initialWindow = defaultWindow,
+            windowHelp = "From your scoring setting. Change it to give this trade its own deadline.",
             onDismiss = { buying = false },
-            onConfirm = { price, date ->
+            onConfirm = { price, date, window ->
                 buying = false
-                onBuy(price, date)
+                onBuy(price, date, window ?: defaultWindow)
             },
         )
     }
+}
+
+/**
+ * How far past its deadline a trade has run with nothing recorded about how it ended.
+ *
+ * The error colour rather than a neutral one, and next to the status rather than buried in the
+ * figures: it is the one thing on a card that is asking the user to do something.
+ */
+@Composable
+internal fun OverdueChip(days: Long) {
+    Surface(color = MaterialTheme.colorScheme.errorContainer, shape = CircleShape) {
+        Text(
+            "Overdue $days ${days.dayWord()}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+    }
+}
+
+/**
+ * Lets a trade outlive its deadline.
+ *
+ * One direction only, and offered only to a trade not already carrying it. A card that is being kept
+ * open says so in a pill, and a button repeating the pill was taking the place beside Sold - the one
+ * action that actually ends a position. Undoing it moved to the card's own menu, where it stays
+ * reachable without competing for that space.
+ */
+@Composable
+internal fun KeepOpenButton(
+    onKeepOpen: (keep: Boolean, note: String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var asking by remember { mutableStateOf(false) }
+    OutlinedButton(onClick = { asking = true }, modifier = modifier) {
+        Icon(
+            Icons.Outlined.HourglassEmpty,
+            contentDescription = null,
+            modifier = Modifier.size(IconSize.Inline),
+        )
+        Text("Keep open", Modifier.padding(start = Space.s))
+    }
+
+    if (asking) {
+        KeepOpenDialog(
+            onDismiss = { asking = false },
+            onConfirm = { note ->
+                asking = false
+                onKeepOpen(true, note)
+            },
+        )
+    }
+}
+
+/**
+ * Asks why, and takes no for an answer.
+ *
+ * The note is optional because a trade held on a hunch is still held, and a dialog that refused to
+ * proceed without a reason would only teach the user to type a full stop. It earns its place months
+ * later, when the reason is the one thing they cannot reconstruct.
+ */
+@Composable
+private fun KeepOpenDialog(onDismiss: () -> Unit, onConfirm: (String?) -> Unit) {
+    var note by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Keep this trade open?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                Text(
+                    "It stops closing on its own. The deadline, target 1 and the stop all stop " +
+                        "ending it, and it stays open until you record a sale with Sold - or " +
+                        "until it reaches target 2, which finishes any trade. What the call " +
+                        "itself did is still tracked and still shown.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("Why (optional)") },
+                    singleLine = true,
+                    supportingText = { Text("Shown on the card, so the reason outlives the decision.") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(note.trim().takeIf(String::isNotBlank)) },
+            ) { Text("Keep open") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /**
@@ -196,7 +316,7 @@ internal fun SellButton(
             confirmLabel = "Close position",
             initialPrice = suggestedExit,
             onDismiss = { selling = false },
-            onConfirm = { price, date ->
+            onConfirm = { price, date, _ ->
                 selling = false
                 onSell(price, date)
             },
@@ -219,12 +339,21 @@ internal fun TradeDialog(
     confirmLabel: String,
     initialPrice: Double?,
     onDismiss: () -> Unit,
-    onConfirm: (price: Double, date: LocalDate) -> Unit,
+    onConfirm: (price: Double, date: LocalDate, windowSessions: Int?) -> Unit,
+    /** Adds the trade-window field, prefilled with this. Absent for a sale, which has no window. */
+    initialWindow: Int? = null,
+    /** Says where the offered window came from, which differs between buying and editing. */
+    windowHelp: String = "",
 ) {
     var price by remember { mutableStateOf(initialPrice?.let(::formatPrice).orEmpty()) }
     var date by remember { mutableStateOf(LocalDate.now().toString()) }
+    var window by remember { mutableStateOf(initialWindow?.toString().orEmpty()) }
     val parsedPrice = price.toPriceOrNull()
     val parsedDate = remember(date) { runCatching { LocalDate.parse(date.trim()) }.getOrNull() }
+    // Rejected rather than clamped. A typed 500 quietly becoming 30 is a deadline the user believes
+    // is one thing and the app believes is another, and they would not find out for a month.
+    val parsedWindow = remember(window) { window.toWindowOrNull() }
+    val windowValid = initialWindow == null || parsedWindow != null
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -254,15 +383,36 @@ internal fun TradeDialog(
                     supportingText = { Text("YYYY-MM-DD") },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (initialWindow != null) {
+                    OutlinedTextField(
+                        value = window,
+                        onValueChange = { window = it },
+                        label = { Text("Trade window") },
+                        singleLine = true,
+                        isError = parsedWindow == null,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        supportingText = {
+                            Text(
+                                if (parsedWindow == null) {
+                                    "Between ${Scoring.MIN_WINDOW_SESSIONS} and " +
+                                        "${Scoring.MAX_WINDOW_SESSIONS} trading sessions."
+                                } else {
+                                    windowHelp
+                                },
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
-                enabled = parsedPrice != null && parsedDate != null,
+                enabled = parsedPrice != null && parsedDate != null && windowValid,
                 onClick = {
                     val value = parsedPrice ?: return@TextButton
                     val on = parsedDate ?: return@TextButton
-                    onConfirm(value, on)
+                    onConfirm(value, on, parsedWindow)
                 },
             ) { Text(confirmLabel) }
         },
@@ -278,6 +428,15 @@ internal fun TradeDialog(
  */
 private fun String.toPriceOrNull(): Double? =
     trim().replace(',', '.').toDoubleOrNull()?.takeIf { it > 0.0 && it.isFinite() }
+
+/**
+ * A window the app will actually honour, or nothing.
+ *
+ * The same bounds [Scoring.clampWindow] enforces, checked rather than applied: the field says no to
+ * a number outside them instead of accepting one and storing a different one.
+ */
+private fun String.toWindowOrNull(): Int? = trim().toIntOrNull()
+    ?.takeIf { it in Scoring.MIN_WINDOW_SESSIONS..Scoring.MAX_WINDOW_SESSIONS }
 
 /** Where the position stands, in one word, coloured the same everywhere it appears. */
 @Composable
@@ -318,8 +477,12 @@ internal fun PositionStatus.tone(): Color = when (this) {
     PositionStatus.PARTIAL_TARGET_HIT, PositionStatus.FULL_TARGET_HIT ->
         MaterialTheme.colorScheme.tertiary
     PositionStatus.STOPPED_OUT -> MaterialTheme.colorScheme.error
-    PositionStatus.CLOSED, PositionStatus.CLOSED_MANUALLY ->
-        MaterialTheme.colorScheme.onSurfaceVariant
+    // Amber, and deliberately not the error red. A trade that ran out of time can easily be up 5%,
+    // so red would report a loss the position never made and would read as the same thing as the
+    // stop-out beside it. The overdue pill keeps the error colour: amber says out of time, red says
+    // and you are late, which is one story in two steps rather than two alarms.
+    PositionStatus.EXPIRED -> extraColors.expired
+    PositionStatus.CLOSED_MANUALLY -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 @Composable
@@ -328,8 +491,9 @@ internal fun PositionStatus.container(): Color = when (this) {
     PositionStatus.PARTIAL_TARGET_HIT, PositionStatus.FULL_TARGET_HIT ->
         MaterialTheme.colorScheme.tertiaryContainer
     PositionStatus.STOPPED_OUT -> MaterialTheme.colorScheme.errorContainer
-    PositionStatus.CLOSED, PositionStatus.CLOSED_MANUALLY ->
-        MaterialTheme.colorScheme.secondaryContainer
+    PositionStatus.EXPIRED -> extraColors.expiredContainer
+    // The most muted pair in the scheme, for the one state that is finished business.
+    PositionStatus.CLOSED_MANUALLY -> MaterialTheme.colorScheme.surfaceVariant
 }
 
 @Composable
@@ -338,6 +502,6 @@ internal fun PositionStatus.onContainer(): Color = when (this) {
     PositionStatus.PARTIAL_TARGET_HIT, PositionStatus.FULL_TARGET_HIT ->
         MaterialTheme.colorScheme.onTertiaryContainer
     PositionStatus.STOPPED_OUT -> MaterialTheme.colorScheme.onErrorContainer
-    PositionStatus.CLOSED, PositionStatus.CLOSED_MANUALLY ->
-        MaterialTheme.colorScheme.onSecondaryContainer
+    PositionStatus.EXPIRED -> extraColors.onExpiredContainer
+    PositionStatus.CLOSED_MANUALLY -> MaterialTheme.colorScheme.onSurfaceVariant
 }

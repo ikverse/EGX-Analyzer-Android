@@ -12,14 +12,10 @@ val appVersionCode = appVersionName.split(".").let { (major, minor, patch) ->
 }
 
 /**
- * The Telegram application credentials, read from `local.properties`, which git ignores.
- *
- * An api_id identifies the *application*, not the person using it - every third-party Telegram
- * client registers one at my.telegram.org and ships it. Asking each user to register their own was
- * a form standing between them and a phone number for no reason. Absent, the app falls back to
- * asking, so a checkout without the file still builds and still works.
+ * Whatever `local.properties` holds. Git ignores that file, so it is where a machine's own secrets
+ * live: the Telegram credentials below, and the release signing key further down.
  */
-val telegramProperties: Map<String, String> = rootProject.file("local.properties")
+val localProperties: Map<String, String> = rootProject.file("local.properties")
     .takeIf { it.exists() }
     ?.readLines()
     ?.mapNotNull { line ->
@@ -30,8 +26,36 @@ val telegramProperties: Map<String, String> = rootProject.file("local.properties
     }
     ?.toMap()
     .orEmpty()
-val telegramApiId: String = telegramProperties["telegramApiId"] ?: "0"
-val telegramApiHash: String = telegramProperties["telegramApiHash"] ?: ""
+
+/**
+ * The Telegram application credentials.
+ *
+ * An api_id identifies the *application*, not the person using it - every third-party Telegram
+ * client registers one at my.telegram.org and ships it. Asking each user to register their own was
+ * a form standing between them and a phone number for no reason. Absent, the app falls back to
+ * asking, so a checkout without the file still builds and still works.
+ */
+val telegramApiId: String = localProperties["telegramApiId"] ?: "0"
+val telegramApiHash: String = localProperties["telegramApiHash"] ?: ""
+
+/** A setting from `local.properties` on a developer machine, or the environment on CI. */
+fun buildSetting(name: String): String? =
+    (localProperties[name] ?: System.getenv(name))?.takeIf(String::isNotBlank)
+
+/**
+ * The key release builds are signed with.
+ *
+ * This is what makes an over-the-air update possible at all. Android refuses an update signed by a
+ * different key than the install it would replace, so every release has to carry the same signature
+ * - which means the key has to outlive the machine that made it, and lives in GitHub secrets rather
+ * than in this repository. Absent, the release build is simply unsigned: a fresh checkout still
+ * builds, and CI still runs the tests, on a machine that has never seen the key.
+ */
+val releaseKeystore = buildSetting("EGX_KEYSTORE_FILE")
+    ?.let(rootProject::file)
+    ?.takeIf { it.exists() }
+val releaseKeystorePassword = buildSetting("EGX_KEYSTORE_PASSWORD")
+val releaseKeyAlias = buildSetting("EGX_KEY_ALIAS")
 
 android {
     namespace = "com.ikverse.egxanalyzer"
@@ -51,9 +75,49 @@ android {
         buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
     }
 
+    signingConfigs {
+        if (releaseKeystore != null && releaseKeystorePassword != null && releaseKeyAlias != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                // Nearly always the same as the store's, and one setting fewer to get wrong.
+                keyPassword = buildSetting("EGX_KEY_PASSWORD") ?: releaseKeystorePassword
+            }
+        }
+    }
+
+    /**
+     * One APK per architecture, and a universal one beside them.
+     *
+     * Most of this app's size is TDLib's native libraries, and a phone has no use for the ones
+     * built for other chips - carrying all four made every over-the-air update a 134MB download.
+     * They are one version, one build and one signature; only the libraries inside differ.
+     *
+     * Off unless CI asks for it, which is the whole point of the flag. Enabled everywhere, the
+     * ordinary debug build would stop producing `app-debug.apk` and start producing one file per
+     * architecture, breaking the install command and the artifact this repository documents.
+     */
+    splits {
+        abi {
+            isEnable = project.hasProperty("abiSplits")
+            reset()
+            // The two devices here are arm64; x86_64 is the emulator. armeabi-v7a is not built -
+            // nothing this app runs on is 32-bit, and the universal APK covers anything missed.
+            include("arm64-v8a", "x86_64")
+            // The fallback the app downloads when it recognises none of the others, and the one to
+            // reach for when installing by hand without checking what a device is.
+            isUniversalApk = true
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Null where the key is not configured, which leaves the APK unsigned rather than
+            // failing the build. An unsigned APK cannot be installed, so nothing can mistake one
+            // for a release.
+            signingConfig = signingConfigs.findByName("release")
         }
         debug {
             // A sideloaded build should be obvious in Settings without checking a commit hash.
@@ -74,6 +138,12 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    testOptions {
+        // Robolectric reads the merged manifest and resources to stand up a context; without this
+        // it starts with neither and every test that needs one fails on the same complaint.
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
@@ -89,6 +159,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.window)
+    // The daily overdue check. Nothing else in the app runs while it is closed.
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.tdl.coroutines.android)
     // Encodes the tg://login link TDLib hands back; scanning it beats typing a phone and a code.
     implementation(libs.zxing.core)
@@ -96,5 +168,8 @@ dependencies {
     testImplementation(libs.junit)
     // android.jar stubs org.json in local unit tests, so supply a real implementation.
     testImplementation(libs.json)
+    // Enough of Android to open a real SQLite database in a plain unit test, which is the only way
+    // an onUpgrade path can be checked without a phone. See LocalDataStoreMigrationTest.
+    testImplementation(libs.robolectric)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

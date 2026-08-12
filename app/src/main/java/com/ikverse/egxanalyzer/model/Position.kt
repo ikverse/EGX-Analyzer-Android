@@ -47,6 +47,24 @@ data class Position(
     val stopLoss: Double? = null,
     /** The scoring window in force when the trade was recorded, which is this call's deadline. */
     val windowSessions: Int = Scoring.DEFAULT_WINDOW_SESSIONS,
+    /**
+     * The user set [windowSessions] by hand rather than taking the value they were offered.
+     *
+     * Recorded rather than worked out by comparing against the global setting, which moves: a trade
+     * deliberately given fifteen sessions is still a deliberate choice after the setting is changed
+     * to fifteen, and a card that stopped saying so would be hiding what the user did.
+     */
+    val windowCustom: Boolean = false,
+    /**
+     * The user has said they are still holding this, whatever the market has since done.
+     *
+     * Nothing closes a position carrying this except a recorded sale - not the deadline, not a
+     * target, not the stop. The app's judgement of the call is not suspended by it: that is what
+     * [PositionView.marketStatus] goes on saying.
+     */
+    val keepOpen: Boolean = false,
+    /** Why, in the user's own words, so a decision made in July still explains itself in November. */
+    val keepOpenNote: String? = null,
     val openedAt: Instant = Instant.now(),
     /**
      * When this revision was written, and by which device.
@@ -74,7 +92,15 @@ enum class PositionStatus(val label: String) {
     PARTIAL_TARGET_HIT("Partial target hit"),
     FULL_TARGET_HIT("Full target hit"),
     STOPPED_OUT("Stopped out"),
-    CLOSED("Closed"),
+    /**
+     * The window ran out with the trade still in the market's hands.
+     *
+     * "Closed" was the wrong word for this and said the wrong thing: a trade that simply ran out of
+     * time is the one case still wanting a decision, and it read identically to one the user had
+     * finished with. Closed now means only what the user means by it - sold by hand, or the targets
+     * reached - and running out of time has its own name.
+     */
+    EXPIRED("Expired"),
     CLOSED_MANUALLY("Closed manually"),
 }
 
@@ -113,25 +139,123 @@ data class PositionView(
     val deadlineDate: LocalDate?,
     /** The session a target or the stop was reached on. */
     val settledOn: LocalDate?,
+    /**
+     * The deadline passed and the trade ended at no level of its own - no target 2, no stop.
+     *
+     * The one shape of unfinished business the app can recognise, and the whole basis of both the
+     * Expired section and the overdue count. A trade that reached target 2 did what it was bought to
+     * do; a trade the stop took out ended where the call said to get out; a trade the user reported
+     * selling ended where they say it did. What is left is a trade that ran out of time while they
+     * were still in it, which is the only case worth chasing them about.
+     */
+    val ranOutOfTime: Boolean,
+    /**
+     * Days since the deadline on a trade that ran out of time, or zero.
+     *
+     * Calendar days rather than sessions: a deadline that passed a fortnight ago has passed by a
+     * fortnight whether or not the feed has caught up with what traded since. Zero on the day it
+     * expires, so the pill starts the day after - expiring today is not being late.
+     */
+    val overdueDays: Long,
 ) {
     val ticker: String get() = position.ticker
     val recommendationDate: LocalDate get() = position.recommendationDate
 
     /** A sale can still be recorded against any position the user has not reported selling. */
     val awaitingSale: Boolean get() = position.exitPrice == null
+
+    /** Out of time, and late with it. */
+    val overdue: Boolean get() = overdueDays > 0
+
+    /**
+     * Reached target 2, which is the one ending nothing reopens.
+     *
+     * A trade that did what it was bought to do is finished with. Keep Open does not survive it and
+     * is not offered on it - there is nothing left to hold for.
+     */
+    val finished: Boolean get() = marketStatus == PositionStatus.FULL_TARGET_HIT
+
+    /**
+     * Running past its deadline because the user said to keep it running.
+     *
+     * Gated on [open] rather than read straight off the position: the flag stays stored through a
+     * full target hit and through a sale, and a pill reading "sell to close" on a trade that is
+     * already closed would be instructing the user to do something they have done.
+     */
+    val keptOpen: Boolean get() = position.keepOpen && open
 }
 
-/** Every position taken for one recommendation session. */
+/**
+ * Every position taken for one recommendation session, whatever became of it.
+ *
+ * One card per session rather than the same session appearing under two headings: a day's trades
+ * were one decision, and reading how it went meant scrolling to find its other half. The three
+ * states are sections inside the card instead.
+ */
 data class PortfolioGroup(
     val recommendationDate: LocalDate,
     val positions: List<PositionView>,
 ) {
+    /** Still running, the user's to sell. Includes anything they have marked Keep Open. */
+    val open: List<PositionView> get() = positions.filter(PositionView::open)
+
+    /** Out of time with nothing recorded about how it ended, which is the section wanting a reply. */
+    val expired: List<PositionView>
+        get() = positions.filter { !it.open && it.ranOutOfTime }
+
+    /** Finished with: sold by hand, taken by the stop, or reached target 2. */
+    val closed: List<PositionView>
+        get() = positions.filter { !it.open && !it.ranOutOfTime }
+
+    /** Holds something still running, so the card opens rather than folding its trades away. */
+    val hasOpen: Boolean get() = positions.any(PositionView::open)
+
+    /** Holds something past its deadline with no sale recorded, and so wants reading first. */
+    val hasOverdue: Boolean get() = positions.any(PositionView::overdue)
+
     /** Average return across the group, which is the only total available without trade sizes. */
     val averageReturnPct: Double?
         get() = positions.mapNotNull(PositionView::returnPct)
             .takeIf(List<Double>::isNotEmpty)
             ?.average()
             ?.round(2)
+}
+
+/**
+ * The order the Portfolio reads in, at both levels at once.
+ *
+ * Two levels rather than one because a session card and the trades inside it are dated by different
+ * things: the card by the session its call was made for, the trades by the day the user bought. A
+ * control that ordered only the cards would leave the positions inside them in an order the user did
+ * not choose and could not explain.
+ *
+ * [URGENT] is what the screen has always done and stays the default. The two date orders deliberately
+ * carry no override - picking a date order and then watching overdue trades jump the queue anyway is
+ * a control that looks broken.
+ */
+enum class PortfolioOrder(
+    val label: String,
+    /** Orders the session cards. */
+    val groups: Comparator<PortfolioGroup>,
+    /** Orders the positions inside one section of a card. */
+    val positions: Comparator<PositionView>,
+) {
+    URGENT(
+        "Urgent first",
+        compareByDescending<PortfolioGroup> { it.hasOverdue }
+            .thenByDescending { it.recommendationDate },
+        compareByDescending<PositionView> { it.overdue }.thenBy { it.ticker },
+    ),
+    NEWEST(
+        "Session date, newest",
+        compareByDescending { it.recommendationDate },
+        compareByDescending<PositionView> { it.position.entryDate }.thenBy { it.ticker },
+    ),
+    OLDEST(
+        "Session date, oldest",
+        compareBy { it.recommendationDate },
+        compareBy<PositionView> { it.position.entryDate }.thenBy { it.ticker },
+    ),
 }
 
 /**
@@ -142,15 +266,15 @@ data class PortfolioGroup(
  * drawn.
  */
 data class Portfolio(
-    val open: List<PortfolioGroup> = emptyList(),
-    val closed: List<PortfolioGroup> = emptyList(),
+    /** One per recommendation session, holding that session's trades in every state. */
+    val groups: List<PortfolioGroup> = emptyList(),
     val stats: PortfolioStats = PortfolioStats(),
 ) {
-    val isEmpty: Boolean get() = open.isEmpty() && closed.isEmpty()
+    val isEmpty: Boolean get() = groups.isEmpty()
 
     /** Every position, in no particular order, for anything that needs the flat list. */
     val positions: List<PositionView>
-        get() = (open + closed).flatMap(PortfolioGroup::positions)
+        get() = groups.flatMap(PortfolioGroup::positions)
 
     /** Looks a card's stock up by the call it belongs to. */
     fun heldFor(ticker: String, recommendationDate: LocalDate?): PositionView? {
@@ -172,12 +296,27 @@ data class Portfolio(
 data class PortfolioStats(
     val total: Int = 0,
     val openCount: Int = 0,
-    val closedCount: Int = 0,
-    /** Average return over closed positions - what the record actually delivered. */
-    val realizedReturnPct: Double? = null,
+    /**
+     * No longer running, however they ended - sold, stopped, target reached, or out of time.
+     *
+     * Settled rather than closed, because a card below this one now reserves "closed" for the trades
+     * that ended somewhere in particular. The win rate and the averages have to keep counting the
+     * expired ones or they stop describing the record: a trade that went nowhere for ten sessions is
+     * a result.
+     */
+    val settledCount: Int = 0,
+    /**
+     * Past their deadline with no sale recorded, which is the only figure here asking to be acted on.
+     *
+     * Counted over everything rather than over open positions alone: a trade the deadline closed
+     * while the user was still holding it is exactly the one that needs chasing, and it is not open.
+     */
+    val overdueCount: Int = 0,
+    /** Average return over settled positions - what the record actually delivered. */
+    val settledReturnPct: Double? = null,
     /** Average return over open positions, which can still change. */
     val openReturnPct: Double? = null,
-    /** Share of closed positions that ended in profit. */
+    /** Share of settled positions that ended in profit. */
     val winRate: Double? = null,
     /** Average return over every position, open and closed. */
     val averageReturnPct: Double? = null,

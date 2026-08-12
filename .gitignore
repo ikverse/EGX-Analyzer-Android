@@ -1,7 +1,12 @@
 *.iml
 .gradle
 .idea
+.kotlin
 local.properties
+# The release signing key. It belongs outside the repository and in GitHub secrets; this is here so
+# that a copy left in the working tree cannot be committed by accident.
+*.jks
+*.keystore
 build
 captures
 .externalNativeBuild

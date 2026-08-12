@@ -6,12 +6,14 @@ import com.ikverse.egxanalyzer.data.AnalysisService
 import com.ikverse.egxanalyzer.data.AndroidKeystoreCredentialStore
 import com.ikverse.egxanalyzer.data.CloudAnalysisRepository
 import com.ikverse.egxanalyzer.data.LocalDataStore
+import com.ikverse.egxanalyzer.data.OverdueWorker
 import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.PromptStore
 import com.ikverse.egxanalyzer.data.RequestTrace
 import com.ikverse.egxanalyzer.data.SymbolMap
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.TelegramRepository
+import com.ikverse.egxanalyzer.data.UpdateRepository
 import com.ikverse.egxanalyzer.ui.AppState
 
 class EgxApplication : Application() {
@@ -41,6 +43,8 @@ class EgxApplication : Application() {
             telegramRepository = telegramRepository,
             priceRepository = PriceRepository(localDataStore, SymbolMap(assets)),
             promptStore = promptStore,
+            // The app is sideloaded, so nothing else will ever offer it an update.
+            updateRepository = UpdateRepository(this),
             // The foreground service is what keeps the process alive; the notification is what
             // tells the user so.
             analysisRunning = { sources, model -> AnalysisService.start(this, sources, model) },
@@ -52,6 +56,14 @@ class EgxApplication : Application() {
                 AnalysisService.stop(this)
                 if (reason == null) notifier.cancelled() else notifier.failed(reason)
             },
+            overdueRemindersChanged = { enabled ->
+                if (enabled) OverdueWorker.schedule(this) else OverdueWorker.cancel(this)
+            },
         ).also { state = it }
+        // Booked on every launch rather than only when the switch is touched, so an install that
+        // has never opened Settings still gets the check, and one whose work was dropped by the
+        // system gets it back.
+        if (state.appPreferences.overdueRemindersEnabled) OverdueWorker.schedule(this)
+        state
     }
 }

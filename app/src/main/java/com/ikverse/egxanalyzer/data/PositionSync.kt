@@ -17,6 +17,19 @@ import java.time.LocalDate
  * Saved reports are different and stay different: a run never changes once written, so those are a
  * union with nothing to resolve.
  */
+/**
+ * One stored revision, with whatever a newer app version wrote against it.
+ *
+ * Separate from [SyncedPosition] because that is the wire shape and this is the disk shape; they
+ * happen to carry the same three things, and collapsing them would put a Telegram concern in the
+ * database layer.
+ */
+data class PositionRevision(
+    val position: Position,
+    val deleted: Boolean,
+    val unknown: String = "{}",
+)
+
 data class SyncedPosition(
     val position: Position,
     val deleted: Boolean,
@@ -58,6 +71,9 @@ data class SyncedPosition(
             .putOrNull("target2", position.target2)
             .putOrNull("stopLoss", position.stopLoss)
             .put("windowSessions", position.windowSessions)
+            .put("windowCustom", position.windowCustom)
+            .put("keepOpen", position.keepOpen)
+            .putOrNull("keepOpenNote", position.keepOpenNote)
             .put("openedAt", position.openedAt.toString())
             .put("updatedAt", position.updatedAt)
             .put("updatedBy", position.updatedBy)
@@ -69,8 +85,8 @@ data class SyncedPosition(
         private val KNOWN = setOf(
             "id", "ticker", "companyEnglish", "companyArabic", "channel", "recommendationDate",
             "entryPrice", "entryDate", "exitPrice", "exitDate", "closedManually", "entryLow",
-            "entryHigh", "target1", "target2", "stopLoss", "windowSessions", "openedAt",
-            "updatedAt", "updatedBy", "deleted",
+            "entryHigh", "target1", "target2", "stopLoss", "windowSessions", "windowCustom",
+            "keepOpen", "keepOpenNote", "openedAt", "updatedAt", "updatedBy", "deleted",
         )
 
         /** Null for anything this app version cannot make sense of, which is then skipped. */
@@ -98,6 +114,11 @@ data class SyncedPosition(
                     target2 = json.optionalDouble("target2"),
                     stopLoss = json.optionalDouble("stopLoss"),
                     windowSessions = json.getInt("windowSessions"),
+                    // Absent on anything written before a trade could outlive its deadline, and
+                    // false is what those trades were: the offered window, closing when it ran out.
+                    windowCustom = json.optBoolean("windowCustom", false),
+                    keepOpen = json.optBoolean("keepOpen", false),
+                    keepOpenNote = json.optionalString("keepOpenNote"),
                     openedAt = json.optionalString("openedAt")
                         ?.let { runCatching { Instant.parse(it) }.getOrNull() }
                         ?: Instant.EPOCH,

@@ -7,6 +7,7 @@ import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.ResponseTimeout
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudProvider
+import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.ThemeMode
 import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.Scoring
@@ -59,7 +60,34 @@ class SettingsRepository(
         preferences.edit()
             .remove(provider.endpointKey())
             .remove(provider.modelKey())
+            .remove(provider.modelListKey())
             .apply()
+    }
+
+    /**
+     * The models a provider last said it had.
+     *
+     * Kept on disk because the list is the only usable way to choose one: held in memory alone it
+     * emptied on every launch, and the card was back to asking the user to type a model name from
+     * memory before it would let a run start.
+     */
+    fun modelList(provider: CloudProvider): List<String> {
+        val raw = preferences.getString(provider.modelListKey(), null) ?: return emptyList()
+        return runCatching {
+            val values = JSONArray(raw)
+            buildList { for (index in 0 until values.length()) add(values.getString(index)) }
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveModelList(provider: CloudProvider, models: List<String>) {
+        preferences.edit()
+            .putString(provider.modelListKey(), JSONArray().apply { models.forEach(::put) }.toString())
+            .apply()
+    }
+
+    /** Drops a cached list that a changed endpoint or a removed key can no longer vouch for. */
+    fun clearModelList(provider: CloudProvider) {
+        preferences.edit().remove(provider.modelListKey()).apply()
     }
 
     fun loadPreferences(): AppPreferences = AppPreferences(
@@ -81,6 +109,9 @@ class SettingsRepository(
         scoringWindowSessions = Scoring.clampWindow(
             preferences.getInt(KEY_SCORING_WINDOW, Scoring.DEFAULT_WINDOW_SESSIONS),
         ),
+        overdueRemindersEnabled = preferences.getBoolean(KEY_OVERDUE_REMINDERS, true),
+        updateChecksEnabled = preferences.getBoolean(KEY_UPDATE_CHECKS, true),
+        portfolioOrder = enumPreference(KEY_PORTFOLIO_ORDER, PortfolioOrder.URGENT),
     )
 
     fun savePreferences(value: AppPreferences) {
@@ -101,6 +132,11 @@ class SettingsRepository(
             .putInt(KEY_CORRECTION_RETRIES, value.correctionRetries.coerceIn(0, 2))
             .putBoolean(KEY_CATALOG_ENRICHMENT, value.catalogEnrichmentEnabled)
             .putInt(KEY_SCORING_WINDOW, Scoring.clampWindow(value.scoringWindowSessions))
+            .putBoolean(KEY_OVERDUE_REMINDERS, value.overdueRemindersEnabled)
+            .putBoolean(KEY_UPDATE_CHECKS, value.updateChecksEnabled)
+            // By name rather than by ordinal: reordering the options or dropping one would otherwise
+            // silently reinterpret what every existing install had chosen.
+            .putString(KEY_PORTFOLIO_ORDER, value.portfolioOrder.name)
             .apply()
     }
 
@@ -164,6 +200,102 @@ class SettingsRepository(
         preferences.edit().putString(KEY_PROMPT_HISTORY, json.toString()).apply()
     }
 
+    /**
+     * Everything Settings holds, as one revision that can travel.
+     *
+     * The credential is not in it, and neither is the day prices were last fetched - see
+     * [SettingsSnapshot]. Every provider is carried rather than only the one in use, because
+     * switching back to a provider configured months ago has to find it configured.
+     */
+    fun snapshot(): SettingsSnapshot = SettingsSnapshot(
+        preferences = loadPreferences(),
+        provider = load().provider,
+        providers = CloudProvider.entries.map { provider ->
+            val configuration = configurationFor(provider)
+            ProviderSettings(
+                provider = provider,
+                endpoint = configuration.endpoint,
+                model = configuration.model,
+                models = modelList(provider),
+            )
+        },
+        useDefaultPromptOnly = useDefaultPromptOnly(),
+        promptHistory = promptHistory(),
+        updatedAt = preferences.getLong(KEY_SETTINGS_UPDATED_AT, 0L),
+        updatedBy = preferences.getString(KEY_SETTINGS_UPDATED_BY, "").orEmpty(),
+        unknown = preferences.getString(KEY_SETTINGS_UNKNOWN, "{}").orEmpty(),
+    )
+
+    /**
+     * Records that this device changed a setting, which is what a later merge compares.
+     *
+     * An install that has never touched a setting keeps a stamp of zero and so defends nothing: it
+     * takes whatever the channel holds, which is exactly what a reinstalled phone should do.
+     */
+    fun recordSettingsChange(device: String, at: Long = System.currentTimeMillis()) {
+        preferences.edit()
+            .putLong(KEY_SETTINGS_UPDATED_AT, at)
+            .putString(KEY_SETTINGS_UPDATED_BY, device)
+            .apply()
+    }
+
+    /**
+     * Claims the settings an install is already holding, once.
+     *
+     * Settings began travelling after they had been configured, so every device that predates the
+     * change holds a full set with no stamp on it - and an unstamped set looks exactly like the
+     * empty one a reinstall starts with, so it would never be published and never reach anywhere.
+     * Having written a setting is what tells the two apart: a fresh install has written none.
+     */
+    fun claimSettingsIfUnstamped(device: String) {
+        if (preferences.getLong(KEY_SETTINGS_UPDATED_AT, 0L) > 0L) return
+        if (preferences.all.isEmpty()) return
+        recordSettingsChange(device)
+    }
+
+    /**
+     * Takes settings that were written on another device.
+     *
+     * The author's stamp is written verbatim rather than refreshed. Stamping the moment they
+     * arrived would make this device claim to be the one that changed them, and the two phones
+     * would then hand the same settings back and forth forever, each believing it knew better.
+     */
+    fun adopt(snapshot: SettingsSnapshot) {
+        savePreferences(snapshot.preferences)
+        saveUseDefaultPromptOnly(snapshot.useDefaultPromptOnly)
+        replacePromptHistory(snapshot.promptHistory)
+        snapshot.providers.forEach { entry ->
+            preferences.edit()
+                .putString(entry.provider.endpointKey(), entry.endpoint)
+                .putString(entry.provider.modelKey(), entry.model)
+                .apply()
+            saveModelList(entry.provider, entry.models)
+        }
+        preferences.edit()
+            .putString(KEY_PROVIDER, snapshot.provider.name)
+            .putLong(KEY_SETTINGS_UPDATED_AT, snapshot.updatedAt)
+            .putString(KEY_SETTINGS_UPDATED_BY, snapshot.updatedBy)
+            // Held on disk rather than only for the length of one sync: a field a newer build added
+            // has to survive this device saving its own settings over the top of it.
+            .putString(KEY_SETTINGS_UNKNOWN, snapshot.unknown)
+            .apply()
+    }
+
+    private fun replacePromptHistory(history: List<PromptSnapshot>) {
+        val json = JSONArray().apply {
+            history.forEach { snapshot ->
+                put(
+                    JSONObject()
+                        .put("systemPrompt", snapshot.systemPrompt)
+                        .put("includePhrases", snapshot.includePhrases)
+                        .put("excludePhrases", snapshot.excludePhrases)
+                        .put("savedAt", snapshot.savedAtEpochMilliseconds),
+                )
+            }
+        }
+        preferences.edit().putString(KEY_PROMPT_HISTORY, json.toString()).apply()
+    }
+
     private inline fun <reified T : Enum<T>> enumPreference(key: String, fallback: T): T =
         preferences.getString(key, null)
             ?.let { stored -> enumValues<T>().firstOrNull { it.name == stored } }
@@ -171,6 +303,7 @@ class SettingsRepository(
 
     private fun CloudProvider.endpointKey() = "endpoint_${name.lowercase()}"
     private fun CloudProvider.modelKey() = "model_${name.lowercase()}"
+    private fun CloudProvider.modelListKey() = "model_list_${name.lowercase()}"
 
     private companion object {
         const val KEY_PROVIDER = "provider"
@@ -185,7 +318,13 @@ class SettingsRepository(
         const val KEY_CORRECTION_RETRIES = "correction_retries"
         const val KEY_CATALOG_ENRICHMENT = "catalog_enrichment"
         const val KEY_SCORING_WINDOW = "scoring_window_sessions"
+        const val KEY_OVERDUE_REMINDERS = "overdue_reminders_enabled"
+        const val KEY_PORTFOLIO_ORDER = "portfolio_order"
+        const val KEY_UPDATE_CHECKS = "update_checks_enabled"
         const val KEY_LAST_PRICE_REFRESH = "last_price_refresh_day"
         const val KEY_PROMPT_HISTORY = "prompt_history"
+        const val KEY_SETTINGS_UPDATED_AT = "settings_updated_at"
+        const val KEY_SETTINGS_UPDATED_BY = "settings_updated_by"
+        const val KEY_SETTINGS_UNKNOWN = "settings_unknown"
     }
 }

@@ -42,6 +42,31 @@ data class AppPreferences(
      * Adjustable because it depends on how long the user actually holds a position.
      */
     val scoringWindowSessions: Int = Scoring.DEFAULT_WINDOW_SESSIONS,
+    /**
+     * A daily notification when a trade has run past its deadline with no sale recorded.
+     *
+     * On by default: the whole point is to reach someone who is not opening the app, and a warning
+     * nobody switched on warns nobody. It is the one thing here that speaks unprompted, so it is
+     * also the one thing with a switch of its own.
+     */
+    val overdueRemindersEnabled: Boolean = true,
+    /**
+     * Whether a launch quietly asks GitHub whether a newer build exists.
+     *
+     * On by default and silent unless there is something new: the app is sideloaded, so a release
+     * nobody is told about reaches nobody. It is a read of one public URL - no analysis, no
+     * Telegram, and nothing is downloaded or installed without being asked.
+     */
+    val updateChecksEnabled: Boolean = true,
+    /**
+     * The order the Portfolio's trades are read in, chosen on that tab and kept.
+     *
+     * Stored where the date filter beside it is not, and the difference is what each one does to the
+     * screen: an order hides nothing, so finding it still set weeks later costs the user a moment's
+     * thought. A date filter still set weeks later shows one session and nothing else, which is how
+     * someone concludes their trades have gone missing.
+     */
+    val portfolioOrder: PortfolioOrder = PortfolioOrder.URGENT,
 )
 
 data class PromptSnapshot(

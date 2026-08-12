@@ -192,7 +192,10 @@ private fun RecommendationCard(
                 TradeAction(
                     held = held,
                     suggestedEntry = point.entryMidpoint(),
-                    onBuy = { price, date -> trades.buy(stock, point, channel, price, date) },
+                    defaultWindow = trades.defaultWindowSessions,
+                    onBuy = { price, date, window ->
+                        trades.buy(stock, point, channel, price, date, window)
+                    },
                     onSell = { price, date -> held?.let { trades.sell(it, price, date) } },
                 )
             }

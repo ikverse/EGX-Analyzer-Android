@@ -33,6 +33,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
@@ -49,10 +50,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.BuildConfig
+import com.ikverse.egxanalyzer.data.UpdateState
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.CloudProvider
@@ -436,7 +440,22 @@ internal fun SettingsScreen(appState: AppState) {
                 steps = Scoring.MAX_WINDOW_SESSIONS - Scoring.MIN_WINDOW_SESSIONS - 1,
             )
             Text(
-                "Trading sessions a recommendation has to reach its target. Re-scores everything.",
+                "Trading sessions a recommendation has to reach its target. Re-scores everything. " +
+                    "It is also what a new trade's window is offered as, which you can change on " +
+                    "the trade itself.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = appState.appPreferences.overdueRemindersEnabled,
+                    onCheckedChange = appState::updateOverdueReminders,
+                )
+                Text("Tell me when a trade goes past its deadline")
+            }
+            Text(
+                "Once a day, and only when something is actually overdue - a trade whose deadline " +
+                    "has passed with no sale recorded. Nothing is analyzed and nothing is fetched.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -486,15 +505,27 @@ internal fun SettingsScreen(appState: AppState) {
         ExpandableSection(
             "About",
             icon = Icons.Outlined.Info,
-            summary = BuildConfig.VERSION_NAME,
+            summary = when (val state = appState.updateState) {
+                is UpdateState.Available -> "Version ${state.update.versionName} available"
+                is UpdateState.Ready -> "Version ${state.update.versionName} ready"
+                else -> BuildConfig.VERSION_NAME
+            },
+            // The one thing on this card worth opening it for, when there is one.
+            summaryTone = when (appState.updateState) {
+                is UpdateState.Available, is UpdateState.Ready -> MaterialTheme.colorScheme.primary
+                else -> null
+            },
             contentMaxWidth = FormWidth,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-                Text(
-                    "Shown so a device can be asked which build it is running.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                    Text(
+                        "Shown so a device can be asked which build it is running.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                UpdateControls(appState)
             }
         }
 
@@ -519,6 +550,131 @@ internal fun SettingsScreen(appState: AppState) {
                 }
             }
         }
+    }
+}
+
+/**
+ * Finding, fetching and installing a newer build, which is all of it as the user meets it.
+ *
+ * Two deliberate taps, Download then Install, and nothing between them happens on its own. The
+ * second hands the file to Android's installer, which asks again in its own words - an app that
+ * could replace itself unasked is what the permission behind this exists to prevent.
+ */
+@Composable
+private fun UpdateControls(appState: AppState) {
+    val context = LocalContext.current
+    val state = appState.updateState
+    val busy = state is UpdateState.Checking || state is UpdateState.Downloading
+
+    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        when (state) {
+            UpdateState.Idle -> Unit
+
+            UpdateState.Checking -> Text(
+                "Checking GitHub…",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            is UpdateState.UpToDate -> Text(
+                "Version ${state.versionName} is the newest release.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            is UpdateState.Available -> {
+                Text(
+                    "Version ${state.update.versionName} · ${state.update.sizeLabel}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                if (state.update.notes.isNotBlank()) {
+                    // Capped rather than scrolled: this is a settings card, and what does not fit
+                    // is on the release page the button below opens.
+                    Text(
+                        state.update.notes,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 8,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Button(onClick = { appState.downloadUpdate(state.update) }) { Text("Download") }
+            }
+
+            is UpdateState.Downloading -> {
+                LinearProgressIndicator(
+                    progress = { state.progress },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Downloading ${state.update.versionName} · " +
+                        "${(state.progress * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            is UpdateState.Ready -> {
+                Text(
+                    "Version ${state.update.versionName} is downloaded and signed by the same key " +
+                        "as this build.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!appState.canInstallUpdates()) {
+                    Text(
+                        "Android needs your permission for this app to install apps. Install opens " +
+                            "that setting first.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(
+                    onClick = {
+                        // Read at the tap rather than at composition: the permission is granted on
+                        // a system page, and coming back from it does not recompose this card.
+                        val intent = if (appState.canInstallUpdates()) {
+                            appState.updateInstallIntent(state.file)
+                        } else {
+                            appState.installPermissionIntent()
+                        }
+                        intent?.let(context::startActivity)
+                    },
+                ) { Text("Install") }
+            }
+
+            is UpdateState.Failed -> Text(state.reason, color = MaterialTheme.colorScheme.error)
+        }
+
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            OutlinedButton(enabled = !busy, onClick = appState::checkForUpdate) {
+                Text(if (state is UpdateState.Idle) "Check for updates" else "Check again")
+            }
+            if (state is UpdateState.Available || state is UpdateState.Ready) {
+                OutlinedButton(
+                    onClick = { appState.releasesPageIntent()?.let(context::startActivity) },
+                ) { Text("Release page") }
+            }
+            if (state is UpdateState.Failed || state is UpdateState.UpToDate) {
+                TextButton(onClick = appState::dismissUpdate) { Text("Dismiss") }
+            }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = appState.appPreferences.updateChecksEnabled,
+                onCheckedChange = appState::updateAutomaticUpdateChecks,
+            )
+            Text("Check for updates when the app opens")
+        }
+        Text(
+            "One request to GitHub, and it says nothing unless there is a newer build. Nothing is " +
+                "downloaded or installed without you pressing for it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

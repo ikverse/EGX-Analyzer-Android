@@ -54,6 +54,61 @@ class PositionSyncTest {
     )
 
     @Test
+    fun `keeping a trade open travels, and so does a window set by hand`() {
+        val original = revision().let {
+            it.copy(position = it.position.copy(keepOpen = true, windowCustom = true, windowSessions = 21))
+        }
+
+        val returned = SyncedPosition.fromDocument(original.toDocument())
+
+        assertEquals(original, returned)
+        assertTrue(returned!!.position.keepOpen)
+        assertTrue(returned.position.windowCustom)
+        assertEquals(21, returned.position.windowSessions)
+    }
+
+    @Test
+    fun `a position written before trades could outlive their deadline reads as an ordinary one`() {
+        // What an older device uploads: no keepOpen, no windowCustom. Both are false there, which
+        // is what those trades were - the offered window, closing when it ran out.
+        val older = JSONObject(revision().toDocument())
+            .apply { remove("keepOpen"); remove("windowCustom") }
+            .toString()
+
+        val returned = SyncedPosition.fromDocument(older)!!
+
+        assertFalse(returned.position.keepOpen)
+        assertFalse(returned.position.windowCustom)
+    }
+
+    @Test
+    fun `a reason for keeping a trade open travels with it`() {
+        val original = revision().let {
+            it.copy(position = it.position.copy(keepOpen = true, keepOpenNote = "Holding for T2"))
+        }
+
+        val returned = SyncedPosition.fromDocument(original.toDocument())!!
+
+        assertEquals("Holding for T2", returned.position.keepOpenNote)
+        assertEquals(original, returned)
+    }
+
+    @Test
+    fun `a field written by a newer app survives being read and sent back`() {
+        // The point of `unknown`: a device that does not understand a field must not delete it by
+        // merely handling the trade. Without this, upgrading one phone quietly strips whatever the
+        // other one knew.
+        val fromNewerApp = JSONObject(revision().toDocument())
+            .put("trailingStopPct", 5.5)
+            .toString()
+
+        val parsed = SyncedPosition.fromDocument(fromNewerApp)!!
+        val resent = JSONObject(parsed.toDocument())
+
+        assertEquals(5.5, resent.getDouble("trailingStopPct"), 0.0001)
+    }
+
+    @Test
     fun `a revision survives the round trip`() {
         val original = revision()
 

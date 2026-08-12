@@ -76,7 +76,18 @@ internal fun InsightsScreen(appState: AppState) {
         onRefresh = { scope.launch { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
     ) {
-        PricesBar(full.windowSessions)
+        // The window itself lives in Settings; here it is only context for the figures below, so it
+        // reads as a line under the page name rather than taking a card of its own. A card cost
+        // about 88dp of the top of the tab to say one short thing, and the ranking is what the
+        // screen is for.
+        Text(
+            "Scored over ${full.windowSessions} trading " +
+                (if (full.windowSessions == 1) "session" else "sessions") +
+                " · change it in Settings",
+            Modifier.padding(start = PageTextInset),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
         if (full.tracked == 0) {
             EmptyState(
@@ -190,24 +201,6 @@ internal fun InsightsScreen(appState: AppState) {
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun PricesBar(windowSessions: Int) {
-    // The window itself lives in Settings; here it is only context for the figures, so one line is
-    // enough and the space goes to the results. Refreshing is the pull, so there is no button.
-    SectionCard {
-        Text(
-            "$windowSessions trading ${if (windowSessions == 1) "session" else "sessions"}",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            "Scoring window · change it in Settings",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

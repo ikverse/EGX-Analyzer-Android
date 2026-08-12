@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,6 +32,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -39,6 +42,45 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+
+/**
+ * Anything that floats over a page rather than sitting in it.
+ *
+ * The navigation bar and the action button are both loose on top of the content, and both have to
+ * say so the same way: slightly see-through, so the page carries on behind them, and outlined, so
+ * their edge holds against whatever scrolls under it. Defined once here because two definitions of
+ * "floating" drift apart the first time one of them is adjusted.
+ *
+ * The shape is still the caller's, though both callers currently pass the page's own card radius.
+ */
+@Composable
+internal fun FloatingSurface(
+    shape: Shape,
+    color: Color,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    // See-through enough that the page carries on behind it, opaque enough that it cannot be read
+    // there. At 0.88 a heading passing underneath came through as a second row of words tangled in
+    // the labels; what is wanted is the movement, not the content.
+    val tinted = color.copy(alpha = 0.94f)
+    // The tint alone leaves the edge indistinct against a card of a similar colour; the hairline is
+    // what draws the shape whatever is behind it.
+    val hairline = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+    if (onClick == null) {
+        Surface(modifier, shape = shape, color = tinted, border = hairline, shadowElevation = FloatingElevation) {
+            content()
+        }
+    } else {
+        Surface(onClick, modifier, shape = shape, color = tinted, border = hairline, shadowElevation = FloatingElevation) {
+            content()
+        }
+    }
+}
+
+/** Enough to lift the surface off the page without casting a shadow the tint then shows through. */
+private val FloatingElevation = 6.dp
 
 /**
  * The one spacing scale.
@@ -140,6 +182,12 @@ fun formatPercent(value: Double?, signed: Boolean = true): String {
     val sign = if (signed && rounded > 0) "+" else ""
     return "$sign${if (abs(rounded - rounded.toLong()) < 1e-9) rounded.toLong().toString() else rounded}%"
 }
+
+/** "session" or "sessions", so the three places that count them all read the same. */
+fun Int.sessionWord(): String = if (this == 1) "session" else "sessions"
+
+/** "day" or "days", for the overdue count. */
+fun Long.dayWord(): String = if (this == 1L) "day" else "days"
 
 /**
  * How many columns of at least [minColumnWidth] fit in the space actually available.

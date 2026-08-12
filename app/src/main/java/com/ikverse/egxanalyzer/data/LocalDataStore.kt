@@ -80,6 +80,7 @@ class LocalDataStore(context: Context) :
         db.createPromptVersions()
         db.createPositions()
         db.addPositionRevisionColumns()
+        db.addPositionWindowColumns()
         db.addOpenColumn()
     }
 
@@ -109,6 +110,10 @@ class LocalDataStore(context: Context) :
             target2 REAL,
             stop_loss REAL,
             window_sessions INTEGER NOT NULL,
+            window_custom INTEGER NOT NULL DEFAULT 0,
+            keep_open INTEGER NOT NULL DEFAULT 0,
+            keep_open_note TEXT,
+            unknown TEXT NOT NULL DEFAULT '{}',
             opened_at INTEGER NOT NULL DEFAULT 0,
             updated_at INTEGER NOT NULL DEFAULT 0,
             updated_by TEXT NOT NULL DEFAULT '',
@@ -136,6 +141,38 @@ class LocalDataStore(context: Context) :
         runCatching { execSQL("UPDATE positions SET id = ticker || '@' || recommendation_date") }
     }
 
+    /**
+     * Brings a positions table written before a trade could outlive its deadline up to date.
+     *
+     * Every column is checked for on its own, and that is the whole point. The first version of
+     * this guarded all four behind "does `keep_open` exist", which is only correct if a device can
+     * never hold some of them and not others - and a device can. A build that shipped two of these
+     * under schema 10 left phones on schema 10 lacking the other two, so `onUpgrade` never ran
+     * again and the columns could never arrive. Asking per column costs one query and cannot care
+     * which build a phone happens to have come from.
+     *
+     * The defaults are not chosen for convenience: a trade recorded before any of this existed took
+     * the window it was offered, closed when that ran out, and had nothing written against it by a
+     * newer app.
+     */
+    private fun SQLiteDatabase.addPositionWindowColumns() {
+        val columns = rawQuery("PRAGMA table_info(positions)", null).use { cursor ->
+            generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }.toSet()
+        }
+        if ("window_custom" !in columns) {
+            execSQL("ALTER TABLE positions ADD COLUMN window_custom INTEGER NOT NULL DEFAULT 0")
+        }
+        if ("keep_open" !in columns) {
+            execSQL("ALTER TABLE positions ADD COLUMN keep_open INTEGER NOT NULL DEFAULT 0")
+        }
+        if ("keep_open_note" !in columns) {
+            execSQL("ALTER TABLE positions ADD COLUMN keep_open_note TEXT")
+        }
+        if ("unknown" !in columns) {
+            execSQL("ALTER TABLE positions ADD COLUMN unknown TEXT NOT NULL DEFAULT '{}'")
+        }
+    }
+
     /** Every position this device holds, tombstoned ones excluded. */
     fun positions(): List<Position> = readableDatabase
         .query(
@@ -151,27 +188,46 @@ class LocalDataStore(context: Context) :
         }
 
     /**
-     * Every position including the buried ones.
+     * Every position including the buried ones, with whatever a newer app added to each.
      *
      * The sync needs the tombstones: a delete that is not published is a delete the next device
-     * undoes by uploading the position back.
+     * undoes by uploading the position back. It needs the unknown fields for the same sort of
+     * reason - re-uploading a revision without them is how a newer version's data gets erased by
+     * an older one that merely looked at it.
      */
-    fun positionRevisions(): List<Pair<Position, Boolean>> = readableDatabase
+    fun positionRevisions(): List<PositionRevision> = readableDatabase
         .query("positions", null, null, null, null, null, "updated_at ASC")
         .use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
                     runCatching {
-                        cursor.toPosition() to
-                            (cursor.getInt(cursor.getColumnIndexOrThrow("deleted")) == 1)
+                        PositionRevision(
+                            position = cursor.toPosition(),
+                            deleted = cursor.getInt(cursor.getColumnIndexOrThrow("deleted")) == 1,
+                            unknown = cursor.nullableString("unknown") ?: "{}",
+                        )
                     }.getOrNull()?.let(::add)
                 }
             }
         }
 
-    /** Writes a position exactly as the merge decided it, tombstone included. */
-    fun adoptPosition(position: Position, deleted: Boolean) {
-        savePosition(position)
+    /** Fields a newer app version wrote against one position, or an empty object for none. */
+    fun unknownFor(id: String): String = readableDatabase.query(
+        "positions",
+        arrayOf("unknown"),
+        "id = ?",
+        arrayOf(id),
+        null,
+        null,
+        null,
+        "1",
+    ).use { cursor ->
+        if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else "{}"
+    }
+
+    /** Writes a position exactly as the merge decided it, tombstone and unknown fields included. */
+    fun adoptPosition(position: Position, deleted: Boolean, unknown: String = "{}") {
+        savePosition(position, unknown)
         if (deleted) {
             writableDatabase.execSQL(
                 "UPDATE positions SET deleted = 1 WHERE id = ?",
@@ -193,7 +249,14 @@ class LocalDataStore(context: Context) :
         )
     }
 
-    fun savePosition(position: Position) {
+    /**
+     * Writes a position, keeping whatever a newer app version had added to it.
+     *
+     * [unknown] is fields this build does not understand, carried through untouched. Without
+     * storing them the passthrough only ever survived inside a single sync: the moment this device
+     * edited a trade it published `{}` and silently stripped whatever a later version had written.
+     */
+    fun savePosition(position: Position, unknown: String = unknownFor(position.id)) {
         writableDatabase.insertWithOnConflict(
             "positions",
             null,
@@ -215,6 +278,10 @@ class LocalDataStore(context: Context) :
                 put("target2", position.target2)
                 put("stop_loss", position.stopLoss)
                 put("window_sessions", position.windowSessions)
+                put("window_custom", if (position.windowCustom) 1 else 0)
+                put("keep_open", if (position.keepOpen) 1 else 0)
+                put("keep_open_note", position.keepOpenNote)
+                put("unknown", unknown)
                 put("opened_at", position.openedAt.toEpochMilli())
                 put("updated_at", position.updatedAt)
                 put("updated_by", position.updatedBy)
@@ -242,6 +309,9 @@ class LocalDataStore(context: Context) :
         target2 = nullableDouble(getColumnIndexOrThrow("target2")),
         stopLoss = nullableDouble(getColumnIndexOrThrow("stop_loss")),
         windowSessions = getInt(getColumnIndexOrThrow("window_sessions")),
+        windowCustom = getInt(getColumnIndexOrThrow("window_custom")) == 1,
+        keepOpen = getInt(getColumnIndexOrThrow("keep_open")) == 1,
+        keepOpenNote = nullableString("keep_open_note"),
         openedAt = Instant.ofEpochMilli(getLong(getColumnIndexOrThrow("opened_at"))),
         updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
         updatedBy = getString(getColumnIndexOrThrow("updated_by")),
@@ -267,6 +337,26 @@ class LocalDataStore(context: Context) :
         "session_date DESC",
         "1",
     ).use { cursor -> if (cursor.moveToFirst()) cursor.nullableDouble(0) else null }
+
+    /**
+     * The newest session stored for one stock, which is where a fetch has to start from.
+     *
+     * The whole point of asking is that the answer is often not yesterday: a phone that was not
+     * opened for a fortnight has a fortnight-shaped hole, and only this says how wide it is.
+     */
+    fun latestSessionDate(ticker: String): LocalDate? = readableDatabase.query(
+        "daily_prices",
+        arrayOf("session_date"),
+        "ticker = ?",
+        arrayOf(ticker),
+        null,
+        null,
+        "session_date DESC",
+        "1",
+    ).use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+        runCatching { LocalDate.parse(cursor.getString(0)) }.getOrNull()
+    }
 
     /**
      * The wording rules, including the shipped ones once they have been changed.
@@ -940,8 +1030,15 @@ class LocalDataStore(context: Context) :
         for (index in 0 until length()) add(getString(index))
     }
 
-    private companion object {
+    /** Internal rather than private so the migration test can open version 9 by the same name. */
+    internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
-        const val DATABASE_VERSION = 9
+        /**
+         * 11 rather than 10 because a phone already ran a 10.
+         *
+         * `onUpgrade` fires only when the stored number is lower than this one, so adding columns
+         * to a version that has already shipped anywhere reaches no device that has it.
+         */
+        const val DATABASE_VERSION = 11
     }
 }

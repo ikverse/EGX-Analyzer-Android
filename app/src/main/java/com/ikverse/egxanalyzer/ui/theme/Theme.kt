@@ -8,6 +8,8 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -86,6 +88,48 @@ private val LightColors = lightColorScheme(
     outlineVariant = Color(0xFFC1C7CE),
 )
 
+/**
+ * The signals Material's roles have no slot left for.
+ *
+ * Every scheme colour above is already spoken for: cyan is a running position, green is a target,
+ * red is a stop, the greys are context. A position that ran out of time is none of those - it is
+ * waiting on the user, and it can perfectly well be up 5%, so borrowing red would report a loss the
+ * trade never made and borrowing purple gave it a hue that means nothing here.
+ *
+ * Amber is added rather than reassigned for the reason the palette is fixed in the first place: a
+ * role that already means something must go on meaning it.
+ */
+data class ExtraColors(
+    /** Text, labels, and the outline a card gets when the trade on it has run out of time. */
+    val expired: Color,
+    val expiredContainer: Color,
+    val onExpiredContainer: Color,
+)
+
+private val DarkExtras = ExtraColors(
+    expired = Color(0xFFF3C264),
+    expiredContainer = Color(0xFF5A4318),
+    onExpiredContainer = Color(0xFFFFE0A3),
+)
+
+private val LightExtras = ExtraColors(
+    expired = Color(0xFF8A5A00),
+    expiredContainer = Color(0xFFFFDFA6),
+    onExpiredContainer = Color(0xFF2A1A00),
+)
+
+/**
+ * Provided by [EgxAnalyzerTheme], so these follow the app's own light/dark setting.
+ *
+ * Reading `isSystemInDarkTheme()` at the point of use would ignore a user who has forced light or
+ * dark in Settings, and put a dark-theme amber on a light page.
+ */
+val LocalExtraColors = staticCompositionLocalOf { LightExtras }
+
+/** The extra roles for the theme in force, beside `MaterialTheme.colorScheme`. */
+val extraColors: ExtraColors
+    @Composable get() = LocalExtraColors.current
+
 /** Rounder than the M3 default; these screens are card-dense and softer corners keep them calm. */
 private val AppShapes = Shapes(
     extraSmall = RoundedCornerShape(6.dp),
@@ -118,10 +162,12 @@ fun EgxAnalyzerTheme(
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
-        shapes = AppShapes,
-        typography = AppTypography,
-        content = content,
-    )
+    CompositionLocalProvider(LocalExtraColors provides if (darkTheme) DarkExtras else LightExtras) {
+        MaterialTheme(
+            colorScheme = if (darkTheme) DarkColors else LightColors,
+            shapes = AppShapes,
+            typography = AppTypography,
+            content = content,
+        )
+    }
 }

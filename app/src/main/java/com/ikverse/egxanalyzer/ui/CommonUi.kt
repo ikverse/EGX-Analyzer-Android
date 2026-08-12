@@ -28,6 +28,7 @@ import androidx.compose.material3.SnackbarVisuals
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
@@ -84,29 +85,16 @@ internal fun Screen(
     // scrolling a list inside a card - the chat list, the source list - leaves the bar alone.
     val navBarVisible = LocalNavBarVisible.current
     val slop = with(LocalDensity.current) { NavBarScrollSlop.toPx() }
-    // Less scroll than this and the bar stays: the page has less to give than the bar hands back, so
-    // hiding it shows nothing new and leaves too little scroll to bring it back.
-    val worthHiding = with(LocalDensity.current) { NavBarReclaimedHeight.toPx() } + slop
+    // Less scroll than this and the bar stays: the page has less left to read than the bar is
+    // covering, so moving it out of the way uncovers nothing worth the movement.
+    val worthHiding = with(LocalDensity.current) { NavBarFootprint.toPx() } + slop
     LaunchedEffect(scroll, slop, worthHiding) {
         var mark = scroll.value
-        var extent = scroll.maxValue
         snapshotFlow { scroll.value to scroll.maxValue }.collect { (offset, max) ->
-            // A change in how far the page can scroll is the layout moving the page, not the reader
-            // scrolling it. The bar leaving hands its height back, the page grows by it, and the
-            // scroll range shrinks by it; at the foot of a page the offset is then clamped to the
-            // shorter range and drops the height of the bar. Read as a scroll that would be a scroll
-            // upwards, which fetches the bar straight back, and the next scroll down sends it away
-            // again - the bar flickering on and off at the end of every page.
-            val relaid = max != extent
-            extent = max
             when {
-                // The top of a page always shows it: there is nothing to reclaim up here, and a
-                // page that opens with no navigation showing looks broken. Ahead of the relayout
-                // check, so content shrinking under a hidden bar cannot strand it hidden up here -
-                // and safe there because a page short enough for the clamp to reach the top is a
-                // page the bar never hides on.
+                // The top of a page always shows it: there is nothing hidden behind the bar up
+                // here, and a page that opens with no navigation showing looks broken.
                 offset <= slop -> navBarVisible.value = true
-                relaid -> Unit
                 offset - mark > slop && max > worthHiding -> navBarVisible.value = false
                 mark - offset > slop -> navBarVisible.value = true
                 else -> return@collect
@@ -114,6 +102,18 @@ internal fun Screen(
             mark = offset
         }
     }
+    // The bar floats over the page, so the page has to hold its own content out from under it.
+    // Beside a rail there is no bar over anything and nothing to hold clear of.
+    val barClearance =
+        if (LocalWindowWidth.current == WindowWidth.COMPACT) NavBarFootprint else 0.dp
+    // The floating button travels with the bar, so the two never drift apart on screen. Only the
+    // button: the content's padding is deliberately fixed at the full clearance, because animating
+    // that would move the scroll range under a reader mid-scroll, which is exactly what used to
+    // flicker the bar on and off at the foot of a page.
+    val floatingActionClearance by animateDpAsState(
+        if (navBarVisible.value) barClearance else 0.dp,
+        label = "floating action clearance",
+    )
     val page = @Composable {
         Column(
             Modifier
@@ -122,10 +122,14 @@ internal fun Screen(
                 .fadingScrollbar(scroll)
                 .verticalScroll(scroll)
                 .padding(horizontal = Space.l)
-                .padding(top = Space.l, bottom = if (floatingAction == null) Space.xl else FloatingActionInset),
+                .padding(
+                    top = Space.l,
+                    bottom = (if (floatingAction == null) Space.xl else FloatingActionInset) +
+                        barClearance,
+                ),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            Text(title, style = MaterialTheme.typography.headlineLarge)
+            Text(title, Modifier.padding(start = PageTextInset), style = MaterialTheme.typography.headlineLarge)
             content()
         }
     }
@@ -142,7 +146,11 @@ internal fun Screen(
             // Further in from the corner on a big screen, where the edge is a long way from the
             // content and a button hard against it reads as stuck to the frame.
             val inset = if (LocalWindowWidth.current == WindowWidth.COMPACT) Space.l else Space.xl + Space.s
-            Box(Modifier.align(Alignment.BottomEnd).padding(inset)) { it() }
+            Box(
+                Modifier.align(Alignment.BottomEnd)
+                    .padding(inset)
+                    .padding(bottom = floatingActionClearance),
+            ) { it() }
         }
     }
     }
@@ -164,6 +172,16 @@ internal val LocalViewportTop = compositionLocalOf { 0f }
  * screen, so a page being scrolled has no other way to tell it to get out of the way.
  */
 internal val LocalNavBarVisible = staticCompositionLocalOf { mutableStateOf(true) }
+
+/**
+ * How far text sitting loose on a page is set in from the page's own edge.
+ *
+ * A card holds its outline at the page edge and its contents [Space.l] inside that, so every
+ * heading on a page reads down one column that starts an inset further in. The page name and any
+ * other text that sits on the page rather than in a card takes the same inset, or it hangs to the
+ * left of every heading under it and the page looks unaligned.
+ */
+internal val PageTextInset = Space.l
 
 /** Enough movement to be a scroll rather than a wobble, so the bar does not flicker on a nudge. */
 private val NavBarScrollSlop = 6.dp
@@ -276,6 +294,14 @@ internal fun ExpandableSection(
     summary: String? = null,
     /** Colour for [summary], where the figure itself carries a verdict. */
     summaryTone: Color? = null,
+    /**
+     * Draws that line itself, for a summary whose parts want different colours.
+     *
+     * Takes the place of [summary] where it is given. A plain string covers almost every card in the
+     * app, and making all of them build one would be paying for a Portfolio card's state counts
+     * everywhere else.
+     */
+    summaryContent: (@Composable () -> Unit)? = null,
     /** Caps the content, for groups of form controls: a text field the width of a desk is unusable. */
     contentMaxWidth: Dp? = null,
     /** Hoisted when the layout around it needs to know: an open card claims the whole row. */
@@ -312,8 +338,9 @@ internal fun ExpandableSection(
                 }
                 Column(Modifier.weight(1f)) {
                     Text(title, style = MaterialTheme.typography.titleMedium)
-                    if (summary != null) {
-                        Text(
+                    when {
+                        summaryContent != null -> summaryContent()
+                        summary != null -> Text(
                             summary,
                             style = MaterialTheme.typography.bodySmall,
                             color = summaryTone ?: MaterialTheme.colorScheme.onSurfaceVariant,

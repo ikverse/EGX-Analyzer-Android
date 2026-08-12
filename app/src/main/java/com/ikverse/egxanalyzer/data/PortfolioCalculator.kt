@@ -4,6 +4,7 @@ import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.Portfolio
 import com.ikverse.egxanalyzer.model.PortfolioGroup
+import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.PortfolioStats
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionStatus
@@ -11,14 +12,16 @@ import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.round
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 
 /**
  * Turns recorded trades plus stored sessions into the portfolio.
  *
- * Two rules run through all of it. The deadline belongs to the recommendation - a window of N
- * trading sessions counted from the session it was made for, whenever the user happened to buy - and
+ * Three rules run through all of it. The deadline belongs to the recommendation - a window of N
+ * trading sessions counted from the session it was made for, whenever the user happened to buy -
  * every percentage is measured from the price the user actually paid, never from the entry band the
- * channel printed.
+ * channel printed, and a position the user has marked Keep Open ends only when they record a sale or
+ * when it reaches target 2.
  */
 object PortfolioCalculator {
 
@@ -28,19 +31,18 @@ object PortfolioCalculator {
         sessionsFor: (ticker: String, from: LocalDate) -> List<DailySession>,
         /** The latest close the feed has for a stock, which is as current as a daily feed gets. */
         latestCloseFor: (ticker: String) -> Double?,
+        /** Passed in rather than read here, so how overdue a trade is can be tested at all. */
+        today: LocalDate = LocalDate.now(),
     ): Portfolio {
         val views = positions.map { position ->
             evaluate(
                 position = position,
                 sessions = sessionsFor(position.ticker, position.recommendationDate),
                 currentPrice = latestCloseFor(position.ticker),
+                today = today,
             )
         }
-        return Portfolio(
-            open = views.filter(PositionView::open).grouped(),
-            closed = views.filterNot(PositionView::open).grouped(),
-            stats = stats(views),
-        )
+        return Portfolio(groups = views.grouped(), stats = stats(views))
     }
 
     /**
@@ -54,6 +56,7 @@ object PortfolioCalculator {
         position: Position,
         sessions: List<DailySession>,
         currentPrice: Double?,
+        today: LocalDate = LocalDate.now(),
     ): PositionView {
         // The deadline set: the recommendation's own window, counted from its own session.
         val window = sessions.take(position.windowSessions)
@@ -82,11 +85,26 @@ object PortfolioCalculator {
             PositionStatus.FULL_TARGET_HIT, PositionStatus.STOPPED_OUT -> true
             PositionStatus.PARTIAL_TARGET_HIT ->
                 scored.stoppedAfterPartial || scored.windowComplete
-            PositionStatus.CLOSED -> true
+            PositionStatus.EXPIRED -> true
             else -> false
         }
         val soldByHand = position.exitPrice != null
-        val open = !soldByHand && !settledByMarket
+        // Keep Open defeats every automatic close but one: a stop the market broke is a fact about
+        // the call, and a user who is still holding is still holding. Target 2 is the exception,
+        // because it is not a close the user might disagree with - the trade did the thing it was
+        // bought to do, and there is nothing left to keep it open for.
+        val open = !soldByHand &&
+            marketStatus != PositionStatus.FULL_TARGET_HIT &&
+            (position.keepOpen || !settledByMarket)
+
+        // Ran out of time rather than ending anywhere: no target 2, no stop, and no sale the user
+        // told us about. Both the Expired section and the overdue count are this and nothing else,
+        // so a trade that reached its target is never chased and one that went nowhere always is.
+        val ranOutOfTime = !soldByHand &&
+            deadlineDate != null &&
+            marketStatus != PositionStatus.FULL_TARGET_HIT &&
+            marketStatus != PositionStatus.STOPPED_OUT &&
+            !scored.stoppedAfterPartial
 
         val exit = when {
             // The user's own price, and the only figure here that is not an estimate.
@@ -97,7 +115,15 @@ object PortfolioCalculator {
 
         return PositionView(
             position = position,
-            status = if (position.closedManually) PositionStatus.CLOSED_MANUALLY else marketStatus,
+            status = when {
+                position.closedManually -> PositionStatus.CLOSED_MANUALLY
+                // A kept-open position whose window merely ran out is still open, and a chip
+                // reading "Expired" above a trade sitting in the Open section would be a
+                // contradiction. Every other verdict survives: a target the market reached is
+                // worth seeing on a position still running, exactly as a partial hit already is.
+                open && marketStatus == PositionStatus.EXPIRED -> PositionStatus.OPEN
+                else -> marketStatus
+            },
             marketStatus = marketStatus,
             open = open,
             currentPrice = currentPrice,
@@ -108,7 +134,27 @@ object PortfolioCalculator {
             sessionsRemaining = remaining,
             deadlineDate = deadlineDate,
             settledOn = scored.settledOn,
+            ranOutOfTime = ranOutOfTime,
+            overdueDays = overdueDays(ranOutOfTime, deadlineDate, today),
         )
+    }
+
+    /**
+     * How far past its deadline a trade that ran out of time has run.
+     *
+     * Only for a trade that ended nowhere, which is the whole of the rule: a position the user
+     * reported selling is over, a target reached is the trade doing what it was bought to do, and a
+     * stop broken is the call's own instruction being followed. Chasing any of those would be
+     * scolding the user over a trade that already has an answer. Zero on the day the deadline lands,
+     * so the pill starts the morning after.
+     */
+    private fun overdueDays(
+        ranOutOfTime: Boolean,
+        deadlineDate: LocalDate?,
+        today: LocalDate,
+    ): Long {
+        if (!ranOutOfTime || deadlineDate == null) return 0
+        return ChronoUnit.DAYS.between(deadlineDate, today).coerceAtLeast(0)
     }
 
     /**
@@ -143,36 +189,47 @@ object PortfolioCalculator {
         Outcome.FULL_HIT -> PositionStatus.FULL_TARGET_HIT
         Outcome.PARTIAL_HIT -> PositionStatus.PARTIAL_TARGET_HIT
         Outcome.STOPPED -> PositionStatus.STOPPED_OUT
-        Outcome.EXPIRED -> PositionStatus.CLOSED
+        Outcome.EXPIRED -> PositionStatus.EXPIRED
         // The rest cannot arise for a held position: the entry is given rather than waited for, so
         // nothing is unreachable and no two events need ordering against it. A stock with no stored
         // sessions yet is simply open and unpriced.
         else -> PositionStatus.OPEN
     }
 
-    /** Newest session first, matching how every other list of target dates in the app reads. */
-    private fun List<PositionView>.grouped(): List<PortfolioGroup> = groupBy(PositionView::recommendationDate)
-        .map { (date, held) ->
-            PortfolioGroup(date, held.sortedBy { it.ticker })
-        }
-        .sortedByDescending(PortfolioGroup::recommendationDate)
+    /**
+     * One group per session, in the screen's default order.
+     *
+     * [PortfolioOrder.URGENT] rather than a comparator written out here: the Portfolio lets the user
+     * pick an order, so the rule has to live somewhere both this and the screen can reach, or the
+     * default and the option the user chooses drift apart. Anything reading the portfolio without a
+     * screen - the overdue worker, a test - gets the same order the screen opens on.
+     */
+    private fun List<PositionView>.grouped(): List<PortfolioGroup> =
+        groupBy(PositionView::recommendationDate)
+            .map { (date, held) ->
+                PortfolioGroup(date, held.sortedWith(PortfolioOrder.URGENT.positions))
+            }
+            .sortedWith(PortfolioOrder.URGENT.groups)
 
     /**
      * The record as figures.
      *
-     * Closed positions carry the verdict - they are what the record delivered - while open ones are
-     * reported apart, because a position still running can still change its mind.
+     * Settled positions carry the verdict - they are what the record delivered - while open ones are
+     * reported apart, because a position still running can still change its mind. Settled counts
+     * every trade no longer running, the expired ones included: a trade that went nowhere for ten
+     * sessions is a result, and leaving it out would flatter the win rate.
      */
     internal fun stats(views: List<PositionView>): PortfolioStats {
         if (views.isEmpty()) return PortfolioStats()
         val open = views.filter(PositionView::open)
-        val closed = views.filterNot(PositionView::open)
-        val settledReturns = closed.mapNotNull(PositionView::returnPct)
+        val settled = views.filterNot(PositionView::open)
+        val settledReturns = settled.mapNotNull(PositionView::returnPct)
         return PortfolioStats(
             total = views.size,
             openCount = open.size,
-            closedCount = closed.size,
-            realizedReturnPct = settledReturns.meanOrNull(),
+            settledCount = settled.size,
+            overdueCount = views.count(PositionView::overdue),
+            settledReturnPct = settledReturns.meanOrNull(),
             openReturnPct = open.mapNotNull(PositionView::returnPct).meanOrNull(),
             winRate = settledReturns
                 .takeIf(List<Double>::isNotEmpty)

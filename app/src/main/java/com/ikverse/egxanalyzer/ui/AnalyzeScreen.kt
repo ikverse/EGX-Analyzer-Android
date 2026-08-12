@@ -7,12 +7,9 @@ import android.content.Intent
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.outlined.Preview
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.DisposableEffect
@@ -28,30 +25,21 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoGraph
-import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -59,6 +47,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
 import java.time.format.DateTimeFormatter
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +56,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,7 +73,6 @@ import java.time.ZoneId
 
 @Composable
 internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
-    var modelMenuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     // Android 13 and later start with notifications denied, and the app never asked. Everything
     // was built - channel, foreground service, deep link - and none of it could reach the screen,
@@ -108,7 +97,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         appState.startAnalysis()
     }
     // Computed here rather than inside the content, because the floating action needs it too.
-    val blockedReason = analyzeBlockedReason(appState)
+    val blocker = analyzeBlocker(appState)
     // Until Analyze is pressed this is guidance, not a complaint: painting it red on a freshly
     // opened app tells someone who has done nothing wrong that something is broken.
     var attempted by remember { mutableStateOf(false) }
@@ -116,13 +105,13 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         title = "Analyze",
         floatingAction = {
             val big = LocalWindowWidth.current != WindowWidth.COMPACT
-            val actionModifier = if (big) Modifier.height(BigActionHeight) else Modifier
+            val actionModifier = Modifier.height(if (big) BigActionHeight else ActionHeight)
             if (appState.analysisStatus == AnalysisStatus.RUNNING) {
-                ExtendedFloatingActionButton(
+                AnalyzeAction(
                     onClick = { scope.launch { appState.cancelAnalysis() } },
+                    container = MaterialTheme.colorScheme.errorContainer,
+                    content = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = actionModifier,
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
                     // A spinner rather than the cancel icon: the button is still what cancels the
                     // run, but while one is going the first thing it has to say is that it is alive.
                     icon = {
@@ -132,18 +121,17 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                             strokeWidth = 2.dp,
                         )
                     },
-                    text = { RunningLabel(appState.analysisStartedAt, big) },
+                    label = { RunningLabel(appState.analysisStartedAt, big) },
                 )
             } else {
-                ExtendedFloatingActionButton(
-                    modifier = actionModifier,
+                AnalyzeAction(
                     onClick = {
                         // Asked here rather than at first launch: a permission prompt before the
                         // app has done anything is the one people decline, and Android never asks
                         // twice.
-                        if (blockedReason != null) {
+                        if (blocker != null) {
                             attempted = true
-                            return@ExtendedFloatingActionButton
+                            return@AnalyzeAction
                         }
                         if (notificationsAllowed) {
                             appState.startAnalysis()
@@ -151,16 +139,20 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
                     },
-                    containerColor = if (blockedReason == null) {
+                    container = if (blocker == null) {
                         MaterialTheme.colorScheme.primaryContainer
                     } else {
-                        MaterialTheme.colorScheme.surfaceContainerHighest
+                        // A step down from surfaceContainerHighest, which read as nearly solid once
+                        // the button went see-through and left the blocked state looking the most
+                        // substantial of the three.
+                        MaterialTheme.colorScheme.surfaceContainerHigh
                     },
-                    contentColor = if (blockedReason == null) {
+                    content = if (blocker == null) {
                         MaterialTheme.colorScheme.onPrimaryContainer
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
+                    modifier = actionModifier,
                     icon = {
                         Icon(
                             Icons.Outlined.AutoGraph,
@@ -168,7 +160,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                             modifier = Modifier.size(if (big) BigActionIcon else ActionIcon),
                         )
                     },
-                    text = {
+                    label = {
                         Text(
                             "Analyze",
                             style = if (big) {
@@ -203,9 +195,6 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         AdaptivePanes(
             main = {
                 ChannelsSection(appState)
-                // The reason a run cannot start sits with the button that loads what it is
-                // missing, rather than as a loose line under the card it is about.
-                MessagesPreview(appState, scope, blockedReason, attempted)
             },
             side = {
         Card(
@@ -244,6 +233,18 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                             ContentTypeToggle("Voice messages", AnalysisContentType.AUDIO, appState)
                         }
                     }
+                }
+                // Drawn where the boxes are, for the same reason the model card carries its own.
+                if (blocker == AnalyzeBlocker.NO_CONTENT_TYPE) {
+                    Text(
+                        blocker.reason,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (attempted) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
                 }
             }
         }
@@ -290,79 +291,18 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 }
             }
         }
-        ExpandableSection("Cloud model", Icons.Outlined.SmartToy) {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                Text(
-                    appState.cloudConfiguration.provider.displayName,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                OutlinedTextField(
-                    value = appState.cloudConfiguration.model,
-                    onValueChange = appState::updateModel,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Analysis model") },
-                    singleLine = true,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth().scrollableRow(),
-                    horizontalArrangement = Arrangement.spacedBy(Space.s),
-                ) {
-                    OutlinedButton(
-                        onClick = { scope.launch { appState.loadCloudModels() } },
-                        enabled = !appState.modelListLoading,
-                    ) {
-                        Icon(Icons.Outlined.CloudDownload, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (appState.modelListLoading) "Loading…" else "Load models")
-                    }
-                    if (appState.availableModels.isNotEmpty()) {
-                        Box {
-                            OutlinedButton(onClick = { modelMenuOpen = true }) {
-                                Icon(Icons.Outlined.SmartToy, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Choose model (${appState.availableModels.size})")
-                            }
-                            DropdownMenu(
-                                expanded = modelMenuOpen,
-                                onDismissRequest = { modelMenuOpen = false },
-                            ) {
-                                appState.availableModels.forEach { model ->
-                                    DropdownMenuItem(
-                                        text = { Text(model) },
-                                        onClick = {
-                                            appState.updateModel(model)
-                                            // Picking a model does not change the key, so this
-                                            // persists the choice without re-verifying.
-                                            appState.persistModelChoice()
-                                            modelMenuOpen = false
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                appState.modelListMessage?.let {
-                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
+        // The reason a run cannot start sits with the button that loads what it is missing, rather
+        // than as a loose line under the card it is about.
+        MessagesPreview(appState, scope, blocker, attempted)
+        AnalysisModelCard(appState, blocker, attempted)
             },
         )
         DuplicateAnalysisDialog(appState)
 
-        val analyzeDisabledReason = blockedReason
         if (appState.analysisStatus != AnalysisStatus.RUNNING) {
-            analyzeDisabledReason?.let {
-                if (appState.inputs.isEmpty()) {
-                    // The chat list now sits at the top of this screen, so there is nowhere to send
-                    // the user - only somewhere to point them.
-                    Text(
-                        "Select chats at the top of this screen, then load them in Messages preview.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            // Every blocker is now drawn once, by the card it is about. The line that used to sit
+            // here said "Select chats at the top of this screen" whatever was actually wrong, so a
+            // missing API key was reported as a missing chat.
             if (!notificationsAllowed) {
                 Text(
                     "Notifications are off, so a run gives no progress while you are in another " +
@@ -373,7 +313,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                     Text("Turn on notifications")
                 }
             }
-            if (analyzeDisabledReason == null && appState.inputs.isEmpty()) {
+            if (blocker == null && appState.inputs.isEmpty()) {
                 Text(
                     "Selected Telegram chats will be collected automatically for the resolved source window.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -460,8 +400,9 @@ private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState
 private fun MessagesPreview(
     appState: AppState,
     scope: kotlinx.coroutines.CoroutineScope,
-    /** Why a run cannot start, or nothing when it can. */
-    blockedReason: String?,
+    /** What is stopping a run, or nothing when nothing is. Only [AnalyzeBlocker.NO_SOURCES] is
+     * this card's to answer for; the others are drawn by the cards they are about. */
+    blocker: AnalyzeBlocker?,
     /** Whether Analyze has been pressed: until it has, this is guidance rather than an error. */
     attempted: Boolean,
 ) {
@@ -485,9 +426,9 @@ private fun MessagesPreview(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        blockedReason?.let {
+        blocker?.takeIf { it == AnalyzeBlocker.NO_SOURCES }?.let {
             Text(
-                it,
+                it.reason,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (attempted) {
                     MaterialTheme.colorScheme.error
@@ -673,29 +614,85 @@ private fun Activity.openNotificationSettings() {
 }
 
 /**
- * Why a run cannot start, or null when it can.
+ * Why a run cannot start.
  *
- * Lifted out of the screen body so the floating action and the explanation beneath the sources can
- * agree without one of them re-deriving it.
+ * Typed rather than a bare string so each card can answer for its own: the reason used to be one
+ * sentence rendered under the sources whatever it was about, which put "Save the provider API key"
+ * beneath a list of messages and left the model card - the thing that was actually wrong - silent.
  */
-private fun analyzeBlockedReason(appState: AppState): String? = when {
-    !appState.cloudConfiguration.hasCredential ->
-        "Save the provider API key in Settings first."
-    appState.cloudConfiguration.model.isBlank() ->
-        "Load or enter a cloud model before analyzing."
-    appState.selectedContentTypes.isEmpty() ->
-        "Select at least one content type."
+internal enum class AnalyzeBlocker(
+    val reason: String,
+    /** Drawn by [AnalysisModelCard]; the rest belong to the cards their subject sits in. */
+    val belongsToModelCard: Boolean = false,
+) {
+    NO_CREDENTIAL("Save the provider API key in Settings first.", belongsToModelCard = true),
+    NO_MODEL("Choose the model this run will be sent to.", belongsToModelCard = true),
+    NO_CONTENT_TYPE("Select at least one content type."),
+    NO_SOURCES("No messages are loaded. Select chats in Telegram, then load them here."),
+}
+
+/**
+ * What is stopping a run, or null when nothing is.
+ *
+ * Lifted out of the screen body so the floating action and the card that explains itself agree
+ * without one of them re-deriving it.
+ */
+private fun analyzeBlocker(appState: AppState): AnalyzeBlocker? = when {
+    !appState.cloudConfiguration.hasCredential -> AnalyzeBlocker.NO_CREDENTIAL
+    appState.cloudConfiguration.model.isBlank() -> AnalyzeBlocker.NO_MODEL
+    appState.selectedContentTypes.isEmpty() -> AnalyzeBlocker.NO_CONTENT_TYPE
     appState.inputs.isEmpty() &&
         (appState.telegramAuthState.step != TelegramAuthStep.READY ||
-            appState.channels.none(ChannelSelection::selected)) ->
-        "No messages are loaded. Select chats in Telegram, then load them in Messages preview."
+            appState.channels.none(ChannelSelection::selected)) -> AnalyzeBlocker.NO_SOURCES
     else -> null
 }
 
 /** The action is the point of this screen, so it grows with the room a big screen gives it. */
 private val BigActionHeight = 88.dp
+
+/** Material's own extended button height, which this one no longer inherits by being one. */
+private val ActionHeight = 56.dp
 private val ActionIcon = 24.dp
 private val BigActionIcon = 34.dp
+
+/** Room either side of the icon and its label, where the button used to bring Material's own. */
+private val ActionPadding = 20.dp
+
+/**
+ * The screen's action, wearing the same floating treatment as the navigation bar under it.
+ *
+ * Not an `ExtendedFloatingActionButton`: that one paints its own opaque container, and a button
+ * floating over the page beside a bar that lets the page through read as two different kinds of
+ * thing. Less rounded than the bar on purpose - the page's own card radius rather than a pill - so
+ * the two are the same material without being the same shape.
+ */
+@Composable
+private fun AnalyzeAction(
+    onClick: () -> Unit,
+    container: Color,
+    content: Color,
+    icon: @Composable () -> Unit,
+    label: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FloatingSurface(
+        shape = MaterialTheme.shapes.large,
+        color = container,
+        modifier = modifier,
+        onClick = onClick,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides content) {
+            Row(
+                Modifier.padding(horizontal = ActionPadding),
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                icon()
+                label()
+            }
+        }
+    }
+}
 
 /**
  * What the button says while a run is going.

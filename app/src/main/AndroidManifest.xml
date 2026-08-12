@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The app updates itself from its own GitHub releases; nothing else will offer it an update.
+         Android still asks the user to allow this app to install apps, and shows its own installer
+         dialog for every APK - this permission only makes the app eligible to ask. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Analyses run past the moment the app leaves the foreground, and say so. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -43,6 +47,20 @@
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/trace_paths" />
+        </provider>
+
+        <!-- Lets Android's package installer read the APK the app downloaded for itself. A second
+             provider rather than another path on the one above: that one is named for traces and
+             shares them outward on request, and an authority whose name is a lie about what it
+             carries is how the wrong file gets granted to the wrong app. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
         </provider>
     </application>
 </manifest>

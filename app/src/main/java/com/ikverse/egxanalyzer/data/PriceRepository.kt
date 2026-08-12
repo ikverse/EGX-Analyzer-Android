@@ -40,20 +40,40 @@ class PriceRepository(
     /**
      * Brings stored prices up to date.
      *
-     * A closed session never changes, so anything already stored is left alone. A stock with no
-     * history yet is fetched in full; one that already has history only needs the days since, and
-     * a short range covers those without asking for a year of prices that are already on disk.
+     * A stock with no history yet is fetched in full. One that has history is fetched from where
+     * that history stops, which is not the same as "the last few days": a phone left shut for a
+     * fortnight has a fortnight-shaped hole, and a fixed short range can never reach back over it.
+     * The hole used to be permanent, because every later refresh asked for the same few days again -
+     * and a call whose window has a hole in it never reaches its deadline, so it never expires and
+     * never shows as overdue.
+     *
+     * Re-asking for sessions already on disk costs nothing: they are stored by (ticker, date) and
+     * overwrite themselves. It buys something, too - a session first saved while it was still
+     * trading is corrected the next time it is fetched.
      */
-    suspend fun refresh(tickers: Collection<String>): PriceRefresh = coroutineScope {
+    suspend fun refresh(
+        tickers: Collection<String>,
+        /**
+         * The oldest session that still has to be judged for a stock, where there is one.
+         *
+         * An open trade is the case that matters: its window has to be complete for the deadline to
+         * arrive, so a hole inside it is fetched again every refresh until it fills. Anything older
+         * than that is settled and is left where it is.
+         */
+        neededFrom: (ticker: String) -> LocalDate? = { null },
+    ): PriceRefresh = coroutineScope {
         val normalized = tickers.map(Scoring::normalizeTicker).filter(String::isNotBlank).distinct()
-        val known = withContext(Dispatchers.IO) { localDataStore.pricedTickers() }
+        val newest = withContext(Dispatchers.IO) {
+            normalized.associateWith(localDataStore::latestSessionDate)
+        }
+        val today = LocalDate.now(ZoneId.of("UTC"))
         // A few at a time rather than all at once: this is an undocumented public endpoint and
         // hammering it from a phone would be both rude and likely to get throttled.
         val limit = Semaphore(CONCURRENCY)
         val fetched = normalized
             .map { ticker ->
-                val range = if (ticker in known) RECENT_RANGE else FULL_RANGE
-                async { ticker to limit.withPermit { fetchAllFeeds(ticker, range) } }
+                val from = fetchFrom(newest[ticker], neededFrom(ticker), today)
+                async { ticker to limit.withPermit { fetchAllFeeds(ticker, from, today) } }
             }
             .map { it.await() }
 
@@ -78,22 +98,37 @@ class PriceRepository(
      * missing either the history or everything recent. Where both report the same session the
      * newer feed wins, since the legacy one froze mid-migration.
      */
-    private suspend fun fetchAllFeeds(ticker: String, range: String): List<DailySession> {
+    private suspend fun fetchAllFeeds(
+        ticker: String,
+        from: LocalDate?,
+        today: LocalDate,
+    ): List<DailySession> {
         val merged = LinkedHashMap<java.time.LocalDate, DailySession>()
         // Reversed so the live feed, listed first, overwrites the legacy rows rather than the
         // other way round.
         for (symbol in symbolMap.feedsFor(ticker).asReversed()) {
-            for (session in fetch(symbol, ticker, range)) {
+            for (session in fetch(symbol, ticker, window(from, today))) {
                 merged[session.date] = session
+            }
+        }
+        // A dated window that comes back with nothing, on a stock that has history, is the one way
+        // this can be worse than the fixed range it replaced - so it falls back to that range and
+        // is no worse. Unproven endpoint behaviour is the reason: `range=max` quietly returns
+        // monthly buckets, and an explicit period is not obliged to behave any better.
+        if (merged.isEmpty() && from != null) {
+            for (symbol in symbolMap.feedsFor(ticker).asReversed()) {
+                for (session in fetch(symbol, ticker, "range=$FULL_RANGE")) {
+                    merged[session.date] = session
+                }
             }
         }
         return merged.values.sortedBy(DailySession::date)
     }
 
-    private suspend fun fetch(symbol: String, ticker: String, range: String): List<DailySession> =
+    private suspend fun fetch(symbol: String, ticker: String, query: String): List<DailySession> =
         withContext(Dispatchers.IO) {
             runCatching {
-                val url = URL("${endpointTemplate.format(symbol)}?interval=1d&range=$range")
+                val url = URL("${endpointTemplate.format(symbol)}?interval=1d&$query")
                 val connection = url.openConnection() as HttpURLConnection
                 try {
                     connection.requestMethod = "GET"
@@ -153,18 +188,62 @@ class PriceRepository(
 
     fun earliestSession(): LocalDate? = localDataStore.earliestSessionDate()
 
-    private companion object {
-        const val YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/%s"
+    companion object {
+        private const val YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/%s"
 
         /** A stock with no stored history: a year of daily sessions, which is what the feed offers
          *  at daily granularity. Asking for `max` returns monthly buckets instead. */
-        const val FULL_RANGE = "1y"
+        private const val FULL_RANGE = "1y"
 
-        /** A stock already on disk: only the sessions since, with slack for weekends and holidays. */
-        const val RECENT_RANGE = "5d"
-        const val USER_AGENT = "Mozilla/5.0 (compatible; EGX-Analyzer)"
-        const val SOURCE = "Yahoo Finance"
-        const val CONCURRENCY = 4
+        /**
+         * Re-asked for on every refresh, so the newest stored session is never trusted on its own.
+         *
+         * It may have been saved while it was still trading, and a weekend sits behind it either
+         * way. Three days costs a couple of rows that overwrite themselves.
+         */
+        private const val OVERLAP_DAYS = 3L
+
+        private const val USER_AGENT = "Mozilla/5.0 (compatible; EGX-Analyzer)"
+        private const val SOURCE = "Yahoo Finance"
+        private const val CONCURRENCY = 4
+
+        /**
+         * Where a stock's fetch has to start, or null to ask for the full history.
+         *
+         * The earlier of two dates, because both are holes worth filling: where the stored history
+         * stops, and where the oldest thing still being judged begins. The second is what heals a
+         * gap that already exists - starting at the newest stored session would step straight over
+         * it and leave the trade that needs it stuck short of its deadline forever.
+         */
+        internal fun fetchFrom(
+            latestStored: LocalDate?,
+            neededFrom: LocalDate?,
+            today: LocalDate,
+        ): LocalDate? {
+            // Nothing on disk is the one case that genuinely wants everything.
+            val stored = latestStored ?: return null
+            val since = stored.minusDays(OVERLAP_DAYS)
+            val from = if (neededFrom != null && neededFrom < since) neededFrom else since
+            // A clock that has gone backwards, or history stored ahead of today, would otherwise
+            // ask for a window that ends before it starts.
+            return if (from > today) today else from
+        }
+
+        /**
+         * The query that names the window, dated where there is one to date.
+         *
+         * `period1`/`period2` rather than `range`, because a fixed range can only ever reach back a
+         * fixed distance, and the distance that matters is however long the app went unopened.
+         */
+        internal fun window(from: LocalDate?, today: LocalDate): String {
+            if (from == null) return "range=$FULL_RANGE"
+            val zone = ZoneId.of("UTC")
+            val start = from.atStartOfDay(zone).toEpochSecond()
+            // Tomorrow, so a session that settled today is inside the window rather than on its
+            // edge: period2 is exclusive of anything later in the same day.
+            val end = today.plusDays(1).atStartOfDay(zone).toEpochSecond()
+            return "period1=$start&period2=$end"
+        }
     }
 }
 

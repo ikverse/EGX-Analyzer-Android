@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -93,6 +94,7 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
         // who had forgotten it was on.
         var channelFilter by remember { mutableStateOf(emptySet<String>()) }
         var dateFilter by remember { mutableStateOf<String?>(null) }
+        var stockFilter by remember { mutableStateOf("") }
         var order by remember { mutableStateOf(RunOrder.RUN_NEWEST) }
         val allChannels = remember(appState.savedResults) {
             appState.savedResults.flatMap { it.channelNames() }.distinct().sorted()
@@ -104,12 +106,17 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
         }
         if (appState.savedResults.isNotEmpty()) {
             FilterRow(
-                active = channelFilter.isNotEmpty() || dateFilter != null,
+                active = channelFilter.isNotEmpty() || dateFilter != null || stockFilter.isNotBlank(),
                 onClearAll = {
                     channelFilter = emptySet()
                     dateFilter = null
+                    stockFilter = ""
                 },
             ) {
+                // Search leads here for the same reason it leads inside a report: it is the control
+                // someone arrives at the screen already knowing they want, and the only one that can
+                // empty the list on a single keystroke.
+                StockFilterField(value = stockFilter, onValueChange = { stockFilter = it })
                 MultiSelectFilter(
                     label = "channels",
                     options = allChannels,
@@ -139,22 +146,34 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                 )
             }
         }
-        val shown = remember(appState.savedResults, dateFilter, channelFilter, order) {
+        val shown = remember(appState.savedResults, dateFilter, channelFilter, stockFilter, order) {
+            // Normalized once for the whole list rather than once per run: the same question is put
+            // to every stock of every saved analysis.
+            val wanted = WordingRule.normalize(stockFilter)
             appState.savedResults
                 .filter { saved ->
                     (
                         dateFilter == null ||
                             saved.result.recommendationTargetDate?.toString() == dateFilter
                         ) &&
-                        (channelFilter.isEmpty() || saved.channelNames().any { it in channelFilter })
+                        (channelFilter.isEmpty() || saved.channelNames().any { it in channelFilter }) &&
+                        saved.result.consolidated.hasStockMatching(wanted)
                 }
                 .sortedWith(order.comparator)
         }
         if (shown.isEmpty() && appState.savedResults.isNotEmpty()) {
+            // The stock is named when it is what emptied the list: "no runs match these filters"
+            // beside a box holding COMI reads as though the app had not noticed what was typed.
+            val searching = stockFilter.isNotBlank()
             EmptyState(
                 icon = Icons.Outlined.Assessment,
-                title = "No runs match these filters",
-                detail = "Clear a filter to see the rest of your saved analyses.",
+                title = if (searching) "No runs mention ${stockFilter.trim()}" else "No runs match these filters",
+                detail = if (searching) {
+                    "No saved analysis holds a stock by that code or name. " +
+                        "Clear the stock filter to see the rest."
+                } else {
+                    "Clear a filter to see the rest of your saved analyses."
+                },
             )
         }
         if (appState.savedResults.isEmpty()) {
@@ -215,6 +234,7 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                         onDelete = { appState.deleteResult(saved) },
                         report = { appState.reportFor(saved) },
                         peakFor = appState::peakSince,
+                        stockFilter = stockFilter,
                     )
                 }
 
@@ -297,6 +317,17 @@ internal fun ConsolidatedRecommendation.matches(normalizedQuery: String): Boolea
     return listOfNotNull(stockCode, stockNameArabic, stockNameEnglish)
         .any { WordingRule.normalize(it).contains(normalizedQuery) }
 }
+
+/**
+ * Whether a saved run holds anything answering to what was typed.
+ *
+ * A run that holds nothing is hidden rather than listed empty: the screen is answering "which of my
+ * analyses read this stock", and a card that opens onto no rows is a worse answer than no card. An
+ * empty query is not a question, so it hides nothing - including a run that found no stocks at all,
+ * which `any` alone would drop.
+ */
+internal fun List<ConsolidatedRecommendation>.hasStockMatching(normalizedQuery: String): Boolean =
+    normalizedQuery.isBlank() || any { it.matches(normalizedQuery) }
 
 /** The channel behind an occurrence, named so it can be ticked off a list. */
 internal fun RecommendationDataPoint.channelLabel(channelFor: Map<String, String>): String =
@@ -390,6 +421,8 @@ private fun SavedAnalysisCard(
     report: () -> AnalysisReport,
     /** Highest a stock has traded since the call, for the ladder's arrow. */
     peakFor: (String, LocalDate?) -> Double? = { _, _ -> null },
+    /** What the screen is searching for, which the report opens already narrowed to. */
+    stockFilter: String = "",
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var showReport by remember { mutableStateOf(false) }
@@ -438,27 +471,28 @@ private fun SavedAnalysisCard(
     ) {
         Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
             // Top-aligned: the heading below runs to two lines and a menu centred against both sits
-            // level with neither.
-            Row(verticalAlignment = Alignment.Top) {
+            // level with neither. The floor is what keeps two cards in a grid row level: a report
+            // older than a week gets no relative word, and would otherwise stand a line shorter
+            // than the one beside it.
+            Row(Modifier.heightIn(min = RunHeaderHeight), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(Space.s),
-                        verticalAlignment = Alignment.Bottom,
-                    ) {
-                        // The session the report is about, which is the first thing anyone reads a
-                        // card for and was previously the raw stored date.
+                    // The session the report is about, which is the first thing anyone reads a
+                    // card for and was previously the raw stored date.
+                    Text(
+                        saved.result.recommendationTargetDate?.format(TARGET_FORMAT)
+                            ?: "Target not recorded",
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                    // Always its own line, never beside the date. Sharing a line meant the date was
+                    // measured first and the word took what was left, which broke "Yesterday" in
+                    // half on the narrower cards.
+                    saved.result.recommendationTargetDate?.let(::relativeSession)?.let {
                         Text(
-                            saved.result.recommendationTargetDate?.format(TARGET_FORMAT)
-                                ?: "Target not recorded",
-                            style = MaterialTheme.typography.titleLarge,
+                            it,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
                         )
-                        saved.result.recommendationTargetDate?.let(::relativeSession)?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
                     }
                     // Both dates on one line and each labelled. The run time used to sit four rows
                     // below the target session with nothing to say which was which.
@@ -541,7 +575,13 @@ private fun SavedAnalysisCard(
             }
 
             AnimatedVisibility(expanded) {
-                ResultDetail(saved, peakFor, trades, onHide = { onExpandedChange(false) })
+                ResultDetail(
+                    saved,
+                    peakFor,
+                    trades,
+                    stockFilter = stockFilter,
+                    onHide = { onExpandedChange(false) },
+                )
             }
         }
     }
@@ -650,6 +690,8 @@ private fun ResultDetail(
     saved: SavedAnalysis,
     peakFor: (String, LocalDate?) -> Double?,
     trades: TradeBook,
+    /** What the screen is searching for, which this report opens already narrowed to. */
+    stockFilter: String,
     onHide: () -> Unit,
 ) {
     var detail by remember { mutableStateOf<Pair<ConsolidatedRecommendation, RecommendationDataPoint>?>(null) }
@@ -668,7 +710,10 @@ private fun ResultDetail(
     val channels = remember(saved.id, channelNames) { saved.result.channelLabels(channelNames) }
     var shownTimings by remember(saved.id) { mutableStateOf(timings.toSet()) }
     var shownChannels by remember(saved.id) { mutableStateOf(channels.toSet()) }
-    var search by remember(saved.id) { mutableStateOf("") }
+    // Seeded from the screen's search, and re-seeded when it changes, so a report opened under one
+    // opens narrowed to it. Held rather than applied behind the toolbar: the box then shows the
+    // query that is hiding rows, which is what makes it clearable here.
+    var search by remember(saved.id, stockFilter) { mutableStateOf(stockFilter) }
     var filtersOpen by remember(saved.id) { mutableStateOf(false) }
 
     val stocks = remember(saved.id, shownTimings, shownChannels, search, channelNames) {
@@ -974,6 +1019,14 @@ private fun LegacyDetail(recommendation: RecommendationResult) {
     }
     HorizontalDivider()
 }
+
+/**
+ * A card header's floor, so two of them in a grid row line up.
+ *
+ * The worst case at default font scale, which every card is then held to: the 28dp target date, the
+ * 16dp relative word under it, and 32dp for the provider line where it wraps to its second.
+ */
+private val RunHeaderHeight = 76.dp
 
 /** Weekday first: which session a report is about is read as a day before it is read as a date. */
 private val TARGET_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM yyyy")
