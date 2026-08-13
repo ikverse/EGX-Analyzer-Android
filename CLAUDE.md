@@ -28,8 +28,14 @@ context growth in an earlier session.
 
 ```bash
 export ADB="$HOME/AppData/Local/Android/Sdk/platform-tools/adb.exe"
-"$ADB" -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk
+"$ADB" -s <serial> install -r --user 0 app/build/outputs/apk/debug/app-debug.apk
 ```
+
+`--user 0` is not optional on the Fold 7. Without it the session installs for **every** profile,
+which put a copy into Samsung's `DUAL_APP` user (95) on every sideload — a second launcher icon for
+one package, with its own data, so opening it showed an app with no reports and no Telegram session
+and looked exactly like the record had been lost. Removed with
+`pm uninstall --user 95 com.ikverse.egxanalyzer`, which leaves user 0's install and data alone.
 
 Wrap every adb call in `timeout N` — a device that drops mid-command leaves adb blocking on
 `- waiting for device -` until the tool times out.
@@ -475,6 +481,13 @@ phone only by plugging it into the machine that built it. It reads one public UR
   `vX.Y.Z`, push both. The tag is the whole process — CI runs the tests, signs the release APKs, and
   publishes them as a GitHub release, which is where the app looks. A tag whose tests fail publishes
   nothing.
+- **The 2.1.0 redesign was judged as a second app, and that scaffolding is gone.** A `next` build
+  type gave it its own `applicationId`, its own sync channel and its own splash, so it could be
+  installed beside the real app rather than over it — the downgrade Android refuses — and released
+  under a `-next` tag as a prerelease no device would be offered. It was removed when the redesign
+  shipped as 2.1.0 rather than left standing unused, since a build type nothing builds is one more
+  thing every later change has to be correct in. `git show b40344c` has it whole if a future
+  redesign wants the same treatment.
 - **`-PabiSplits` is passed by CI and nowhere else.** The ABI split is off by default on purpose:
   enabled everywhere, an ordinary `assembleDebug` would stop producing `app-debug.apk` and start
   producing one file per architecture, breaking the install command above and the CI artifact. To

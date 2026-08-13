@@ -12,4 +12,8 @@ captures
 .externalNativeBuild
 .cxx
 app/build
+# The design bundle the 2.1.0 redesign was drawn from - a brief and its tokens, not source the app
+# builds against. It is regenerated per redesign rather than kept in step with the code, so a copy
+# in here would go stale and start being read as the spec.
+design/
 
