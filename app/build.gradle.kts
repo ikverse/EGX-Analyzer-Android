@@ -83,6 +83,16 @@ android {
 
         buildConfigField("int", "TELEGRAM_API_ID", telegramApiId)
         buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
+
+        /**
+         * The private Telegram channel every device syncs through.
+         *
+         * A build setting rather than a constant in the source, so a build installed *beside* the
+         * real app can be given a channel of its own. Two installs sharing one channel would each
+         * publish revisions into it, and the merge takes the newest - so a setting written by a test
+         * build would silently overwrite the real app's. See the `next` build type below.
+         */
+        buildConfigField("String", "SYNC_CHAT_TITLE", "\"EGX Analyzer sync\"")
     }
 
     signingConfigs {
@@ -136,6 +146,68 @@ android {
             // A sideloaded build should be obvious in Settings without checking a commit hash.
             versionNameSuffix = "-debug"
         }
+
+        /**
+         * The redesign, installed beside the real app rather than over it.
+         *
+         * A build type and deliberately not a product flavour. A flavour dimension inserts itself
+         * into every output path, which would move `app-debug.apk` out from under the install
+         * command this repository documents and out from under the release job at the same time.
+         * This leaves `assembleDebug` and `assembleRelease` exactly where they are and adds
+         * `assembleNext` beside them.
+         *
+         * Its own `applicationId`, so it is a second app with its own data, its own Telegram session
+         * and its own launcher entry. That is what makes the redesign revertible: abandoning it is
+         * uninstalling this app, where replacing the real one would mean a downgrade Android
+         * refuses - uninstall, reinstall, and a fresh QR sign-in.
+         *
+         * Release-signed and not debuggable, inherited from `release`. A UI is being judged on how it
+         * feels to use, and a debuggable build does not feel like the one that would ship.
+         *
+         * Declared after `release` because `initWith` copies whatever that block has already been
+         * configured with - the signing config most of all, which is null when the keystore is
+         * absent, so a checkout without the key still builds.
+         */
+        create("next") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".next"
+            versionNameSuffix = "-next"
+            // Named again rather than left to initWith. Whether initWith carries a signing config
+            // is not something this machine can check - it holds no key, so every build here is
+            // unsigned either way - and the first build that could tell us would be a published
+            // prerelease no device can install. Same expression `release` uses: null without the
+            // key, which leaves the APK unsigned rather than failing.
+            signingConfig = signingConfigs.findByName("release")
+            // Its own channel. See SYNC_CHAT_TITLE in defaultConfig for why sharing one is not an
+            // option. ASCII only: this lands in generated Java as a string literal.
+            buildConfigField("String", "SYNC_CHAT_TITLE", "\"EGX Analyzer sync (next)\"")
+        }
+    }
+
+    /**
+     * Which UI a build draws, chosen by build type rather than by a branch in the code.
+     *
+     * `next` is being rebuilt from zero and shares only the data layer, so the two UIs are two
+     * bodies of source that must never be compiled together - and Android source sets *merge* with
+     * `main` rather than replacing it, so a file of the same name in both is a duplicate class.
+     *
+     * So the entry point lives per build type. `src/current/java` and `src/next/java` each hold one
+     * `ui/AppRoot.kt`, identical in signature and nothing else, and `MainActivity` calls it without
+     * knowing which it got. Everything under `src/main` - AppState, the repositories, the scoring,
+     * the database - is shared by both, which is the whole point.
+     *
+     * `src/current` rather than leaving today's UI in `main`: named for what it is, and a single
+     * directory to delete on the day `next` becomes the app.
+     *
+     * Registered on `kotlin` and not only on `java`: `src/next/java` is a source directory the
+     * Android plugin creates for a build type by itself, but `src/current` is not a build type and
+     * has to be named. Added to `java` alone it compiles nothing - the Kotlin compilation does not
+     * follow the Java source dirs - and `MainActivity` fails to resolve `AppRoot` for debug and
+     * release while `next` builds perfectly, which reads as the split being backwards.
+     */
+    sourceSets {
+        getByName("debug").kotlin.srcDir("src/current/java")
+        getByName("release").kotlin.srcDir("src/current/java")
     }
 
     compileOptions {

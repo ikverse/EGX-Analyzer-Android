@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Overrides for the build that installs beside the real app.
+
+  Only the name and the two background colours differ; everything else comes from `main`. Short
+  rather than "EGX Analyzer · Next": this string sets the launcher label, where anything past about
+  twelve characters is truncated, and the app header, which is one line at titleLarge on a 411dp
+  cover screen.
+-->
+<resources>
+    <string name="app_name">EGX Next</string>
+</resources>

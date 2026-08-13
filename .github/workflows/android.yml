@@ -23,6 +23,26 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # A tag ending in -next releases the side-by-side redesign instead of the real app: a
+      # different applicationId, and published as a prerelease so it stays out of
+      # `releases/latest`, which is the one endpoint the in-app updater reads. Neither device is
+      # ever offered it; the different package id is the second layer under that.
+      #
+      # Parameterised rather than a second job, so the signing, the Telegram guard and the naming
+      # below exist once and cannot drift apart between the two kinds of release.
+      - name: Decide what this tag releases
+        id: target
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-next ]]; then
+            echo "variant=next" >> "$GITHUB_OUTPUT"
+            echo "task=assembleNext" >> "$GITHUB_OUTPUT"
+            echo "prerelease=--prerelease" >> "$GITHUB_OUTPUT"
+          else
+            echo "variant=release" >> "$GITHUB_OUTPUT"
+            echo "task=assembleRelease" >> "$GITHUB_OUTPUT"
+            echo "prerelease=" >> "$GITHUB_OUTPUT"
+          fi
+
       # local.properties is gitignored because the SDK path is per-machine; the runner's
       # ANDROID_HOME is already set, so Gradle resolves the SDK without it.
       - name: Unit tests
@@ -89,13 +109,13 @@ jobs:
           # my.telegram.org before it will show a sign-in code.
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-        run: ./gradlew :app:assembleRelease -PabiSplits --no-daemon
+        run: ./gradlew :app:${{ steps.target.outputs.task }} -PabiSplits --no-daemon
 
       # A release that cannot sign in to Telegram does nothing this app is for, and the failure only
       # surfaces on a phone after an install. Cheaper to refuse the release than to publish one.
       - name: Refuse a release with no Telegram credentials
         run: |
-          if ! grep -q 'TELEGRAM_API_ID = [1-9]' "app/build/generated/source/buildConfig/release/com/ikverse/egxanalyzer/BuildConfig.java"; then
+          if ! grep -q 'TELEGRAM_API_ID = [1-9]' "app/build/generated/source/buildConfig/${{ steps.target.outputs.variant }}/com/ikverse/egxanalyzer/BuildConfig.java"; then
             echo "The release build has no Telegram api_id; set the TELEGRAM_API_ID and TELEGRAM_API_HASH secrets." >&2
             exit 1
           fi
@@ -107,7 +127,7 @@ jobs:
       # it, so this is the cheapest place to catch it.
       - name: Refuse an unsigned build
         run: |
-          dir="app/build/outputs/apk/release"
+          dir="app/build/outputs/apk/${{ steps.target.outputs.variant }}"
           if ls "$dir"/*-unsigned.apk >/dev/null 2>&1; then
             echo "The release build produced unsigned APKs, so its signing config is not wired up." >&2
             ls -la "$dir" >&2
@@ -119,13 +139,13 @@ jobs:
       - name: Name the APKs for their version
         run: |
           version="${GITHUB_REF_NAME#v}"
-          cd app/build/outputs/apk/release
+          cd app/build/outputs/apk/${{ steps.target.outputs.variant }}
           # Whatever the split produced, rather than a list that has to be kept in step with
           # build.gradle.kts - a name in this loop that the build no longer makes fails the release
           # at its last step, with the APKs built and nothing published.
-          for apk in app-*-release.apk; do
+          for apk in app-*-${{ steps.target.outputs.variant }}.apk; do
             abi="${apk#app-}"
-            abi="${abi%-release.apk}"
+            abi="${abi%-${{ steps.target.outputs.variant }}.apk}"
             mv "$apk" "egx-analyzer-$version-$abi.apk"
           done
           ls -la
@@ -135,9 +155,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            app/build/outputs/apk/release/egx-analyzer-*.apk \
+            app/build/outputs/apk/${{ steps.target.outputs.variant }}/egx-analyzer-*.apk \
             --title "$GITHUB_REF_NAME" \
-            --generate-notes
+            --generate-notes ${{ steps.target.outputs.prerelease }}
 
       - name: Forget the signing key
         if: always()

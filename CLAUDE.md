@@ -493,13 +493,25 @@ phone only by plugging it into the machine that built it. It reads one public UR
   `vX.Y.Z`, push both. The tag is the whole process — CI runs the tests, signs the release APKs, and
   publishes them as a GitHub release, which is where the app looks. A tag whose tests fail publishes
   nothing.
-- **The 2.1.0 redesign was judged as a second app, and that scaffolding is gone.** A `next` build
-  type gave it its own `applicationId`, its own sync channel and its own splash, so it could be
-  installed beside the real app rather than over it — the downgrade Android refuses — and released
-  under a `-next` tag as a prerelease no device would be offered. It was removed when the redesign
-  shipped as 2.1.0 rather than left standing unused, since a build type nothing builds is one more
-  thing every later change has to be correct in. `git show b40344c` has it whole if a future
-  redesign wants the same treatment.
+- **A redesign is judged as a second app: the `next` build type.** Its own `applicationId`, sync
+  channel, launcher label (`EGX Next`) and splash ground, so it installs beside the real app rather
+  than over it — the downgrade Android refuses. A tag ending `-next` runs `assembleNext` and
+  publishes a **prerelease**, which keeps it out of `releases/latest`, the one endpoint the updater
+  reads. A build type and not a product flavour: a flavour dimension moves `app-debug.apk` out from
+  under the install command above and the release job at once. `assembleDebug` and `assembleRelease`
+  are untouched. It was removed once, when the 2.1.0 redesign shipped, and restored on 2026-08-13
+  when that redesign was judged too close to the original.
+- **Two UIs, chosen by build type, never compiled together.** `next` is being rebuilt from zero and
+  shares only the data layer, so today's UI and the redesign are two bodies of source — and Android
+  source sets *merge* with `main`, so a same-named file in both is a duplicate class. The entry
+  point is what varies: `src/current/java/…/ui/AppRoot.kt` and `src/next/java/…/ui/AppRoot.kt`,
+  identical in signature and nothing else, each applying its own theme. `MainActivity` calls
+  `AppRoot` and does not know which it got. `src/current` is registered on **`kotlin`**, not only
+  `java` — the Kotlin compilation does not follow Java source dirs, and getting that wrong builds
+  `next` perfectly while debug and release fail to resolve `AppRoot`, which reads as the split being
+  backwards. The redesign lives under `src/next/java/…/next/` and imports nothing from `ui` except
+  `AppState` and `AppDestination`; the day it imports a screen is the day it starts copying what it
+  replaces. `src/current` is one directory to delete when `next` becomes the app.
 - **`-PabiSplits` is passed by CI and nowhere else.** The ABI split is off by default on purpose:
   enabled everywhere, an ordinary `assembleDebug` would stop producing `app-debug.apk` and start
   producing one file per architecture, breaking the install command above and the CI artifact. To

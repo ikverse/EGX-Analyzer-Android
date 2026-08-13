@@ -1048,7 +1048,14 @@ class TelegramRepository(
         const val MAX_MESSAGES_PER_CHAT = 2_000
         const val CLIENT_CLOSE_TIMEOUT_MS = 10_000L
         const val KEY_SYNC_CHAT = "telegram_sync_chat"
-        const val SYNC_CHAT_TITLE = "EGX Analyzer sync"
+        /**
+         * The private channel this build syncs through.
+         *
+         * Set per build type rather than fixed here, so a build installed beside the real app gets a
+         * channel of its own and cannot publish into the record the real app is keeping. See
+         * `SYNC_CHAT_TITLE` in `app/build.gradle.kts`.
+         */
+        val SYNC_CHAT_TITLE: String = BuildConfig.SYNC_CHAT_TITLE
     }
 }
 

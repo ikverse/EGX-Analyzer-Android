@@ -9,8 +9,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import com.ikverse.egxanalyzer.data.OverdueNotifier
 import com.ikverse.egxanalyzer.ui.AppDestination
-import com.ikverse.egxanalyzer.ui.EgxAnalyzerApp
-import com.ikverse.egxanalyzer.ui.theme.EgxAnalyzerTheme
+import com.ikverse.egxanalyzer.ui.AppRoot
 
 class MainActivity : ComponentActivity() {
 
@@ -21,16 +20,18 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         openRequestedResult(intent)
         setContent {
-            EgxAnalyzerTheme(themeMode = appState.appPreferences.themeMode) {
-                // How overdue a trade is depends on the date, and nothing announces midnight. A
-                // phone left on the Portfolio tab overnight would otherwise show yesterday's count
-                // until something else happened to recompute.
-                LifecycleResumeEffect(Unit) {
-                    appState.refreshOverdue()
-                    onPauseOrDispose { }
-                }
-                EgxAnalyzerApp(activity = this, appState = appState)
+            // How overdue a trade is depends on the date, and nothing announces midnight. A phone
+            // left on the Portfolio tab overnight would otherwise show yesterday's count until
+            // something else happened to recompute. Outside the root on purpose: it is app
+            // behaviour rather than UI, so both versions of the UI get it without either owning it.
+            LifecycleResumeEffect(Unit) {
+                appState.refreshOverdue()
+                onPauseOrDispose { }
             }
+            // Which UI this is depends on the build type, and this activity does not know. Two
+            // files named AppRoot.kt - one in src/current, one in src/next - and exactly one of them
+            // is compiled. See the sourceSets block in app/build.gradle.kts.
+            AppRoot(activity = this, appState = appState)
         }
     }
 
