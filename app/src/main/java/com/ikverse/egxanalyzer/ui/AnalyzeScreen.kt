@@ -61,7 +61,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.data.AnalysisChunking
 import com.ikverse.egxanalyzer.model.AnalysisContentType
+import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.SourceTrace
@@ -98,6 +100,14 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
     }
     // Computed here rather than inside the content, because the floating action needs it too.
     val blocker = analyzeBlocker(appState)
+    // What pressing the button will actually cost, worked out by the same function that will do the
+    // splitting - so the figure on the button and the number of requests the run makes cannot
+    // disagree. This is the only screen that spends the owner's money, and the count used to sit as
+    // grey text inside a card two thirds of the way up the page.
+    val requests = remember(appState.inputs) {
+        appState.inputs.takeIf(List<AnalysisInput>::isNotEmpty)
+            ?.let { AnalysisChunking.chunk(it).size }
+    }
     // Until Analyze is pressed this is guidance, not a complaint: painting it red on a freshly
     // opened app tells someone who has done nothing wrong that something is broken.
     var attempted by remember { mutableStateOf(false) }
@@ -161,14 +171,25 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                         )
                     },
                     label = {
-                        Text(
-                            "Analyze",
-                            style = if (big) {
-                                MaterialTheme.typography.titleMedium
-                            } else {
-                                MaterialTheme.typography.labelLarge
-                            },
-                        )
+                        Column {
+                            Text(
+                                "Analyze",
+                                style = if (big) {
+                                    MaterialTheme.typography.titleMedium
+                                } else {
+                                    MaterialTheme.typography.labelLarge
+                                },
+                            )
+                            // The price, on the thing that charges it. Only the request count: the
+                            // messages behind it are named on the card that loaded them, and a
+                            // button that repeats the card is a button doing two jobs.
+                            requests?.let {
+                                Text(
+                                    "$it ${if (it == 1) "request" else "requests"}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                        }
                     },
                 )
             }
@@ -420,8 +441,12 @@ private fun MessagesPreview(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
+            // What was loaded, in the reader's own terms. "Model inputs" was the app naming its own
+            // plumbing, and the figure that actually matters - what a run costs - is on the button
+            // that spends it rather than here.
             Text(
-                "${sources.size} messages · ${appState.inputs.size} model inputs",
+                "${sources.size} ${if (sources.size == 1) "message" else "messages"} from " +
+                    "$selected ${if (selected == 1) "chat" else "chats"}",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
