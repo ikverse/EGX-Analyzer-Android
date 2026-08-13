@@ -23,26 +23,6 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # A tag ending in -next releases the side-by-side redesign instead of the real app: a
-      # different applicationId, and published as a prerelease so it stays out of
-      # `releases/latest`, which is the one endpoint the in-app updater reads. Neither device is
-      # ever offered it; the different package id is the second layer under that.
-      #
-      # Parameterised rather than a second job, so the signing, the Telegram guard and the naming
-      # below exist once and cannot drift apart between the two kinds of release.
-      - name: Decide what this tag releases
-        id: target
-        run: |
-          if [[ "$GITHUB_REF_NAME" == *-next ]]; then
-            echo "variant=next" >> "$GITHUB_OUTPUT"
-            echo "task=assembleNext" >> "$GITHUB_OUTPUT"
-            echo "prerelease=--prerelease" >> "$GITHUB_OUTPUT"
-          else
-            echo "variant=release" >> "$GITHUB_OUTPUT"
-            echo "task=assembleRelease" >> "$GITHUB_OUTPUT"
-            echo "prerelease=" >> "$GITHUB_OUTPUT"
-          fi
-
       # local.properties is gitignored because the SDK path is per-machine; the runner's
       # ANDROID_HOME is already set, so Gradle resolves the SDK without it.
       - name: Unit tests
@@ -84,6 +64,26 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # A tag ending in -next releases the side-by-side redesign instead of the real app: a
+      # different applicationId, and published as a prerelease so it stays out of
+      # `releases/latest`, which is the one endpoint the in-app updater reads. Neither device is
+      # ever offered it; the different package id is the second layer under that.
+      #
+      # Parameterised rather than a second job, so the signing, the Telegram guard and the naming
+      # below exist once and cannot drift apart between the two kinds of release.
+      - name: Decide what this tag releases
+        id: target
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-next ]]; then
+            echo "variant=next" >> "$GITHUB_OUTPUT"
+            echo "task=assembleNext" >> "$GITHUB_OUTPUT"
+            echo "prerelease=--prerelease" >> "$GITHUB_OUTPUT"
+          else
+            echo "variant=release" >> "$GITHUB_OUTPUT"
+            echo "task=assembleRelease" >> "$GITHUB_OUTPUT"
+            echo "prerelease=" >> "$GITHUB_OUTPUT"
+          fi
+
       # Refused rather than skipped: an unsigned APK attached to a release is one every device
       # would offer and none could install.
       - name: Restore the signing key
@@ -109,7 +109,19 @@ jobs:
           # my.telegram.org before it will show a sign-in code.
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-        run: ./gradlew :app:${{ steps.target.outputs.task }} -PabiSplits --no-daemon
+        run: |
+          # Named rather than interpolated straight into the command line, so that a decision step
+          # which did not run leaves an empty variable this can refuse - where `:app:` with nothing
+          # after it reaches Gradle as "cannot locate tasks that match ':app:'", eleven seconds into
+          # a release, saying nothing about the step that was actually missing. That has happened:
+          # the decision step was added to the build job by mistake, where `steps.target` is not
+          # visible from here and every output silently reads as empty.
+          task="${{ steps.target.outputs.task }}"
+          if [ -z "$task" ]; then
+            echo "No assemble task was decided. The 'Decide what this tag releases' step has to be in this job, before this one." >&2
+            exit 1
+          fi
+          ./gradlew ":app:$task" -PabiSplits --no-daemon
 
       # A release that cannot sign in to Telegram does nothing this app is for, and the failure only
       # surfaces on a phone after an install. Cheaper to refuse the release than to publish one.
