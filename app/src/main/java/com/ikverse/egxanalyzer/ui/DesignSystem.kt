@@ -137,8 +137,13 @@ object PriceRole {
     /** Where the call says to give up. */
     val stop: Color @Composable get() = androidx.compose.material3.MaterialTheme.colorScheme.error
 
-    /** A price the market reached, rather than one a channel chose. */
-    val market: Color @Composable get() = androidx.compose.material3.MaterialTheme.colorScheme.primary
+    /**
+     * A price the market reached, rather than one a channel chose.
+     *
+     * Its own hue rather than `primary`, which is the app's own voice and was doing both jobs. See
+     * `market` in `ExtraColors`.
+     */
+    val market: Color @Composable get() = com.ikverse.egxanalyzer.ui.theme.extraColors.market
 
     /** Supporting context: dates, notes, counts. */
     val muted: Color @Composable get() = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant

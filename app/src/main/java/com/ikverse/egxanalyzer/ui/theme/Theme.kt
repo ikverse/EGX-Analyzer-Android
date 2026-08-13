@@ -29,11 +29,17 @@ private val DarkColors = darkColorScheme(
     onPrimary = Color(0xFF00363F),
     primaryContainer = Color(0xFF004E5A),
     onPrimaryContainer = Color(0xFFB3ECF8),
-    secondary = Color(0xFFA894F5),
-    onSecondary = Color(0xFF2A1A5E),
-    secondaryContainer = Color(0xFF3F2E7A),
-    onSecondaryContainer = Color(0xFFE7DEFF),
-    tertiary = Color(0xFF6BDD9A),
+    // Purple is gone. Nothing in this app ever meant it - it was the hue left over - and Material
+    // spends `secondary` on exactly the things that should read as the app's own voice: a selected
+    // filter chip, the navigation indicator. Pitched a step quieter than `primary` so the two can
+    // sit beside each other without competing, but unmistakably the same family.
+    secondary = Color(0xFF7FC5D6),
+    onSecondary = Color(0xFF00363F),
+    secondaryContainer = Color(0xFF0E3F49),
+    onSecondaryContainer = Color(0xFFB3ECF8),
+    // Deeper than the mint it replaces. A target and a price the market reached appear on one card,
+    // and the old green sat close enough to the old cyan that the two read as one colour.
+    tertiary = Color(0xFF46C98A),
     onTertiary = Color(0xFF00391F),
     tertiaryContainer = Color(0xFF11512F),
     onTertiaryContainer = Color(0xFF89FAB5),
@@ -61,10 +67,10 @@ private val LightColors = lightColorScheme(
     onPrimary = Color.White,
     primaryContainer = Color(0xFFB0ECFB),
     onPrimaryContainer = Color(0xFF001F26),
-    secondary = Color(0xFF5B4AA8),
+    secondary = Color(0xFF00697A),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE5DEFF),
-    onSecondaryContainer = Color(0xFF190066),
+    secondaryContainer = Color(0xFFCDEDF6),
+    onSecondaryContainer = Color(0xFF001F26),
     tertiary = Color(0xFF13683D),
     onTertiary = Color.White,
     tertiaryContainer = Color(0xFF9DF6BC),
@@ -104,18 +110,37 @@ data class ExtraColors(
     val expired: Color,
     val expiredContainer: Color,
     val onExpiredContainer: Color,
+
+    /**
+     * A price the market actually reached, rather than one a channel chose.
+     *
+     * Added for the same reason amber was, and it is the second time the same argument has come up.
+     * This used to be `primary` - so cyan meant both "the market got here" and "this is the app
+     * speaking": the navigation indicator, a running position, a hit rate worth noticing. One hue
+     * cannot carry a provenance and a voice at once, and the cost was paid on the call cards, where
+     * a peak in cyan sat beside a target in green close enough in hue that the two read as one.
+     *
+     * Blue rather than another green, so target, stop, market and expired are four hues a
+     * red/green colour-blind reader can still hold apart.
+     */
+    val market: Color,
 )
 
 private val DarkExtras = ExtraColors(
     expired = Color(0xFFF3C264),
     expiredContainer = Color(0xFF5A4318),
     onExpiredContainer = Color(0xFFFFE0A3),
+    market = Color(0xFF4C9DF0),
 )
 
 private val LightExtras = ExtraColors(
     expired = Color(0xFF8A5A00),
     expiredContainer = Color(0xFFFFDFA6),
     onExpiredContainer = Color(0xFF2A1A00),
+    // Darkened rather than reused. The dark theme's #4C9DF0 comes out at 2.4:1 on a light card,
+    // where these figures are actually drawn, against the 4.5:1 body text needs - and every one of
+    // them is a price. This lands at 4.5:1 there and 5.2:1 on the page.
+    market = Color(0xFF1668C7),
 )
 
 /**
