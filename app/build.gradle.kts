@@ -6,7 +6,7 @@ plugins {
 // One place decides the version. It stayed at 0.1.0 through every build, so a device could not be
 // asked which one it was running - a question that cost real time while diagnosing a black screen.
 // Bump the name here; the code is derived from it so the two can never disagree.
-val appVersionName = "2.1.2"
+val appVersionName = "2.1.3"
 val appVersionCode = appVersionName.split(".").let { (major, minor, patch) ->
     major.toInt() * 10_000 + minor.toInt() * 100 + patch.toInt()
 }
@@ -88,11 +88,18 @@ android {
          * The private Telegram channel every device syncs through.
          *
          * A build setting rather than a constant in the source, so a build installed *beside* the
-         * real app can be given a channel of its own. Two installs sharing one channel would each
-         * publish revisions into it, and the merge takes the newest - so a setting written by a test
-         * build would silently overwrite the real app's. See the `next` build type below.
+         * real app can be pointed somewhere on purpose. See the `next` build type below, which
+         * shares this one and is held off writing to it by SYNC_READ_ONLY.
          */
         buildConfigField("String", "SYNC_CHAT_TITLE", "\"EGX Analyzer sync\"")
+
+        /**
+         * Whether a build may write to that channel.
+         *
+         * False everywhere the app is the app. True only for `next`, which reads the record and must
+         * not be able to change it - see TelegramRepository.READ_ONLY, where the guard actually sits.
+         */
+        buildConfigField("boolean", "SYNC_READ_ONLY", "false")
     }
 
     signingConfigs {
@@ -178,9 +185,27 @@ android {
             // prerelease no device can install. Same expression `release` uses: null without the
             // key, which leaves the APK unsigned rather than failing.
             signingConfig = signingConfigs.findByName("release")
-            // Its own channel. See SYNC_CHAT_TITLE in defaultConfig for why sharing one is not an
-            // option. ASCII only: this lands in generated Java as a string literal.
-            buildConfigField("String", "SYNC_CHAT_TITLE", "\"EGX Analyzer sync (next)\"")
+
+            /**
+             * The real app's channel, read and never written.
+             *
+             * It started with a channel of its own, which was the safe answer and the useless one: a
+             * fresh channel is empty, so the redesign opened on a record with nothing in it - and a
+             * dense screen full of prices is exactly the thing that looks fine with no rows. It
+             * shares the real channel now and gets every report, trade and rule the app has.
+             *
+             * What kept the two apart was the channel; what keeps them apart now is this flag.
+             * Reports, positions, rules, settings and prompt versions all travel as revisions that
+             * merge newest-wins, so a single write from here could overwrite something the real app
+             * meant - and deleting a report is worse than that, because it takes the report off
+             * every device permanently. `TelegramRepository.READ_ONLY` holds all seven paths; the
+             * list, and how to tell when it is complete, is documented there.
+             *
+             * Prices are not synced at all, so this build still has to fetch its own before any
+             * figure is worth looking at. The provider API key is not synced either, which is why
+             * this build cannot start an analysis even by accident.
+             */
+            buildConfigField("boolean", "SYNC_READ_ONLY", "true")
         }
     }
 

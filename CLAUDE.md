@@ -493,8 +493,8 @@ phone only by plugging it into the machine that built it. It reads one public UR
   `vX.Y.Z`, push both. The tag is the whole process — CI runs the tests, signs the release APKs, and
   publishes them as a GitHub release, which is where the app looks. A tag whose tests fail publishes
   nothing.
-- **A redesign is judged as a second app: the `next` build type.** Its own `applicationId`, sync
-  channel, launcher label (`EGX Next`) and splash ground, so it installs beside the real app rather
+- **A redesign is judged as a second app: the `next` build type.** Its own `applicationId`, launcher
+  label (`EGX Next`) and splash ground, so it installs beside the real app rather
   than over it — the downgrade Android refuses. A tag ending `-next` runs `assembleNext` and
   publishes a **prerelease**, which keeps it out of `releases/latest`, the one endpoint the updater
   reads. A build type and not a product flavour: a flavour dimension moves `app-debug.apk` out from
@@ -512,6 +512,20 @@ phone only by plugging it into the machine that built it. It reads one public UR
   backwards. The redesign lives under `src/next/java/…/next/` and imports nothing from `ui` except
   `AppState` and `AppDestination`; the day it imports a screen is the day it starts copying what it
   replaces. `src/current` is one directory to delete when `next` becomes the app.
+- **`next` reads the real sync channel and cannot write to it.** It started with a channel of its
+  own, which was safe and useless: a fresh channel is empty, and a screen full of prices is exactly
+  the thing that looks fine with no rows in it. It shares `EGX Analyzer sync` now, so it opens on the
+  whole record. What keeps the two apart is `BuildConfig.SYNC_READ_ONLY` →
+  `TelegramRepository.READ_ONLY`, and it guards **seven** paths, not the five `upload*` calls it
+  looks like. The sixth is `resolveSyncChat`, which must not *create* a channel — a read-only build
+  that failed to find the real one would otherwise put a second channel of that name in the owner's
+  Telegram, the duplicate that function exists to prevent. The seventh is **`buryReport`**, which
+  does not read like a write and is the one that could do lasting harm: it deletes the report's
+  message and publishes a tombstone, so a delete pressed in `next` would take that report off every
+  device for good. The test for completeness is not "which functions upload" but which TDLib calls
+  mutate — today `sendMessage`, `deleteMessages` and `createNewSupergroupChat`. Prices never sync, so `next`
+  still needs its own refresh before any figure means anything; the API key never syncs, which is why
+  `next` cannot start an analysis even by accident.
 - **`-PabiSplits` is passed by CI and nowhere else.** The ABI split is off by default on purpose:
   enabled everywhere, an ordinary `assembleDebug` would stop producing `app-debug.apk` and start
   producing one file per architecture, breaking the install command above and the CI artifact. To

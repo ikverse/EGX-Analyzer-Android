@@ -391,6 +391,13 @@ class TelegramRepository(
             preferences.edit().putLong(KEY_SYNC_CHAT, busiest).apply()
             return busiest
         }
+        // A read-only build reads a channel it did not make and must never make one. It is looking
+        // for the *real* app's channel by the real app's name, so creating one here would put a
+        // second channel of that name in the owner's Telegram - the duplicate this whole function
+        // exists to prevent, and this time one the real app could adopt and find empty. Failing is
+        // the correct answer: there is nothing to read yet, and the caller already treats a channel
+        // it cannot reach as nothing to sync.
+        if (READ_ONLY) error("No sync channel found, and a read-only build does not create one.")
         val created = client.createNewSupergroupChat(
             SYNC_CHAT_TITLE,
             false,
@@ -537,6 +544,11 @@ class TelegramRepository(
      * and the marker stops a device that already holds it from uploading it back.
      */
     suspend fun buryReport(requestId: String) {
+        // The most destructive thing this class can do, and the one that does not look like an
+        // upload: it deletes the report from the channel and publishes a marker that keeps it
+        // deleted, so a report removed here is gone from every device permanently. A read-only build
+        // deletes its own copy and says nothing. See READ_ONLY.
+        if (READ_ONLY) return
         val chats = (findSyncChats() + syncChatId()).distinct()
         chats.forEach { chat ->
             val contents = contentsOf(chat)
@@ -588,6 +600,8 @@ class TelegramRepository(
 
     /** Puts one rule revision in the channel. Revisions accumulate; the merge picks the winner. */
     suspend fun uploadRule(revision: SyncedRule) {
+        // Nothing this build produces belongs in the channel. See READ_ONLY.
+        if (READ_ONLY) return
         val chatId = syncChatId()
         val staged = File(context.cacheDir, revision.fileName).apply { writeText(revision.toDocument()) }
         try {
@@ -630,6 +644,8 @@ class TelegramRepository(
 
     /** Puts one position revision in the channel. Revisions accumulate; the merge picks the winner. */
     suspend fun uploadPosition(revision: SyncedPosition) {
+        // Nothing this build produces belongs in the channel. See READ_ONLY.
+        if (READ_ONLY) return
         val chatId = syncChatId()
         val staged = File(context.cacheDir, revision.fileName).apply {
             writeText(revision.toDocument())
@@ -666,6 +682,8 @@ class TelegramRepository(
 
     /** Puts one report in the channel. The file name is the identity; nothing else is read back. */
     suspend fun uploadReport(run: SyncedRun) {
+        // Nothing this build produces belongs in the channel. See READ_ONLY.
+        if (READ_ONLY) return
         val chatId = syncChatId()
         val staged = File(context.cacheDir, run.fileName).apply { writeText(run.toDocument()) }
         try {
@@ -722,6 +740,8 @@ class TelegramRepository(
 
     /** Puts one settings revision in the channel. Revisions accumulate; the newest one wins. */
     suspend fun uploadSettings(snapshot: SettingsSnapshot) {
+        // Nothing this build produces belongs in the channel. See READ_ONLY.
+        if (READ_ONLY) return
         val chatId = syncChatId()
         val staged = File(context.cacheDir, snapshot.fileName).apply {
             writeText(snapshot.toDocument())
@@ -768,6 +788,8 @@ class TelegramRepository(
 
     /** Puts one generated prompt in the channel. The id is the identity; it is never rewritten. */
     suspend fun uploadPromptVersion(version: SyncedPromptVersion) {
+        // Nothing this build produces belongs in the channel. See READ_ONLY.
+        if (READ_ONLY) return
         val chatId = syncChatId()
         val staged = File(context.cacheDir, version.fileName).apply {
             writeText(version.toDocument())
@@ -1051,11 +1073,35 @@ class TelegramRepository(
         /**
          * The private channel this build syncs through.
          *
-         * Set per build type rather than fixed here, so a build installed beside the real app gets a
-         * channel of its own and cannot publish into the record the real app is keeping. See
-         * `SYNC_CHAT_TITLE` in `app/build.gradle.kts`.
+         * Set per build type rather than fixed here. The redesign build reads the real app's
+         * channel - it is the only way it has anything to draw, since a design cannot be judged
+         * against an empty record - and is held off writing to it by [READ_ONLY] instead.
          */
         val SYNC_CHAT_TITLE: String = BuildConfig.SYNC_CHAT_TITLE
+
+        /**
+         * Whether this build may write to the channel at all.
+         *
+         * True only for the redesign, which shares the real app's channel so it has a record to draw
+         * and must not be able to change it.
+         *
+         * **Seven guards, and they were not all obvious.** Five are the `upload*` functions. The
+         * sixth is `resolveSyncChat`, which must not *create* a channel - a read-only build that
+         * failed to find the real one would otherwise put a second channel of that name in the
+         * owner's Telegram. The seventh is `buryReport`, which is the dangerous one and the one that
+         * does not read like a write at all: it deletes the report's message from the channel and
+         * publishes a tombstone that keeps it deleted, so a delete pressed here would remove that
+         * report from every device for good.
+         *
+         * The test for whether this list is complete is not "which functions upload" - it is which
+         * TDLib calls mutate. Today that is `sendMessage`, `deleteMessages` and
+         * `createNewSupergroupChat`; everything else this class calls reads, downloads, or
+         * authenticates. Any new one of those three needs a guard.
+         *
+         * **This is now the only thing protecting the record**, where a channel of its own used to
+         * be. That is the deliberate trade: an isolated build had nothing in it to look at.
+         */
+        val READ_ONLY: Boolean = BuildConfig.SYNC_READ_ONLY
     }
 }
 
