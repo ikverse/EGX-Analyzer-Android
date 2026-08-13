@@ -605,7 +605,7 @@ private fun PositionCard(
                     Cell("Target 1", formatPrice(position.target1), PriceRole.target),
                     Cell("Target 2", formatPrice(position.target2), PriceRole.target),
                     Cell("Stop loss", formatPrice(position.stopLoss), PriceRole.stop),
-                    Cell("Deadline", view.deadline(), PriceRole.muted),
+                    Cell("Deadline", view.deadline(), PriceRole.muted, tabular = false),
                 ),
             )
 
@@ -763,8 +763,18 @@ private fun PositionView.profitLine(): String {
     } + if (marketStatus != status) " · the call itself: ${marketStatus.label.lowercase()}" else ""
 }
 
-/** One labelled figure, matching how Insights lays a call's numbers out. */
-private data class Cell(val label: String, val value: String, val tone: Color)
+/**
+ * One labelled figure, matching how Insights lays a call's numbers out.
+ *
+ * [tabular] is off only where the value is a sentence rather than a figure - the deadline reads
+ * "3 of 10 left · custom", and monospacing prose sets it apart from the prices for no reason.
+ */
+private data class Cell(
+    val label: String,
+    val value: String,
+    val tone: Color,
+    val tabular: Boolean = true,
+)
 
 /**
  * Four figures across, or two when the width cannot take four.
@@ -788,7 +798,9 @@ private fun FigureRow(cells: List<Cell>) {
                             )
                             Text(
                                 cell.value,
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.bodyMedium.let {
+                                    if (cell.tabular) it.copy(fontFamily = TabularFigures) else it
+                                },
                                 color = cell.tone,
                             )
                         }

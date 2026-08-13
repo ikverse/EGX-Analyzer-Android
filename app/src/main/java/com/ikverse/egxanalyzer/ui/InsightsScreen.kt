@@ -64,6 +64,7 @@ import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.positionId
 import com.ikverse.egxanalyzer.model.sessionFor
+import com.ikverse.egxanalyzer.ui.theme.extraColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.ZoneId
@@ -437,7 +438,7 @@ private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
                     {
                         Figure(
                             "Average return", channel.averageReturn.signedPercent(),
-                            Modifier.weight(1f), tone = channel.averageReturn.returnTone(),
+                            Modifier.weight(1f), tone = PriceRole.forReturn(channel.averageReturn),
                         )
                     },
                     {
@@ -664,7 +665,7 @@ private fun ScoredCallRow(
                             "Return",
                             call.returnPct.signedPercent(),
                             Modifier.weight(1f),
-                            tone = call.returnPct.returnTone(),
+                            tone = PriceRole.forReturn(call.returnPct),
                         )
                     },
                 ),
@@ -820,7 +821,14 @@ private fun Figure(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(value, style = MaterialTheme.typography.bodyMedium, color = tone, textAlign = TextAlign.Start)
+        // Every figure this draws is a number, and this screen's whole job is comparing them down a
+        // column. Proportional digits put the same price at a different width on every card.
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
+            color = tone,
+            textAlign = TextAlign.Start,
+        )
         if (on != null) {
             Text(
                 on.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")),
@@ -831,11 +839,19 @@ private fun Figure(
     }
 }
 
+/**
+ * Expired takes the amber the palette gained for exactly this, not the purple it used to.
+ *
+ * A call that ran out of time is the same fact here as it is on a trade in the Portfolio, which has
+ * drawn it amber since the colour was added - and `secondary` is a hue that means nothing in this
+ * app, which is the reason amber was added rather than borrowed in the first place. Two tabs
+ * disagreeing about the colour of one outcome is the reader's problem, not the palette's.
+ */
 @Composable
 private fun Outcome.container(): Color = when (this) {
     Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> MaterialTheme.colorScheme.tertiaryContainer
     Outcome.STOPPED -> MaterialTheme.colorScheme.errorContainer
-    Outcome.EXPIRED -> MaterialTheme.colorScheme.secondaryContainer
+    Outcome.EXPIRED -> extraColors.expiredContainer
     else -> MaterialTheme.colorScheme.surfaceContainerHighest
 }
 
@@ -843,7 +859,7 @@ private fun Outcome.container(): Color = when (this) {
 private fun Outcome.onContainer(): Color = when (this) {
     Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> MaterialTheme.colorScheme.onTertiaryContainer
     Outcome.STOPPED -> MaterialTheme.colorScheme.onErrorContainer
-    Outcome.EXPIRED -> MaterialTheme.colorScheme.onSecondaryContainer
+    Outcome.EXPIRED -> extraColors.onExpiredContainer
     else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
@@ -859,14 +875,6 @@ private fun Double?.rateTone(): Color = when {
     this == null -> MaterialTheme.colorScheme.onSurfaceVariant
     this >= 50.0 -> MaterialTheme.colorScheme.primary
     else -> MaterialTheme.colorScheme.onSurfaceVariant
-}
-
-@Composable
-private fun Double?.returnTone(): Color = when {
-    this == null -> MaterialTheme.colorScheme.onSurface
-    this > 0 -> MaterialTheme.colorScheme.primary
-    this < 0 -> MaterialTheme.colorScheme.error
-    else -> MaterialTheme.colorScheme.onSurface
 }
 
 private fun ScoredCall.entryRange(): String = when {

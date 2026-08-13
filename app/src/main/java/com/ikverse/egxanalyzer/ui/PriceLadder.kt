@@ -60,18 +60,20 @@ internal fun PriceLadder(
     // entry band are one fact, and a range printed with its floor below the line and its ceiling
     // above it stops reading as a range at all.
     val marks = buildList {
-        point.stopLoss?.let { add(Triple(it, stopColor, STOP_GROUP)) }
-        entryLow?.let { add(Triple(it, entryColor, ENTRY_GROUP)) }
-        entryHigh?.takeIf { it != entryLow }?.let { add(Triple(it, entryColor, ENTRY_GROUP)) }
-        point.target1?.let { add(Triple(it, targetColor, TARGET1_GROUP)) }
-        point.target2?.let { add(Triple(it, targetColor, TARGET2_GROUP)) }
-        peak?.let { add(Triple(it, peakColor, PEAK_GROUP)) }
+        point.stopLoss?.let { add(Mark(it, stopColor, STOP_GROUP, MarkSide.BELOW)) }
+        entryLow?.let { add(Mark(it, entryColor, ENTRY_GROUP, MarkSide.CENTRE)) }
+        entryHigh?.takeIf { it != entryLow }
+            ?.let { add(Mark(it, entryColor, ENTRY_GROUP, MarkSide.CENTRE)) }
+        point.target1?.let { add(Mark(it, targetColor, TARGET1_GROUP, MarkSide.ABOVE)) }
+        point.target2?.let { add(Mark(it, targetColor, TARGET2_GROUP, MarkSide.ABOVE)) }
+        // Drawn as an arrow rather than a tick, so its side is never read. See drawPeak.
+        peak?.let { add(Mark(it, peakColor, PEAK_GROUP, MarkSide.CENTRE)) }
     }
 
     val measurer = rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelSmall
-    val labels = marks.map { (value, color, _) ->
-        measurer.measure(formatPrice(value), labelStyle) to color
+    val labels = marks.map { mark ->
+        measurer.measure(formatPrice(mark.value), labelStyle) to mark.color
     }
 
     BoxWithConstraints(modifier.fillMaxWidth()) {
@@ -83,14 +85,14 @@ internal fun PriceLadder(
 
         fun axis(value: Double) = insetPx + ((value.coerceIn(low, high) - low) / span).toFloat() * usable
 
-        val centers = marks.map { axis(it.first) }
+        val centers = marks.map { axis(it.value) }
         val widths = labels.map { it.first.size.width.toFloat() }
         val slots = layoutPriceLabels(
             centers,
             widths,
             widthPx,
             with(density) { LabelGap.toPx() },
-            marks.map { it.third },
+            marks.map { it.group },
         )
         val rowsAbove = slots.filter { it.above }.maxOfOrNull { it.row + 1 } ?: 0
         val rowsBelow = slots.filterNot { it.above }.maxOfOrNull { it.row + 1 } ?: 0
@@ -98,7 +100,7 @@ internal fun PriceLadder(
         // The peak's arrow goes on the side its own price printed on, so the two are read together
         // rather than pointing at each other across the line.
         val peakAbove = peak?.let { value ->
-            slots.getOrNull(marks.indexOfFirst { it.first == value })?.above
+            slots.getOrNull(marks.indexOfFirst { it.value == value })?.above
         } ?: false
 
         val rowHeight = with(density) { LabelRowHeight.toPx() }
@@ -133,9 +135,13 @@ internal fun PriceLadder(
                 )
             }
 
-            marks.forEach { (value, color, _) ->
-                if (value == peak) return@forEach
-                drawMarker(axis(value), y, color)
+            // Never longer than half the band, so a tick on one side of the line cannot reach the
+            // price labels above or below it at a low display density. At the two densities this
+            // app actually runs at the clamp does nothing; it is what keeps a third from breaking.
+            val markLength = min(MARKER_HEIGHT, trackHeight / 2f)
+            marks.forEach { mark ->
+                if (mark.value == peak) return@forEach
+                drawMarker(axis(mark.value), y, mark.color, mark.side, markLength)
             }
 
             peak?.let {
@@ -226,11 +232,41 @@ internal fun layoutPriceLabels(
     return slots.map { requireNotNull(it) }
 }
 
-private fun DrawScope.drawMarker(x: Float, y: Float, color: Color) {
+/**
+ * Which side of the line a level's tick sits on, and therefore what it is without reading its hue.
+ *
+ * Target and stop appear on nearly every ladder and telling them apart is the most common read on
+ * the screen - so the distinction cannot rest on green against red, which is the one pair a
+ * colour-blind reader cannot make. Everywhere else in the app a text label carries it; here there
+ * are only prices, so the line itself does: what the call is aiming at ticks up, what it gives up
+ * on ticks down.
+ *
+ * Entry stays centred, and is the only thing that does. It is the reference the other two are read
+ * against rather than an outcome, and it already has the band drawn through it.
+ */
+private enum class MarkSide { ABOVE, CENTRE, BELOW }
+
+/** One level on the axis: where it sits, what colour it is, what it groups with, and which side. */
+private data class Mark(
+    val value: Double,
+    val color: Color,
+    /** Labels sharing this describe one fact and move together. See [layoutPriceLabels]. */
+    val group: Int,
+    val side: MarkSide,
+)
+
+private fun DrawScope.drawMarker(x: Float, y: Float, color: Color, side: MarkSide, length: Float) {
+    // Every side overlaps the track by the line's own half-thickness, so a tick reads as rising out
+    // of the line rather than floating beside it.
+    val top = when (side) {
+        MarkSide.ABOVE -> y - length
+        MarkSide.CENTRE -> y - length / 2
+        MarkSide.BELOW -> y
+    }
     drawRect(
         color = color,
-        topLeft = Offset(x - MARKER_WIDTH / 2, y - MARKER_HEIGHT / 2),
-        size = Size(MARKER_WIDTH, MARKER_HEIGHT),
+        topLeft = Offset(x - MARKER_WIDTH / 2, top),
+        size = Size(MARKER_WIDTH, length),
     )
 }
 
