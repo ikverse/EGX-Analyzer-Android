@@ -74,4 +74,53 @@ class ChannelRankingTest {
 
         assertEquals("Silent", ranked.last().channel)
     }
+
+    /**
+     * The four verdict counts divide the judged calls exactly, with nothing left over.
+     *
+     * The outcome bar draws them as one band whose whole length *is* `judged`, so a call that fell
+     * outside all four - or landed in two of them - would draw a bar that disagrees with the count
+     * printed beside it. The four are the only outcomes `Outcome.judged` is true for, and this is
+     * what holds that true as outcomes are added.
+     */
+    @Test
+    fun `the four verdicts partition the judged calls`() {
+        val mixed = List(3) { call("Mixed", "AAA$it", Outcome.FULL_HIT) } +
+            List(2) { call("Mixed", "BBB$it", Outcome.PARTIAL_HIT) } +
+            List(4) { call("Mixed", "CCC$it", Outcome.STOPPED) } +
+            List(1) { call("Mixed", "DDD$it", Outcome.EXPIRED) } +
+            // Say nothing about the source, so they are outside every rate and outside the bar.
+            List(5) { call("Mixed", "EEE$it", Outcome.OPEN) } +
+            List(2) { call("Mixed", "FFF$it", Outcome.UNPRICED) }
+
+        val score = PerformanceCalculator.channelScores(mixed).single()
+
+        assertEquals(10, score.judged)
+        assertEquals(
+            score.judged,
+            score.fullHits + score.partialHits + score.stopped + score.expired,
+        )
+        // The unjudged are still counted as calls made; they are simply not weighed.
+        assertEquals(17, score.calls)
+    }
+
+    /**
+     * Whoever the hero names as the best record has a record behind it.
+     *
+     * The screen takes the first channel clearing [PerformanceCalculator.MINIMUM_JUDGED_TO_RANK] out
+     * of this order. It used to re-sort on the rate alone first, which named Lucky as "Best" at 100%
+     * directly above Lucky's own card calling it too thin to rank.
+     */
+    @Test
+    fun `the source the hero leads with is one that clears the floor`() {
+        val ranked = PerformanceCalculator.channelScores(lucky + proven)
+
+        val leader = ranked.firstOrNull {
+            it.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
+        }
+
+        assertEquals("Proven", leader?.channel)
+        // The one with the better rate, and it is still not the leader.
+        assertEquals(100.0, ranked.single { it.channel == "Lucky" }.anyTargetRate!!, 0.001)
+    }
 }

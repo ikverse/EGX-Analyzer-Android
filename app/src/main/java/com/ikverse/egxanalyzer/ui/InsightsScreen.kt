@@ -88,19 +88,6 @@ internal fun InsightsScreen(appState: AppState) {
         onRefresh = { scope.launch { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
     ) {
-        // The window itself lives in Settings; here it is only context for the figures below, so it
-        // reads as a line under the page name rather than taking a card of its own. A card cost
-        // about 88dp of the top of the tab to say one short thing, and the ranking is what the
-        // screen is for.
-        Text(
-            "Scored over ${full.windowSessions} trading " +
-                (if (full.windowSessions == 1) "session" else "sessions") +
-                " · change it in Settings",
-            Modifier.padding(start = PageTextInset),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
         if (full.tracked == 0) {
             EmptyState(
                 icon = Icons.Outlined.Insights,
@@ -122,6 +109,31 @@ internal fun InsightsScreen(appState: AppState) {
         var outcomes by remember { mutableStateOf(emptySet<String>()) }
         var stock by remember { mutableStateOf("") }
         val everyChannel = remember(full.channels) { full.channels.map(ChannelScore::channel).sorted() }
+
+        // Recomputed, not merely hidden: a rate or a session count still describing calls the
+        // screen is filtering out would be worse than showing no filter at all.
+        //
+        // Worked out above the controls rather than below them, because the hero reads from it and
+        // the hero is the first thing on the page.
+        val wanted = stock.trim().uppercase()
+        val report = remember(full, channels, outcomes, wanted) {
+            if (channels.isEmpty() && outcomes.isEmpty() && wanted.isEmpty()) {
+                full
+            } else {
+                PerformanceCalculator.refine(full) { call ->
+                    (channels.isEmpty() || call.channel in channels) &&
+                        (outcomes.isEmpty() || outcomes.any { OutcomeFilters[it]?.invoke(call) == true }) &&
+                        (wanted.isEmpty() || call.ticker.contains(wanted))
+                }
+            }
+        }
+
+        // The answer leads, and the controls that narrow it come after. This tab exists to settle
+        // one argument - which source is worth reading - and it used to open on a filter row.
+        if (report.tracked > 0) InsightsHero(report)
+
+        // Above the empty state below on purpose: filters that vanish when they match nothing leave
+        // the reader looking at "nothing matches" with no way to undo it.
         FilterRow(
             active = channels.isNotEmpty() || outcomes.isNotEmpty() || stock.isNotBlank(),
             onClearAll = {
@@ -149,21 +161,6 @@ internal fun InsightsScreen(appState: AppState) {
                 onClear = { outcomes = emptySet() },
             )
             StockFilterField(value = stock, onValueChange = { stock = it })
-        }
-
-        // Recomputed, not merely hidden: a rate or a session count still describing calls the
-        // screen is filtering out would be worse than showing no filter at all.
-        val wanted = stock.trim().uppercase()
-        val report = remember(full, channels, outcomes, wanted) {
-            if (channels.isEmpty() && outcomes.isEmpty() && wanted.isEmpty()) {
-                full
-            } else {
-                PerformanceCalculator.refine(full) { call ->
-                    (channels.isEmpty() || call.channel in channels) &&
-                        (outcomes.isEmpty() || outcomes.any { OutcomeFilters[it]?.invoke(call) == true }) &&
-                        (wanted.isEmpty() || call.ticker.contains(wanted))
-                }
-            }
         }
 
         // Arriving from a trade pressed on the Portfolio tab. The filters this screen was left on
@@ -332,35 +329,119 @@ private fun ScoredCall.reason(windowSessions: Int): String {
 
 private val OUTCOME_DATE = DateTimeFormatter.ofPattern("d MMM")
 
+/**
+ * The source with the best record, and what that record is actually made of.
+ *
+ * The page opens on this rather than on a filter row, because the tab exists to settle one argument.
+ * The bar is the argument: a rate on its own hides how much evidence is behind it, and a bar whose
+ * length is the sample size cannot.
+ *
+ * Nothing here is drawn in a card. The hero is the page rather than something on it, and a card
+ * around it would put an edge between the reader and the first thing they came for.
+ */
+@Composable
+private fun ColumnScope.InsightsHero(report: PerformanceReport) {
+    val ranked = report.channels
+    // The floor decides who leads, exactly as PerformanceCalculator's own ordering does. A source
+    // with three settled calls at 100% is not the best record in the file, and naming it as one -
+    // beside its own card that greys the figure as too thin to rank - is the screen contradicting
+    // itself in two places at once.
+    val best = ranked.firstOrNull { it.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK }
+    val scale = ranked.maxOfOrNull(ChannelScore::judged) ?: 0
+    val window = "${report.windowSessions}-${report.windowSessions.sessionWord().removeSuffix("s")} window"
+
+    Column(
+        Modifier.padding(start = PageTextInset, end = Space.xs),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        Text(
+            if (best == null) "NOT ENOUGH SETTLED YET" else "BEST RECORD",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (best == null) {
+            // Honest rather than empty. Every source is still being measured; none has the
+            // MINIMUM_JUDGED_TO_RANK settled calls it takes to lead, and saying which is furthest
+            // along would be the ranking this rule exists to prevent.
+            Text(
+                "No source has ${PerformanceCalculator.MINIMUM_JUDGED_TO_RANK} settled calls yet, " +
+                    "so none of them leads. The rates below are measured exactly; they are just " +
+                    "resting on too little to rank.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            // The name is Arabic and the figures are not, so a first-strong isolate keeps each in
+            // its own direction rather than letting a digit drift into the name.
+            Text(
+                "⁨${best.channel}⁩",
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            OutcomeBar(best, scale = scale, on = MaterialTheme.colorScheme.background)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Text(
+                    formatPercent(best.anyTargetRate, signed = false),
+                    style = MaterialTheme.typography.headlineLarge.copy(fontFamily = TabularFigures),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "reached a target",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = HeroLabelBaseline),
+                )
+            }
+        }
+        // What the figures above rest on, and where the window that produced them is changed. This
+        // is the line the page used to open with, which said the window and nothing else.
+        Text(
+            listOfNotNull(
+                "${report.tracked} scored",
+                ranked.size.takeIf { it > 0 }?.let { "$it ${if (it == 1) "source" else "sources"}" },
+                window,
+                "change it in Settings",
+            ).joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Lifts the label off the baseline of the figure beside it, which is four times its size. */
+private val HeroLabelBaseline = 4.dp
+
 @Composable
 private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
     if (channels.isEmpty()) return
-    // Best first, and a source with nothing judged sinks below one that has been: an untested
-    // channel is not a good channel.
-    val ordered = channels.sortedWith(
-        compareByDescending<ChannelScore> { it.judged > 0 }
-            .thenByDescending { it.anyTargetRate ?: -1.0 }
-            .thenByDescending { it.judged },
-    )
-    val best = ordered.firstOrNull { it.judged > 0 }
+    // The order PerformanceCalculator already produced, which puts the MINIMUM_JUDGED_TO_RANK floor
+    // first and the rate second. This used to re-sort on the rate alone, which floated a source with
+    // three settled calls to the top of the list and into the summary line as "Best".
+    val best = channels.firstOrNull { it.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK }
+    val scale = channels.maxOfOrNull(ChannelScore::judged) ?: 0
     ExpandableSection(
         title = "Sources ranked",
         icon = Icons.Outlined.Leaderboard,
         // Open by default: this is the question the tab exists to answer, not a detail to go
         // looking for.
         initiallyExpanded = true,
-        // The channel name is Arabic and the figure is not, so a first-strong isolate keeps each
-        // in its own direction rather than letting the percent sign drift into the name.
         summary = best?.let {
-            "Best: ⁨${it.channel}⁩ · ${formatPercent(it.anyTargetRate, signed = false)} reached a target"
-        } ?: "${channels.size} sources, none judged yet",
-        summaryTone = best?.anyTargetRate.rateTone(),
+            "${channels.size} ${if (channels.size == 1) "source" else "sources"} · " +
+                "led by ⁨${it.channel}⁩"
+        } ?: "${channels.size} sources, none settled enough to rank",
     ) {
+        // The key to every bar below, drawn once. Four names repeated on each card would be most of
+        // the card, and the order never changes.
+        OutcomeLegend(Modifier.padding(bottom = Space.xs))
         BoxWithConstraints {
             val columns = responsiveColumns(minColumnWidth = ChannelCardMinWidth, maxColumns = 2)
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                ResponsiveRows(ordered, columns) { channel, cardModifier ->
-                    ChannelCard(channel, cardModifier)
+                ResponsiveRows(channels, columns) { channel, cardModifier ->
+                    ChannelCard(channel, scale, cardModifier)
                 }
             }
         }
@@ -369,7 +450,7 @@ private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
 
 /** One source, and everything known about how it has done. */
 @Composable
-private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
+private fun ChannelCard(channel: ChannelScore, scale: Int, modifier: Modifier = Modifier) {
     Card(
         modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -415,17 +496,12 @@ private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            FigureGroup(
-                "How they turned out",
-                listOf(
-                    // "Target 1 only": a call that ran on to target 2 is counted there, so these
-                    // four figures partition the judged calls instead of double-counting them.
-                    { Figure("Target 1 only", channel.partialHits.toString(), Modifier.weight(1f), tone = PriceRole.target) },
-                    { Figure("Target 2", channel.fullHits.toString(), Modifier.weight(1f), tone = PriceRole.target) },
-                    { Figure("Stopped", channel.stopped.toString(), Modifier.weight(1f), tone = PriceRole.stop) },
-                    { Figure("Expired", channel.expired.toString(), Modifier.weight(1f), tone = PriceRole.muted) },
-                ),
-            )
+            // The four counts these figures used to print are inside the bar. They partition the
+            // judged calls, so they were always a division of one quantity rather than four
+            // separate ones - and printed apart, nothing said so, nothing said how the failures
+            // divided, and nothing related this source's 94 settled calls to the 3 behind the card
+            // underneath it. The bar says all three.
+            OutcomeBar(channel, scale = scale, height = OutcomeBarCompact)
             FigureGroup(
                 "What that was worth",
                 listOf(
