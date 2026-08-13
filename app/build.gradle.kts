@@ -6,7 +6,7 @@ plugins {
 // One place decides the version. It stayed at 0.1.0 through every build, so a device could not be
 // asked which one it was running - a question that cost real time while diagnosing a black screen.
 // Bump the name here; the code is derived from it so the two can never disagree.
-val appVersionName = "2.0.0"
+val appVersionName = "2.1.0"
 val appVersionCode = appVersionName.split(".").let { (major, minor, patch) ->
     major.toInt() * 10_000 + minor.toInt() * 100 + patch.toInt()
 }
@@ -83,6 +83,16 @@ android {
 
         buildConfigField("int", "TELEGRAM_API_ID", telegramApiId)
         buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
+
+        /**
+         * The private Telegram channel every device syncs through.
+         *
+         * A build setting rather than a constant in the source, so a build installed *beside* the
+         * real app can be given a channel of its own. Two installs sharing one channel would each
+         * publish revisions into it, and the merge takes the newest - so a setting written by a test
+         * build would silently overwrite the real app's. See the `next` build type below.
+         */
+        buildConfigField("String", "SYNC_CHAT_TITLE", "\"EGX Analyzer sync\"")
     }
 
     signingConfigs {
@@ -135,6 +145,42 @@ android {
         debug {
             // A sideloaded build should be obvious in Settings without checking a commit hash.
             versionNameSuffix = "-debug"
+        }
+
+        /**
+         * The redesign, installed beside the real app rather than over it.
+         *
+         * A build type and deliberately not a product flavour. A flavour dimension inserts itself
+         * into every output path, which would move `app-debug.apk` out from under the install
+         * command this repository documents and out from under the release job at the same time.
+         * This leaves `assembleDebug` and `assembleRelease` exactly where they are and adds
+         * `assembleNext` beside them.
+         *
+         * Its own `applicationId`, so it is a second app with its own data, its own Telegram session
+         * and its own launcher entry. That is what makes the redesign revertible: abandoning it is
+         * uninstalling this app, where replacing the real one would mean a downgrade Android
+         * refuses - uninstall, reinstall, and a fresh QR sign-in.
+         *
+         * Release-signed and not debuggable, inherited from `release`. A UI is being judged on how it
+         * feels to use, and a debuggable build does not feel like the one that would ship.
+         *
+         * Declared after `release` because `initWith` copies whatever that block has already been
+         * configured with - the signing config most of all, which is null when the keystore is
+         * absent, so a checkout without the key still builds.
+         */
+        create("next") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".next"
+            versionNameSuffix = "-next"
+            // Named again rather than left to initWith. Whether initWith carries a signing config
+            // is not something this machine can check - it holds no key, so every build here is
+            // unsigned either way - and the first build that could tell us would be a published
+            // prerelease no device can install. Same expression `release` uses: null without the
+            // key, which leaves the APK unsigned rather than failing.
+            signingConfig = signingConfigs.findByName("release")
+            // Its own channel. See SYNC_CHAT_TITLE in defaultConfig for why sharing one is not an
+            // option. ASCII only: this lands in generated Java as a string literal.
+            buildConfigField("String", "SYNC_CHAT_TITLE", "\"EGX Analyzer sync (next)\"")
         }
     }
 
