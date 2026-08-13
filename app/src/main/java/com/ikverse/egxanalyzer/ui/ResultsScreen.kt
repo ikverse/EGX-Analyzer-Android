@@ -56,7 +56,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -89,18 +88,14 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
     ) {
         UnreadableNotice(appState.unreadableResults)
         // Session-only, deliberately: a filter that survived a restart would hide runs from someone
-        // who had forgotten it was on. Saveable rather than merely remembered, which is a different
-        // question - it survives the page being torn down and rebuilt underneath the reader, by
-        // folding the phone or turning it or swiping two tabs away, and still does not reach the
-        // disk. A launch from cold opens on an unfiltered list.
-        var channelFilter by rememberSaveable(stateSaver = StringSetSaver) {
-            mutableStateOf(emptySet())
-        }
-        var dateFilter by rememberSaveable { mutableStateOf<String?>(null) }
-        var stockFilter by rememberSaveable { mutableStateOf("") }
-        var order by rememberSaveable(stateSaver = enumSaver<RunOrder>()) {
-            mutableStateOf(RunOrder.RUN_NEWEST)
-        }
+        // who had forgotten it was on. Held on AppState rather than remembered here, so that folding
+        // the phone - which rebuilds this whole page from nothing - does not reset it either. It
+        // still dies with the process, which is the sense in which it was always session-only. See
+        // PageState.
+        var channelFilter by appState.pages.resultsChannels
+        var dateFilter by appState.pages.resultsDate
+        var stockFilter by appState.pages.resultsStock
+        var order by appState.pages.resultsOrder
         val allChannels = remember(appState.savedResults) {
             appState.savedResults.flatMap { it.channelNames() }.distinct().sorted()
         }
@@ -188,13 +183,16 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                 detail = "Run an analysis and it will be stored here with the sources behind it.",
             )
         } else {
-            // Which run is open lives here rather than in the card, because a report needs the whole
-            // row to show its table - half of one is under the width the table needs and falls back
-            // to cards - and a card cannot give itself a row.
+            // Which run is open lives outside the card, because a report needs the whole row to show
+            // its table - half of one is under the width the table needs and falls back to cards -
+            // and a card cannot give itself a row. On AppState rather than in a `remember` because
+            // this is the one the reader notices going: opening a report on the cover screen and
+            // unfolding the phone put them back on the list of runs.
             //
-            // Saveable, because this is the one the reader notices going: opening a report on the
-            // cover screen and unfolding the phone put them back on the list of runs.
-            var openRun by rememberSaveable { mutableStateOf(appState.pendingResultId) }
+            // Not seeded from pendingResultId any more. The effect below opens a run arriving from a
+            // notification and runs on first composition, so the seed only ever repeated it.
+            var openRun by appState.pages.openResultId
+            var openReports by appState.pages.openReportMarkdown
             // The newest run held for each session, so a card can tell whether it is the current
             // reading of its session or an earlier one a re-run has since covered.
             val newestRunFor = remember(appState.savedResults) {
@@ -233,6 +231,13 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                             openRun = if (open) saved.id else null
                             // Expanding also selects, so the companion pane follows what is open.
                             if (open) appState.selectResult(saved)
+                        },
+                        // Hoisted for the same reason `expanded` is, and kept by run id so that
+                        // re-sorting the list cannot hand one card's open report to another.
+                        showReport = saved.id in openReports,
+                        onShowReportChange = { show ->
+                            openReports =
+                                if (show) openReports + saved.id else openReports - saved.id
                         },
                         highlighted = saved.id == appState.pendingResultId,
                         onHighlightShown = { appState.consumePendingResult() },
@@ -421,6 +426,9 @@ private fun SavedAnalysisCard(
     /** Held by the screen, which needs it to give an open report a row of its own. */
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
+    /** Whether the written report is showing. Held by the screen so a fold cannot close it. */
+    showReport: Boolean,
+    onShowReportChange: (Boolean) -> Unit,
     /** Opened from a notification: its edge flashes briefly. */
     highlighted: Boolean = false,
     onHighlightShown: () -> Unit = {},
@@ -438,11 +446,9 @@ private fun SavedAnalysisCard(
     /** What the screen is searching for, which the report opens already narrowed to. */
     stockFilter: String = "",
 ) {
+    // Stays local and dies with the card, deliberately: a dropdown left hanging over a page that has
+    // just been rebuilt into a different shape is not where the reader left anything.
     var menuOpen by remember { mutableStateOf(false) }
-    // Keyed by the run rather than by where the card sits, or re-sorting the list would hand one
-    // card's open report to whichever card took its place. The menu above it is not saved: a
-    // dropdown left hanging over a page that has just been rebuilt is not where the reader left it.
-    var showReport by rememberSaveable(key = "report:${saved.id}") { mutableStateOf(false) }
     // Asked for, because deleting is no longer local: it removes the report from the sync channel
     // and from every other device, and there is nothing left to restore it from.
     var confirmDelete by remember { mutableStateOf(false) }
@@ -511,7 +517,7 @@ private fun SavedAnalysisCard(
                         DropdownMenuItem(
                             text = { Text(if (showReport) "Hide report" else "Show report") },
                             leadingIcon = { Icon(Icons.Outlined.Description, contentDescription = null) },
-                            onClick = { showReport = !showReport; menuOpen = false },
+                            onClick = { onShowReportChange(!showReport); menuOpen = false },
                         )
                         DropdownMenuItem(
                             text = { Text("Share") },

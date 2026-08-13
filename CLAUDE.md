@@ -462,6 +462,18 @@ phone only by plugging it into the machine that built it. It reads one public UR
   history at all; `stale` means the series answers every request while its newest session stays put.
   That has happened here — the ISIN migration — and nothing noticed. Seven days, which clears the
   Friday–Saturday weekend plus a public holiday.
+- **The two shells are two call sites, so no page may hold its own state.** `EgxAnalyzerApp` branches
+  on `rail` around one `AppContent` for the rail and another for the pill, and again around
+  `AnimatedContent` versus `DestinationPager`. Folding the phone flips `rail`, Compose disposes one
+  subtree whole and composes the other from nothing, and every `remember` in every screen dies with
+  it — which is how an open report vanished on unfolding and left the reader on the list of runs.
+  Anything the reader would notice losing goes in `PageState`, hung off the application-scoped
+  `AppState`; only transient chrome (a dropdown, a confirm dialog) stays in a `remember`.
+  `rememberSaveable` under a `SaveableStateHolder` does **not** work here and was shipped once
+  before it was understood: the branches swap inside one frame, so the arriving page reads the
+  holder before the leaving page has written to it, and on the way back it restores what the
+  previous fold left there. `movableContentOf` cannot reach across `HorizontalPager`'s lazy
+  subcomposition. `PageState`'s own comment carries the whole reasoning.
 - Scrollbar overlays must be applied **outside** the scrolling node, or they are measured against
   the content and slide away with it.
 - `NavigationSuiteScaffoldLayout` does **not** consume window insets for its content; the full

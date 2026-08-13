@@ -43,7 +43,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -105,11 +104,11 @@ internal fun InsightsScreen(appState: AppState) {
         }
 
         // Session-only: a filter that outlived a restart would quietly shrink the record someone
-        // came back to read. Saveable is a different question and answers a different complaint -
-        // see Results, which explains it beside its own.
-        var channels by rememberSaveable(stateSaver = StringSetSaver) { mutableStateOf(emptySet()) }
-        var outcomes by rememberSaveable(stateSaver = StringSetSaver) { mutableStateOf(emptySet()) }
-        var stock by rememberSaveable { mutableStateOf("") }
+        // came back to read. On AppState so that folding the phone, which rebuilds this page from
+        // nothing, is not mistaken for a restart. See PageState.
+        var channels by appState.pages.insightsChannels
+        var outcomes by appState.pages.insightsOutcomes
+        var stock by appState.pages.insightsStock
         val everyChannel = remember(full.channels) { full.channels.map(ChannelScore::channel).sorted() }
 
         // Recomputed, not merely hidden: a rate or a session count still describing calls the
@@ -198,7 +197,7 @@ internal fun InsightsScreen(appState: AppState) {
         // text across the full width. The count is derived, so an untested width still behaves.
         // Collapsed cards share a row; an open one takes the whole width, because its contents are
         // a table of figures and half a row squeezes every price onto two lines.
-        var openSession by rememberSaveable { mutableStateOf<String?>(null) }
+        var openSession by appState.pages.openInsightsSession
         // Where the call being pointed at sits, so the page can scroll to it inside whichever
         // session card holds it.
         val reveal = remember { BringIntoViewRequester() }

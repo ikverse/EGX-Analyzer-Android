@@ -137,6 +137,14 @@ class AppState(
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     var destination by mutableStateOf(AppDestination.ANALYZE)
         private set
+
+    /**
+     * What each tab had open and filtered to, kept out of the composition so a fold cannot take it.
+     *
+     * Here for the same reason [destination] is: the shell rebuilds the whole page when the phone
+     * changes shape, and anything a screen was holding in a `remember` goes with it. See [PageState].
+     */
+    internal val pages = PageState()
     var cloudConfiguration by mutableStateOf(settingsRepository.load())
         private set
     var appPreferences by mutableStateOf(settingsRepository.loadPreferences())

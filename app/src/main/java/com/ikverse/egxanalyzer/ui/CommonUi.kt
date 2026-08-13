@@ -63,9 +63,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.saveable.Saver
-import androidx.compose.runtime.saveable.listSaver
-import java.time.LocalDate
 import kotlinx.coroutines.delay
 
 /**
@@ -608,39 +605,3 @@ internal fun EmptyState(icon: ImageVector, title: String, detail: String) {
     }
 }
 
-/**
- * A set of names, stored as the list a `Bundle` can actually carry.
- *
- * Every multi-select filter in the app is a `Set<String>`, and `rememberSaveable` refuses anything
- * it cannot put in a `Bundle`. Order is not preserved and does not matter: a set of channel names is
- * compared with `in`, never read down.
- *
- * **An empty set is stored as nothing**, which is `listSaver`'s own doing, so a cleared filter comes
- * back as whatever the screen asked for initially rather than as the empty set it was saved from.
- * Every set held through this one starts empty, so the two are the same thing - but a screen that
- * gave one a non-empty default would find clearing it did not survive the fold.
- */
-internal val StringSetSaver: Saver<Set<String>, Any> =
-    listSaver(save = { it.toList() }, restore = { it.toSet() })
-
-/**
- * Which session cards are open, stored as ISO dates.
- *
- * `LocalDate` is not saveable either, and `toString` is the round-trip `parse` reads back.
- */
-internal val LocalDateSetSaver: Saver<Set<LocalDate>, Any> = listSaver(
-    save = { dates -> dates.map(LocalDate::toString) },
-    restore = { saved -> saved.mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.toSet() },
-)
-
-/**
- * An enum stored by **name**, never by ordinal.
- *
- * The same rule the stored settings follow, and for the same reason: an ordinal silently means a
- * different option the moment the entries are reordered. A name this build no longer knows restores
- * as null, which `rememberSaveable` reads as nothing saved and falls back to the initial value.
- */
-internal inline fun <reified T : Enum<T>> enumSaver(): Saver<T, Any> = Saver(
-    save = { it.name },
-    restore = { name -> runCatching { enumValueOf<T>(name as String) }.getOrNull() },
-)
