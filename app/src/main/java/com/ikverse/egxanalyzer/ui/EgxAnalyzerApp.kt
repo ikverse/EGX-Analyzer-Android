@@ -72,6 +72,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.SaveableStateHolder
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -136,6 +138,20 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
     // Held here rather than inside the pages: the bar is drawn over them, and it has to survive a
     // change of destination.
     val navBarVisible = remember { mutableStateOf(true) }
+    // What each page had open, held above the branch below rather than inside the page.
+    //
+    // The two shells are two call sites, so folding or unfolding the phone flips `rail`, disposes
+    // one subtree whole and builds the other from nothing: a report opened on the cover screen was
+    // gone by the time the inner panel drew it, and the reader landed back on the list. The pager
+    // does the same thing on a smaller scale, dropping a page two swipes away and rebuilding it
+    // blank. This saves a page's state as it leaves and hands it back when it is composed again,
+    // wherever that turns out to be, which is the only mechanism that spans both - `remember` dies
+    // with the subtree, and `rememberSaveable` on its own is keyed by call site, which is precisely
+    // what changes.
+    //
+    // Not persistence: nothing here reaches the disk, and a launch from cold still opens on an
+    // unfiltered list.
+    val pageState = rememberSaveableStateHolder()
     CompositionLocalProvider(
         LocalWindowWidth provides windowWidth,
         LocalNavBarVisible provides navBarVisible,
@@ -159,7 +175,7 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
                     ),
                     color = MaterialTheme.colorScheme.surfaceContainer,
                 ) {
-                    AppContent(activity, appState, rail = true)
+                    AppContent(activity, appState, rail = true, pageState = pageState)
                 }
             }
         } else {
@@ -172,7 +188,7 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
                     Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.surfaceContainer,
                 ) {
-                    AppContent(activity, appState, rail = false)
+                    AppContent(activity, appState, rail = false, pageState = pageState)
                 }
                 FloatingNavBar(appState, Modifier.align(Alignment.BottomCenter))
             }
@@ -416,7 +432,12 @@ private fun NavigationIcon(
 }
 
 @Composable
-private fun AppContent(activity: Activity, appState: AppState, rail: Boolean) {
+private fun AppContent(
+    activity: Activity,
+    appState: AppState,
+    rail: Boolean,
+    pageState: SaveableStateHolder,
+) {
     val snackbarHost = remember { SnackbarHostState() }
 
     // Arriving somewhere new with the navigation still hidden reads as the bar having gone missing,
@@ -486,10 +507,10 @@ private fun AppContent(activity: Activity, appState: AppState, rail: Boolean) {
                         },
                         label = "destination",
                     ) { destination ->
-                        DestinationScreen(destination, activity, appState)
+                        DestinationScreen(destination, activity, appState, pageState)
                     }
                 } else {
-                    DestinationPager(activity, appState)
+                    DestinationPager(activity, appState, pageState)
                 }
             }
         }
@@ -508,7 +529,11 @@ private fun AppContent(activity: Activity, appState: AppState, rail: Boolean) {
  * it and a page-wide horizontal drag would be caught by the tables that scroll sideways.
  */
 @Composable
-private fun DestinationPager(activity: Activity, appState: AppState) {
+private fun DestinationPager(
+    activity: Activity,
+    appState: AppState,
+    pageState: SaveableStateHolder,
+) {
     val destinations = AppDestination.entries
     val pager = rememberPagerState(
         initialPage = destinations.indexOf(appState.destination),
@@ -554,7 +579,7 @@ private fun DestinationPager(activity: Activity, appState: AppState) {
         // moves it somewhere there is no gesture for it to stutter.
         beyondViewportPageCount = 1,
     ) { page ->
-        DestinationScreen(destinations[page], activity, appState)
+        DestinationScreen(destinations[page], activity, appState, pageState)
     }
 }
 
@@ -563,13 +588,19 @@ private fun DestinationScreen(
     destination: AppDestination,
     activity: Activity,
     appState: AppState,
+    pageState: SaveableStateHolder,
 ) {
-    when (destination) {
-        AppDestination.ANALYZE -> AnalyzeScreen(activity, appState)
-        AppDestination.RESULTS -> ResultsScreen(activity, appState)
-        AppDestination.INSIGHTS -> InsightsScreen(appState)
-        AppDestination.PORTFOLIO -> PortfolioScreen(appState)
-        AppDestination.SETTINGS -> SettingsScreen(appState)
+    // Keyed by the destination and not by where it is drawn, which is the whole point: the rail's
+    // cross-fade and the phone's pager are two different places to draw the same page, and a page
+    // has to be able to arrive in either one still holding what the reader had open.
+    pageState.SaveableStateProvider(destination.name) {
+        when (destination) {
+            AppDestination.ANALYZE -> AnalyzeScreen(activity, appState)
+            AppDestination.RESULTS -> ResultsScreen(activity, appState)
+            AppDestination.INSIGHTS -> InsightsScreen(appState)
+            AppDestination.PORTFOLIO -> PortfolioScreen(appState)
+            AppDestination.SETTINGS -> SettingsScreen(appState)
+        }
     }
 }
 

@@ -43,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -104,10 +105,11 @@ internal fun InsightsScreen(appState: AppState) {
         }
 
         // Session-only: a filter that outlived a restart would quietly shrink the record someone
-        // came back to read.
-        var channels by remember { mutableStateOf(emptySet<String>()) }
-        var outcomes by remember { mutableStateOf(emptySet<String>()) }
-        var stock by remember { mutableStateOf("") }
+        // came back to read. Saveable is a different question and answers a different complaint -
+        // see Results, which explains it beside its own.
+        var channels by rememberSaveable(stateSaver = StringSetSaver) { mutableStateOf(emptySet()) }
+        var outcomes by rememberSaveable(stateSaver = StringSetSaver) { mutableStateOf(emptySet()) }
+        var stock by rememberSaveable { mutableStateOf("") }
         val everyChannel = remember(full.channels) { full.channels.map(ChannelScore::channel).sorted() }
 
         // Recomputed, not merely hidden: a rate or a session count still describing calls the
@@ -196,7 +198,7 @@ internal fun InsightsScreen(appState: AppState) {
         // text across the full width. The count is derived, so an untested width still behaves.
         // Collapsed cards share a row; an open one takes the whole width, because its contents are
         // a table of figures and half a row squeezes every price onto two lines.
-        var openSession by remember { mutableStateOf<Any?>(null) }
+        var openSession by rememberSaveable { mutableStateOf<String?>(null) }
         // Where the call being pointed at sits, so the page can scroll to it inside whichever
         // session card holds it.
         val reveal = remember { BringIntoViewRequester() }
@@ -535,8 +537,14 @@ private fun ChannelCard(channel: ChannelScore, scale: Int, modifier: Modifier = 
     }
 }
 
-/** Identifies a session across recompositions, so the layout knows which card is open. */
-private fun ScoredSession.key(): Any = targetDate ?: lastRunAt
+/**
+ * Identifies a session across recompositions, so the layout knows which card is open.
+ *
+ * A string rather than the date or the instant itself, so which card is open is something a
+ * `Bundle` can carry and the card can still be open after the page is rebuilt. Both `toString`
+ * forms are unambiguous and cannot be mistaken for each other.
+ */
+private fun ScoredSession.key(): String = (targetDate ?: lastRunAt).toString()
 
 /** Two lines of channel name, so a row of source cards stays level. */
 private val ChannelHeaderHeight = 44.dp
@@ -569,7 +577,9 @@ private fun SessionCard(
         title = run.targetDate?.toString() ?: "Target not recorded",
         icon = Icons.Outlined.Assessment,
         summary = "${run.calls.size} ${if (run.calls.size == 1) "call" else "calls"} · " +
-            "${run.fullHits} full · ${run.partialHits} partial · ${run.stopped} stopped" +
+            // Target 1 before target 2, the same order the bar above reads in. A summary that
+            // counted them the other way round would be the one line on the card disagreeing.
+            "${run.partialHits} partial · ${run.fullHits} full · ${run.stopped} stopped" +
             if (run.pending > 0) " · ${run.pending} pending" else "",
         summaryTone = if (run.fullHits > 0) MaterialTheme.colorScheme.primary else null,
         expandedState = expanded,

@@ -56,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,11 +89,18 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
     ) {
         UnreadableNotice(appState.unreadableResults)
         // Session-only, deliberately: a filter that survived a restart would hide runs from someone
-        // who had forgotten it was on.
-        var channelFilter by remember { mutableStateOf(emptySet<String>()) }
-        var dateFilter by remember { mutableStateOf<String?>(null) }
-        var stockFilter by remember { mutableStateOf("") }
-        var order by remember { mutableStateOf(RunOrder.RUN_NEWEST) }
+        // who had forgotten it was on. Saveable rather than merely remembered, which is a different
+        // question - it survives the page being torn down and rebuilt underneath the reader, by
+        // folding the phone or turning it or swiping two tabs away, and still does not reach the
+        // disk. A launch from cold opens on an unfiltered list.
+        var channelFilter by rememberSaveable(stateSaver = StringSetSaver) {
+            mutableStateOf(emptySet())
+        }
+        var dateFilter by rememberSaveable { mutableStateOf<String?>(null) }
+        var stockFilter by rememberSaveable { mutableStateOf("") }
+        var order by rememberSaveable(stateSaver = enumSaver<RunOrder>()) {
+            mutableStateOf(RunOrder.RUN_NEWEST)
+        }
         val allChannels = remember(appState.savedResults) {
             appState.savedResults.flatMap { it.channelNames() }.distinct().sorted()
         }
@@ -183,7 +191,10 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
             // Which run is open lives here rather than in the card, because a report needs the whole
             // row to show its table - half of one is under the width the table needs and falls back
             // to cards - and a card cannot give itself a row.
-            var openRun by remember { mutableStateOf(appState.pendingResultId) }
+            //
+            // Saveable, because this is the one the reader notices going: opening a report on the
+            // cover screen and unfolding the phone put them back on the list of runs.
+            var openRun by rememberSaveable { mutableStateOf(appState.pendingResultId) }
             // The newest run held for each session, so a card can tell whether it is the current
             // reading of its session or an earlier one a re-run has since covered.
             val newestRunFor = remember(appState.savedResults) {
@@ -428,7 +439,10 @@ private fun SavedAnalysisCard(
     stockFilter: String = "",
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    var showReport by remember { mutableStateOf(false) }
+    // Keyed by the run rather than by where the card sits, or re-sorting the list would hand one
+    // card's open report to whichever card took its place. The menu above it is not saved: a
+    // dropdown left hanging over a page that has just been rebuilt is not where the reader left it.
+    var showReport by rememberSaveable(key = "report:${saved.id}") { mutableStateOf(false) }
     // Asked for, because deleting is no longer local: it removes the report from the sync channel
     // and from every other device, and there is nothing left to restore it from.
     var confirmDelete by remember { mutableStateOf(false) }

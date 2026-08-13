@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -173,13 +174,13 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
     // survived a restart would hide trades from someone who had forgotten it was on. The order is
     // kept instead - it hides nothing, so finding it as you left it costs a moment's thought rather
     // than a search for trades that look as though they have gone.
-    var dateFilter by remember { mutableStateOf<String?>(null) }
+    var dateFilter by rememberSaveable { mutableStateOf<String?>(null) }
     val order = appState.appPreferences.portfolioOrder
     // Which session cards are open, held here rather than inside each card. A card cannot open
     // itself on someone else's behalf, and arriving from a call on the Insights tab has to open the
     // one holding that trade. Keyed by session date rather than by position in the list, so
     // re-sorting no longer moves which card is open onto whichever card took its place.
-    var openGroups by remember { mutableStateOf(emptySet<LocalDate>()) }
+    var openGroups by rememberSaveable(stateSaver = LocalDateSetSaver) { mutableStateOf(emptySet()) }
     // Every call the record still holds, so a card knows whether it has anywhere to go back to.
     // Asked once per report: a trade whose analysis was deleted has no call left to open.
     val scoredCalls = remember(appState.performance) { appState.performance.callIds }
