@@ -396,7 +396,7 @@ private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
                 val thin = channel.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
                 Text(
                     formatPercent(channel.anyTargetRate, signed = false),
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
                     fontWeight = FontWeight.Bold,
                     color = if (thin) {
                         MaterialTheme.colorScheme.onSurfaceVariant

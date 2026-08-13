@@ -442,7 +442,13 @@ internal fun StatTile(
         verticalArrangement = Arrangement.spacedBy(Space.xs),
         horizontalAlignment = alignment,
     ) {
-        Text(value, style = MaterialTheme.typography.headlineSmall, color = tone)
+        // The role sets the size; the figure sets its own face. Everything a tile ever holds is a
+        // number, and the display face is for names.
+        Text(
+            value,
+            style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
+            color = tone,
+        )
         Text(
             label.uppercase(),
             style = MaterialTheme.typography.labelSmall,

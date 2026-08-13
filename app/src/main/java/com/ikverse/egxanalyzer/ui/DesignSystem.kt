@@ -175,8 +175,13 @@ object PriceRole {
     }
 }
 
-/** Digits that line up in a column, so a table can be compared down as well as read across. */
-val TabularFigures = FontFamily.Monospace
+/**
+ * Digits that line up in a column, so a table can be compared down as well as read across.
+ *
+ * IBM Plex Mono rather than `FontFamily.Monospace`, which resolved to whatever the device happened
+ * to call monospace and matched nothing else on screen. See `Figures` in `theme/Type.kt`.
+ */
+val TabularFigures = com.ikverse.egxanalyzer.ui.theme.Figures
 
 const val Dash = "—"
 
