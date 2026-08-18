@@ -21,6 +21,7 @@ import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.cleanChannelName
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.IntradayBar
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.ExcludedSource
@@ -28,6 +29,7 @@ import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.SourceTrace
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 
@@ -61,6 +63,8 @@ class LocalDataStore(context: Context) :
         )
         db.createDailyPrices()
         db.createPriceEvents()
+        db.createIntradayBars()
+        db.createIntradayFetches()
         db.createPendingDeletions()
         db.createWordingRules()
         db.createPromptVersions()
@@ -77,6 +81,8 @@ class LocalDataStore(context: Context) :
         )
         db.createDailyPrices()
         db.createPriceEvents()
+        db.createIntradayBars()
+        db.createIntradayFetches()
         db.createPendingDeletions()
         db.createWordingRules()
         db.createPromptVersions()
@@ -496,6 +502,37 @@ class LocalDataStore(context: Context) :
         writableDatabase.delete("price_events", "ticker = ?", arrayOf(ticker))
     }
 
+    /**
+     * Forgets every bar stored for one stock, and that they were ever fetched.
+     *
+     * Called on the same heal as [clearPriceBreaks]. A split rewrites the intraday history exactly
+     * as it rewrites the daily one, so bars kept across one are in the old money while the levels
+     * beside them are in the new - and ordering an entry against a target using the two would give
+     * a confident answer built on prices that never belonged together.
+     */
+    fun clearIntraday(ticker: String) {
+        writableDatabase.delete("intraday_bars", "ticker = ?", arrayOf(ticker))
+        writableDatabase.delete("intraday_fetches", "ticker = ?", arrayOf(ticker))
+    }
+
+    /** Where the database actually sits, for the diagnostics copy that reads it off a device. */
+    fun databaseFile(): File = File(writableDatabase.path)
+
+    /**
+     * Folds the write-ahead log back into the database file.
+     *
+     * Android opens this in write-ahead mode, so the newest commits live in a `-wal` sidecar until
+     * something checkpoints them. Copying the database alone would hand over a record missing the
+     * recent activity - which is precisely the part worth asking about. Best effort: a checkpoint
+     * refused because something else holds the database still leaves a readable, if older, copy.
+     */
+    fun checkpoint() {
+        runCatching {
+            writableDatabase.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null)
+                .use { it.moveToFirst() }
+        }
+    }
+
     /** Every stock that has one, so a recompute reads them once rather than per call. */
     fun priceBreakDates(): Map<String, Set<LocalDate>> = readableDatabase
         .query("price_events", arrayOf("ticker", "session_date"), null, null, null, null, null)
@@ -508,6 +545,132 @@ class LocalDataStore(context: Context) :
                 }
             }
         }
+
+    /**
+     * Five-minute bars, kept only for the sessions a call could not order on its own.
+     *
+     * Deliberately not a series per stock: a year of five-minute bars for two hundred stocks is
+     * millions of rows to answer a question that arises a handful of times. Only the extremes are
+     * stored, because only "was this level touched inside this bar" is ever asked of them.
+     *
+     * A closed session's bars never change, so a row here is written once and never refreshed.
+     */
+    private fun SQLiteDatabase.createIntradayBars() {
+        execSQL(
+            """CREATE TABLE IF NOT EXISTS intraday_bars (
+                ticker TEXT NOT NULL,
+                session_date TEXT NOT NULL,
+                bar_at INTEGER NOT NULL,
+                high REAL,
+                low REAL,
+                PRIMARY KEY (ticker, bar_at)
+            )""",
+        )
+        execSQL(
+            "CREATE INDEX IF NOT EXISTS intraday_bars_session " +
+                "ON intraday_bars (ticker, session_date)",
+        )
+    }
+
+    /**
+     * That a session's bars were asked for, and what came back.
+     *
+     * Without this a session the feed has nothing for is asked about again on every refresh,
+     * forever - and the sessions with nothing to give are exactly the ones past the feed's 60-day
+     * intraday retention, which accumulate. A row with no bars is an answer and is kept as one.
+     */
+    private fun SQLiteDatabase.createIntradayFetches() = execSQL(
+        """CREATE TABLE IF NOT EXISTS intraday_fetches (
+            ticker TEXT NOT NULL,
+            session_date TEXT NOT NULL,
+            fetched_at INTEGER NOT NULL,
+            bars INTEGER NOT NULL,
+            PRIMARY KEY (ticker, session_date)
+        )""",
+    )
+
+    /**
+     * Every stored bar, grouped by the stock and session it belongs to.
+     *
+     * Read whole rather than per call: only ambiguous sessions have bars at all, so this is a small
+     * table, and a recompute would otherwise query it once for every call it scores.
+     */
+    fun intradayBars(): Map<Pair<String, LocalDate>, List<IntradayBar>> = readableDatabase
+        .query(
+            "intraday_bars",
+            arrayOf("ticker", "session_date", "bar_at", "high", "low"),
+            null, null, null, null, "ticker, bar_at",
+        )
+        .use { cursor ->
+            buildMap<Pair<String, LocalDate>, MutableList<IntradayBar>> {
+                while (cursor.moveToNext()) {
+                    val date = runCatching { LocalDate.parse(cursor.getString(1)) }.getOrNull()
+                        ?: continue
+                    val ticker = cursor.getString(0)
+                    getOrPut(ticker to date) { mutableListOf() }.add(
+                        IntradayBar(
+                            ticker = ticker,
+                            at = Instant.ofEpochSecond(cursor.getLong(2)),
+                            high = cursor.nullableDouble(3),
+                            low = cursor.nullableDouble(4),
+                        ),
+                    )
+                }
+            }
+        }
+
+    /** The sessions already asked about, whether or not the feed had anything to say. */
+    fun intradayFetched(): Set<Pair<String, LocalDate>> = readableDatabase
+        .query("intraday_fetches", arrayOf("ticker", "session_date"), null, null, null, null, null)
+        .use { cursor ->
+            buildSet {
+                while (cursor.moveToNext()) {
+                    val date = runCatching { LocalDate.parse(cursor.getString(1)) }.getOrNull()
+                        ?: continue
+                    add(cursor.getString(0) to date)
+                }
+            }
+        }
+
+    /**
+     * Stores one session's bars and the fact that it was asked for, in one transaction.
+     *
+     * The two have to land together: bars with no fetch row would be re-fetched forever, and a
+     * fetch row with no bars where bars did arrive would read as a session the feed had nothing for.
+     */
+    fun saveIntradayBars(ticker: String, date: LocalDate, bars: List<IntradayBar>) {
+        writableDatabase.beginTransaction()
+        try {
+            bars.forEach { bar ->
+                writableDatabase.insertWithOnConflict(
+                    "intraday_bars",
+                    null,
+                    ContentValues().apply {
+                        put("ticker", ticker)
+                        put("session_date", date.toString())
+                        put("bar_at", bar.at.epochSecond)
+                        put("high", bar.high)
+                        put("low", bar.low)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            }
+            writableDatabase.insertWithOnConflict(
+                "intraday_fetches",
+                null,
+                ContentValues().apply {
+                    put("ticker", ticker)
+                    put("session_date", date.toString())
+                    put("fetched_at", System.currentTimeMillis())
+                    put("bars", bars.size)
+                },
+                SQLiteDatabase.CONFLICT_REPLACE,
+            )
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
 
     /**
      * The newest session stored for a stock, prices and all.
@@ -537,6 +700,42 @@ class LocalDataStore(context: Context) :
             open = cursor.nullableDouble(6),
         )
     }
+
+    /**
+     * The newest session for every stock at once, for the screen that shows where each stands now.
+     *
+     * One query rather than [latestSession] per ticker, which a recompute would otherwise run
+     * hundreds of times. The bare columns beside `MAX(session_date)` are taken from the row that
+     * holds the maximum - SQLite guarantees this specifically for a single min or max aggregate,
+     * which is why the query is shaped around one rather than joining back onto the table.
+     */
+    fun latestSessions(): Map<String, DailySession> = readableDatabase
+        .rawQuery(
+            "SELECT ticker, MAX(session_date), high, low, close, volume, open " +
+                "FROM daily_prices GROUP BY ticker",
+            null,
+        )
+        .use { cursor ->
+            buildMap {
+                while (cursor.moveToNext()) {
+                    val date = runCatching { LocalDate.parse(cursor.getString(1)) }.getOrNull()
+                        ?: continue
+                    val ticker = cursor.getString(0)
+                    put(
+                        ticker,
+                        DailySession(
+                            ticker = ticker,
+                            date = date,
+                            high = cursor.nullableDouble(2),
+                            low = cursor.nullableDouble(3),
+                            close = cursor.nullableDouble(4),
+                            volume = cursor.nullableDouble(5),
+                            open = cursor.nullableDouble(6),
+                        ),
+                    )
+                }
+            }
+        }
 
     /**
      * Drops everything stored for one stock.
@@ -1158,11 +1357,13 @@ class LocalDataStore(context: Context) :
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
         /**
-         * 12 for `price_events`, which records where a stock's prices changed scale.
+         * 13 for `intraday_bars` and `intraday_fetches`, which order the two events inside a
+         * session that daily figures cannot separate. 12 was `price_events`, which records where a
+         * stock's prices changed scale.
          *
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 12
+        const val DATABASE_VERSION = 13
     }
 }

@@ -68,8 +68,24 @@ class SymbolMapTest {
             "HRHO" to "EGS69101C011.CA",
             "FWRY" to "EGS745L1C014.CA",
             "AMIA" to "EGS67221C019.CA",
+            // Joined on 17/18 August rather than 29/30 July, because both were added long after
+            // the migration: MBEG.CA closed 17 August at 6.800 and EGS221V1C015.CA opened
+            // 18 August at exactly that.
+            "MBEG" to "EGS221V1C015.CA",
         )
         val actual = each().associate { it.getString("egx") to it.getString("yahoo") }
         expected.forEach { (egx, yahoo) -> assertEquals(egx, yahoo, actual[egx]) }
+    }
+
+    @Test
+    fun `the two Valmore listings stay apart`() {
+        // One issuer, two instruments, one name - and the catalog gives both the same one, which is
+        // precisely the shape that put three stocks on a single symbol the last time names were
+        // trusted. They are told apart by price: VLMRA trades near 30 and VLMR near 0.70, and the
+        // call that named VLMRA printed a support of 30.50 - the 12 August low of EGS69081C023.CA
+        // exactly, and of nothing else listed in Cairo.
+        val actual = each().associate { it.getString("egx") to it.getString("yahoo") }
+        assertEquals("EGS69081C023.CA", actual["VLMRA"])
+        assertEquals("EGS69082C013.CA", actual["VLMR"])
     }
 }

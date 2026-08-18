@@ -3,6 +3,8 @@ package com.ikverse.egxanalyzer.data
 import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.IntradayBar
+import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
@@ -23,6 +25,19 @@ import java.time.LocalDate
  */
 object PerformanceCalculator {
 
+    /**
+     * The first session this app judges anything on.
+     *
+     * Everything stored before it came from testing the extraction rather than from reading the
+     * market, and a rate resting on it describes the test rather than the source. A constant and
+     * not a setting: a floor that can be dragged is a floor that silently rewrites the record, and
+     * every figure the app has ever shown would move with it.
+     *
+     * The rows themselves are left on disk. Filtering is reversible and costs nothing; deleting a
+     * year of prices to answer a question about which calls count would not be.
+     */
+    val ANALYSIS_START: LocalDate = LocalDate.of(2026, 8, 3)
+
     fun report(
         analyses: List<SavedAnalysis>,
         pricesFrom: LocalDate?,
@@ -37,11 +52,24 @@ object PerformanceCalculator {
          * source happened to call that stock.
          */
         priceBreaksFor: (ticker: String) -> Set<LocalDate> = { emptySet() },
+        /**
+         * Five-minute bars for a stock's session, where any were fetched.
+         *
+         * Only sessions a call could not order on daily figures ever have them, so this answers
+         * empty for almost everything it is asked about.
+         */
+        intradayFor: (ticker: String, date: LocalDate) -> List<IntradayBar> = { _, _ -> emptyList() },
+        /** Where each stock stands as of the last refresh, for the card to show alongside the call. */
+        latestPrices: Map<String, LatestPrice> = emptyMap(),
     ): PerformanceReport {
         val window = Scoring.clampWindow(windowSessions)
         if (pricesFrom == null) return PerformanceReport(windowSessions = window)
+        // Whichever starting line is later. Prices reaching further back than [ANALYSIS_START] are
+        // still fetched and still stored - they are what a split check compares against - but no
+        // call is judged on them.
+        val since = maxOf(pricesFrom, ANALYSIS_START)
 
-        val scoredRuns = runs(analyses, pricesFrom).map { run ->
+        val scoredRuns = runs(analyses, since).map { run ->
             run.copy(
                 calls = run.calls.map { call ->
                     val sessions = sessionsFor(call.ticker, call.openedOn).take(window)
@@ -54,6 +82,7 @@ object PerformanceCalculator {
                         stopLoss = call.stopLoss,
                         windowSessions = window,
                         priceBreaks = priceBreaksFor(call.ticker),
+                        intradayFor = { date -> intradayFor(call.ticker, date) },
                     )
                     call.copy(
                         outcome = scored.outcome,
@@ -79,9 +108,10 @@ object PerformanceCalculator {
         val any = calls.count { it.outcome.reachedATarget }
         return PerformanceReport(
             windowSessions = window,
-            // The earliest call that was actually scored, so the figure describes the calls rather
-            // than how far back the price history happens to reach.
-            scoringSince = calls.minOfOrNull(ScoredCall::openedOn),
+            // The starting line itself, not the earliest call behind it. Derived from the calls it
+            // was unreachable: it was null exactly when there were no calls, which is the one case
+            // the screen wanted it for - so the empty state could never say what it was waiting on.
+            scoringSince = since,
             unpricedStocks = calls.filter { it.outcome == Outcome.UNPRICED }
                 .map(ScoredCall::ticker)
                 .distinct()
@@ -112,6 +142,9 @@ object PerformanceCalculator {
                     )
                 }
                 .sortedByDescending { it.targetDate },
+            // Every stock the record names, not only the ones with a call on screen: `refine` keeps
+            // this untouched, so a filtered view still knows where its stocks stand.
+            latestPrices = latestPrices,
         )
     }
 
@@ -134,7 +167,8 @@ object PerformanceCalculator {
         val full = calls.count { it.outcome.isFullHit }
         val any = calls.count { it.outcome.reachedATarget }
         return report.copy(
-            scoringSince = calls.minOfOrNull(ScoredCall::openedOn),
+            // Deliberately not recomputed. Every other figure here describes the calls on screen,
+            // but the starting line is a property of the record, and a filter does not move it.
             tracked = calls.size,
             judged = judged,
             fullHits = full,

@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.LocalDate
+import java.time.ZoneOffset
 
 class ScoringTest {
     private val start = LocalDate.of(2026, 7, 20)
@@ -221,6 +222,98 @@ class ScoringTest {
         // Which of the two cases it was is the whole of what the card can say about it.
         assertEquals(Ambiguity.ENTRY_AND_TARGET, scored.ambiguity)
     }
+
+    @Test
+    fun `an unorderable session stops mattering when the window settles it either way`() {
+        // The entry is a fact of that session under both readings - its low traded through the band
+        // - so the reader holds from its close whichever way round it happened. A later session
+        // reaching the target settles the call without anyone having to know the order.
+        val walk = listOf(
+            DailySession("TEST", start, high = 12.5, low = 9.5, close = 12.0, volume = 1.0, open = 11.5),
+            DailySession("TEST", start.plusDays(1), high = 12.5, low = 11.0, close = 12.4, volume = 1.0, open = 11.2),
+        )
+
+        val scored = Scoring.score(walk, 9.8, 10.0, 12.0, null, 9.0, windowSessions = 10)
+
+        assertEquals(Outcome.FULL_HIT, scored.outcome)
+        // The later of the two readings, because the earlier one rests on an order nothing proved.
+        assertEquals(start.plusDays(1), scored.settledOn)
+    }
+
+    @Test
+    fun `an unorderable session stays ambiguous when the two readings disagree`() {
+        // Read one way the call reached its target on the first session; read the other it sat out
+        // the window and expired. Nothing in the record can choose between them.
+        val later = (1..9).map { day ->
+            DailySession("TEST", start.plusDays(day.toLong()), 11.0, 10.5, 10.8, 1.0, open = 10.6)
+        }
+        val walk = listOf(
+            DailySession("TEST", start, high = 12.5, low = 9.5, close = 12.0, volume = 1.0, open = 11.5),
+        ) + later
+
+        val scored = Scoring.score(walk, 9.8, 10.0, 12.0, null, 9.0, windowSessions = 10)
+
+        assertEquals(Outcome.AMBIGUOUS, scored.outcome)
+        assertEquals(Ambiguity.ENTRY_AND_TARGET, scored.ambiguity)
+    }
+
+    @Test
+    fun `five-minute bars order an entry that came before the target`() {
+        val session = listOf(
+            DailySession("TEST", start, high = 12.5, low = 9.5, close = 12.0, volume = 1.0, open = 11.5),
+        )
+
+        val scored = Scoring.score(
+            session, 9.8, 10.0, 12.0, null, 9.0, windowSessions = 10,
+            intradayFor = { bars(10.0 to 9.5, 12.5 to 12.1) },
+        )
+
+        assertEquals(Outcome.FULL_HIT, scored.outcome)
+        assertEquals(start, scored.settledOn)
+    }
+
+    @Test
+    fun `five-minute bars refuse a target the buy zone never preceded`() {
+        // The target was reached before the band ever traded, so the reader could not have been in
+        // for it. They are in from that session on, and the target is not theirs.
+        val session = listOf(
+            DailySession("TEST", start, high = 12.5, low = 9.5, close = 12.0, volume = 1.0, open = 11.5),
+        )
+
+        val scored = Scoring.score(
+            session, 9.8, 10.0, 12.0, null, 9.0, windowSessions = 1,
+            intradayFor = { bars(12.5 to 12.1, 10.0 to 9.5) },
+        )
+
+        assertEquals(Outcome.EXPIRED, scored.outcome)
+    }
+
+    @Test
+    fun `two events inside one five-minute bar cannot be ordered any finer`() {
+        val session = listOf(
+            DailySession("TEST", start, high = 12.5, low = 9.5, close = 12.0, volume = 1.0, open = 11.5),
+        )
+
+        val scored = Scoring.score(
+            session, 9.8, 10.0, 12.0, null, 9.0, windowSessions = 10,
+            intradayFor = { bars(12.5 to 9.5) },
+        )
+
+        assertEquals(Outcome.AMBIGUOUS, scored.outcome)
+        // Worth telling apart from the unfetched case: this one will never be answerable.
+        assertEquals(Ambiguity.SAME_INTRADAY_BAR, scored.ambiguity)
+    }
+
+    /** Bars five minutes apart on the session under test, in the order given. */
+    private fun bars(vararg highLow: Pair<Double, Double>): List<IntradayBar> =
+        highLow.mapIndexed { index, (high, low) ->
+            IntradayBar(
+                ticker = "TEST",
+                at = start.atStartOfDay(ZoneOffset.UTC).toInstant().plusSeconds(index * 300L),
+                high = high,
+                low = low,
+            )
+        }
 
     @Test
     fun `a session with no recorded open is not assumed favourable`() {

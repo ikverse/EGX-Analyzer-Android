@@ -5,6 +5,7 @@ import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import com.ikverse.egxanalyzer.data.AnalysisService
 import com.ikverse.egxanalyzer.data.AndroidKeystoreCredentialStore
 import com.ikverse.egxanalyzer.data.CloudAnalysisRepository
+import com.ikverse.egxanalyzer.data.IntradayRepository
 import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.OverdueWorker
 import com.ikverse.egxanalyzer.data.PriceRepository
@@ -36,12 +37,16 @@ class EgxApplication : Application() {
         RequestTrace.prune(this)
         val localDataStore = LocalDataStore(this)
         val notifier = AnalysisNotifier(this)
+        // One mapping for both feeds, so the daily series and the bars that order a session inside
+        // it can never disagree about which Yahoo symbol a stock is.
+        val symbols = SymbolMap(assets)
         AppState(
             settingsRepository = settingsRepository,
             analysisRepository = analysisRepository,
             localDataStore = localDataStore,
             telegramRepository = telegramRepository,
-            priceRepository = PriceRepository(localDataStore, SymbolMap(assets)),
+            priceRepository = PriceRepository(localDataStore, symbols),
+            intradayRepository = IntradayRepository(localDataStore, symbols),
             promptStore = promptStore,
             // The app is sideloaded, so nothing else will ever offer it an update.
             updateRepository = UpdateRepository(this),

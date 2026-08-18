@@ -57,6 +57,7 @@ import com.ikverse.egxanalyzer.data.PerformanceCalculator
 import com.ikverse.egxanalyzer.model.Ambiguity
 import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.PositionView
@@ -97,7 +98,7 @@ internal fun InsightsScreen(appState: AppState) {
                         "for the last few trading sessions, and scoring begins at the earliest one."
                 } else {
                     "Saved analyses name no stock dated on or after ${full.scoringSince}, which " +
-                        "is the first session with stored prices."
+                        "is where scoring starts. Anything called before it is left out on purpose."
                 },
             )
             return@Screen
@@ -233,6 +234,7 @@ internal fun InsightsScreen(appState: AppState) {
                             expanded = true,
                             onExpandedChange = { openSession = null },
                             heldFor = appState::heldFor,
+                            latestFor = { ticker -> report.latestPrices[ticker] },
                             onOpenTrade = appState::openPosition,
                             revealCall = pendingCall,
                             onRevealShown = appState::consumePendingCall,
@@ -245,6 +247,7 @@ internal fun InsightsScreen(appState: AppState) {
                                 expanded = false,
                                 onExpandedChange = { openSession = session.key() },
                                 heldFor = appState::heldFor,
+                                latestFor = { ticker -> report.latestPrices[ticker] },
                                 onOpenTrade = appState::openPosition,
                                 // A folded card draws none of its calls, so the highlight only ever
                                 // lands on the one this arrival opened.
@@ -321,7 +324,13 @@ private fun ScoredCall.reason(windowSessions: Int): String {
             "The share price changed scale inside the window - a split or a bonus issue - so the " +
                 "levels and the prices are in different money. Not counted for or against."
         Outcome.AMBIGUOUS -> when (ambiguity) {
-            Ambiguity.ENTRY_AND_TARGET -> "Opened above the buy zone, target hit that day."
+            Ambiguity.ENTRY_AND_TARGET ->
+                "Opened above the buy zone, target hit that day. Five-minute bars would settle it, " +
+                    "and the feed keeps only 60 days of them - so a session older than that stays " +
+                    "unordered for good."
+            Ambiguity.SAME_INTRADAY_BAR ->
+                "The buy zone and the target were both reached inside the same five-minute bar. " +
+                    "This is as fine as the feed goes, so nothing further will separate them."
             // Scored before the reason was recorded, so only the fact survives.
             null -> "Two levels were reached in one session and cannot be ordered."
         }
@@ -405,6 +414,10 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
                 "${report.tracked} scored",
                 ranked.size.takeIf { it > 0 }?.let { "$it ${if (it == 1) "source" else "sources"}" },
                 window,
+                // How current every price on this page is, in one place rather than repeated on
+                // each card. Read off the prices themselves, so a refresh that ran and came back
+                // with nothing cannot make the page look fresher than it is.
+                report.pricesTo?.let { "prices to $it" },
                 "change it in Settings",
             ).joinToString(" · "),
             style = MaterialTheme.typography.labelSmall,
@@ -557,6 +570,8 @@ private fun SessionCard(
     onExpandedChange: (Boolean) -> Unit,
     /** The position taken on a call, so a stock actually held is marked as such. */
     heldFor: (String, java.time.LocalDate?) -> PositionView?,
+    /** Where a stock stands as of the last refresh, by ticker. */
+    latestFor: (String) -> LatestPrice?,
     /** Opens a held call's trade on the Portfolio tab, by the id the two share. */
     onOpenTrade: (String) -> Unit,
     /** The trade the reader has just pressed their way here from, if this is that arrival. */
@@ -615,6 +630,7 @@ private fun SessionCard(
                     ScoredCallRow(
                         call,
                         windowSessions,
+                        latestFor(call.ticker),
                         held,
                         // Only a call the user is actually in leads anywhere: there is no trade to
                         // open for one they read and left alone.
@@ -637,6 +653,8 @@ private fun SessionCard(
 private fun ScoredCallRow(
     call: ScoredCall,
     windowSessions: Int,
+    /** Where this stock stands as of the last refresh. Absent for a stock with no prices at all. */
+    latest: LatestPrice?,
     held: PositionView?,
     /** Opens the trade taken on this call. Absent where none was, which is most cards. */
     onOpenTrade: (() -> Unit)?,
@@ -753,6 +771,27 @@ private fun ScoredCallRow(
                             tone = PriceRole.forReturn(call.returnPct),
                         )
                     },
+                    // Where the stock actually is, which every other figure here stops short of
+                    // saying: peak and trough are the extremes of the window and the return is
+                    // measured to wherever the call settled, so a card could report a target hit
+                    // three weeks ago and give no clue what the price has done since.
+                    {
+                        Figure(
+                            "Latest close",
+                            formatPrice(latest?.session?.close),
+                            Modifier.weight(1f),
+                            tone = PriceRole.market,
+                            caption = latest?.let { price ->
+                                listOfNotNull(
+                                    price.session.date.format(OUTCOME_DATE),
+                                    call.moveSince(price.session.close)?.let { formatPercent(it) },
+                                    // Named as what it is rather than as a warning: the session has
+                                    // not closed, so the figure beside it is going to move.
+                                    if (price.provisional) "still trading" else null,
+                                ).joinToString(" · ")
+                            },
+                        )
+                    },
                 ),
             )
             if (call.sessions.isNotEmpty()) {
@@ -864,7 +903,15 @@ private fun FigureGroup(title: String, figures: List<@Composable RowScope.() -> 
         BoxWithConstraints {
             // Taken as a list rather than a row of slots, because wrapping means splitting them -
             // and a lambda that draws four figures cannot be cut in half.
-            val perRow = if (maxWidth >= FourFiguresMinWidth) figures.size else 2
+            //
+            // Capped rather than "all of them on a wide screen": the threshold below was measured
+            // for four prices, and a group of five would put all five on one row at a width that
+            // was only ever proved to hold four.
+            val perRow = if (maxWidth >= FourFiguresMinWidth) {
+                minOf(figures.size, MaxFiguresPerRow)
+            } else {
+                2
+            }
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 figures.chunked(perRow).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
@@ -879,6 +926,9 @@ private fun FigureGroup(title: String, figures: List<@Composable RowScope.() -> 
 
 /** Four prices need this much before the digits start truncating. */
 private val FourFiguresMinWidth = 420.dp
+
+/** What [FourFiguresMinWidth] was measured against, so a longer group wraps rather than shrinks. */
+private const val MaxFiguresPerRow = 4
 
 /*
  * Column thresholds, set against the narrowest screen meant to show two of something.
@@ -899,6 +949,8 @@ private fun Figure(
     tone: Color = MaterialTheme.colorScheme.onSurface,
     /** The session a high or low was set on: a price without its date says half of it. */
     on: java.time.LocalDate? = null,
+    /** Takes the place of [on] where the line under a figure has more to say than a date. */
+    caption: String? = null,
 ) {
     Column(modifier) {
         Text(
@@ -914,9 +966,10 @@ private fun Figure(
             color = tone,
             textAlign = TextAlign.Start,
         )
-        if (on != null) {
+        val note = caption ?: on?.format(OUTCOME_DATE)
+        if (note != null) {
             Text(
-                on.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")),
+                note,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -960,6 +1013,22 @@ private fun Double?.rateTone(): Color = when {
     this == null -> MaterialTheme.colorScheme.onSurfaceVariant
     this >= 50.0 -> MaterialTheme.colorScheme.primary
     else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+/**
+ * Where the stock is now against the middle of the buy zone.
+ *
+ * The same base the scored return uses, so the two figures on one card are measured from the same
+ * place and only their end points differ - one stops where the call settled, this one does not stop.
+ */
+private fun ScoredCall.moveSince(close: Double?): Double? {
+    val entry = if (entryLow != null && entryHigh != null) {
+        (entryLow + entryHigh) / 2
+    } else {
+        entryLow ?: entryHigh ?: return null
+    }
+    if (entry == 0.0 || close == null) return null
+    return (close - entry) / entry * 100
 }
 
 private fun ScoredCall.entryRange(): String = when {

@@ -20,6 +20,8 @@ import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import java.io.File
 import java.io.IOException
+import java.io.OutputStream
+import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.roundToInt
 
@@ -97,20 +99,63 @@ internal fun reportBytes(saved: SavedAnalysis): ByteArray = writeXlsx(reportShee
  * gives `... (1).xlsx` rather than overwriting, which matters most for the case worth protecting: a
  * re-run of a session whose earlier reading someone has already saved.
  */
-internal fun saveToDownloads(context: Context, saved: SavedAnalysis): String {
-    val requested = exportFileName(saved)
+internal fun saveToDownloads(context: Context, saved: SavedAnalysis): String =
+    writeToDownloads(context, exportFileName(saved), XLSX_MIME_TYPE) {
+        it.write(reportBytes(saved))
+    }
+
+/**
+ * Copies the app's database into Downloads, for reading a problem off the device that has it.
+ *
+ * A screenshot of a wrong figure says what happened and nothing about why; the record behind it is
+ * what answers that, and there is no other way off a release-signed build - `run-as` refuses a
+ * package that is not debuggable and `adb backup` is closed by `allowBackup="false"`. Installing a
+ * debug build instead would mean uninstalling this one, which takes the record with it.
+ *
+ * No credential travels in it. Provider keys and the Telegram database key are encrypted by Android
+ * Keystore in their own preferences file and have never been in this database.
+ *
+ * [checkpoint] is not optional. SQLite runs in write-ahead mode here, so the newest commits sit in
+ * a side file until one happens - copying the database alone would hand over a record missing
+ * exactly the recent activity worth asking about.
+ */
+internal fun saveDatabaseToDownloads(
+    context: Context,
+    database: File,
+    checkpoint: () -> Unit,
+): String {
+    checkpoint()
+    val stamp = LocalDate.now().toString()
+    return writeToDownloads(context, "egx-diagnostics-$stamp.db", DATABASE_MIME_TYPE) { out ->
+        database.inputStream().use { it.copyTo(out) }
+    }
+}
+
+/**
+ * The Downloads write itself, shared by everything that lands a file there.
+ *
+ * Returns what Downloads actually called the file, which is not what was asked for once a second
+ * copy of the same name exists - MediaStore appends rather than overwrites, and a message naming
+ * the requested file would point at the older one.
+ */
+private fun writeToDownloads(
+    context: Context,
+    requested: String,
+    mimeType: String,
+    write: (OutputStream) -> Unit,
+): String {
     val resolver = context.contentResolver
     val pending = ContentValues().apply {
         put(MediaStore.Downloads.DISPLAY_NAME, requested)
-        put(MediaStore.Downloads.MIME_TYPE, XLSX_MIME_TYPE)
+        put(MediaStore.Downloads.MIME_TYPE, mimeType)
         // Nothing else may open it until it is whole. Without this a failure part way through
-        // leaves a truncated spreadsheet in Downloads that looks exactly like a finished one.
+        // leaves a truncated file in Downloads that looks exactly like a finished one.
         put(MediaStore.Downloads.IS_PENDING, 1)
     }
     val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, pending)
         ?: throw IOException("Android would not open a file in Downloads")
     try {
-        resolver.openOutputStream(uri)?.use { it.write(reportBytes(saved)) }
+        resolver.openOutputStream(uri)?.use(write)
             ?: throw IOException("Android would not write to the file it had just made")
         val finished = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
         resolver.update(uri, finished, null, null)
@@ -122,6 +167,8 @@ internal fun saveToDownloads(context: Context, saved: SavedAnalysis): String {
     }
     return savedName(resolver, uri) ?: requested
 }
+
+private const val DATABASE_MIME_TYPE = "application/octet-stream"
 
 /** What Downloads actually called the file, which is not always what was asked for. */
 private fun savedName(resolver: ContentResolver, uri: Uri): String? = runCatching {

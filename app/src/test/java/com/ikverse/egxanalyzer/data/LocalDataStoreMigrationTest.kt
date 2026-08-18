@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.ikverse.egxanalyzer.model.IntradayBar
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -11,6 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import java.time.Instant
 import java.time.LocalDate
 
 /**
@@ -196,6 +198,64 @@ class LocalDataStoreMigrationTest {
     }
 
     @Test
+    fun `a phone on schema 12 gains the intraday tables and keeps its prices`() {
+        Version12(context).writableDatabase.use { old ->
+            old.insert("positions", null, version9Position())
+            old.insert("daily_prices", null, storedSession())
+        }
+
+        val store = LocalDataStore(context)
+
+        // What it already had, untouched. A migration that quietly emptied this would leave every
+        // call unscored and read as a feed outage rather than as a bad upgrade.
+        assertEquals(10.4, store.sessionsFrom("AMOC", called).single().high!!, 0.0001)
+
+        // And the new tables are there to be written to, which is the point of the version bump.
+        store.saveIntradayBars(
+            "AMOC",
+            called,
+            listOf(IntradayBar("AMOC", Instant.ofEpochSecond(1_000), high = 10.4, low = 9.8)),
+        )
+
+        val reopened = LocalDataStore(context)
+        assertEquals(1, reopened.intradayBars()[("AMOC" to called)]?.size)
+        assertEquals(setOf("AMOC" to called), reopened.intradayFetched())
+    }
+
+    @Test
+    fun `a session the feed had no bars for is still recorded as asked about`() {
+        // Otherwise it is asked again on every refresh for the rest of the record's life - and the
+        // sessions with nothing to give are exactly the ones past the feed's intraday retention,
+        // which only accumulate.
+        val store = LocalDataStore(context)
+
+        store.saveIntradayBars("AMOC", called, emptyList())
+
+        assertTrue(store.intradayBars().isEmpty())
+        assertEquals(setOf("AMOC" to called), store.intradayFetched())
+    }
+
+    @Test
+    fun `a healed series drops its bars along with its prices`() {
+        // A split rewrites the intraday history exactly as it rewrites the daily one. Bars kept
+        // across one would be in the old money while the levels beside them are in the new, and
+        // ordering an entry against a target on them would give a confident, wrong answer.
+        val store = LocalDataStore(context)
+        store.saveIntradayBars(
+            "AMOC",
+            called,
+            listOf(IntradayBar("AMOC", Instant.ofEpochSecond(1_000), high = 10.4, low = 9.8)),
+        )
+
+        store.clearIntraday("AMOC")
+
+        val reopened = LocalDataStore(context)
+        assertTrue(reopened.intradayBars().isEmpty())
+        // The fetch record goes too, so the session is asked about again against the new scale.
+        assertTrue(reopened.intradayFetched().isEmpty())
+    }
+
+    @Test
     fun `healing a series clears all of it, including what a refetch cannot reach`() {
         // The loop this prevents: a refetch reaches back a year, so a split older than that would
         // leave the pre-split rows in place with a seam between them and the new ones. That seam is
@@ -358,7 +418,45 @@ class LocalDataStoreMigrationTest {
     private class Version11(context: Context) :
         SQLiteOpenHelper(context, LocalDataStore.DATABASE_NAME, null, 11) {
 
+        override fun onCreate(db: SQLiteDatabase) = version11Tables(db)
+
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    }
+
+    /**
+     * Schema 12 as it shipped: schema 11 plus `price_events`, and no intraday tables.
+     *
+     * Written by hand like the rest. Building the "old" schema from today's code would test
+     * nothing, because both sides would move together.
+     */
+    private class Version12(context: Context) :
+        SQLiteOpenHelper(context, LocalDataStore.DATABASE_NAME, null, 12) {
+
         override fun onCreate(db: SQLiteDatabase) {
+            version11Tables(db)
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS price_events (
+                    ticker TEXT NOT NULL,
+                    session_date TEXT NOT NULL,
+                    previous_close REAL NOT NULL,
+                    opening_price REAL NOT NULL,
+                    detected_at INTEGER NOT NULL,
+                    PRIMARY KEY (ticker, session_date)
+                )""",
+            )
+        }
+
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    }
+
+    /**
+     * The tables schema 11 shipped, hand-written, shared by the two old shapes that both had them.
+     *
+     * A function rather than a base class so it stays a literal transcription of what a phone
+     * holds: 12 is 11 plus one table, and writing 11 out twice would let the two drift.
+     */
+    private companion object {
+        fun version11Tables(db: SQLiteDatabase) {
             db.execSQL(
                 """CREATE TABLE IF NOT EXISTS positions (
                     id TEXT PRIMARY KEY,
@@ -402,7 +500,5 @@ class LocalDataStoreMigrationTest {
                 )""",
             )
         }
-
-        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
     }
 }

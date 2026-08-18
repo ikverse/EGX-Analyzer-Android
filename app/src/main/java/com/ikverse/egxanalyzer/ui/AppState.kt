@@ -38,7 +38,9 @@ import com.ikverse.egxanalyzer.data.EgxCatalog
 import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.PerformanceCalculator
 import com.ikverse.egxanalyzer.data.PortfolioCalculator
+import com.ikverse.egxanalyzer.data.IntradayRepository
 import com.ikverse.egxanalyzer.data.PriceRepository
+import com.ikverse.egxanalyzer.data.UnorderedSession
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.SyncOutcome
 import com.ikverse.egxanalyzer.data.SyncedRun
@@ -58,6 +60,8 @@ import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.ChatKind
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudProvider
+import com.ikverse.egxanalyzer.model.LatestPrice
+import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.Portfolio
 import com.ikverse.egxanalyzer.model.PortfolioOrder
@@ -115,6 +119,7 @@ class AppState(
     private val localDataStore: LocalDataStore,
     private val telegramRepository: TelegramRepository,
     private val priceRepository: PriceRepository,
+    private val intradayRepository: IntradayRepository,
     /** The shipped prompt, which every generated version is composed from. */
     private val promptStore: PromptStore,
     /**
@@ -1462,6 +1467,16 @@ class AppState(
         settingsRepository.recordPriceRefreshDay(today)
     }
 
+    /**
+     * The database file and a way to settle it first, for the diagnostics copy in Settings.
+     *
+     * Exposed rather than handing the store itself to a screen: this is the one thing the UI has
+     * any business knowing about where the record lives.
+     */
+    fun databaseFile(): java.io.File = localDataStore.databaseFile()
+
+    fun checkpointDatabase() = localDataStore.checkpoint()
+
     /** Every stock worth a request: the ones analyses name, plus the ones actually held. */
     private fun pricedStocks(): Set<String> =
         savedResults.recommendedTickers() + positions.map(Position::ticker)
@@ -1521,6 +1536,9 @@ class AppState(
             )
             recomputePerformance()
             recomputePortfolio()
+            // Only now, because which sessions need bars is something only a scored record knows.
+            // A second recompute is cheap and happens only when bars actually arrived.
+            if (resolveUnorderedSessions()) recomputePerformance()
             val missing = refresh.unpriced.size
             if (announce) {
                 // A stock whose prices changed scale, and one whose feed has stopped moving, are
@@ -1554,11 +1572,53 @@ class AppState(
         }
     }
 
+    /**
+     * Fetches five-minute bars for every session a call could not order on daily figures alone.
+     *
+     * On the refresh rather than when a card is opened, because the feed keeps intraday bars for
+     * about sixty days: a call nobody happens to look at inside that window becomes permanently
+     * unorderable, and the reader has no way of knowing a clock was running. Sessions already asked
+     * about are skipped inside the repository, so a record full of genuinely unorderable calls
+     * costs one query and no requests.
+     *
+     * Returns whether anything new arrived, so the caller re-scores only when it would say
+     * something different. Failures are swallowed: an ambiguous call is the state the record is
+     * already in, and a network error raised over an attempt to improve it is about something
+     * nobody asked for.
+     */
+    private suspend fun resolveUnorderedSessions(): Boolean {
+        val unordered = performance.sessions
+            .asSequence()
+            .flatMap { it.calls.asSequence() }
+            .filter { it.outcome == Outcome.AMBIGUOUS }
+            // The session it could not order is the one it settled on, which is the only date that
+            // needs bars - the rest of the window was ordered by the calendar.
+            .mapNotNull { call -> call.settledOn?.let { UnorderedSession(call.ticker, it) } }
+            .distinct()
+            .toList()
+        if (unordered.isEmpty()) return false
+        return runCatching {
+            intradayRepository.fetchMissing(unordered, LocalDate.now(ZoneId.of(EGX_ZONE)))
+        }.getOrDefault(0) > 0
+    }
+
     private suspend fun recomputePerformance() {
         val analyses = savedResults
         val window = appPreferences.scoringWindowSessions
         performance = withContext(Dispatchers.IO) {
             val breaks = localDataStore.priceBreakDates()
+            // Read once for the whole recompute. Only the sessions a call could not order on daily
+            // figures have bars at all, so this is a short table however long the record grows.
+            val bars = localDataStore.intradayBars()
+            // The exchange's calendar, not the phone's: a session dated today is still trading, so
+            // nothing it reports about itself is final.
+            val today = LocalDate.now(ZoneId.of(EGX_ZONE))
+            val latest = localDataStore.latestSessions().mapValues { (_, session) ->
+                LatestPrice(
+                    session = session,
+                    provisional = !session.date.isBefore(today) || session.inconsistent,
+                )
+            }
             PerformanceCalculator.report(
                 analyses = analyses,
                 pricesFrom = localDataStore.earliestSessionDate(),
@@ -1566,6 +1626,8 @@ class AppState(
                 sessionsFor = localDataStore::sessionsFrom,
                 pricedTickers = localDataStore.pricedTickers(),
                 priceBreaksFor = { ticker -> breaks[ticker].orEmpty() },
+                intradayFor = { ticker, date -> bars[ticker to date].orEmpty() },
+                latestPrices = latest,
             )
         }
     }

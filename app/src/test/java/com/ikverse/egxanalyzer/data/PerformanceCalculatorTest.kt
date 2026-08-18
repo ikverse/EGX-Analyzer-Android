@@ -16,7 +16,7 @@ import java.time.Instant
 import java.time.LocalDate
 
 class PerformanceCalculatorTest {
-    private val called = LocalDate.of(2026, 7, 20)
+    private val called = LocalDate.of(2026, 8, 10)
 
     @Test
     fun `the same call saved by several runs is counted once`() {
@@ -43,7 +43,7 @@ class PerformanceCalculatorTest {
         // The first run named two stocks, the second only one. The later run is the considered
         // view, so the stock it dropped does not survive from the earlier attempt.
         val first = analysis(id = 1, extraTicker = "COMI")
-        val second = analysis(id = 2, ranAt = Instant.parse("2026-07-20T12:00:00Z"))
+        val second = analysis(id = 2, ranAt = Instant.parse("2026-08-10T12:00:00Z"))
 
         val report = PerformanceCalculator.report(
             analyses = listOf(first, second),
@@ -64,7 +64,7 @@ class PerformanceCalculatorTest {
         // The whole point of keying coverage per chat: a rerun over one chat must not erase what
         // another chat said about the same session.
         val broad = analysis(id = 1, secondChannel = "Second channel", extraTicker = "COMI")
-        val narrow = analysis(id = 2, ranAt = Instant.parse("2026-07-20T12:00:00Z"))
+        val narrow = analysis(id = 2, ranAt = Instant.parse("2026-08-10T12:00:00Z"))
 
         val report = PerformanceCalculator.report(
             analyses = listOf(broad, narrow),
@@ -196,6 +196,54 @@ class PerformanceCalculatorTest {
         assertEquals(12.87, report.sessions.flatMap { it.calls }.single().peakHigh!!, 0.0001)
     }
 
+    @Test
+    fun `calls made before the analysis floor are left out however far the prices reach`() {
+        // The record starts on a date, not wherever the oldest stored price happens to sit. Prices
+        // from before it are still on disk - a split check compares against them - and no call is
+        // judged on them.
+        val old = PerformanceCalculator.ANALYSIS_START.minusDays(1)
+        val report = PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1, targetDate = old)),
+            pricesFrom = old.minusMonths(6),
+            windowSessions = 10,
+            sessionsFor = { _, _ -> listOf(sessions(12.5).single().copy(date = old)) },
+        )
+
+        assertEquals(0, report.tracked)
+        assertEquals(emptyList<Any>(), report.sessions)
+    }
+
+    @Test
+    fun `the starting line is the floor rather than the earliest call behind it`() {
+        // Derived from the calls, this was null exactly when nothing had been scored - which is the
+        // one case the empty state needs it for, so it could never name the date it was waiting on.
+        val report = PerformanceCalculator.report(
+            analyses = emptyList(),
+            pricesFrom = PerformanceCalculator.ANALYSIS_START.minusMonths(6),
+            windowSessions = 10,
+            sessionsFor = { _, _ -> emptyList() },
+        )
+
+        assertEquals(PerformanceCalculator.ANALYSIS_START, report.scoringSince)
+    }
+
+    @Test
+    fun `a filter does not move the starting line`() {
+        // Every other figure on the report describes the calls on screen. This one is a property of
+        // the record, and recomputing it would have a filter claim the record began later.
+        val report = PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1)),
+            pricesFrom = called,
+            windowSessions = 10,
+            sessionsFor = { _, _ -> sessions(12.5) },
+        )
+
+        val narrowed = PerformanceCalculator.refine(report) { false }
+
+        assertEquals(0, narrowed.tracked)
+        assertEquals(report.scoringSince, narrowed.scoringSince)
+    }
+
     private fun sessions(high: Double) = listOf(
         DailySession("AMOC", called, high = high, low = 9.9, close = high, volume = 1000.0, open = 9.9),
     )
@@ -206,7 +254,9 @@ class PerformanceCalculatorTest {
         entryLow: Double? = 9.8,
         entryHigh: Double? = 10.0,
         stopLoss: Double? = 9.0,
-        ranAt: Instant = Instant.parse("2026-07-20T09:00:00Z"),
+        ranAt: Instant = Instant.parse("2026-08-10T09:00:00Z"),
+        /** The session the run was aimed at, so a fixture can sit below the analysis floor. */
+        targetDate: LocalDate = called,
         /** A second stock this run named, to show a rerun dropping it. */
         extraTicker: String? = null,
         /** The same stock quoted again by another channel in the same run. */
@@ -222,7 +272,7 @@ class PerformanceCalculatorTest {
             recommendations = emptyList(),
             // The session the run was aimed at, which is what a call is dated by and what the
             // Insights cards group on.
-            recommendationTargetDate = called,
+            recommendationTargetDate = targetDate,
             completedAt = ranAt,
             inquiryReplyCount = 0,
             sources = listOfNotNull(
@@ -231,7 +281,7 @@ class PerformanceCalculatorTest {
                     channelId = 1,
                     channelName = channel,
                     messageId = 42,
-                    timestamp = Instant.parse("2026-07-20T10:00:00Z"),
+                    timestamp = Instant.parse("2026-08-10T10:00:00Z"),
                     contentType = AnalysisContentType.TEXT,
                     preview = "",
                 ),
@@ -241,7 +291,7 @@ class PerformanceCalculatorTest {
                         channelId = 2,
                         channelName = it,
                         messageId = 43,
-                        timestamp = Instant.parse("2026-07-20T10:05:00Z"),
+                        timestamp = Instant.parse("2026-08-10T10:05:00Z"),
                         contentType = AnalysisContentType.TEXT,
                         preview = "",
                     )

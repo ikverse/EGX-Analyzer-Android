@@ -868,6 +868,13 @@
   "verified": "price"
  },
  {
+  "egx": "MBEG",
+  "yahoo": "EGS221V1C015.CA",
+  "isin": "EGS221V1C015",
+  "company": "M.B Engineering",
+  "verified": "price"
+ },
+ {
   "egx": "MBSC",
   "yahoo": "EGS3C371C019.CA",
   "isin": "EGS3C371C019",
@@ -1447,6 +1454,13 @@
   "isin": "EGS69082C013",
   "company": "Valmore Holding",
   "verified": "name"
+ },
+ {
+  "egx": "VLMRA",
+  "yahoo": "EGS69081C023.CA",
+  "isin": "EGS69081C023",
+  "company": "Valmore Holding",
+  "verified": "price"
  },
  {
   "egx": "WCDF",

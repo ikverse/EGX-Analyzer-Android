@@ -88,10 +88,12 @@ data class ChannelScore(
 data class PerformanceReport(
     val windowSessions: Int,
     /**
-     * The earliest call actually scored, not the earliest stored price.
+     * The session scoring starts from: the later of the first stored price and the analysis floor.
      *
-     * Reporting the price history's start claimed a month of coverage that no saved call came
-     * anywhere near, which read as though the figures rested on far more than they did.
+     * The starting line rather than the earliest call behind it. Derived from the calls, this was
+     * null exactly when no call had been scored - which is the one case the screen needs it for, so
+     * the empty state could never name the date it was waiting on. Null now means only that no
+     * price has ever been stored.
      */
     val scoringSince: LocalDate? = null,
     /** Stocks with no stored price at all, so a refresh is the missing step. */
@@ -114,6 +116,35 @@ data class PerformanceReport(
     val byOutcome: Map<Outcome, Int> = emptyMap(),
     val channels: List<ChannelScore> = emptyList(),
     val sessions: List<ScoredSession> = emptyList(),
+    /**
+     * Where each stock stands now, as of the last refresh.
+     *
+     * A property of the stock rather than of any one call, so it is held once here and read by
+     * ticker. Taking it from a call's own sessions would give the end of that call's window, which
+     * for anything already settled is not the current price at all.
+     */
+    val latestPrices: Map<String, LatestPrice> = emptyMap(),
+) {
+    /**
+     * The newest session any stock has a price for.
+     *
+     * Derived from the prices themselves rather than from the day a refresh last ran: a refresh
+     * records that it went out, not that it came back with anything, and on a day the exchange did
+     * not trade the two are a day or more apart.
+     */
+    val pricesTo: LocalDate? get() = latestPrices.values.maxOfOrNull { it.session.date }
+}
+
+/**
+ * The newest stored session for one stock, and whether it can be trusted as final.
+ *
+ * [provisional] is what stops the card stating a price that is still moving as though the market
+ * had closed on it. A session in progress is also where the feed contradicts itself - a close below
+ * the day's own low - so the flag covers a row that is wrong as well as one that is merely early.
+ */
+data class LatestPrice(
+    val session: DailySession,
+    val provisional: Boolean,
 )
 
 /**

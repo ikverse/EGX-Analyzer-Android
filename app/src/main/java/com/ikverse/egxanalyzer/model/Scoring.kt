@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.model
 
+import java.time.Instant
 import java.time.LocalDate
 
 /**
@@ -67,6 +68,59 @@ object Scoring {
          * Empty by default, so a caller with no price history to consult scores exactly as before.
          */
         priceBreaks: Set<LocalDate> = emptySet(),
+        /**
+         * Five-minute bars for a session, where any have been fetched.
+         *
+         * Consulted only for the one session a call cannot order on its own, so this is a lambda
+         * rather than a map: for almost every call it is never asked at all. Empty by default, so a
+         * caller with no intraday history scores exactly as before.
+         */
+        intradayFor: (LocalDate) -> List<IntradayBar> = { emptyList() },
+    ): Scored {
+        val fullTargetLevel = target2 ?: target1
+        val partialTargetLevel = target1.takeIf { target2 != null }
+        val plain = walk(
+            sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, priceBreaks,
+        ) { day ->
+            resolveFromBars(
+                intradayFor(day.date), entryLow, entryHigh, partialTargetLevel, fullTargetLevel,
+            )
+        }
+        if (plain.outcome != Outcome.AMBIGUOUS) return plain
+
+        // Neither the open nor the bars could order that session, but the rest of the window often
+        // makes the question moot. The entry is a fact of the session either way - its low traded
+        // through the band - so the reader holds from its close whichever way round it happened,
+        // and only that day's own target is in doubt. Score it both ways: where the two agree there
+        // is nothing left to be ambiguous about.
+        val entryFirst = walk(
+            sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, priceBreaks,
+        ) { Ordering.ENTRY_FIRST }
+        val targetFirst = walk(
+            sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, priceBreaks,
+        ) { Ordering.TARGET_FIRST }
+        // The pessimistic run is the one reported. Where the two agree it is also the later of the
+        // two, since it never credits the unproven target - so this is the conservative settlement
+        // date as well as the conservative reading.
+        return if (entryFirst.outcome == targetFirst.outcome) targetFirst else plain
+    }
+
+    /**
+     * One pass over the window under a single answer to "which of the two came first".
+     *
+     * [ordering] is asked only about the session that first offered the entry and reached a target
+     * on the same day, and only when the open cannot settle it for free.
+     */
+    private fun walk(
+        sessions: List<DailySession>,
+        entryLow: Double?,
+        entryHigh: Double?,
+        target1: Double?,
+        target2: Double?,
+        stopLoss: Double?,
+        windowSessions: Int,
+        priceBreaks: Set<LocalDate>,
+        ordering: (DailySession) -> Ordering,
     ): Scored {
         val window = clampWindow(windowSessions)
         // A session in progress can arrive with a high or low of zero. Stored once, it stopped
@@ -144,12 +198,27 @@ object Scoring {
                         )
                     }
                     // The entry first became available on the same session a target was reached.
-                    // Only the open can order those, since it precedes every other price of the day.
+                    // The open orders those for free where it already sits inside the band; failing
+                    // that it takes the bars, and failing those the caller's assumption.
                     if (enteredHere && !day.buyableAtOpen(entryLow, entryHigh)) {
-                        return Scored(
-                            Outcome.AMBIGUOUS, day.date, null, elapsed, peak, peakOn, trough,
-                            troughOn, null, ambiguity = Ambiguity.ENTRY_AND_TARGET,
-                        )
+                        when (val order = ordering(day)) {
+                            // The band traded before the high, so the target counts and this
+                            // session is scored exactly as an unambiguous one would be.
+                            Ordering.ENTRY_FIRST -> Unit
+                            // The target was reached before the band ever traded, so the reader
+                            // could not have been in for it. They are in from here on - which is
+                            // what leaving `entered` set says - but this target is not theirs.
+                            Ordering.TARGET_FIRST -> return@forEachIndexed
+                            Ordering.SAME_BAR, Ordering.NO_DATA -> return Scored(
+                                Outcome.AMBIGUOUS, day.date, null, elapsed, peak, peakOn, trough,
+                                troughOn, null,
+                                ambiguity = if (order == Ordering.SAME_BAR) {
+                                    Ambiguity.SAME_INTRADAY_BAR
+                                } else {
+                                    Ambiguity.ENTRY_AND_TARGET
+                                },
+                            )
+                        }
                     }
                 }
 
@@ -225,12 +294,61 @@ object Scoring {
     )
 
     /** The session traded through the entry band at some point. */
-    private fun DailySession.touchedEntry(low: Double?, high: Double?): Boolean {
+    private fun DailySession.touchedEntry(low: Double?, high: Double?): Boolean =
+        traded(this.low, this.high, low, high)
+
+    /** The same question of one intraday bar, so a bar and a session cannot answer it differently. */
+    private fun IntradayBar.touchedEntry(low: Double?, high: Double?): Boolean =
+        traded(this.low, this.high, low, high)
+
+    /** Whether a low/high pair overlaps the entry band, at the precision the feed can be trusted to. */
+    private fun traded(barLow: Double?, barHigh: Double?, low: Double?, high: Double?): Boolean {
         val boundLow = low ?: high ?: return false
         val boundHigh = high ?: low ?: return false
-        if (this.low == null || this.high == null) return false
-        return this.low.atMost(maxOf(boundLow, boundHigh)) &&
-            this.high.atLeast(minOf(boundLow, boundHigh))
+        if (barLow == null || barHigh == null) return false
+        return barLow.atMost(maxOf(boundLow, boundHigh)) &&
+            barHigh.atLeast(minOf(boundLow, boundHigh))
+    }
+
+    /**
+     * Which of the entry and the target came first, as far as anything can say.
+     *
+     * [SAME_BAR] and [NO_DATA] are both "unknown" to the scorer and differ only in what the card is
+     * then able to tell the reader: one means the feed was asked and could not separate them, the
+     * other that it was never asked or had nothing left to give.
+     */
+    private enum class Ordering { ENTRY_FIRST, TARGET_FIRST, SAME_BAR, NO_DATA }
+
+    /**
+     * Reads the real order off a session's intraday bars.
+     *
+     * The first bar whose range covers the buy zone against the first bar whose high reaches a
+     * target: at five minutes these are almost never the same bar, and when they are the session
+     * genuinely cannot be ordered any finer than the feed offers.
+     *
+     * A bar that reaches a target without the band ever trading is not an answer either - the entry
+     * has to have happened for the question to arise - so a missing side reads as no data rather
+     * than as the other side winning.
+     */
+    private fun resolveFromBars(
+        bars: List<IntradayBar>,
+        entryLow: Double?,
+        entryHigh: Double?,
+        partialTarget: Double?,
+        fullTarget: Double?,
+    ): Ordering {
+        if (bars.isEmpty()) return Ordering.NO_DATA
+        val ordered = bars.sortedBy(IntradayBar::at)
+        val entryAt = ordered.indexOfFirst { it.touchedEntry(entryLow, entryHigh) }
+        val targetAt = ordered.indexOfFirst {
+            reached(it.high, fullTarget) || (partialTarget != null && reached(it.high, partialTarget))
+        }
+        return when {
+            entryAt < 0 || targetAt < 0 -> Ordering.NO_DATA
+            entryAt < targetAt -> Ordering.ENTRY_FIRST
+            targetAt < entryAt -> Ordering.TARGET_FIRST
+            else -> Ordering.SAME_BAR
+        }
     }
 
     /**
@@ -350,6 +468,28 @@ data class DailySession(
             close = close?.takeIf { it > 0.0 },
             open = open?.takeIf { it > 0.0 },
         )
+
+    /**
+     * The row does not hang together: no close, or a close outside its own high and low.
+     *
+     * A session still trading reports exactly this. GBCO came back on 16 August with a close of
+     * 30.16 beneath a low of 30.31, because the session had not finished and the two fields were
+     * written at different moments. It is a second, feed-side sign of the same thing the session
+     * date says, and it catches the case where the phone's calendar and the exchange's disagree.
+     *
+     * The slack is the feed's own 32-bit precision, not a tolerance: a close genuinely at the high
+     * must not read as being above it.
+     */
+    val inconsistent: Boolean
+        get() {
+            val settled = close ?: return true
+            return (high != null && settled > high * (1 + FLOAT_NOISE)) ||
+                (low != null && settled < low * (1 - FLOAT_NOISE))
+        }
+
+    private companion object {
+        const val FLOAT_NOISE = 1e-6
+    }
 }
 
 /**
@@ -362,7 +502,28 @@ data class DailySession(
 enum class Ambiguity {
     /** The buy zone first opened on the day a target was reached, above the zone. */
     ENTRY_AND_TARGET,
+
+    /**
+     * The bars were read and both events fall inside the same five-minute bar.
+     *
+     * As far as this feed goes the two are simultaneous. Kept apart from [ENTRY_AND_TARGET] because
+     * the two ask for different things: that one may be answerable by fetching, this one never is.
+     */
+    SAME_INTRADAY_BAR,
 }
+
+/**
+ * One intraday bar, fine enough to order two events inside a session.
+ *
+ * Only the extremes are kept. The open and the close of a five-minute bar say nothing the high and
+ * the low do not already say about whether a level was touched inside it.
+ */
+data class IntradayBar(
+    val ticker: String,
+    val at: Instant,
+    val high: Double?,
+    val low: Double?,
+)
 
 data class Scored(
     val outcome: Outcome,

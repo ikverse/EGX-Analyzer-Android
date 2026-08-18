@@ -78,6 +78,7 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   image it is citing, which produced exclusions naming the wrong card.
 - `data/ConsolidatedParser.kt` — the model's JSON into `ConsolidatedRecommendation`.
 - `model/Scoring.kt` — how a call is judged. See below.
+- `data/IntradayRepository.kt` — five-minute bars for the sessions daily figures cannot order.
 - `data/PerformanceCalculator.kt` — per-channel and per-session rollups, and the ranking.
 - `data/PortfolioCalculator.kt` + `model/Position.kt` — the trades the user actually took. See below.
 - `data/AnalysisPolicy.kt` + `data/RuleSet.kt` + `data/BuiltInRules.kt` — the local wording filter.
@@ -94,6 +95,15 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 A call is replayed over the next N trading sessions (`Scoring.DEFAULT_WINDOW_SESSIONS` is 10,
 adjustable in Settings).
 
+- **The record starts on `PerformanceCalculator.ANALYSIS_START`, 3 August 2026.** Everything before
+  it came from testing the extraction rather than from reading the market, and a rate resting on it
+  describes the test. A constant and not a setting: a floor that can be dragged is a floor that
+  silently rewrites every figure the app has ever shown. Prices from before it are still fetched and
+  still stored — a split check compares against them — and no call is judged on them. The rows are
+  **filtered, not deleted**; reversing a filter costs nothing and un-deleting a year of prices is
+  not possible. `scoringSince` is that floor rather than the earliest call behind it: derived from
+  the calls it was null exactly when nothing had been scored, which is the one case the empty state
+  needs it for, so the screen could never name the date it was waiting on.
 - The entry must trade before anything else counts.
 - A stop counts as broken only past **2%** — the channels themselves say
   `يتاكد بالكسر بنسبة 2%`. Applying it turned 26 stop-outs into 7.
@@ -115,6 +125,57 @@ adjustable in Settings).
   the split, and it is the right direction to err in.
 - A channel needs `MINIMUM_JUDGED_TO_RANK` (5) settled calls before its rate is allowed to lead.
   Without it, two good calls beat a month of evidence.
+
+### Ordering the two events inside one session
+
+A session that first offered the entry **and** reached a target says nothing about which came first,
+and crediting the target would credit a call nobody could have taken — the price may only have
+fallen into the buy zone after the target was hit. Three answers are tried, cheapest first.
+
+- **The open**, where it already sits inside the band. It precedes every other price of the day, so
+  it settles the order for free. Unchanged, and still the first thing asked.
+- **Five-minute bars for that one session**, fetched by `IntradayRepository` and stored in
+  `intraday_bars`. The first bar covering the buy zone against the first bar reaching the target.
+  Bars are kept **only for sessions a call could not order**, and only their high and low: a year of
+  five-minute bars for two hundred stocks is millions of rows to answer a question that arises a
+  handful of times. A closed session's bars never change, so a row is written once and never
+  refreshed, and a heal (`clearIntraday`) drops them with the prices — a split rewrites the intraday
+  history too, and bars kept across one are in the old money.
+- **Scoring the window both ways.** The entry is a fact of that session under either reading, since
+  its low traded through the band, so the reader holds from its close whichever way round it
+  happened and only that day's own target is in doubt. Score it as entry-first and as target-first:
+  where the two agree there is nothing left to be ambiguous about, and the **pessimistic run is
+  reported** — where they agree it is also the later settlement date, because it never credits the
+  unproven target. `AMBIGUOUS` survives only when the two genuinely disagree.
+
+Fetching happens on the **daily refresh, not when a card is opened**. The feed keeps five-minute
+bars for about 60 days, so a call nobody looks at inside that window becomes permanently unorderable
+with no sign that a clock was running. `intraday_fetches` records that a session was asked about
+**even when nothing came back**, or the sessions past the retention wall — exactly the ones with
+nothing to give — are re-requested on every refresh forever.
+
+`Ambiguity` now has two values, because they ask for different things: `ENTRY_AND_TARGET` may still
+be answerable by fetching, `SAME_INTRADAY_BAR` never will be.
+
+### Where the stock is now
+
+Every other figure on a call's card stops short of saying it: peak and trough are the extremes of
+the window, and the return is measured to wherever the call settled — so a card could report a
+target hit three weeks ago and give no clue what the price has done since. **Latest close** is that
+figure, with its session date and the move from the entry midpoint under it.
+
+- It comes from `PerformanceReport.latestPrices`, keyed by ticker and filled from
+  `LocalDataStore.latestSessions()`. A property of the **stock**, not of any one call: taking it
+  from `ScoredCall.sessions` would give the end of that call's window, which for anything settled is
+  not the current price. `refine` leaves it alone, so a filtered view still knows where its stocks
+  stand.
+- **"prices to \<date\>" on the page comes from the prices themselves**, not from
+  `lastPriceRefreshDay` — that records a refresh going out, not coming back with anything, and on a
+  day the exchange did not trade the two are days apart.
+- A session dated today is marked **"still trading"**, because it is: the close is going to move.
+  `DailySession.inconsistent` catches the same thing from the other side — GBCO came back on 16
+  August with a close of 30.16 beneath a low of 30.31, the two fields written at different moments
+  of an unfinished session.
 
 ## The portfolio
 
@@ -280,6 +341,22 @@ through the filter dropdowns on row 1.
   not only by asserting on our own XML: a hand-written workbook that Excel rejects says so with one
   dialog and no reason, which no test over our own strings would catch.
 
+## Reading a problem off a device
+
+**Settings → About → Save diagnostics** copies `egx_analyzer.db` into Downloads, from where
+`adb pull //sdcard/Download/egx-diagnostics-<date>.db` reaches it. It exists because there is no
+other way off a release-signed build: `run-as` refuses a package that is not debuggable,
+`adb backup` is closed by `android:allowBackup="false"`, and installing a debug build to get at the
+data means uninstalling this one and taking the record with it.
+
+- It goes through the **same `writeToDownloads` as the spreadsheet export** — `IS_PENDING` until
+  whole, entry deleted on failure, and the message names what Downloads actually created.
+- **`checkpoint()` first, and it is not optional.** SQLite runs in write-ahead mode, so the newest
+  commits sit in a `-wal` sidecar until something folds them in — copying the database alone hands
+  over a record missing exactly the recent activity worth asking about.
+- **No credential travels in it.** Provider keys and the Telegram database key are encrypted by
+  Android Keystore in their own preferences file and have never been in this database.
+
 ## Wording rules and the generated prompt
 
 The 21 Arabic and English phrases that drop old or already-hit cards used to be Kotlin lists. They
@@ -432,7 +509,7 @@ phone only by plugging it into the machine that built it. It reads one public UR
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 12.
+  `onUpgrade`. Currently 13.
 - **Migrations are tested** — `LocalDataStoreMigrationTest` runs under Robolectric, which supplies
   enough of Android for a real SQLite database in a plain unit test. It writes the version-9 table
   by hand and upgrades it, deliberately: a test that builds its "old" schema from today's code
@@ -458,6 +535,26 @@ phone only by plugging it into the machine that built it. It reads one public UR
   rather than corrected: guessing a ratio and rescaling a year of prices would be the app inventing
   history. Breaks are **local and deliberately not synced** — every device fetches the same public
   feed and reaches the same conclusion, and a device's opinion about a feed is not evidence.
+- **The ISIN feed's *daily* endpoint serves only the newest session; its *intraday* endpoint holds
+  the history.** Measured 19 August 2026 across all 262 Cairo listings: 257 returned exactly one
+  daily session and 236 of those only that day — `^CASE30` included, so it is no longer the way to
+  ask whether the exchange traded. The same symbols answer `interval=5m` with about four weeks and
+  `interval=1h` with about two years. History therefore comes from the **legacy `SYMBOL.CA`** feed,
+  which is alive and deep (25 sessions in a 40-day window), and the ISIN symbol contributes the
+  current session. This is why `fetchAllFeeds` must keep reading both — dropping the legacy feed
+  would leave every stock with a one-day history.
+- **A stock with no legacy symbol can never build a daily history.** VLMRA is the case: `VLMRA.CA`
+  is a 404, so the merge has only the ISIN feed's single session and a call made on it keeps a
+  permanent hole in its window — which never completes, so the call never expires. The data does
+  exist on the 5m feed and could be aggregated into daily bars; nothing does that yet.
+- **The legacy `SYMBOL.CA` feed ignores `interval` and answers with daily rows.** Nothing in the
+  response shape says so — only `meta.dataGranularity` does. Taken at face value, the one daily bar
+  it returns would be read as the whole session and would "prove" that the entry and the target
+  happened at the same instant: a confident verdict on a question the feed was never asked.
+  `parseIntradayBars` checks the granularity and refuses anything that is not `5m`, and intraday is
+  only ever requested against the ISIN symbol. Also measured: a 5m window reaching back **59 days
+  answers, 90 days is refused outright with HTTP 422** rather than trimmed, so the window has to be
+  clamped by the caller or the whole request fails.
 - **A frozen feed is not the same as an unpriced stock, and is harder to see.** `unpriced` means no
   history at all; `stale` means the series answers every request while its newest session stays put.
   That has happened here — the ISIN migration — and nothing noticed. Seven days, which clears the

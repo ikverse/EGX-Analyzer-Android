@@ -66,7 +66,9 @@ import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import com.ikverse.egxanalyzer.model.ThemeMode
 import com.ikverse.egxanalyzer.model.ResponseTimeout
 import com.ikverse.egxanalyzer.model.RuleOrigin
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 @Composable
@@ -527,6 +529,7 @@ internal fun SettingsScreen(appState: AppState) {
                     )
                 }
                 UpdateControls(appState)
+                DiagnosticsControl(appState)
             }
         }
 
@@ -551,6 +554,64 @@ internal fun SettingsScreen(appState: AppState) {
                 }
             }
         }
+    }
+}
+
+/**
+ * Puts this device's record into Downloads, so a problem can be read off the phone that has it.
+ *
+ * The only way off a release-signed build: `run-as` refuses a package that is not debuggable and
+ * `adb backup` is closed by `allowBackup="false"`, while installing a debug build to get at the
+ * data would mean uninstalling this one and taking the data with it.
+ *
+ * Off the main thread - it copies a file that grows with the record - and nothing opens afterwards,
+ * so the status message is the only sign it worked. It names what Downloads actually created, which
+ * differs from what was asked for the second time it is saved on one day.
+ */
+@Composable
+private fun DiagnosticsControl(appState: AppState) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var saving by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        OutlinedButton(
+            enabled = !saving,
+            onClick = {
+                scope.launch {
+                    saving = true
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            saveDatabaseToDownloads(
+                                context,
+                                appState.databaseFile(),
+                                appState::checkpointDatabase,
+                            )
+                        }
+                    }
+                        .onSuccess {
+                            appState.statusMessage =
+                                StatusMessage("Saved to Downloads/$it", succeeded = true)
+                        }
+                        .onFailure {
+                            appState.statusMessage = StatusMessage(
+                                it.message?.takeIf(String::isNotBlank)
+                                    ?: "Could not save diagnostics",
+                                succeeded = false,
+                            )
+                        }
+                    saving = false
+                }
+            },
+        ) {
+            Text(if (saving) "Saving…" else "Save diagnostics")
+        }
+        Text(
+            "Copies this device's saved record into Downloads. No provider key and no Telegram " +
+                "key travels in it - those are encrypted separately by Android Keystore and have " +
+                "never been part of it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -101,6 +101,7 @@ class PriceRepository(
             fetched.filter(Fetched::healed).forEach { result ->
                 localDataStore.deleteSessions(result.ticker)
                 localDataStore.clearPriceBreaks(result.ticker)
+                localDataStore.clearIntraday(result.ticker)
             }
             if (stored.isNotEmpty()) localDataStore.saveSessions(stored, SOURCE)
             localDataStore.savePriceBreaks(fetched.flatMap(Fetched::breaks))
@@ -349,5 +350,5 @@ class PriceRepository(
  * call on that stock was judged stopped by a session that had not happened. No EGX stock trades at
  * or below nothing, which makes this safe to read as "not known".
  */
-private fun JSONArray.price(index: Int): Double? =
+internal fun JSONArray.price(index: Int): Double? =
     optDouble(index).takeUnless { it.isNaN() || it <= 0.0 }
