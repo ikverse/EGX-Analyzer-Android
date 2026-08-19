@@ -93,6 +93,14 @@ internal fun PortfolioScreen(appState: AppState) {
             return@Screen
         }
 
+        // Above the record rather than below it: this is the one thing on the screen asking to be
+        // acted on, and the record is reference. Built from the whole portfolio, so a date chosen
+        // in the filter below cannot hide a trade that is late.
+        OverdueCard(
+            overdue = remember(portfolio) { overdueRoster(portfolio.positions) },
+            onOpen = appState::openPosition,
+        )
+
         PortfolioSummary(portfolio.stats)
 
         PositionSection(groups = portfolio.groups, appState = appState)
@@ -117,15 +125,9 @@ private fun ColumnScope.PortfolioSummary(stats: PortfolioStats) {
             // Settled rather than closed: it counts the expired trades too, and the card below this
             // one now keeps "closed" for the ones that ended somewhere in particular.
             StatTile(stats.settledCount.toString(), "settled")
-            // Only when there is one. A permanent "0 overdue" is a figure nobody reads, and this
-            // tile earns its place by being unusual.
-            if (stats.overdueCount > 0) {
-                StatTile(
-                    stats.overdueCount.toString(),
-                    "overdue",
-                    tone = MaterialTheme.colorScheme.error,
-                )
-            }
+            // No overdue tile. The card above this one names the trades themselves, in the same
+            // view, and a count of the same thing beside it is a figure the reader has to
+            // reconcile against a list that already says more than it does.
             StatTile(
                 formatPercent(stats.settledReturnPct),
                 "average settled",
@@ -156,6 +158,127 @@ private fun ColumnScope.PortfolioSummary(stats: PortfolioStats) {
         }
     }
 }
+
+/**
+ * The trades that ran out of time, said before anything on this screen has been opened.
+ *
+ * Overdue is the only state in the app that asks the user for something, and until now it was only
+ * ever found: a count in the record card, then a scroll through folded sessions looking for the
+ * cards it was counting. Each tile carries what a decision needs - which stock, how late, when it
+ * was bought, and whether the deadline closed it or the user is holding it deliberately - and
+ * presses through to the trade itself.
+ *
+ * Absent entirely when nothing is late, exactly as the tile it replaces was. A card reading "no
+ * overdue trades" is a permanent reminder of a state the app is not in.
+ */
+@Composable
+private fun OverdueCard(overdue: List<PositionView>, onOpen: (String) -> Unit) {
+    if (overdue.isEmpty()) return
+    SectionCard(title = "Overdue", icon = Icons.Outlined.HourglassEmpty) {
+        Text(
+            "Past the deadline with no sale recorded, and ended at neither target 2 nor the stop.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        BoxWithConstraints {
+            // Tiles rather than full-width rows, through the same helper the position cards use:
+            // two across on the cover screen, four on the Fold and the tablet. A trade that is late
+            // is not more urgent for being drawn a screen wide.
+            val columns = responsiveColumns(minColumnWidth = OverdueTileMinWidth, maxColumns = 4)
+            Column {
+                ResponsiveRows(overdue, columns, spacing = Space.s) { view, tileModifier ->
+                    OverdueTile(
+                        view = view,
+                        onOpen = { onOpen(view.position.id) },
+                        modifier = tileModifier,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One late trade, in four facts and a press.
+ *
+ * The day count is the only thing here in the error colour, and it carries no word beside it: "6d"
+ * in red under a heading that already says Overdue cannot be read as anything else, and the room
+ * that buys goes to the entry date - the one figure saying how long the trade has actually been
+ * held, which the session date the card opens into does not.
+ *
+ * The press is the trip a call in Insights already makes: [AppState.openPosition] hands the id to
+ * the arrival effect in [PositionSection], which clears the date filter only if it is what hides
+ * the trade, unfolds the session card, scrolls to it and flashes its edge. No second path to
+ * maintain, and no way for the two entrances to disagree about where a trade is.
+ */
+@Composable
+private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifier = Modifier) {
+    val meta = buildAnnotatedString {
+        withStyle(SpanStyle(color = MaterialTheme.colorScheme.error)) {
+            append("${view.overdueDays}d")
+        }
+        append(" · ${view.position.entryDate}")
+        // Kept open is the user holding on purpose; expired is the app having stopped tracking a
+        // trade they are still in. Without this the tile would claim the two are the same thing.
+        append(" · ${if (view.keptOpen) "kept open" else "expired"}")
+    }
+    Card(
+        onClick = onOpen,
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { onClick(label = "Open this trade", action = null) },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        border = cardOutline,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(
+            Modifier.padding(horizontal = Space.m, vertical = Space.s),
+            verticalArrangement = Arrangement.spacedBy(Space.xs),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(view.ticker, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    formatPercent(view.returnPct),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = PriceRole.forReturn(view.returnPct),
+                )
+                Icon(
+                    Icons.AutoMirrored.Outlined.ArrowForward,
+                    // Named by the press it belongs to, one level up; a reader announcing the glyph
+                    // as well would say it twice.
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = Space.xs).size(IconSize.Inline),
+                )
+            }
+            // One line, and the state word is what gives way on a tile too narrow to hold it all -
+            // it is the one fact here that the card's own heading half says already.
+            Text(
+                meta,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * The trades the card names, in the order it names them.
+ *
+ * Most overdue first, then by ticker, which is [PortfolioOrder.URGENT]s own rule for the positions
+ * inside a section: a card leading with a different one would disagree with the list beneath it.
+ * Read off the whole record rather than the filtered list - a date picked on the screen is a view
+ * of the positions, not a statement about which of them are late, which is the same reason the
+ * filter is kept out of `PortfolioCalculator` for the overdue notification.
+ */
+internal fun overdueRoster(positions: List<PositionView>): List<PositionView> =
+    positions
+        .filter(PositionView::overdue)
+        .sortedWith(compareByDescending<PositionView> { it.overdueDays }.thenBy { it.ticker })
 
 /**
  * The trades, one card per session the calls were made for.
@@ -825,3 +948,11 @@ private val PositionHeaderHeight = 52.dp
  * this was written for.
  */
 private val PositionCardMinWidth = 300.dp
+
+/**
+ * Narrow enough for two tiles on the 411dp cover screen, which is the tightest this app is read on.
+ *
+ * The page holds its content in by [Space.l] and the card by another, so two tiles land at about
+ * 165dp there - the same width they take on the Fold, where four fit across instead of two.
+ */
+private val OverdueTileMinWidth = 150.dp

@@ -237,6 +237,27 @@ trade is then managed, in whatever state it has reached.
   current date, which is what makes it right after a restart. A `LifecycleResumeEffect` in
   `MainActivity` recomputes when the app returns to the foreground, so a phone left on the Portfolio
   tab overnight does not go on showing yesterday's count.
+- **The Overdue card is the first thing on the tab**, above Your record, and it is absent whenever
+  nothing is late. Overdue was only ever *findable* before: a count in the record card, then a scroll
+  through folded sessions hunting for what it was counting. `overdueRoster` is the whole record
+  filtered and ordered most-overdue-then-ticker - `PortfolioOrder.URGENT`'s own rule, so the card
+  cannot lead with a trade the list beneath it disagrees about - and the record's `overdue` StatTile
+  is gone, because a count beside a list that names the same trades is a figure to reconcile.
+  Deliberately **not** narrowed by the date filter, for the reason `PortfolioCalculator` is not: a
+  date picked on screen is a view of the positions, not a claim about which are late.
+- One **tile** per late trade rather than a row, through the same `responsiveColumns`/`ResponsiveRows`
+  the position cards use - two across at 411dp, four on the Fold and the tablet. It carries ticker,
+  return so far, the day count and, in the space that saved, `position.entryDate` - **the entry date,
+  not the call's**, which is the one figure saying how long the trade has actually been held; the
+  session it opens into is titled by the call date, and on a trade bought late the two differ. The
+  day count is bare (`6d`) and the only thing in the error colour: under a heading reading Overdue it
+  cannot be read as anything else. `kept open` / `expired` is the fact that gives way if a tile is
+  too narrow, and it is there because the two are not the same - one is the user holding on purpose,
+  the other is the app having stopped tracking a trade they are still in.
+- A press calls **`AppState.openPosition`** - the same entrance a call in Insights uses - so the
+  arrival effect in `PositionSection` does the rest: clear the date filter only if it is what hides
+  the trade, unfold the session card, scroll, flash the edge. A second path would be a second way for
+  the app to disagree with itself about where a trade is.
 - **One card per session, holding that session's trades in every state**, with **Open**, **Expired**
   and **Closed** as sections inside it. A day's trades were one decision, and splitting them across
   an open list and a closed one meant scrolling to find the other half. **Every card starts
@@ -590,6 +611,11 @@ phone only by plugging it into the machine that built it. It reads one public UR
   `vX.Y.Z`, push both. The tag is the whole process — CI runs the tests, signs the release APKs, and
   publishes them as a GitHub release, which is where the app looks. A tag whose tests fail publishes
   nothing.
+- **The redesign was abandoned on 2026-08-19 — the shipping UI is the UI.** The three `next` bullets
+  that follow are kept as a record of how the side-by-side app worked, not as a live plan. `next`,
+  `src/next` and `src/current` are left in place but dormant: no new UI work goes into them, no
+  `-next` tag gets published, and UI changes are edits to `src/main/java/…/ui/`. Nothing here
+  affects `assembleDebug` or `assembleRelease`, which never compile `src/next`.
 - **A redesign is judged as a second app: the `next` build type.** Its own `applicationId`, launcher
   label (`EGX Next`) and splash ground, so it installs beside the real app rather
   than over it — the downgrade Android refuses. A tag ending `-next` runs `assembleNext` and
