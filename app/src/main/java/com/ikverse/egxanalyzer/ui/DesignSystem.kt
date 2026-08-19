@@ -164,7 +164,7 @@ object PriceRole {
      * Shared with the Excel export, which mixes it onto the page by hand because an xlsx font
      * colour carries no alpha. Two constants would drift apart the first time either was adjusted.
      */
-    const val DerivedAlpha = 0.6f
+    const val DerivedAlpha = com.ikverse.egxanalyzer.model.DERIVED_ALPHA
 
     @Composable
     fun forReturn(value: Double?): Color = when {

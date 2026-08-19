@@ -1,4 +1,4 @@
-package com.ikverse.egxanalyzer.ui
+package com.ikverse.egxanalyzer.data
 
 import android.content.ContentResolver
 import android.content.ContentValues
@@ -8,16 +8,12 @@ import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
-import com.ikverse.egxanalyzer.data.Cell
-import com.ikverse.egxanalyzer.data.CellAlign
-import com.ikverse.egxanalyzer.data.CellStyle
-import com.ikverse.egxanalyzer.data.Sheet
-import com.ikverse.egxanalyzer.data.SheetColumn
-import com.ikverse.egxanalyzer.data.XLSX_MIME_TYPE
-import com.ikverse.egxanalyzer.data.writeXlsx
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
+import com.ikverse.egxanalyzer.model.DERIVED_ALPHA
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.SavedAnalysis
+import com.ikverse.egxanalyzer.model.returnFrom
+import com.ikverse.egxanalyzer.model.timing
 import java.io.File
 import java.io.IOException
 import java.io.OutputStream
@@ -27,6 +23,12 @@ import kotlin.math.roundToInt
 
 /**
  * A saved report as a spreadsheet, in the colours the table draws it in.
+ *
+ * In `data/` rather than in `ui/`, and deliberately: nothing here draws anything. It builds a sheet,
+ * encodes an xlsx, and hands a file to MediaStore or to a chooser - which is data-layer work that
+ * two different user interfaces both need. Left under `ui/` it was reachable only by the UI that
+ * happened to be compiled, which made "export this report" a feature of one look rather than of the
+ * app.
  *
  * The sheet is the same table read the same way - what kind of call it is, what it asks you to pay,
  * what it is worth, what it risks, then the context behind it - with three deliberate differences,
@@ -316,14 +318,14 @@ private fun returnCell(point: RecommendationDataPoint, stated: Double?, target: 
  * [role] as the table softens a derived figure, mixed onto the page.
  *
  * An xlsx font colour carries no alpha, so the blend Compose does at draw time is done here instead,
- * against the white a spreadsheet is read on, at the same `PriceRole.DerivedAlpha` the table uses.
+ * against the white a spreadsheet is read on, at the same `DERIVED_ALPHA` the table uses.
  * Shared rather than a second set of constants, which would drift the first time either was
  * adjusted - the same reason `returnFrom` is shared and not copied.
  */
 private fun derivedTint(role: String): String = (1..3).joinToString("", prefix = "FF") { channel ->
     val start = channel * 2
     val value = role.substring(start, start + 2).toInt(16)
-    val mixed = value * PriceRole.DerivedAlpha + 0xFF * (1 - PriceRole.DerivedAlpha)
+    val mixed = value * DERIVED_ALPHA + 0xFF * (1 - DERIVED_ALPHA)
     "%02X".format(mixed.roundToInt())
 }
 

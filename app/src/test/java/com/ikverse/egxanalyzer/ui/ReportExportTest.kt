@@ -1,5 +1,8 @@
 package com.ikverse.egxanalyzer.ui
 
+import com.ikverse.egxanalyzer.data.exportFileName
+import com.ikverse.egxanalyzer.data.reportSheet
+
 import com.ikverse.egxanalyzer.data.Cell
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisResult

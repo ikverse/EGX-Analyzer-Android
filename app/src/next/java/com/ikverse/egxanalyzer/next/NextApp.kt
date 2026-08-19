@@ -1,164 +1,136 @@
 package com.ikverse.egxanalyzer.next
 
 import android.app.Activity
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.remember
+import com.ikverse.egxanalyzer.data.UpdateState
 import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppState
+import kotlin.math.roundToInt
 
 /**
- * EGX Analyzer NEXT — the redesign, before it has been designed.
+ * EGX Analyzer NEXT - the redesign, rebuilt from zero.
  *
- * **This is scaffolding, and it is meant to look like scaffolding.** It exists so the redesign has
- * somewhere to arrive one screen at a time: a second app on the phone, with its own data and its own
- * sync channel, that installs and runs today. Nothing here is a proposal. Every deliberate choice
- * about type, colour, shape, density and motion is the design work's to make, and making a
- * provisional one here would be the quickest way to have it copied.
+ * Everything a screen sits inside is here: the two authored grounds, the type scale, the spacing
+ * and motion vocabularies, and the shell that frames all five destinations at every width. And now
+ * the five destinations themselves, each in a file of its own, sharing one card, one chip, one
+ * figure treatment and one press - because this is one system rather than five screens.
  *
- * It draws Material's own defaults on purpose, unstyled and unloved, because that is the one look
- * nobody will mistake for a decision.
- *
- * What it does do is prove the wiring: five destinations, real counts read from the shared
- * [AppState], and a theme of its own that the design will replace. As each screen is designed, its
- * placeholder below gives way to a file of its own, and this shell gives way with them.
+ * It imports nothing from the shipping UI beyond [AppState] and [AppDestination]. Everything below
+ * the UI - the repositories, the scoring, the database - is shared; not one composable is. This
+ * import list is where that is enforced, and the day a screen appears in it, the redesign has
+ * started copying the thing it replaces.
  */
 @Composable
 internal fun NextApp(activity: Activity, appState: AppState) {
-    NextTheme {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Text("EGX Next", style = MaterialTheme.typography.titleLarge)
-                NextDestinationBar(appState)
-                Box(Modifier.fillMaxSize()) {
-                    NextScreen(appState.destination, appState)
-                }
+    NextTheme(activity = activity, themeMode = appState.appPreferences.themeMode) {
+        val colors = LocalNextColors.current
+        // Above the destination switch on purpose: leaving a tab disposes its screen, and a card
+        // the reader opened or a sheet they half filled in must not be a casualty of checking
+        // something on another tab. See NextPageState.
+        val page = remember { NextPageState() }
+        // A state, not a message. The rail says whether the app is working; what it is working on
+        // is the toast's business, and the failure's.
+        val status = if (appState.busyLabel != null) "running" else "idle"
+        NextShell(
+            destination = appState.destination,
+            onNavigate = appState::navigate,
+            status = status,
+            statusTone = if (appState.busyLabel != null) colors.accent else colors.target,
+            banner = updateBanner(appState),
+            toast = appState.statusMessage
+                ?.takeIf { it.succeeded }
+                ?.let { message ->
+                    ShellToast(
+                        text = message.text,
+                        action = ShellAction("Dismiss", appState::consumeStatusMessage),
+                    )
+                },
+            error = appState.statusMessage
+                ?.takeIf { !it.succeeded }
+                ?.let { message ->
+                    ShellError(
+                        kicker = "Stopped",
+                        title = message.text,
+                        // The provider's own sentence is already the whole of what is known.
+                        body = "",
+                        primary = null,
+                        dismiss = ShellAction("Dismiss", appState::consumeStatusMessage),
+                    )
+                },
+            modal = {
+                NextTradeSheets(appState, page)
+                NextResultSheets(appState, page)
+                NextAnalyzeSheets(appState, page)
+                NextRuleSheet(appState, page)
+                NextBuySheet(appState, page)
+            },
+        ) { contentPadding ->
+            when (appState.destination) {
+                AppDestination.PORTFOLIO ->
+                    NextPortfolioScreen(appState, page, contentPadding)
+
+                AppDestination.INSIGHTS ->
+                    NextInsightsScreen(appState, page, contentPadding)
+
+                AppDestination.RESULTS ->
+                    NextResultsScreen(activity, appState, page, contentPadding)
+
+                AppDestination.ANALYZE ->
+                    NextAnalyzeScreen(activity, appState, page, contentPadding)
+
+                AppDestination.SETTINGS ->
+                    NextSettingsScreen(activity, appState, page, contentPadding)
             }
         }
     }
 }
 
 /**
- * The five destinations as plain text buttons.
+ * The update, as the shell shows it.
  *
- * Not a bar, not a rail, and deliberately neither: choosing between them - and whether the answer is
- * either - is one of the first questions the redesign has to settle, and it is the one thing on
- * screen at every width. See the navigation shell section of the brief.
+ * Only the four states that are worth interrupting a reader for. Checking, up-to-date and idle are
+ * answers to a question asked in Settings and belong on that screen, not across the top of whatever
+ * this one is.
  */
 @Composable
-private fun NextDestinationBar(appState: AppState) {
-    Row(
-        Modifier.fillMaxWidth().selectableGroup(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        AppDestination.entries.forEach { destination ->
-            val selected = appState.destination == destination
-            Box(
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        if (selected) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainer
-                        },
-                    )
-                    .selectable(
-                        selected = selected,
-                        role = Role.Tab,
-                        onClick = { appState.navigate(destination) },
-                    )
-                    .padding(vertical = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    destination.shortLabel,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.onSecondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            }
-        }
-    }
-}
+private fun updateBanner(appState: AppState): ShellBanner? {
+    val colors = LocalNextColors.current
+    val later = ShellAction("Later", appState::dismissUpdate)
+    return when (val state = appState.updateState) {
+        is UpdateState.Available -> ShellBanner(
+            label = "Update",
+            text = "${state.update.versionName} available",
+            tone = colors.expired,
+            primary = ShellAction("Download") { appState.downloadUpdate(state.update) },
+            secondary = later,
+        )
 
-/**
- * What a destination draws until it has been designed.
- *
- * Each names itself, states the question it exists to answer - the same question the brief gives it
- * - and prints what the shared data layer actually holds for it right now. The counts are here to
- * prove the wiring: a placeholder reading "3 saved runs" on a phone with three saved runs says the
- * redesign is standing on the real app, not on fixtures.
- */
-@Composable
-private fun NextScreen(destination: AppDestination, appState: AppState) {
-    val (question, holding) = when (destination) {
-        AppDestination.ANALYZE ->
-            "What do I want read, and what will it cost me?" to
-                "${appState.channels.size} chats known"
-        AppDestination.RESULTS ->
-            "What did the model actually extract, and can I trust it?" to
-                "${appState.savedResults.size} saved runs"
-        AppDestination.INSIGHTS ->
-            "Which channels are worth following?" to
-                "${appState.performance.tracked} calls scored · " +
-                "${appState.performance.channels.size} sources"
-        AppDestination.PORTFOLIO ->
-            "What am I holding, and what needs attention today?" to
-                "${appState.portfolio.stats.openCount} open · " +
-                "${appState.portfolio.stats.settledCount} settled"
-        AppDestination.SETTINGS ->
-            "How is this thing configured?" to
-                "${appState.cloudConfiguration.provider.displayName} · ${appState.appPreferences.themeMode}"
-    }
-    Column(
-        Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(destination.label, style = MaterialTheme.typography.headlineMedium)
-        Text(
-            question,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        is UpdateState.Downloading -> ShellBanner(
+            label = "Update",
+            text = "${state.update.versionName} · ${(state.progress * 100).roundToInt()}%",
+            tone = colors.expired,
+            primary = null,
+            secondary = later,
         )
-        Text(holding, style = MaterialTheme.typography.bodyLarge)
-        Text(
-            "Not designed yet.",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.error,
-            textAlign = TextAlign.Start,
-            modifier = Modifier.fillMaxWidth(),
+
+        is UpdateState.Ready -> ShellBanner(
+            label = "Update",
+            text = "${state.update.versionName} ready to install",
+            tone = colors.expired,
+            primary = ShellAction("Install") { appState.installUpdate(state.file) },
+            secondary = later,
         )
+
+        is UpdateState.Failed -> ShellBanner(
+            label = "Update failed",
+            text = state.reason,
+            tone = colors.stop,
+            primary = null,
+            secondary = ShellAction("Dismiss", appState::dismissUpdate),
+        )
+
+        UpdateState.Idle, UpdateState.Checking, is UpdateState.UpToDate -> null
     }
 }

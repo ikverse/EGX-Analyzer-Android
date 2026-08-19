@@ -1,5 +1,8 @@
 package com.ikverse.egxanalyzer.ui
 
+import com.ikverse.egxanalyzer.model.returnFrom
+import com.ikverse.egxanalyzer.model.timing
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -353,17 +356,6 @@ private fun ReturnCell(point: RecommendationDataPoint, stated: Double?, target: 
  * worth would drift from this one the first time either is adjusted, and the two would then be
  * reporting different returns for the same row.
  */
-internal fun returnFrom(point: RecommendationDataPoint, target: Double?): Double? {
-    if (target == null) return null
-    val low = point.buyPriceLow ?: point.buyPrice
-    val high = point.buyPriceHigh ?: point.buyPrice
-    val entry = when {
-        low != null && high != null -> (low + high) / 2
-        else -> low ?: high ?: return null
-    }
-    if (entry == 0.0) return null
-    return (target - entry) / entry * 100
-}
 
 private fun entry(point: RecommendationDataPoint): String {
     val low = point.buyPriceLow
@@ -375,12 +367,6 @@ private fun entry(point: RecommendationDataPoint): String {
 }
 
 /** What dated this occurrence: the first thing read on a row, and the label on a card. */
-internal fun timing(point: RecommendationDataPoint): String? = when {
-    point.isWatching -> "Watching"
-    point.isTPlusOne -> "T+1"
-    point.effectiveDateBasis == "explicit_date" -> "Explicit date"
-    else -> point.effectiveDateBasis
-}
 
 private val PinnedWidth = 116.dp
 

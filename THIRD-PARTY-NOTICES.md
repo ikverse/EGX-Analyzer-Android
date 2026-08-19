@@ -2,7 +2,10 @@
 
 ## Fonts
 
-Three families are bundled in `app/src/main/res/font/` and drawn by `ui/theme/Type.kt`. All three
+Three families are bundled in `app/src/main/res/font/` and drawn by `ui/theme/Type.kt`. Two further
+weights of IBM Plex Mono sit in `app/src/next/res/font/`, where only the `next` build type picks them
+up — the redesign sets every figure at 600 and a rank number at 700, and the shipping app has no use
+for either, so they are kept out of its APK. All three families
 are licensed under the **SIL Open Font License, Version 1.1**, which permits bundling in an
 application, modification, and redistribution, and asks that the licence travel with the fonts —
 which is what this file is for. The full text is at <https://openfontlicense.org>.
@@ -11,7 +14,7 @@ which is what this file is for. The full text is at <https://openfontlicense.org
 |---|---|---|
 | **Cairo** | `cairo_semibold.ttf`, `cairo_bold.ttf` | [google/fonts `ofl/cairo`](https://github.com/google/fonts/tree/main/ofl/cairo) |
 | **IBM Plex Sans Arabic** | `plex_arabic_regular.ttf`, `plex_arabic_medium.ttf`, `plex_arabic_semibold.ttf` | [google/fonts `ofl/ibmplexsansarabic`](https://github.com/google/fonts/tree/main/ofl/ibmplexsansarabic) |
-| **IBM Plex Mono** | `plex_mono_regular.ttf`, `plex_mono_medium.ttf` | [google/fonts `ofl/ibmplexmono`](https://github.com/google/fonts/tree/main/ofl/ibmplexmono) |
+| **IBM Plex Mono** | `plex_mono_regular.ttf`, `plex_mono_medium.ttf`, `plex_mono_semibold.ttf`†, `plex_mono_bold.ttf`† | [google/fonts `ofl/ibmplexmono`](https://github.com/google/fonts/tree/main/ofl/ibmplexmono) |
 
 Copyright: Cairo — the Cairo Project Authors. IBM Plex Sans Arabic and IBM Plex Mono — IBM Corp.
 
@@ -23,7 +26,8 @@ Cairo ships upstream only as a variable font, `Cairo[slnt,wght].ttf`. The two fi
 touched, and no reserved font name is claimed. Instancing is what the OFL calls a modified version;
 the licence is unchanged and travels with them.
 
-The other five are upstream statics, byte for byte.
+The other seven are upstream statics, byte for byte. † marks the two that live under
+`app/src/next/res/font/` rather than `main`.
 
 ### Why these three, and not fewer
 

@@ -1,5 +1,7 @@
 package com.ikverse.egxanalyzer.ui
 
+import com.ikverse.egxanalyzer.data.saveDatabaseToDownloads
+
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
