@@ -234,6 +234,7 @@ private fun StockHeader(
     // Top-aligned so the right-hand column starts level with the ticker rather than floating
     // against the middle of however many name lines this stock happens to have.
     Row(verticalAlignment = Alignment.Top) {
+        StockLogo(stock.stockCode, LogoSize.Header, Modifier.padding(end = Space.m))
         Column(Modifier.weight(1f)) {
             Text(
                 stock.stockCode,

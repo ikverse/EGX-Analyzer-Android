@@ -77,7 +77,6 @@ import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SavedAnalysis
-import com.ikverse.egxanalyzer.model.WordingRule
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -155,7 +154,7 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
         val shown = remember(appState.savedResults, dateFilter, channelFilter, stockFilter, order) {
             // Normalized once for the whole list rather than once per run: the same question is put
             // to every stock of every saved analysis.
-            val wanted = WordingRule.normalize(stockFilter)
+            val wanted = StockSearch.query(stockFilter)
             appState.savedResults
                 .filter { saved ->
                     (
@@ -319,37 +318,6 @@ internal enum class RunOrder(val label: String, val comparator: Comparator<Saved
     ),
 }
 
-/**
- * Which chats a saved run covered.
- *
- * Taken from the selection the run recorded. Analyses saved before that was stored fall back to the
- * chats their rows actually name, which understates a run that read a chat and found nothing.
- */
-/**
- * Whether a stock answers to what was typed.
- *
- * Ticker, Arabic name and English name at once, because someone looking for a stock has whichever
- * of the three they happened to read. Arabic goes through the app's own normalizer, so `المصرية`
- * finds `المصريه` - without it a search only works when it repeats the exact spelling the channel
- * used.
- */
-internal fun ConsolidatedRecommendation.matches(normalizedQuery: String): Boolean {
-    if (normalizedQuery.isBlank()) return true
-    return listOfNotNull(stockCode, stockNameArabic, stockNameEnglish)
-        .any { WordingRule.normalize(it).contains(normalizedQuery) }
-}
-
-/**
- * Whether a saved run holds anything answering to what was typed.
- *
- * A run that holds nothing is hidden rather than listed empty: the screen is answering "which of my
- * analyses read this stock", and a card that opens onto no rows is a worse answer than no card. An
- * empty query is not a question, so it hides nothing - including a run that found no stocks at all,
- * which `any` alone would drop.
- */
-internal fun List<ConsolidatedRecommendation>.hasStockMatching(normalizedQuery: String): Boolean =
-    normalizedQuery.isBlank() || any { it.matches(normalizedQuery) }
-
 /** The channel behind an occurrence, named so it can be ticked off a list. */
 internal fun RecommendationDataPoint.channelLabel(channelFor: Map<String, String>): String =
     channelFor[sourceMessageId]?.takeIf(String::isNotBlank) ?: "Not stated"
@@ -369,6 +337,12 @@ private fun AnalysisResult.timings(): List<String> =
         .map(RecommendationDataPoint::timingLabel)
         .distinct()
 
+/**
+ * Which chats a saved run covered.
+ *
+ * Taken from the selection the run recorded. Analyses saved before that was stored fall back to the
+ * chats their rows actually name, which understates a run that read a chat and found nothing.
+ */
 internal fun SavedAnalysis.channelNames(): List<String> =
     result.selectedChannels.map { it.name }.filter(String::isNotBlank).distinct()
         .ifEmpty {
@@ -791,7 +765,7 @@ private fun ResultDetail(
     val stocks = remember(saved.id, shownTimings, shownChannels, search, channelNames) {
         // Timing and channel narrow the rows; the search narrows the stocks, because a name belongs
         // to the stock rather than to any one occurrence of it.
-        val wanted = WordingRule.normalize(search)
+        val wanted = StockSearch.query(search)
         saved.result.consolidated
             .map { stock ->
                 stock.copy(

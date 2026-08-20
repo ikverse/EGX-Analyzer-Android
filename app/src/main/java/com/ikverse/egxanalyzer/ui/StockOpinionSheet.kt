@@ -67,6 +67,7 @@ internal fun StockOpinionSheet(
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             Row(verticalAlignment = Alignment.Top) {
+                StockLogo(call.ticker, LogoSize.Header, Modifier.padding(end = Space.m))
                 Column(Modifier.weight(1f)) {
                     Text(call.ticker, style = MaterialTheme.typography.headlineSmall)
                     listOfNotNull(call.companyEnglish, call.companyArabic)

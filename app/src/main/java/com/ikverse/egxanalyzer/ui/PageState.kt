@@ -66,4 +66,5 @@ internal class PageState {
     val openPortfolioGroups: MutableState<Set<LocalDate>> = mutableStateOf(emptySet())
 
     val portfolioDate: MutableState<String?> = mutableStateOf(null)
+    val portfolioStock: MutableState<String> = mutableStateOf("")
 }

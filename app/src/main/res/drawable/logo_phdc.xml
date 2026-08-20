@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="56dp"
+    android:height="56dp"
+    android:viewportWidth="56"
+    android:viewportHeight="56">
+    <path
+        android:fillColor="#FFF0F3FA"
+        android:pathData="M0 0h56v56H0z"/>
+    <path
+        android:fillColor="#FFD31048"
+        android:pathData="M28 10L10 28h6.88l-0.58-1.03L17.48 28h2.05l-1.59-2.12L20.06 28h1.59l-2.12-3.18L22.7 28h1.58l-3.7-4.76L25.35 28h1.6l-5.3-6.35L28 26.97v-1.62l-4.76-4.76 4.76 3.7v-1.58l-3.18-3.18L28 21.65v-1.49l-2.12-2.22L28 19.53V17.4l-1.06-1.06L28 16.87V10Z"/>
+    <path
+        android:fillColor="#FFA70336"
+        android:pathData="M28 10l18 18h-6.88l0.58-1.03L38.52 28h-2.05l1.59-2.12L35.94 28h-1.59l2.12-3.18L33.3 28h-1.58l3.7-4.76L30.65 28h-1.6l5.3-6.35L28 26.97v-1.62l4.76-4.76-4.76 3.7v-1.58l3.18-3.18L28 21.65v-1.49l2.12-2.22L28 19.53V17.4l1.06-1.06L28 16.87V10Zm0 36L10 28h6.88l-0.58 1.03L17.48 28h2.05l-1.59 2.12L20.06 28h1.59l-2.12 3.18L22.7 28h1.58l-3.7 4.76L25.35 28h1.6l-5.3 6.35L28 29.03v1.62l-4.76 4.76 4.76-3.7v1.58l-3.18 3.18L28 34.35v1.49l-2.12 2.22L28 36.47v2.12l-1.06 1.06L28 39.12V46Z"/>
+    <path
+        android:fillColor="#FF90002B"
+        android:pathData="M28 46l18-18h-6.88l0.58 1.03L38.52 28h-2.05l1.59 2.12L35.94 28h-1.59l2.12 3.18L33.3 28h-1.58l3.7 4.76L30.65 28h-1.6l5.3 6.35L28 29.03v1.62l4.76 4.76-4.76-3.7v1.58l3.18 3.18L28 34.35v1.49l2.12 2.22L28 36.47v2.12l1.06 1.06L28 39.12V46Z"/>
+</vector>

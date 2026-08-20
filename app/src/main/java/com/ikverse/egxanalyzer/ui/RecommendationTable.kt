@@ -175,6 +175,7 @@ private fun StockHeadingRow(stock: ConsolidatedRecommendation) {
             .padding(horizontal = Space.m, vertical = Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
         // The anchor for everything under it, so it carries more weight than a row does.
         Text(
             stock.stockCode,

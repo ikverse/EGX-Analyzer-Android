@@ -142,7 +142,11 @@ internal fun InsightsScreen(appState: AppState) {
         //
         // Worked out above the controls rather than below them, because the hero reads from it and
         // the hero is the first thing on the page.
-        val wanted = stock.trim().uppercase()
+        //
+        // Normalized once for the whole record rather than once per call, and through the same rule
+        // Results and Portfolio search by: this box used to match tickers alone, so typing a company
+        // name on the tab that ranks the sources found nothing. See StockSearch.
+        val wanted = StockSearch.query(stock)
         val report = remember(full, channels, outcomes, wanted) {
             if (channels.isEmpty() && outcomes.isEmpty() && wanted.isEmpty()) {
                 full
@@ -150,7 +154,7 @@ internal fun InsightsScreen(appState: AppState) {
                 PerformanceCalculator.refine(full) { call ->
                     (channels.isEmpty() || call.channel in channels) &&
                         (outcomes.isEmpty() || outcomes.any { OutcomeFilters[it]?.invoke(call) == true }) &&
-                        (wanted.isEmpty() || call.ticker.contains(wanted))
+                        call.matches(wanted)
                 }
             }
         }
@@ -831,6 +835,7 @@ private fun ScoredCallRow(
                 Modifier.heightIn(min = CardHeaderHeight),
                 verticalAlignment = Alignment.Top,
             ) {
+                StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
                 Column(Modifier.weight(1f)) {
                     Text(call.ticker, style = MaterialTheme.typography.titleSmall)
                     listOfNotNull(call.companyArabic, call.companyEnglish)
