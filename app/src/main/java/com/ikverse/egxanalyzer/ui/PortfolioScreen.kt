@@ -454,40 +454,54 @@ private class PositionJump(
 )
 
 /**
- * One line saying what a session's trades came to, so a folded card still informs.
+ * One line naming the states a session's trades are in, so a folded card still informs.
  *
- * All three states are named and counted rather than two of them, so the line accounts for every
- * position in the card: a reader who wants to know how many expired should not have to subtract.
- * Each count carries its own state's colour, which is the same colour the section below it and the
- * chip on the trade itself are drawn in.
+ * Every verdict is named and counted rather than the three sections alone: a session that ended on
+ * its targets and one the stops took both read as "closed" from the outside, and telling those two
+ * apart is worth more than the position count and the average that used to stand here. Each count
+ * carries the colour of the chip on the trade itself, so the line and the cards under it say one
+ * thing twice rather than two different things.
+ *
+ * Counted by each trade's own verdict, which is why a partial hit still running is a partial hit
+ * here while still sitting under Open below: the count and the chip agree, and the sections answer
+ * a different question - what can I still do about it - than the counts do.
  */
 @Composable
 private fun GroupSummary(group: PortfolioGroup) {
-    val counts = listOf(
-        Triple(group.open.size, "open", OpenTone),
-        Triple(group.expired.size, "expired", ExpiredTone),
-        Triple(group.closed.size, "closed", ClosedTone),
-    )
-    val averageTone = PriceRole.forReturn(group.averageReturnPct)
-    val line = buildAnnotatedString {
-        val held = group.positions.size
-        append("$held ${if (held == 1) "position" else "positions"}")
-        counts.forEach { (size, word, tone) ->
-            if (size == 0) return@forEach
-            append(" · ")
-            withStyle(SpanStyle(color = tone)) { append("$size $word") }
-        }
-        append(" · ")
-        withStyle(SpanStyle(color = averageTone)) {
-            append("average ${formatPercent(group.averageReturnPct)}")
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        SummaryStates.forEach { (status, word) ->
+            val held = group.positions.count { it.status == status }
+            if (held == 0) return@forEach
+            Text(
+                "$held $word",
+                style = MaterialTheme.typography.bodySmall,
+                color = status.tone(),
+            )
         }
     }
-    Text(
-        line,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 }
+
+/**
+ * The verdicts the summary names, in the order the card's own sections run.
+ *
+ * Open and expired lead because those are the two sections standing above the record, and the rest
+ * are the ways a trade actually ended. Sold is here for the same reason the counts exist at all:
+ * leave it out and a hand-sold trade vanishes from the line while still sitting in the card.
+ *
+ * Shorter words than the chips carry - "full hit" rather than "Full target hit" - because six of
+ * these share one line under a date, and every one of them is already coloured as its own chip.
+ */
+private val SummaryStates = listOf(
+    PositionStatus.OPEN to "open",
+    PositionStatus.EXPIRED to "expired",
+    PositionStatus.PARTIAL_TARGET_HIT to "partial hit",
+    PositionStatus.FULL_TARGET_HIT to "full hit",
+    PositionStatus.STOPPED_OUT to "stopped",
+    PositionStatus.CLOSED_MANUALLY to "sold",
+)
 
 /**
  * One state's trades inside a session's card, under a label saying which state it is.

@@ -218,13 +218,6 @@ data class PortfolioGroup(
 
     /** Holds something past its deadline with no sale recorded, and so wants reading first. */
     val hasOverdue: Boolean get() = positions.any(PositionView::overdue)
-
-    /** Average return across the group, which is the only total available without trade sizes. */
-    val averageReturnPct: Double?
-        get() = positions.mapNotNull(PositionView::returnPct)
-            .takeIf(List<Double>::isNotEmpty)
-            ?.average()
-            ?.round(2)
 }
 
 /**
