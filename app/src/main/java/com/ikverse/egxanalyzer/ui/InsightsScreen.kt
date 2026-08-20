@@ -947,23 +947,25 @@ private fun ScoredCallRow(
             // Wrapped rather than laid in a row: at 280dp the two labels together are wider than
             // the card, and a button pushed off the edge is a button nobody can press.
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                TextButton(
+                AskAiButton(
+                    label = when {
+                        asking -> "Asking\u2026"
+                        // Named for what it holds once there is something to open. The button that
+                        // spends money and the button that reopens a saved answer must not read
+                        // alike, or the free press looks like the paid one - which is why the saved
+                        // one is drawn as a ring rather than a filled pill, not only worded apart.
+                        opinion != null -> "AI Response"
+                        else -> "Ask AI"
+                    },
                     onClick = { if (opinion == null) confirming = true else showing = true },
+                    look = if (opinion != null && !asking) AiLook.Outlined else AiLook.Filled,
                     // A second request while the first is still out would be paid for twice and
                     // answer the same question.
                     enabled = !asking,
-                ) {
-                    Text(
-                        when {
-                            asking -> "Asking\u2026"
-                            // Named for what it holds once there is something to open. The button
-                            // that spends money and the button that reopens a saved answer must not
-                            // read alike, or the free press looks like the paid one.
-                            opinion != null -> "AI opinion \u00b7 ${opinion.verdict.arabic}"
-                            else -> "Ask AI"
-                        },
-                    )
-                }
+                    working = asking,
+                    // Stable per card, so the halo does not restart its cycle on every scroll.
+                    phaseKey = call.ticker,
+                )
                 if (call.sessions.isNotEmpty()) {
                     TextButton(onClick = { expanded = !expanded }) {
                         Text(

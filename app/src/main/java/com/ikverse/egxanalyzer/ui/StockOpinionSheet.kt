@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -141,9 +140,16 @@ internal fun StockOpinionSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                TextButton(onClick = { onAskAgain?.invoke() }, enabled = onAskAgain != null) {
-                    Text("Ask again")
-                }
+                // Filled, like the button on the card that first spent money here: a re-ask is a
+                // second billed request, and the ring is reserved for reopening what is already
+                // paid for - which is this sheet.
+                AskAiButton(
+                    label = if (onAskAgain == null) "Asking\u2026" else "Ask again",
+                    onClick = { onAskAgain?.invoke() },
+                    enabled = onAskAgain != null,
+                    working = onAskAgain == null,
+                    phaseKey = call.ticker,
+                )
             }
         }
     }
@@ -276,7 +282,9 @@ internal fun AskAiDialog(
                     "The answer is saved on this card, so opening it again is free.",
             )
         },
-        confirmButton = { Button(onClick = onConfirm) { Text("Ask") } },
+        // The gradient rather than a plain Button: this is the press that actually spends the
+        // money, and it should look like the one that opened the dialog.
+        confirmButton = { AskAiButton(label = "Ask", onClick = onConfirm, phaseKey = call.ticker) },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

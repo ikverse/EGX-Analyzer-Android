@@ -120,13 +120,62 @@ data class ExtraColors(
      * red/green colour-blind reader can still hold apart.
      */
     val market: Color,
+
+    /**
+     * The model speaking, which is the one thing on these screens that is not a measurement.
+     *
+     * Violet through magenta, and the third time the "a role that already means something must go
+     * on meaning it" argument has decided a colour here. Every hue above is a claim about a price -
+     * green a target, red a stop, blue a level the market reached, amber a window that closed - and
+     * an opinion is none of them. Purple was retired from this palette for having no meaning; it is
+     * given one back, and only one.
+     *
+     * [aiFill] is the pill itself and runs dark, so [aiOnFill] can be white in both themes.
+     */
+    val aiFill: List<Color>,
+    val aiOnFill: Color,
+
+    /**
+     * The same family drawn as a line rather than a surface, for the button that only reopens a
+     * saved answer.
+     *
+     * Its own stops rather than [aiFill]'s, because an outline has to contrast with the card behind
+     * it while a fill has to contrast with the label on top of it - opposite requirements on a dark
+     * theme, where the fill goes darker than the card and the line has to go lighter.
+     */
+    val aiLine: List<Color>,
+    val aiText: Color,
+
+    /** The halo under the pill. Kept bright: a dark glow on a dark page is not a glow. */
+    val aiGlow: Color,
+
+    /**
+     * The mark, in gold.
+     *
+     * Two sets because it is drawn on two different grounds: [aiSpark] on the dark pill, where gold
+     * can be bright, and [aiSparkOnCard] on the card itself, where the light theme's pale surface
+     * would swallow the same colour whole.
+     */
+    val aiSpark: List<Color>,
+    val aiSparkOnCard: List<Color>,
 )
+
+/** Gold, on a violet pill. The one place this app spends a colour on delight rather than meaning. */
+private val BrightGold = listOf(Color(0xFFFFE9B8), Color(0xFFFFD37A), Color(0xFFE8A53C))
 
 private val DarkExtras = ExtraColors(
     expired = Color(0xFFF3C264),
     expiredContainer = Color(0xFF5A4318),
     onExpiredContainer = Color(0xFFFFE0A3),
     market = Color(0xFF4C9DF0),
+    aiFill = listOf(Color(0xFF4A3FBE), Color(0xFF7548AE), Color(0xFF9C4478)),
+    aiOnFill = Color.White,
+    aiLine = listOf(Color(0xFF9E8AF0), Color(0xFFB98ADD), Color(0xFFDE86B4)),
+    aiText = Color(0xFFB9A3F2),
+    aiGlow = Color(0xFF845FD6),
+    aiSpark = BrightGold,
+    // The card is dark here too, so the mark needs no softening.
+    aiSparkOnCard = BrightGold,
 )
 
 private val LightExtras = ExtraColors(
@@ -137,6 +186,17 @@ private val LightExtras = ExtraColors(
     // where these figures are actually drawn, against the 4.5:1 body text needs - and every one of
     // them is a price. This lands at 4.5:1 there and 5.2:1 on the page.
     market = Color(0xFF1668C7),
+    // A shade under the dark theme's, because these sit on a pale card rather than a black page.
+    aiFill = listOf(Color(0xFF3E349E), Color(0xFF653B96), Color(0xFF883A66)),
+    aiOnFill = Color.White,
+    // The fill's own stops, unlike the dark theme: here the line has to be darker than the card,
+    // which is the same direction the fill goes.
+    aiLine = listOf(Color(0xFF3E349E), Color(0xFF653B96), Color(0xFF883A66)),
+    aiText = Color(0xFF55338F),
+    aiGlow = Color(0xFF653B96),
+    aiSpark = BrightGold,
+    // Bright gold on a near-white card is barely there. Deepened until it draws at 3:1 on it.
+    aiSparkOnCard = listOf(Color(0xFFD9A44E), Color(0xFFC2872A), Color(0xFF9E6A17)),
 )
 
 /**
