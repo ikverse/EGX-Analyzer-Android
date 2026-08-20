@@ -52,6 +52,13 @@ import kotlin.math.roundToInt
  * "floating" drift apart the first time one of them is adjusted.
  *
  * The shape is still the caller's, though both callers currently pass the page's own card radius.
+ *
+ * @param painted draws the surface itself, for a caller whose fill is not one colour. It is applied
+ *   to the content rather than to [modifier] so it lands where the flat tint would have - inside the
+ *   shape's clip and on top of the elevation shadow - and it carries its own alpha, so a gradient
+ *   here is as see-through as a tint here. [color] is ignored when it is passed; pass
+ *   `Color.Transparent`.
+ * @param outline overrides the neutral hairline for a caller that needs the edge to mean something.
  */
 @Composable
 internal fun FloatingSurface(
@@ -59,22 +66,34 @@ internal fun FloatingSurface(
     color: Color,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    painted: Modifier? = null,
+    outline: Color? = null,
     content: @Composable () -> Unit,
 ) {
     // See-through enough that the page carries on behind it, opaque enough that it cannot be read
     // there. At 0.88 a heading passing underneath came through as a second row of words tangled in
     // the labels; what is wanted is the movement, not the content.
-    val tinted = color.copy(alpha = 0.94f)
+    val tinted = if (painted == null) color.copy(alpha = 0.94f) else Color.Transparent
     // The tint alone leaves the edge indistinct against a card of a similar colour; the hairline is
     // what draws the shape whatever is behind it.
-    val hairline = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+    val hairline = BorderStroke(
+        1.dp,
+        outline ?: MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+    )
+    // Only wrapped when there is something to paint: an unconditional Box would put a layout node
+    // under every floating surface in the app to serve the one that needs it.
+    val body: @Composable () -> Unit = if (painted == null) {
+        content
+    } else {
+        { Box(painted, propagateMinConstraints = true) { content() } }
+    }
     if (onClick == null) {
         Surface(modifier, shape = shape, color = tinted, border = hairline, shadowElevation = FloatingElevation) {
-            content()
+            body()
         }
     } else {
         Surface(onClick, modifier, shape = shape, color = tinted, border = hairline, shadowElevation = FloatingElevation) {
-            content()
+            body()
         }
     }
 }

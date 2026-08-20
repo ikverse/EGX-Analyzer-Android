@@ -22,6 +22,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +38,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -95,31 +98,7 @@ private fun FilledPill(
     phaseKey: Any?,
 ) {
     val ai = extraColors
-    val pulse = rememberInfiniteTransition(label = "ai")
-
-    // Where in the cycle this button starts. Derived from the key rather than drawn at random, so
-    // a card returns to the same phase after a scroll or a fold instead of jumping.
-    val phase = remember(phaseKey) { abs(phaseKey.hashCode()) % BreathHalfMs }
-
-    val glow = pulse.animateFloat(
-        initialValue = 1f,
-        targetValue = GlowPeak,
-        animationSpec = infiniteRepeatable(
-            tween(BreathHalfMs),
-            RepeatMode.Reverse,
-            initialStartOffset = StartOffset(phase),
-        ),
-        label = "glow",
-    )
-    val sweep = pulse.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(SweepMs, easing = LinearEasing)),
-        label = "sweep",
-    )
-
-    // Resolves against the draw size, so it survives every frame and every re-measure untouched.
-    val resting = remember(ai.aiFill) { Brush.horizontalGradient(ai.aiFill) }
+    val motion = rememberAiMotion(ai.aiFill, phaseKey)
 
     Pill(
         label = label,
@@ -131,35 +110,9 @@ private fun FilledPill(
         // composition they would recompose every card sixty times a second; read in the draw
         // lambda the frame costs a repaint and nothing else.
         painted = Modifier.drawBehind {
-            val corner = CornerRadius(size.height / 2f)
-            val breath = if (working) 1f else glow.value
-            // Rings rather than a blur: `Modifier.blur` would put the pill in a layer of its own
-            // and re-render it on every frame the halo moves, on every card in the list. Stacked
-            // round rects cost one draw call each and fall off the same way.
-            repeat(GlowRings) { ring ->
-                val t = (ring + 1f) / GlowRings
-                val spread = GlowSpread.toPx() * t
-                drawRoundRect(
-                    color = ai.aiGlow.copy(alpha = GlowAlpha * (1f - t) * breath),
-                    topLeft = Offset(-spread, -spread),
-                    size = Size(size.width + spread * 2f, size.height + spread * 2f),
-                    cornerRadius = CornerRadius((size.height + spread * 2f) / 2f),
-                )
-            }
-            val fill = if (working) {
-                // A window one button wide slid across twice that distance, mirrored so the
-                // gradient never shows a seam where it wraps.
-                val travel = sweep.value * 2f * size.width - size.width
-                Brush.linearGradient(
-                    ai.aiFill,
-                    start = Offset(travel, 0f),
-                    end = Offset(travel + size.width, 0f),
-                    tileMode = TileMode.Mirror,
-                )
-            } else {
-                resting
-            }
-            drawRoundRect(fill, cornerRadius = corner)
+            val corner = size.height / 2f
+            drawAiHalo(ai.aiGlow, corner, motion.breath(working))
+            drawRoundRect(motion.fill(size.width, working), cornerRadius = CornerRadius(corner))
         },
         modifier = modifier,
     )
@@ -225,19 +178,119 @@ private fun Pill(
  * without a layer of its own the blend would find the whole card underneath.
  */
 @Composable
-private fun Spark(gold: List<Color>) {
+internal fun Spark(gold: List<Color>, size: Dp = SparkSize) {
     Icon(
         Icons.Filled.AutoAwesome,
         contentDescription = null,
         tint = Color.Unspecified,
         modifier = Modifier
-            .size(SparkSize)
+            .size(size)
             .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
             .drawWithContent {
                 drawContent()
                 drawRect(Brush.linearGradient(gold), blendMode = BlendMode.SrcIn)
             },
     )
+}
+
+/**
+ * The two animations the AI treatment is made of, resolved once for whatever draws it.
+ *
+ * Handed back as state rather than as numbers so the caller can read them inside a draw lambda:
+ * read in a composable body they recompose their caller sixty times a second, on every card in a
+ * list. Every method here is meant to be called from a draw lambda for that reason.
+ *
+ * @param stops the fill's colours. The pill passes `aiFill`'s three; the Analyze action passes
+ *   `aiAction`'s two, because the third stop only reads as a shimmer at a pill's width.
+ * @param phaseKey seeds where in the breath this one starts. A screen can show twenty of these, and
+ *   twenty haloes swelling on one beat is a Christmas tree rather than a list. Pass something stable
+ *   per card - the ticker - so the cycle does not restart on every recomposition.
+ */
+@Composable
+internal fun rememberAiMotion(stops: List<Color>, phaseKey: Any? = null): AiMotion {
+    val pulse = rememberInfiniteTransition(label = "ai")
+
+    // Derived from the key rather than drawn at random, so a card returns to the same phase after a
+    // scroll or a fold instead of jumping.
+    val phase = remember(phaseKey) { abs(phaseKey.hashCode()) % BreathHalfMs }
+
+    val glow = pulse.animateFloat(
+        initialValue = 1f,
+        targetValue = GlowPeak,
+        animationSpec = infiniteRepeatable(
+            tween(BreathHalfMs),
+            RepeatMode.Reverse,
+            initialStartOffset = StartOffset(phase),
+        ),
+        label = "glow",
+    )
+    val sweep = pulse.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(SweepMs, easing = LinearEasing)),
+        label = "sweep",
+    )
+    // Resolves against the draw size, so it survives every frame and every re-measure untouched.
+    val resting = remember(stops) { Brush.horizontalGradient(stops) }
+    return remember(stops, resting, glow, sweep) { AiMotion(stops, resting, glow, sweep) }
+}
+
+/** What [rememberAiMotion] hands back. Not built directly. */
+@Stable
+internal class AiMotion(
+    private val stops: List<Color>,
+    private val resting: Brush,
+    private val glow: State<Float>,
+    private val sweep: State<Float>,
+) {
+    /**
+     * What to scale the halo by this frame.
+     *
+     * Flat while [working], because the sweep is doing the reporting then and a control breathing
+     * and sliding at once is two clocks disagreeing.
+     */
+    fun breath(working: Boolean): Float = if (working) 1f else glow.value
+
+    /**
+     * The fill for a control [width] pixels across: still when idle, sliding while [working].
+     *
+     * The sweep is a window one control wide slid across twice that distance, mirrored so the
+     * gradient never shows a seam where it wraps.
+     */
+    fun fill(width: Float, working: Boolean): Brush = if (!working) {
+        resting
+    } else {
+        val travel = sweep.value * 2f * width - width
+        Brush.linearGradient(
+            stops,
+            start = Offset(travel, 0f),
+            end = Offset(travel + width, 0f),
+            tileMode = TileMode.Mirror,
+        )
+    }
+}
+
+/**
+ * The halo, as stacked round rects rather than a blur.
+ *
+ * `Modifier.blur` would put the control in a layer of its own and re-render it on every frame the
+ * halo moves, on every card in the list. These cost one draw call each and fall off the same way.
+ *
+ * @param cornerPx the corner of the shape it is coming from - half the height for a pill, the
+ *   shape's own radius for anything else. Each ring out grows with its spread, so the halo keeps
+ *   that shape all the way out instead of rounding off into an oval.
+ */
+internal fun DrawScope.drawAiHalo(color: Color, cornerPx: Float, breath: Float) {
+    repeat(GlowRings) { ring ->
+        val t = (ring + 1f) / GlowRings
+        val spread = GlowSpread.toPx() * t
+        drawRoundRect(
+            color = color.copy(alpha = GlowAlpha * (1f - t) * breath),
+            topLeft = Offset(-spread, -spread),
+            size = Size(size.width + spread * 2f, size.height + spread * 2f),
+            cornerRadius = CornerRadius(cornerPx + spread),
+        )
+    }
 }
 
 private val AiPadding: Dp = 12.dp

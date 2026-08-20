@@ -56,6 +56,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -68,6 +69,7 @@ import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
+import com.ikverse.egxanalyzer.ui.theme.extraColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -116,24 +118,40 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         floatingAction = {
             val big = LocalWindowWidth.current != WindowWidth.COMPACT
             val actionModifier = Modifier.height(if (big) BigActionHeight else ActionHeight)
-            if (appState.analysisStatus == AnalysisStatus.RUNNING) {
+            val ai = extraColors
+            val running = appState.analysisStatus == AnalysisStatus.RUNNING
+            // One instance across both branches, so the sweep picks up from the breath rather than
+            // restarting from nothing at the moment a run begins. The phase key is fixed because
+            // there is only ever one of these on screen - nothing to stagger it against.
+            val motion = rememberAiMotion(ai.aiAction, phaseKey = "analyze")
+            // The halo falls outside the surface, so it goes on the modifier the surface is given
+            // rather than inside the shape's clip. The fill goes inside, where the flat tint was.
+            val haloed = actionModifier.drawBehind {
+                drawAiHalo(ai.aiGlow, ActionCorner.toPx(), motion.breath(running))
+            }
+            val violet = Modifier.drawBehind { drawRect(motion.fill(size.width, running)) }
+            if (running) {
                 AnalyzeAction(
                     onClick = { scope.launch { appState.cancelAnalysis() } },
-                    container = MaterialTheme.colorScheme.errorContainer,
-                    content = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = actionModifier,
-                    // A spinner rather than the cancel icon: the button is still what cancels the
-                    // run, but while one is going the first thing it has to say is that it is alive.
-                    icon = {
-                        CircularProgressIndicator(
-                            Modifier.size(if (big) BigActionIcon else ActionIcon),
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            strokeWidth = 2.dp,
-                        )
-                    },
+                    container = Color.Transparent,
+                    content = ai.aiOnFill,
+                    modifier = haloed,
+                    painted = violet,
+                    // The one red left on the button, and a hairline of it. The violet says a model
+                    // is working, which is not the same as saying what pressing this does - and
+                    // with the spinner gone the label was carrying that on its own.
+                    outline = ai.aiStop,
+                    // The mark rather than a spinner: the fill sweeping under it is what reports
+                    // the run is alive, the same way it does on the pill while an answer is out. A
+                    // spinner on top of a sweep is one control saying "waiting" twice.
+                    icon = { Spark(ai.aiSpark, if (big) BigActionIcon else ActionIcon) },
                     label = { RunningLabel(appState.analysisStartedAt, big) },
                 )
             } else {
+                // Only the state that can actually spend money wears the treatment. A blocked
+                // button in violet would be the loudest thing on the screen and do nothing when
+                // pressed, which is the one thing the colour must not be able to mean.
+                val ready = blocker == null
                 AnalyzeAction(
                     onClick = {
                         // Asked here rather than at first launch: a permission prompt before the
@@ -149,26 +167,27 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
                     },
-                    container = if (blocker == null) {
-                        MaterialTheme.colorScheme.primaryContainer
+                    container = if (ready) {
+                        Color.Transparent
                     } else {
                         // A step down from surfaceContainerHighest, which read as nearly solid once
                         // the button went see-through and left the blocked state looking the most
                         // substantial of the three.
                         MaterialTheme.colorScheme.surfaceContainerHigh
                     },
-                    content = if (blocker == null) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    modifier = actionModifier,
+                    content = if (ready) ai.aiOnFill else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = if (ready) haloed else actionModifier,
+                    painted = violet.takeIf { ready },
                     icon = {
-                        Icon(
-                            Icons.Outlined.AutoGraph,
-                            contentDescription = null,
-                            modifier = Modifier.size(if (big) BigActionIcon else ActionIcon),
-                        )
+                        if (ready) {
+                            Spark(ai.aiSpark, if (big) BigActionIcon else ActionIcon)
+                        } else {
+                            Icon(
+                                Icons.Outlined.AutoGraph,
+                                contentDescription = null,
+                                modifier = Modifier.size(if (big) BigActionIcon else ActionIcon),
+                            )
+                        }
                     },
                     label = {
                         Column {
@@ -678,6 +697,15 @@ private val BigActionHeight = 88.dp
 
 /** Material's own extended button height, which this one no longer inherits by being one. */
 private val ActionHeight = 56.dp
+
+/**
+ * The corner the halo has to match, which is `shapes.large` read as a number.
+ *
+ * Restated rather than measured: the shape is handed to the surface as a `Shape`, and the halo is
+ * drawn outside that surface by a lambda that never sees it. Kept beside the heights so the two are
+ * changed together if the action ever stops taking the page's card radius.
+ */
+private val ActionCorner = 22.dp
 private val ActionIcon = 24.dp
 private val BigActionIcon = 34.dp
 
@@ -700,12 +728,16 @@ private fun AnalyzeAction(
     icon: @Composable () -> Unit,
     label: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    painted: Modifier? = null,
+    outline: Color? = null,
 ) {
     FloatingSurface(
         shape = MaterialTheme.shapes.large,
         color = container,
         modifier = modifier,
         onClick = onClick,
+        painted = painted,
+        outline = outline,
     ) {
         CompositionLocalProvider(LocalContentColor provides content) {
             Row(

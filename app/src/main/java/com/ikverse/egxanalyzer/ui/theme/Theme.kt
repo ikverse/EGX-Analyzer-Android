@@ -136,6 +136,27 @@ data class ExtraColors(
     val aiOnFill: Color,
 
     /**
+     * The same violet drawn a whole button wide rather than a pill wide, and two stops instead of
+     * three.
+     *
+     * The magenta is the one dropped. Across 32dp of pill the run from indigo to magenta reads as a
+     * shimmer; across the 56dp screen action - 88dp on an unfolded Fold - it reads as two colours
+     * meeting in the middle, and the label's contrast drifts along its length. One hue in two
+     * shades holds still at any width. Kept beside [aiFill] rather than replacing it, because the
+     * pill is the size the three stops were chosen for.
+     */
+    val aiAction: List<Color>,
+
+    /**
+     * The hairline the action wears while a run is going, in place of the neutral outline.
+     *
+     * One value for both themes, for the same reason [aiOnFill] is white in both: [aiAction] runs
+     * dark either way. Material's light-theme `error` is #B3261E, which on this fill is a dark line
+     * on a dark field and reports nothing.
+     */
+    val aiStop: Color,
+
+    /**
      * The same family drawn as a line rather than a surface, for the button that only reopens a
      * saved answer.
      *
@@ -170,6 +191,8 @@ private val DarkExtras = ExtraColors(
     market = Color(0xFF4C9DF0),
     aiFill = listOf(Color(0xFF4A3FBE), Color(0xFF7548AE), Color(0xFF9C4478)),
     aiOnFill = Color.White,
+    aiAction = listOf(Color(0xFF4A3FBE), Color(0xFF7548AE)),
+    aiStop = Color(0xFFFF8A80),
     aiLine = listOf(Color(0xFF9E8AF0), Color(0xFFB98ADD), Color(0xFFDE86B4)),
     aiText = Color(0xFFB9A3F2),
     aiGlow = Color(0xFF845FD6),
@@ -189,6 +212,8 @@ private val LightExtras = ExtraColors(
     // A shade under the dark theme's, because these sit on a pale card rather than a black page.
     aiFill = listOf(Color(0xFF3E349E), Color(0xFF653B96), Color(0xFF883A66)),
     aiOnFill = Color.White,
+    aiAction = listOf(Color(0xFF3E349E), Color(0xFF653B96)),
+    aiStop = Color(0xFFFF8A80),
     // The fill's own stops, unlike the dark theme: here the line has to be darker than the card,
     // which is the same direction the fill goes.
     aiLine = listOf(Color(0xFF3E349E), Color(0xFF653B96), Color(0xFF883A66)),
