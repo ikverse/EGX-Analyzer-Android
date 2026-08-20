@@ -9,6 +9,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Wakes the phone at the minute a scheduled job asks for. Requested rather than the
+         auto-granted USE_EXACT_ALARM, which is meant for alarm clocks and calendars; without it
+         the app falls back to an inexact alarm that can drift by the better part of an hour,
+         which is what every job's grace window exists to absorb. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- An alarm does not survive a reboot. Without this a phone that restarted overnight comes
+         back with every schedule silently unbooked. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".EgxApplication"
@@ -36,6 +44,22 @@
             android:name=".data.AnalysisService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- The four things that mean the schedule needs re-booking: its alarm firing, a reboot,
+             an update replacing the app, and the user granting or revoking exact alarms. Not
+             exported: three of the four are system broadcasts, which reach a private receiver
+             anyway, and the fourth is this app's own alarm. Exporting it would let any app on the
+             phone ask this one to wake up and go looking for work. -->
+        <receiver
+            android:name=".data.ScheduleReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.ikverse.egxanalyzer.RUN_SCHEDULE" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Shares a run's trace. Traces hold prompts, source labels and the model's answer, never
              image bytes or credentials, but they still leave the device only when asked. -->

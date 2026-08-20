@@ -16,7 +16,17 @@ class ChannelRankingTest {
 
     private val called = LocalDate.of(2026, 8, 3)
 
-    private fun call(channel: String, ticker: String, outcome: Outcome) = ScoredCall(
+    private fun call(
+        channel: String,
+        ticker: String,
+        outcome: Outcome,
+        // A stopped call that returned +5% is not a stopped call, and every ordering below is now
+        // decided by what the calls were worth rather than by how many of them worked.
+        returnPct: Double = if (outcome == Outcome.STOPPED) -5.0 else 5.0,
+        target1: Double = 11.0,
+        stopLoss: Double = 9.5,
+        repeatOf: LocalDate? = null,
+    ) = ScoredCall(
         ticker = ticker,
         companyEnglish = null,
         companyArabic = null,
@@ -25,15 +35,16 @@ class ChannelRankingTest {
         openedOn = called,
         entryLow = 10.0,
         entryHigh = 10.2,
-        target1 = 11.0,
+        target1 = target1,
         target2 = 12.0,
-        stopLoss = 9.5,
+        stopLoss = stopLoss,
         outcome = outcome,
         settledOn = called,
         peakHigh = 11.5,
         troughLow = 9.9,
-        returnPct = 5.0,
+        returnPct = returnPct,
         sessionsElapsed = 1,
+        repeatOf = repeatOf,
     )
 
     /** Two settled calls, both good: a real 100%, and no evidence at all. */
@@ -59,12 +70,36 @@ class ChannelRankingTest {
         assertEquals(2, thin.judged)
     }
 
+    /**
+     * Above the floor it is the record that decides, and the record is what the calls were worth.
+     *
+     * This asserted the better *rate* led, which is the thing the ordering no longer does: a rate is
+     * bought by moving the target closer to the entry, and two channels can hold the same rate on
+     * calls worth quite different amounts. Strong still leads Proven here - six clean calls against
+     * five and two stops - but it leads on +5.0 per call against +2.14, not on 100% against 71.4%.
+     */
     @Test
-    fun `above the floor the better rate still leads`() {
+    fun `above the floor the better record still leads`() {
         val strong = List(6) { call("Strong", "DDD$it", Outcome.PARTIAL_HIT) }
         val ranked = PerformanceCalculator.channelScores(strong + proven)
 
         assertEquals(listOf("Strong", "Proven"), ranked.map { it.channel })
+        assertEquals(5.0, ranked.first().averageReturn!!, 0.001)
+        assertEquals(2.14, ranked.last().averageReturn!!, 0.01)
+    }
+
+    /** Same earnings, more evidence: the record with more behind it leads. */
+    @Test
+    fun `where two records earn the same the longer one leads`() {
+        val brief = List(6) { call("Brief", "EEE$it", Outcome.PARTIAL_HIT) }
+        val lengthy = List(20) { call("Lengthy", "FFF$it", Outcome.PARTIAL_HIT) }
+
+        val ranked = PerformanceCalculator.channelScores(brief + lengthy)
+
+        assertEquals(listOf("Lengthy", "Brief"), ranked.map { it.channel })
+        // Neither average moved. Both made exactly +5% a call; one has shown it more often.
+        assertEquals(5.0, ranked.first().averageReturn!!, 0.001)
+        assertEquals(5.0, ranked.last().averageReturn!!, 0.001)
     }
 
     @Test
@@ -122,5 +157,104 @@ class ChannelRankingTest {
         assertEquals("Proven", leader?.channel)
         // The one with the better rate, and it is still not the leader.
         assertEquals(100.0, ranked.single { it.channel == "Lucky" }.anyTargetRate!!, 0.001)
+    }
+
+    /**
+     * Being right often is not the same as being worth following.
+     *
+     * Tight prints its target 2% above the entry against a stop 10% below and reaches it nine times
+     * in ten; the tenth call takes back more than the nine made. Wide reaches its target less than
+     * half the time and makes more per call. Ranked on the hit rate the wrong one led by 50 points.
+     */
+    @Test
+    fun `the channel that makes more per call leads the one that is right more often`() {
+        val tight = List(9) { call("Tight", "AAA$it", Outcome.PARTIAL_HIT, returnPct = 2.0) } +
+            call("Tight", "AAZ", Outcome.STOPPED, returnPct = -10.0)
+        val wide = List(4) { call("Wide", "BBB$it", Outcome.PARTIAL_HIT, returnPct = 10.0) } +
+            List(6) { call("Wide", "BBZ$it", Outcome.STOPPED, returnPct = -5.0) }
+
+        val ranked = PerformanceCalculator.channelScores(tight + wide)
+
+        assertEquals(listOf("Wide", "Tight"), ranked.map { it.channel })
+        // Both figures are still reported exactly as measured. The one that led on the old ordering
+        // is still the higher of the two.
+        assertEquals(90.0, ranked.single { it.channel == "Tight" }.anyTargetRate!!, 0.001)
+        assertEquals(40.0, ranked.single { it.channel == "Wide" }.anyTargetRate!!, 0.001)
+        assertEquals(0.8, ranked.single { it.channel == "Tight" }.averageReturn!!, 0.001)
+        assertEquals(1.0, ranked.single { it.channel == "Wide" }.averageReturn!!, 0.001)
+    }
+
+    /** A mean from six calls is not the claim the same mean from fifty is. */
+    @Test
+    fun `a long record leads a short one that averages slightly more`() {
+        val short = List(6) { call("Short", "AAA$it", Outcome.PARTIAL_HIT, returnPct = 5.0) }
+        val long = List(50) { call("Long", "BBB$it", Outcome.PARTIAL_HIT, returnPct = 4.5) }
+
+        val ranked = PerformanceCalculator.channelScores(short + long)
+
+        assertEquals(listOf("Long", "Short"), ranked.map { it.channel })
+        // Neither average moves: the discount decides the order and is not what the card prints.
+        assertEquals(5.0, ranked.single { it.channel == "Short" }.averageReturn!!, 0.001)
+        assertEquals(2.73, ranked.single { it.channel == "Short" }.discountedReturn!!, 0.01)
+        assertEquals(4.09, ranked.single { it.channel == "Long" }.discountedReturn!!, 0.01)
+    }
+
+    /**
+     * The floor under a hit rate, which is the figure printed beneath it.
+     *
+     * Six of six is a true 100% resting on six calls. Wilson says the record supports 61%, where the
+     * normal approximation everyone reaches for first says 100% - the claim being questioned.
+     */
+    @Test
+    fun `the hit rate carries the floor its own evidence supports`() {
+        val perfect = List(6) { call("Perfect", "AAA$it", Outcome.PARTIAL_HIT) }
+        val long = List(40) { call("Long", "BBB$it", Outcome.PARTIAL_HIT) } +
+            List(10) { call("Long", "BBZ$it", Outcome.STOPPED) }
+
+        val scores = PerformanceCalculator.channelScores(perfect + long)
+        val six = scores.single { it.channel == "Perfect" }
+        val fifty = scores.single { it.channel == "Long" }
+
+        assertEquals(100.0, six.anyTargetRate!!, 0.001)
+        assertEquals(61.0, six.anyTargetRateFloor!!, 0.1)
+        assertEquals(80.0, fifty.anyTargetRate!!, 0.001)
+        assertEquals(67.0, fifty.anyTargetRateFloor!!, 0.1)
+    }
+
+    /** What the channel printed, which is the context its hit rate cannot be read without. */
+    @Test
+    fun `risk and reward are measured from the levels the channel printed`() {
+        // Entry midpoint 10.1, target 1 at 11.0, stop at 9.5: 0.9 up against 0.6 down.
+        val scores = PerformanceCalculator.channelScores(
+            List(5) { call("Source", "AAA$it", Outcome.PARTIAL_HIT) },
+        )
+
+        assertEquals(1.5, scores.single().averageRiskReward!!, 0.01)
+    }
+
+    /** A stop above the entry describes nothing, so it is left out rather than counted as free. */
+    @Test
+    fun `a call whose levels contradict each other is outside the ratio`() {
+        val scores = PerformanceCalculator.channelScores(
+            List(4) { call("Source", "AAA$it", Outcome.PARTIAL_HIT) } +
+                call("Source", "BAD", Outcome.PARTIAL_HIT, target1 = 9.0, stopLoss = 10.5),
+        )
+
+        assertEquals(1.5, scores.single().averageRiskReward!!, 0.01)
+    }
+
+    /** One bet, however many mornings it was printed on. */
+    @Test
+    fun `a re-posted call is counted once and said to have been`() {
+        val once = List(5) { call("Source", "AAA$it", Outcome.PARTIAL_HIT) }
+        val again = List(3) {
+            call("Source", "AAA0", Outcome.PARTIAL_HIT, repeatOf = called)
+        }
+
+        val score = PerformanceCalculator.channelScores(once + again).single()
+
+        assertEquals(5, score.calls)
+        assertEquals(5, score.judged)
+        assertEquals(3, score.repeats)
     }
 }

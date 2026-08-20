@@ -362,6 +362,8 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
+        SchedulesSettingsSection(appState, FormWidth)
+
         ExpandableSection(
             "Appearance",
             icon = Icons.Outlined.Palette,

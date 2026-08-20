@@ -35,6 +35,8 @@ import com.ikverse.egxanalyzer.data.rulesToUpload
 import com.ikverse.egxanalyzer.data.AnalysisPolicy
 import com.ikverse.egxanalyzer.data.EndpointPolicy
 import com.ikverse.egxanalyzer.data.EgxCatalog
+import com.ikverse.egxanalyzer.data.JobRunner
+import com.ikverse.egxanalyzer.data.JobSkipped
 import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.PerformanceCalculator
 import com.ikverse.egxanalyzer.data.PortfolioCalculator
@@ -65,7 +67,9 @@ import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.Portfolio
 import com.ikverse.egxanalyzer.model.PortfolioOrder
+import com.ikverse.egxanalyzer.model.JobWork
 import com.ikverse.egxanalyzer.model.Position
+import com.ikverse.egxanalyzer.model.ScheduledJob
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.SavedAnalysis
@@ -138,6 +142,10 @@ class AppState(
     private val analysisStopped: (reason: String?) -> Unit = {},
     /** Books or cancels the daily overdue check; supplied by the app so this class stays testable. */
     private val overdueRemindersChanged: (enabled: Boolean) -> Unit = {},
+    /**
+     * Books or cancels this phone's schedule alarm; supplied by the app so this class stays testable.
+     */
+    private val schedulesChanged: (jobs: List<ScheduledJob>, enabled: Boolean) -> Unit = { _, _ -> },
 ) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     var destination by mutableStateOf(AppDestination.ANALYZE)
@@ -614,6 +622,14 @@ class AppState(
         stopLoss: Double?,
         /** What the dialog offered, or whatever the user typed over it. */
         windowSessions: Int = appPreferences.scoringWindowSessions,
+        /**
+         * What the dialog put in front of them, which is no longer always the scoring setting.
+         *
+         * A T+1 call is offered its own two sessions, and comparing that against the setting would
+         * file every accepted T+1 trade as a window the user set by hand - a card claiming a
+         * decision nobody made.
+         */
+        offeredWindow: Int = appPreferences.scoringWindowSessions,
     ) {
         val normalized = Scoring.normalizeTicker(ticker)
         val existing = positions.firstOrNull {
@@ -637,9 +653,9 @@ class AppState(
             // setting later must not silently move a deadline a trade was taken under. Only an
             // edit of this trade can move it, which is the user doing it on purpose.
             windowSessions = window,
-            // Custom means the user typed over what they were offered, which here is the global
-            // setting. Recorded rather than recomputed later: the setting moves, the choice did not.
-            windowCustom = window != appPreferences.scoringWindowSessions,
+            // Custom means the user typed over what they were offered. Recorded rather than
+            // recomputed later: what was offered moves, the choice did not.
+            windowCustom = window != Scoring.clampWindow(offeredWindow),
             // Re-recording a mistyped price must not quietly cancel a Keep Open already set.
             keepOpen = existing?.keepOpen ?: false,
             // Kept from the first purchase, so re-recording a trade does not restart its life.
@@ -1428,6 +1444,93 @@ class AppState(
     }
 
     /**
+     * The jobs this phone runs on its own.
+     *
+     * Held here so a screen can list them, and read back from disk after every change rather than
+     * edited in memory: the alarm that fires them can wake a process with no screen in it, and the
+     * list the runner works from has to be the same list the card is showing.
+     */
+    var scheduledJobs by mutableStateOf(localDataStore.scheduledJobs())
+        private set
+
+    /**
+     * Whether this phone keeps its schedules at all.
+     *
+     * Off until it is switched on, unlike the overdue reminder beside it. That one reads a date
+     * already on disk; this one wakes the phone to do work, and a feature that starts doing things
+     * unattended because it shipped is not one the user agreed to. Stored outside [AppPreferences]
+     * so it stays this device's own answer - see `SettingsRepository.schedulesEnabled`.
+     */
+    var schedulesEnabled by mutableStateOf(settingsRepository.schedulesEnabled())
+        private set
+
+    fun updateSchedulesEnabled(enabled: Boolean) {
+        if (enabled == schedulesEnabled) return
+        settingsRepository.saveSchedulesEnabled(enabled)
+        schedulesEnabled = enabled
+        rebookSchedules()
+    }
+
+    fun saveScheduledJob(job: ScheduledJob) {
+        localDataStore.saveScheduledJob(job)
+        scheduledJobs = localDataStore.scheduledJobs()
+        rebookSchedules()
+    }
+
+    fun deleteScheduledJob(id: String) {
+        localDataStore.deleteScheduledJob(id)
+        scheduledJobs = localDataStore.scheduledJobs()
+        rebookSchedules()
+    }
+
+    /** Books the alarm for whatever is now nearest, after anything that could have moved it. */
+    private fun rebookSchedules() = schedulesChanged(scheduledJobs, schedulesEnabled)
+
+    /**
+     * Serves every schedule whose fire has come and gone unanswered, then books the next alarm.
+     *
+     * The entry point for the worker the alarm wakes, and the only one: re-booking from in here
+     * means a run can never leave the phone without an alarm for the fire after it.
+     */
+    suspend fun runDueScheduledJobs() {
+        JobRunner(
+            jobs = localDataStore::scheduledJobs,
+            record = localDataStore::saveScheduledJob,
+            schedulesEnabled = settingsRepository::schedulesEnabled,
+        ).runDue(::performScheduledWork)
+        scheduledJobs = localDataStore.scheduledJobs()
+        schedulesEnabled = settingsRepository.schedulesEnabled()
+        rebookSchedules()
+    }
+
+    /**
+     * Does one job's work, through exactly the path a press on screen would take.
+     *
+     * Given the moment the job came due rather than the moment it actually started, because a run
+     * that is late still has to reason about the slot it is filling.
+     */
+    private suspend fun performScheduledWork(work: JobWork, due: Instant): String = when (work) {
+        JobWork.PriceRefresh -> {
+            // A session's prices settle once and stay settled, so a refresh that already happened
+            // after this fire came due has done this job's work for it. Without the check, opening
+            // the app inside a missed job's grace window fetches every stock twice within seconds -
+            // once for the launch, once for the job - from a public feed the app is a guest on.
+            if (settingsRepository.lastPriceRefreshAt() >= due.toEpochMilli()) {
+                throw JobSkipped("Prices had already been fetched since this run came due.")
+            }
+            val outcome = refreshPrices(announce = false)
+            if (outcome.busy) throw JobSkipped(outcome.summary)
+            // A partial answer is still an answer and is recorded as one; only a refresh that threw
+            // or found nothing to fetch is worth a reader's attention the next morning.
+            if (!outcome.succeeded) error(outcome.summary)
+            outcome.summary
+        }
+
+        // Never reached: the runner refuses a job this build cannot run before it gets this far.
+        is JobWork.Unsupported -> error("This version cannot run ${work.kind}.")
+    }
+
+    /**
      * Remembers the order the Portfolio is being read in.
      *
      * Kept rather than held for the session, because it hides nothing: a user who chose oldest-first
@@ -1512,16 +1615,21 @@ class AppState(
         recomputePortfolio()
     }
 
-    suspend fun refreshPrices(announce: Boolean = true) {
-        if (pricesRefreshing) return
+    suspend fun refreshPrices(announce: Boolean = true): PriceRefreshOutcome {
+        if (pricesRefreshing) {
+            return PriceRefreshOutcome(
+                "A price refresh was already running",
+                succeeded = false,
+                busy = true,
+            )
+        }
         // A held stock is priced whether or not a report still names it: deleting the analysis a
         // trade came from must not freeze that trade's current price.
         val tickers = pricedStocks()
         if (tickers.isEmpty()) {
-            if (announce) {
-                statusMessage = StatusMessage("No stocks to price", false)
-            }
-            return
+            val outcome = PriceRefreshOutcome("No stocks to price", succeeded = false)
+            if (announce) statusMessage = StatusMessage(outcome.summary, false)
+            return outcome
         }
         pricesRefreshing = true
         busyLabel = if (announce) "Fetching prices" else null
@@ -1540,32 +1648,37 @@ class AppState(
             // A second recompute is cheap and happens only when bars actually arrived.
             if (resolveUnorderedSessions()) recomputePerformance()
             val missing = refresh.unpriced.size
-            if (announce) {
-                // A stock whose prices changed scale, and one whose feed has stopped moving, are
-                // both worth saying out loud: neither shows up as a failure, and the app's own
-                // figures go quiet about the stock rather than wrong about it.
-                val notes = buildList {
-                    if (missing > 0) add("$missing unpriced")
-                    if (refresh.suspect.isNotEmpty()) {
-                        add("${refresh.suspect.size} changed scale")
-                    }
-                    if (refresh.stale.isNotEmpty()) add("${refresh.stale.size} stale")
+            // A stock whose prices changed scale, and one whose feed has stopped moving, are
+            // both worth saying out loud: neither shows up as a failure, and the app's own
+            // figures go quiet about the stock rather than wrong about it.
+            val notes = buildList {
+                if (missing > 0) add("$missing unpriced")
+                if (refresh.suspect.isNotEmpty()) {
+                    add("${refresh.suspect.size} changed scale")
                 }
-                statusMessage = StatusMessage(
-                    "Priced ${refresh.priced}/${refresh.requested}" +
-                        if (notes.isEmpty()) "" else " · ${notes.joinToString(" · ")}",
-                    succeeded = notes.isEmpty(),
-                )
+                if (refresh.stale.isNotEmpty()) add("${refresh.stale.size} stale")
             }
+            // Composed whether or not anyone is listening, because a scheduled run has to write
+            // down what it did and there is no screen to read it off.
+            val outcome = PriceRefreshOutcome(
+                summary = "Priced ${refresh.priced}/${refresh.requested}" +
+                    if (notes.isEmpty()) "" else " · ${notes.joinToString(" · ")}",
+                succeeded = true,
+                clean = notes.isEmpty(),
+            )
+            if (announce) {
+                statusMessage = StatusMessage(outcome.summary, succeeded = outcome.clean)
+            }
+            return outcome
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
-            if (announce) {
-                statusMessage = StatusMessage(
-                    error.message?.takeIf(String::isNotBlank) ?: "Could not fetch prices",
-                    succeeded = false,
-                )
-            }
+            val outcome = PriceRefreshOutcome(
+                error.message?.takeIf(String::isNotBlank) ?: "Could not fetch prices",
+                succeeded = false,
+            )
+            if (announce) statusMessage = StatusMessage(outcome.summary, succeeded = false)
+            return outcome
         } finally {
             pricesRefreshing = false
             busyLabel = null
@@ -2293,3 +2406,26 @@ data class StatusMessage(val text: String, val succeeded: Boolean)
  */
 internal fun String.sanitizedCredential(): String =
     filter { it.code in 0x21..0x7E }
+
+/**
+ * What a price refresh did, in one line.
+ *
+ * Two verdicts rather than one, because two readers want different answers from the same run.
+ * [clean] colours the status line: a refresh that came back with three stocks unpriced worked, and
+ * painting that red would be wrong. [succeeded] is what a scheduled job files, and there a partial
+ * answer is still an answer - only a refresh that threw, or found nothing to fetch, is worth
+ * anyone's attention the next morning.
+ */
+data class PriceRefreshOutcome(
+    val summary: String,
+    val succeeded: Boolean,
+    val clean: Boolean = false,
+    /**
+     * True where nothing was fetched because a refresh was already under way.
+     *
+     * Its own answer rather than a failure, because it is the likely shape of a collision between
+     * a scheduled run and the refresh a launch starts: nothing went wrong, and filing it as an
+     * error would put a red line on a schedule that behaved perfectly.
+     */
+    val busy: Boolean = false,
+)

@@ -31,6 +31,23 @@ data class ScoredCall(
     val troughOn: LocalDate? = null,
     val returnPct: Double?,
     val sessionsElapsed: Int,
+    /**
+     * The window this call was actually judged over.
+     *
+     * On the call rather than only on the report, because they are no longer all the same: a T+1
+     * card is judged over its own two sessions while everything beside it takes the scoring
+     * setting. A screen reading the report's figure would name the wrong deadline on exactly the
+     * calls whose deadline is the point.
+     */
+    val windowSessions: Int = Scoring.DEFAULT_WINDOW_SESSIONS,
+    /**
+     * Leading sessions of that window the entry could first trade in.
+     *
+     * Equal to [windowSessions] for everything but a T+1 call, so the two differing is what marks
+     * one - and is what a card checks before saying the buy zone missed its one session rather
+     * than its whole window.
+     */
+    val entrySessions: Int = windowSessions,
     /** Set only for [Outcome.AMBIGUOUS], saying which pair of events could not be ordered. */
     val ambiguity: Ambiguity? = null,
     /** The first target was banked and the stop was reached afterwards. */
@@ -39,7 +56,38 @@ data class ScoredCall(
     val windowComplete: Boolean = false,
     /** The sessions this call was judged on, so the card can show them without another query. */
     val sessions: List<DailySession> = emptyList(),
+    /**
+     * The session this exact call was first posted on, where this is a re-posting of it.
+     *
+     * A channel that prints the same table every morning is making one bet, not five, and counted
+     * five times a single good call carries its whole record. Set on the later postings only, so the
+     * first one stays the call. The card still shows it - the channel did post it that day, and the
+     * session's record is what was posted - and every rate leaves it out.
+     */
+    val repeatOf: LocalDate? = null,
 )
+
+/**
+ * What the call offered against what it risked, measured from the middle of the buy zone.
+ *
+ * The first target rather than the second: it is the one a reader can realistically take, and the
+ * second is the channel's best case. Null where a level is missing or the levels contradict each
+ * other - a stop above the entry is not a call risking nothing, it is a call this cannot describe.
+ */
+val ScoredCall.riskReward: Double?
+    get() {
+        val entry = if (entryLow != null && entryHigh != null) {
+            (entryLow + entryHigh) / 2
+        } else {
+            entryLow ?: entryHigh ?: return null
+        }
+        val target = target1 ?: target2 ?: return null
+        val stop = stopLoss ?: return null
+        val reward = target - entry
+        val risk = entry - stop
+        if (reward <= 0 || risk <= 0) return null
+        return reward / risk
+    }
 
 /**
  * One trading session and every call made for it, scored.
@@ -81,8 +129,47 @@ data class ChannelScore(
     val fullHitRate: Double?,
     /** Reached at least the first target. */
     val anyTargetRate: Double?,
+    /**
+     * What one call was worth on average, across every judged call.
+     *
+     * The figure the ranking is built on. A hit rate can be bought by printing the target closer to
+     * the entry: 90% at +2% against a -10% stop loses money, and how often a channel is right says
+     * nothing on its own about whether following it pays.
+     */
     val averageReturn: Double?,
     val medianSessionsToHit: Double?,
+    /**
+     * [averageReturn] pulled toward zero by how little is behind it, which is what the list is
+     * ordered on.
+     *
+     * Six calls averaging +5% and fifty averaging +4.5% are not the same claim, and ordering on the
+     * mean alone put the six on top - the mistake the minimum-judged floor exists to stop, made
+     * again one call above it.
+     *
+     * A lower bound on the mean was the obvious way to do this and is the wrong one here. At the
+     * ten-to-thirty calls a channel actually has, the spread of stock returns swamps the difference
+     * between two channels' averages: a source printing +2% targets against a -10% stop scores a
+     * *better* bound than one making more per call, purely for being less varied, which is the
+     * ordering this whole figure exists to overturn.
+     */
+    val discountedReturn: Double? = null,
+    /**
+     * The Wilson 95% lower bound on [anyTargetRate]: the rate the evidence will bear.
+     *
+     * Printed under the rate rather than in place of it - the rate a channel achieved is the rate it
+     * keeps. 6 of 6 is a true 100% with a floor of 61%; 40 of 50 is 80% with a floor of 67%, and the
+     * second is the better record.
+     */
+    val anyTargetRateFloor: Double? = null,
+    /**
+     * How far the target sits above the entry against how far the stop sits below it, on average.
+     *
+     * The context a hit rate cannot be read without. A channel reaching a target on nine calls in
+     * ten at 0.3 to 1 gives it all back on the tenth, and no other figure on the card would say so.
+     */
+    val averageRiskReward: Double? = null,
+    /** Re-postings of a call already counted, left out of every figure above. */
+    val repeats: Int = 0,
 )
 
 data class PerformanceReport(

@@ -6,6 +6,7 @@ import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.Scoring
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -768,6 +769,33 @@ class PortfolioCalculatorTest {
     }
 
     /** Sessions that go nowhere, for the cases where only the entry and the mark matter. */
+    @Test
+    fun `a T plus one trade is closed by the session after the one it was called for`() {
+        // Bought on the session the card named and sold on the next: the trade the card described,
+        // and the whole of what the deadline is allowed to cover. The third session is priced here
+        // precisely so that a window still running into it would show.
+        val sessions = (0 until 3).map { day ->
+            session(called.plusDays(day.toLong()), high = 10.5, low = 9.5)
+        }
+
+        val view = PortfolioCalculator.evaluate(
+            position = position(
+                windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+                target1 = 20.0,
+                target2 = 22.0,
+                stopLoss = 1.0,
+            ),
+            sessions = sessions,
+            currentPrice = 10.0,
+        )
+
+        assertEquals(PositionStatus.EXPIRED, view.status)
+        assertFalse(view.open)
+        assertEquals(2, view.sessionsElapsed)
+        assertEquals(0, view.sessionsRemaining)
+        assertEquals(called.plusDays(1), view.deadlineDate)
+    }
+
     private fun flat(price: Double) = listOf(session(called, high = price, low = price))
 
     private fun session(date: LocalDate, high: Double, low: Double) = DailySession(

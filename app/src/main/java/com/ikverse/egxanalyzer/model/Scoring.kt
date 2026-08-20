@@ -20,6 +20,30 @@ object Scoring {
     const val MAX_WINDOW_SESSIONS = 30
     const val DEFAULT_WINDOW_SESSIONS = 10
 
+    /**
+     * The window a T+1 call is judged over, whatever the scoring setting says.
+     *
+     * A T+1 card is not a call to hold for a fortnight and see: it is an instruction to buy on the
+     * session it names and sell on the next one. Judged over the setting's ten sessions it was
+     * being credited for a target reached a week after the trade was over, which is a rate about
+     * some other trade than the one the channel described.
+     *
+     * Two rather than one because the count is inclusive of the buy session: the window is the
+     * session the call was made for and the session it is sold in.
+     */
+    const val T_PLUS_ONE_WINDOW_SESSIONS = 2
+
+    /**
+     * How much of that window the entry is still takeable in.
+     *
+     * The buy session and no further. An ordinary call whose buy zone first traded on day four was
+     * still there to be taken and is judged from where it was taken; a T+1 band that first traded
+     * on the sell session was never takeable at all, and expiring it would count a trade nobody
+     * could have made against the channel that called it. Unentered is excluded from every rate,
+     * which is the honest answer here.
+     */
+    const val T_PLUS_ONE_ENTRY_SESSIONS = 1
+
     fun clampWindow(sessions: Int): Int =
         sessions.coerceIn(MIN_WINDOW_SESSIONS, MAX_WINDOW_SESSIONS)
 
@@ -63,6 +87,13 @@ object Scoring {
         stopLoss: Double?,
         windowSessions: Int,
         /**
+         * Leading sessions of the window in which the entry may first trade.
+         *
+         * The whole window for an ordinary call, which is what the default says. Only a T+1 call
+         * shortens it - see [T_PLUS_ONE_ENTRY_SESSIONS] for why.
+         */
+        entrySessions: Int = windowSessions,
+        /**
          * Sessions on which this stock's prices changed scale - a split, a bonus issue.
          *
          * Empty by default, so a caller with no price history to consult scores exactly as before.
@@ -80,7 +111,8 @@ object Scoring {
         val fullTargetLevel = target2 ?: target1
         val partialTargetLevel = target1.takeIf { target2 != null }
         val plain = walk(
-            sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, priceBreaks,
+            sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, entrySessions,
+            priceBreaks,
         ) { day ->
             resolveFromBars(
                 intradayFor(day.date), entryLow, entryHigh, partialTargetLevel, fullTargetLevel,
@@ -94,10 +126,12 @@ object Scoring {
         // and only that day's own target is in doubt. Score it both ways: where the two agree there
         // is nothing left to be ambiguous about.
         val entryFirst = walk(
-            sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, priceBreaks,
+            sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, entrySessions,
+            priceBreaks,
         ) { Ordering.ENTRY_FIRST }
         val targetFirst = walk(
-            sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, priceBreaks,
+            sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, entrySessions,
+            priceBreaks,
         ) { Ordering.TARGET_FIRST }
         // The pessimistic run is the one reported. Where the two agree it is also the later of the
         // two, since it never credits the unproven target - so this is the conservative settlement
@@ -119,6 +153,7 @@ object Scoring {
         target2: Double?,
         stopLoss: Double?,
         windowSessions: Int,
+        entrySessions: Int,
         priceBreaks: Set<LocalDate>,
         ordering: (DailySession) -> Ordering,
     ): Scored {
@@ -177,7 +212,11 @@ object Scoring {
                     troughOn = day.date
                 }
             }
-            val enteredHere = !entered && day.touchedEntry(entryLow, entryHigh)
+            // Past [entrySessions] the band is no longer being offered, so a session that trades
+            // through it changes nothing. `entered` staying false is what carries the call out as
+            // unentered rather than as an expiry the channel never earned.
+            val enteredHere = !entered && zeroBased < entrySessions &&
+                day.touchedEntry(entryLow, entryHigh)
             if (enteredHere) entered = true
             if (entered) {
                 val hitFull = reached(day.high, fullTarget)
@@ -256,13 +295,25 @@ object Scoring {
         }
 
         val complete = considered.size >= window
+        // Where a call that ran out of time actually ended up.
+        //
+        // The window closed with the reader still holding, so the last close is where they stand,
+        // and a call that expired flat is a different fact about a channel from one that expired 9%
+        // down. This was null before, which left every expired call out of the average return while
+        // keeping it inside the rate that average is read beside - so a channel whose calls fizzle
+        // out read exactly like one whose calls all resolved. Nothing is claimed to have settled:
+        // `settledOn` stays null, because the market never reached a level the call named.
+        val lastClose = considered.lastOrNull { it.close != null }?.close
         return when {
             !entered ->
                 Scored(Outcome.ENTRY_NOT_REACHED, null, null, considered.size, peak, peakOn, trough, troughOn, null)
             partialOn != null -> partial(partialTarget, partialOn, partialElapsed, peak, peakOn,
                 trough, troughOn, entryLow, entryHigh, stoppedAfter = false,
                 windowComplete = complete)
-            complete -> Scored(Outcome.EXPIRED, null, null, considered.size, peak, peakOn, trough, troughOn, null)
+            complete -> Scored(
+                Outcome.EXPIRED, null, lastClose, considered.size, peak, peakOn, trough, troughOn,
+                returnPct(entryLow, entryHigh, lastClose),
+            )
             else -> Scored(Outcome.OPEN, null, null, considered.size, peak, peakOn, trough, troughOn, null)
         }
     }
@@ -417,6 +468,13 @@ enum class Outcome(val label: String, val judged: Boolean) {
     /** The first target was reached; the second was not, at least not yet. */
     PARTIAL_HIT("Partial hit", judged = true),
     STOPPED("Stopped out", judged = true),
+
+    /**
+     * The window closed with neither a target nor the stop reached.
+     *
+     * Judged, and carries a return: measured from the entry to the last close of the window, which
+     * is where a reader following the call still stood when it ran out of time.
+     */
     EXPIRED("Expired", judged = true),
 
     // Outcomes that say nothing about whether the source was right, so they are reported separately

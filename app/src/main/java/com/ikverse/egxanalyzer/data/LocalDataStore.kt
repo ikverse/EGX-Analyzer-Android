@@ -22,7 +22,11 @@ import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.cleanChannelName
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.IntradayBar
+import com.ikverse.egxanalyzer.model.JobOutcome
+import com.ikverse.egxanalyzer.model.JobTrigger
+import com.ikverse.egxanalyzer.model.JobWork
 import com.ikverse.egxanalyzer.model.Position
+import com.ikverse.egxanalyzer.model.ScheduledJob
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.ExcludedSource
 import com.ikverse.egxanalyzer.model.SavedAnalysis
@@ -30,8 +34,11 @@ import com.ikverse.egxanalyzer.model.SourceTrace
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
 
 class LocalDataStore(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
@@ -69,6 +76,7 @@ class LocalDataStore(context: Context) :
         db.createWordingRules()
         db.createPromptVersions()
         db.createPositions()
+        db.createScheduledJobs()
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -87,6 +95,7 @@ class LocalDataStore(context: Context) :
         db.createWordingRules()
         db.createPromptVersions()
         db.createPositions()
+        db.createScheduledJobs()
         db.addPositionRevisionColumns()
         db.addPositionWindowColumns()
         db.addOpenColumn()
@@ -1353,17 +1362,160 @@ class LocalDataStore(context: Context) :
         for (index in 0 until length()) add(getString(index))
     }
 
+    /**
+     * The jobs this phone runs on its own.
+     *
+     * Local to the device and never published, unlike positions or wording rules: a schedule
+     * copied onto three phones is three runs of one piece of work. Nothing in `*Sync` reads this
+     * table, and that absence is the feature.
+     *
+     * The work is stored as a kind plus a JSON blob rather than as columns, so a later version
+     * that schedules something with settings of its own adds fields inside the blob instead of
+     * migrating the table again - the same reason positions carry an `unknown` column.
+     */
+    private fun SQLiteDatabase.createScheduledJobs() = execSQL(
+        """CREATE TABLE IF NOT EXISTS scheduled_jobs (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            trigger_kind TEXT NOT NULL,
+            trigger_at TEXT NOT NULL,
+            trigger_days TEXT NOT NULL DEFAULT '',
+            work_kind TEXT NOT NULL,
+            work_config TEXT NOT NULL DEFAULT '{}',
+            grace_minutes INTEGER NOT NULL,
+            last_fired_at INTEGER,
+            last_outcome TEXT NOT NULL DEFAULT 'NEVER',
+            last_message TEXT,
+            created_at INTEGER NOT NULL DEFAULT 0,
+            armed_at INTEGER NOT NULL DEFAULT 0
+        )""",
+    )
+
+    /**
+     * Every schedule, oldest first, including any this build cannot run.
+     *
+     * A row whose kind or trigger will not parse is dropped rather than crashing the read: one
+     * unreadable schedule must not take the rest of them - or the screen that lists them - down
+     * with it. A row written by a newer build parses fine and comes back as
+     * [JobWork.Unsupported], which is shown and never run.
+     */
+    fun scheduledJobs(): List<ScheduledJob> = readableDatabase
+        .query("scheduled_jobs", null, null, null, null, null, "created_at ASC")
+        .use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    runCatching { cursor.toScheduledJob() }.getOrNull()?.let(::add)
+                }
+            }
+        }
+
+    fun saveScheduledJob(job: ScheduledJob) {
+        writableDatabase.insertWithOnConflict(
+            "scheduled_jobs",
+            null,
+            ContentValues().apply {
+                put("id", job.id)
+                put("name", job.name)
+                put("enabled", if (job.enabled) 1 else 0)
+                when (val trigger = job.trigger) {
+                    is JobTrigger.Once -> {
+                        put("trigger_kind", "ONCE")
+                        put("trigger_at", trigger.at.toString())
+                        put("trigger_days", "")
+                    }
+
+                    is JobTrigger.Repeat -> {
+                        put("trigger_kind", "REPEAT")
+                        put("trigger_at", trigger.at.toString())
+                        put("trigger_days", trigger.days.joinToString(",", transform = DayOfWeek::name))
+                    }
+                }
+                put("work_kind", job.work.storedKind())
+                put("work_config", "{}")
+                put("grace_minutes", job.graceMinutes)
+                put("last_fired_at", job.lastFiredAt?.toEpochMilli())
+                put("last_outcome", job.lastOutcome.name)
+                put("last_message", job.lastMessage)
+                put("created_at", job.createdAt.toEpochMilli())
+                put("armed_at", job.armedAt.toEpochMilli())
+            },
+            SQLiteDatabase.CONFLICT_REPLACE,
+        )
+    }
+
+    fun deleteScheduledJob(id: String) {
+        writableDatabase.delete("scheduled_jobs", "id = ?", arrayOf(id))
+    }
+
+    /**
+     * The name a work kind is filed under.
+     *
+     * An unsupported job keeps the name the build that wrote it used, so re-saving a row this
+     * version cannot run - which is what toggling it off does - does not rewrite it into
+     * something the build that can run it will no longer recognise.
+     */
+    private fun JobWork.storedKind(): String = when (this) {
+        JobWork.PriceRefresh -> "PRICE_REFRESH"
+        is JobWork.Unsupported -> kind
+    }
+
+    private fun Cursor.toScheduledJob(): ScheduledJob {
+        val at = getString(getColumnIndexOrThrow("trigger_at"))
+        val trigger = when (getString(getColumnIndexOrThrow("trigger_kind"))) {
+            "ONCE" -> JobTrigger.Once(LocalDateTime.parse(at))
+            "REPEAT" -> JobTrigger.Repeat(
+                days = getString(getColumnIndexOrThrow("trigger_days"))
+                    .split(",")
+                    .filter(String::isNotBlank)
+                    .mapTo(mutableSetOf(), DayOfWeek::valueOf),
+                at = LocalTime.parse(at),
+            )
+
+            else -> error("Unknown trigger")
+        }
+        val kind = getString(getColumnIndexOrThrow("work_kind"))
+        return ScheduledJob(
+            id = getString(getColumnIndexOrThrow("id")),
+            name = getString(getColumnIndexOrThrow("name")),
+            enabled = getInt(getColumnIndexOrThrow("enabled")) == 1,
+            trigger = trigger,
+            work = when (kind) {
+                "PRICE_REFRESH" -> JobWork.PriceRefresh
+                else -> JobWork.Unsupported(kind)
+            },
+            graceMinutes = getInt(getColumnIndexOrThrow("grace_minutes")),
+            lastFiredAt = nullableLong("last_fired_at")?.let(Instant::ofEpochMilli),
+            lastOutcome = runCatching {
+                JobOutcome.valueOf(getString(getColumnIndexOrThrow("last_outcome")))
+            }.getOrDefault(JobOutcome.NEVER),
+            lastMessage = nullableString("last_message"),
+            createdAt = Instant.ofEpochMilli(getLong(getColumnIndexOrThrow("created_at"))),
+            // A row written before schedules could be armed separately dates from its creation,
+            // which is exactly what armedAt meant for every one of them.
+            armedAt = Instant.ofEpochMilli(
+                getLong(getColumnIndexOrThrow("armed_at"))
+                    .takeIf { it > 0L }
+                    ?: getLong(getColumnIndexOrThrow("created_at")),
+            ),
+        )
+    }
+
+    private fun Cursor.nullableLong(column: String): Long? =
+        getColumnIndexOrThrow(column).let { if (isNull(it)) null else getLong(it) }
+
     /** Internal rather than private so the migration test can open version 9 by the same name. */
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
         /**
-         * 13 for `intraday_bars` and `intraday_fetches`, which order the two events inside a
-         * session that daily figures cannot separate. 12 was `price_events`, which records where a
-         * stock's prices changed scale.
+         * 14 for `scheduled_jobs`, the work this phone runs on its own. 13 was `intraday_bars`
+         * and `intraday_fetches`, which order the two events inside a session that daily figures
+         * cannot separate. 12 was `price_events`, which records where a stock's prices changed
+         * scale.
          *
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 13
+        const val DATABASE_VERSION = 14
     }
 }

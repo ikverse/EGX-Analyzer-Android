@@ -90,7 +90,8 @@ internal fun OccurrenceSheet(
                 TradeAction(
                     held = held,
                     suggestedEntry = point.entryMidpoint(),
-                    defaultWindow = trades.defaultWindowSessions,
+                    defaultWindow = trades.windowFor(point),
+                    tPlusOne = point.isTPlusOne,
                     onBuy = { price, date, window ->
                         trades.buy(stock, point, channel, price, date, window)
                     },

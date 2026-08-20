@@ -61,6 +61,7 @@ import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.positionId
@@ -230,7 +231,7 @@ internal fun InsightsScreen(appState: AppState) {
                 bands.forEach { (band, open) ->
                     if (open) {
                         SessionCard(
-                            band.single(), report.windowSessions,
+                            band.single(),
                             expanded = true,
                             onExpandedChange = { openSession = null },
                             heldFor = appState::heldFor,
@@ -243,7 +244,7 @@ internal fun InsightsScreen(appState: AppState) {
                     } else {
                         ResponsiveRows(band, columns) { session, cardModifier ->
                             SessionCard(
-                                session, report.windowSessions,
+                                session,
                                 expanded = false,
                                 onExpandedChange = { openSession = session.key() },
                                 heldFor = appState::heldFor,
@@ -265,7 +266,7 @@ internal fun InsightsScreen(appState: AppState) {
 }
 
 @Composable
-private fun OutcomeLabel(call: ScoredCall, windowSessions: Int) {
+private fun OutcomeLabel(call: ScoredCall) {
     // Every label explains itself, not just the puzzling one: a chip that is sometimes tappable
     // teaches nobody that it can be tapped.
     var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
@@ -285,7 +286,7 @@ private fun OutcomeLabel(call: ScoredCall, windowSessions: Int) {
         AlertDialog(
             onDismissRequest = { showing = false },
             title = { Text("${call.ticker} · ${call.outcome.label}") },
-            text = { Text(call.reason(windowSessions)) },
+            text = { Text(call.reason()) },
             confirmButton = {
                 TextButton(onClick = { showing = false }) { Text("Close") }
             },
@@ -299,7 +300,7 @@ private fun OutcomeLabel(call: ScoredCall, windowSessions: Int) {
  * Names the session it settled on rather than speaking generally, because "reached target 1" and
  * "reached target 1 on 3 Aug" answer different questions, and the second is the one being asked.
  */
-private fun ScoredCall.reason(windowSessions: Int): String {
+private fun ScoredCall.reason(): String {
     val on = settledOn?.format(OUTCOME_DATE)
     return when (outcome) {
         Outcome.FULL_HIT -> "Reached target 2 on $on."
@@ -313,8 +314,15 @@ private fun ScoredCall.reason(windowSessions: Int): String {
             else -> "Reached target 1 on $on."
         }
         Outcome.STOPPED -> "Broke the stop by more than 2% on $on."
-        Outcome.EXPIRED -> "The window closed with no target or stop reached."
-        Outcome.ENTRY_NOT_REACHED -> "The buy zone never traded in the window."
+        Outcome.EXPIRED -> "The $windowSessions-session window closed with no target or stop reached."
+        // A shortened entry is what marks a T+1 call, and this is the case it was shortened for:
+        // the band was never offered on the one session the card said to buy on.
+        Outcome.ENTRY_NOT_REACHED -> if (entrySessions < windowSessions) {
+            "The buy zone never traded on the session this call was made for, so there was no " +
+                "T+1 trade to take. Not counted for or against."
+        } else {
+            "The buy zone never traded in the window."
+        }
         Outcome.OPEN -> "Still inside its window, nothing settled yet."
         Outcome.UNPRICED -> "No stored prices for this stock yet."
         // Named as the company's doing rather than the feed's, because that is what it usually is,
@@ -359,6 +367,14 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
     val best = ranked.firstOrNull { it.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK }
     val scale = ranked.maxOfOrNull(ChannelScore::judged) ?: 0
     val window = "${report.windowSessions}-${report.windowSessions.sessionWord().removeSuffix("s")} window"
+    // A T+1 call is judged over its own two sessions, so the setting no longer describes every call
+    // on the page. Said only where the record actually holds one, rather than qualifying a figure
+    // that nothing on screen contradicts.
+    val holdsTPlusOne = remember(report.sessions) {
+        report.sessions.any { session ->
+            session.calls.any { it.windowSessions != report.windowSessions }
+        }
+    }
 
     Column(
         Modifier.padding(start = PageTextInset, end = Space.xs),
@@ -394,13 +410,17 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
                 verticalAlignment = Alignment.Bottom,
             ) {
+                // What following this source was worth per call, which is the question the page
+                // exists to answer. The hit rate used to stand here and cannot answer it on its
+                // own: a source printing its target 2% above the entry reaches it nearly every
+                // time and hands it all back on the call that goes wrong.
                 Text(
-                    formatPercent(best.anyTargetRate, signed = false),
+                    best.averageReturn.signedPercent(),
                     style = MaterialTheme.typography.headlineLarge.copy(fontFamily = TabularFigures),
-                    color = MaterialTheme.colorScheme.primary,
+                    color = PriceRole.forReturn(best.averageReturn),
                 )
                 Text(
-                    "reached a target",
+                    "per call · ${formatPercent(best.anyTargetRate, signed = false)} reached a target",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = HeroLabelBaseline),
@@ -414,6 +434,7 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
                 "${report.tracked} scored",
                 ranked.size.takeIf { it > 0 }?.let { "$it ${if (it == 1) "source" else "sources"}" },
                 window,
+                "T+1 calls ${Scoring.T_PLUS_ONE_WINDOW_SESSIONS}".takeIf { holdsTPlusOne },
                 // How current every price on this page is, in one place rather than repeated on
                 // each card. Read off the prices themselves, so a refresh that ran and came back
                 // with nothing cannot make the page look fresher than it is.
@@ -475,6 +496,9 @@ private fun ChannelCard(channel: ChannelScore, scale: Int, modifier: Modifier = 
         Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             // A fixed height so a long Arabic channel name does not make its card taller than the
             // one beside it.
+            // A figure resting on two settled calls is still measured exactly, and still worth
+            // nothing as a verdict. It keeps its figure and loses its colour.
+            val thin = channel.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
             Row(
                 Modifier.heightIn(min = ChannelHeaderHeight),
                 verticalAlignment = Alignment.Top,
@@ -486,26 +510,28 @@ private fun ChannelCard(channel: ChannelScore, scale: Int, modifier: Modifier = 
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // A rate resting on two settled calls is still measured exactly, and still worth
-                // nothing as a verdict. It keeps its figure and loses its colour.
-                val thin = channel.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
+                // What one call was worth, which is what these cards are now ordered on. The hit
+                // rate moved down into the figures: it is worth knowing and it is not the verdict.
                 Text(
-                    formatPercent(channel.anyTargetRate, signed = false),
+                    channel.averageReturn.signedPercent(),
                     style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
                     fontWeight = FontWeight.Bold,
                     color = if (thin) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {
-                        channel.anyTargetRate.rateTone()
+                        PriceRole.forReturn(channel.averageReturn)
                     },
                 )
             }
             Text(
-                (if (channel.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK) {
-                    "too few judged to rank"
-                } else {
-                    "reached a target"
-                }) + " · ${channel.judged} of ${channel.calls} calls judged",
+                listOfNotNull(
+                    if (thin) "too few judged to rank" else "per judged call",
+                    "${channel.judged} of ${channel.calls} calls judged",
+                    // Said out loud rather than left as a smaller number of calls than the sessions
+                    // below plainly show. The same call posted again is the same bet, and a channel
+                    // re-posting every morning would otherwise carry one idea several times over.
+                    channel.repeats.takeIf { it > 0 }?.let { "$it re-posted, counted once" },
+                ).joinToString(" · "),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -517,8 +543,21 @@ private fun ChannelCard(channel: ChannelScore, scale: Int, modifier: Modifier = 
             // underneath it. The bar says all three.
             OutcomeBar(channel, scale = scale, height = OutcomeBarCompact)
             FigureGroup(
-                "What that was worth",
+                "The record behind it",
                 listOf(
+                    {
+                        Figure(
+                            "Reached a target",
+                            formatPercent(channel.anyTargetRate, signed = false),
+                            Modifier.weight(1f), tone = channel.anyTargetRate.rateTone(),
+                            // The rate the evidence will bear, under the rate that was measured.
+                            // Six of six is a true 100% and a floor of 61%; a long record at 80%
+                            // floors above that, which is why the order is not the rate.
+                            caption = channel.anyTargetRateFloor?.let {
+                                "at least ${formatPercent(it, signed = false)}"
+                            },
+                        )
+                    },
                     {
                         Figure(
                             "Target 2 rate", formatPercent(channel.fullHitRate, signed = false),
@@ -527,8 +566,11 @@ private fun ChannelCard(channel: ChannelScore, scale: Int, modifier: Modifier = 
                     },
                     {
                         Figure(
-                            "Average return", channel.averageReturn.signedPercent(),
-                            Modifier.weight(1f), tone = PriceRole.forReturn(channel.averageReturn),
+                            "Risk : reward", channel.averageRiskReward.asRatio(),
+                            Modifier.weight(1f),
+                            // Without this the rate above cannot be read at all: reaching a target
+                            // nine times in ten at 0.3 to 1 gives it all back on the tenth.
+                            caption = "target 1 against the stop",
                         )
                     },
                     {
@@ -565,7 +607,6 @@ private val ChannelHeaderHeight = 44.dp
 @Composable
 private fun SessionCard(
     run: ScoredSession,
-    windowSessions: Int,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     /** The position taken on a call, so a stock actually held is marked as such. */
@@ -629,7 +670,6 @@ private fun SessionCard(
                     val held = heldFor(call.ticker, call.openedOn)
                     ScoredCallRow(
                         call,
-                        windowSessions,
                         latestFor(call.ticker),
                         held,
                         // Only a call the user is actually in leads anywhere: there is no trade to
@@ -652,7 +692,6 @@ private fun SessionCard(
 @Composable
 private fun ScoredCallRow(
     call: ScoredCall,
-    windowSessions: Int,
     /** Where this stock stands as of the last refresh. Absent for a stock with no prices at all. */
     latest: LatestPrice?,
     held: PositionView?,
@@ -695,11 +734,14 @@ private fun ScoredCallRow(
                             )
                         }
                 }
-                OutcomeLabel(call, windowSessions)
+                OutcomeLabel(call)
             }
             Text(
                 "${call.channel} · called ${call.openedOn}" +
-                    (call.settledOn?.let { " · settled $it" } ?: ""),
+                    (call.settledOn?.let { " · settled $it" } ?: "") +
+                    // The channel did post it that day, so the card stays; it is the same bet as
+                    // the call it repeats, so no rate counts it twice.
+                    (call.repeatOf?.let { " · repeat of $it, counted once" } ?: ""),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -769,6 +811,15 @@ private fun ScoredCallRow(
                             call.returnPct.signedPercent(),
                             Modifier.weight(1f),
                             tone = PriceRole.forReturn(call.returnPct),
+                            // A call that ran out of time reached no level it named, so its return
+                            // is measured to wherever the window left it. Said on the card, because
+                            // that is a different kind of figure from a return to a target the
+                            // market actually got to.
+                            caption = if (call.outcome == Outcome.EXPIRED) {
+                                "to the last close"
+                            } else {
+                                null
+                            },
                         )
                     },
                     // Where the stock actually is, which every other figure here stops short of
@@ -1039,6 +1090,15 @@ private fun ScoredCall.entryRange(): String = when {
 }
 
 private fun Double?.signedPercent(): String = formatPercent(this)
+
+/**
+ * A risk-to-reward ratio, always written against a risk of one.
+ *
+ * "1 : 2.4" rather than a bare 2.4, which on a card of prices reads as one - and which way round
+ * it goes is the whole meaning of the figure.
+ */
+private fun Double?.asRatio(): String =
+    if (this == null || isNaN()) Dash else "1 : ${formatPrice(this)}"
 
 private fun Double.trimZero(): String = formatPrice(this)
 

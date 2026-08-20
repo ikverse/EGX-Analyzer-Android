@@ -22,6 +22,34 @@ fun returnFrom(point: RecommendationDataPoint, target: Double?): Double? {
     return (target - entry) / entry * 100
 }
 
+/**
+ * How long a call is given, and how much of that the entry is still takeable in.
+ *
+ * One pair rather than two loose numbers: the scorer, the Insights card and the buy dialog all have
+ * to agree about a call's deadline, and a second place deciding it would drift from this one the
+ * first time either was adjusted - after which a trade would run to a date the rate judging it had
+ * never heard of.
+ */
+data class TradeWindow(
+    /** Sessions the call is judged over, counted inclusively from the session it was made for. */
+    val sessions: Int,
+    /** Leading sessions of that window in which the entry may first trade. */
+    val entrySessions: Int,
+)
+
+/**
+ * The window this occurrence is judged over, given the user's scoring setting.
+ *
+ * A T+1 card names its own deadline and the setting does not apply to it: buy on the session it is
+ * for, sell on the next. Everything else takes the setting, which is what the user set it for.
+ */
+fun RecommendationDataPoint.tradeWindow(setting: Int): TradeWindow = if (isTPlusOne) {
+    TradeWindow(Scoring.T_PLUS_ONE_WINDOW_SESSIONS, Scoring.T_PLUS_ONE_ENTRY_SESSIONS)
+} else {
+    val window = Scoring.clampWindow(setting)
+    TradeWindow(window, window)
+}
+
 /** What dated this occurrence: the first thing read on a row, and the label on a card. */
 fun timing(point: RecommendationDataPoint): String? = when {
     point.isWatching -> "Watching"

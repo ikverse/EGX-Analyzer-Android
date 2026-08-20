@@ -39,6 +39,7 @@ import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.callDate
+import com.ikverse.egxanalyzer.model.tradeWindow
 import com.ikverse.egxanalyzer.ui.theme.extraColors
 import java.time.LocalDate
 
@@ -62,12 +63,14 @@ internal class TradeBook(
         appState.heldFor(stock.stockCode, dateOf(point))
 
     /**
-     * What a new trade's window is offered as, which is the global scoring setting.
+     * What a new trade's window is offered as, which is this call's own deadline.
      *
-     * Read at the moment the dialog opens rather than captured earlier: a user who has just changed
-     * the setting means the new one.
+     * The scoring setting for an ordinary call; a T+1 call names its own and the setting does not
+     * apply to it. Read at the moment the dialog opens rather than captured earlier: a user who has
+     * just changed the setting means the new one.
      */
-    val defaultWindowSessions: Int get() = appState.appPreferences.scoringWindowSessions
+    fun windowFor(point: RecommendationDataPoint): Int =
+        point.tradeWindow(appState.appPreferences.scoringWindowSessions).sessions
 
     fun buy(
         stock: ConsolidatedRecommendation,
@@ -94,6 +97,9 @@ internal class TradeBook(
             target2 = point.target2,
             stopLoss = point.stopLoss,
             windowSessions = windowSessions,
+            // What the dialog showed them, so accepting a T+1 call's two sessions is not recorded
+            // as a deadline they set by hand.
+            offeredWindow = windowFor(point),
         )
     }
 
@@ -132,6 +138,14 @@ internal fun TradeAction(
     suggestedEntry: Double?,
     /** Offered as the new trade's window, and overwritable in the dialog. */
     defaultWindow: Int,
+    /**
+     * This call carries its own deadline rather than taking the scoring setting.
+     *
+     * Only changes what the dialog says about the number it offers. The field stays editable: a
+     * T+1 call the user means to hold longer is theirs to hold, and a window they cannot argue
+     * with would be the app overruling them about their own trade.
+     */
+    tPlusOne: Boolean = false,
     /** Prefills the sale dialog with the latest close, which is the likeliest sale price. */
     suggestedExit: Double? = null,
     onBuy: (price: Double, date: LocalDate, windowSessions: Int) -> Unit,
@@ -182,7 +196,12 @@ internal fun TradeAction(
             confirmLabel = "Save",
             initialPrice = suggestedEntry,
             initialWindow = defaultWindow,
-            windowHelp = "From your scoring setting. Change it to give this trade its own deadline.",
+            windowHelp = if (tPlusOne) {
+                "This call is T+1: the session it was made for, and the next one. Change it to " +
+                    "give this trade longer."
+            } else {
+                "From your scoring setting. Change it to give this trade its own deadline."
+            },
             onDismiss = { buying = false },
             onConfirm = { price, date, window ->
                 buying = false

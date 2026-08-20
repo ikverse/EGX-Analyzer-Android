@@ -88,6 +88,11 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   sent onward from the ⋮ menu on its card. See below.
 - `ui/PortfolioScreen.kt` + `ui/TradeControls.kt` — the Portfolio tab, and the Bought button and
   closing controls that sit on a recommendation card.
+- `model/ScheduleClock.kt` + `model/ScheduledJob.kt` — when a scheduled job fires, and what one is.
+- `data/JobScheduler.kt` + `data/ScheduleReceiver.kt` + `data/ScheduledJobWorker.kt` +
+  `data/JobRunner.kt` — the alarm, the four things that mean re-book it, and what runs. See below.
+- `ui/SchedulesSection.kt` + `ui/SchedulesSheet.kt` — the card on Analyze, the section in Settings,
+  and the sheet both open.
 - `ui/` — one file per screen, plus `CommonUi.kt` and `DesignSystem.kt` for shared pieces.
 
 ## Scoring, and why each rule is there
@@ -117,14 +122,53 @@ adjustable in Settings).
 - **Judged** outcomes are full hit, partial hit, stopped, expired. Still open, entry never traded,
   ambiguous, not priced and **prices changed scale** say nothing about the channel and are excluded
   from every rate.
+- An **expired call carries a return**, measured from the entry to the last close of its window -
+  where a reader following it still stood when the time ran out. It reported none before, which kept
+  every expired call out of the average return while leaving it inside the rate that average is read
+  beside, so a channel whose calls fizzle out flat read exactly like one whose calls all resolved.
+  `settledOn` stays null: the market reached no level the call named.
+- **A call re-posted on the next analysed session is the same call.** Channels print a standing
+  recommendation every morning until it resolves, and one idea was collecting a judged call per
+  posting - so a source running a daily table outweighed one that posts when it has something to
+  say, on nothing but how often it posts. Same source, same stock, every level identical; move a
+  stop or lift a target and it is a new call. Adjacency is measured against the sessions actually
+  analysed rather than the calendar, so a session going by without the call starts a fresh one.
+  `ScoredCall.repeatOf` is a **mark, not a deletion**: the card stays on its session, because that
+  is the record of what the channel published that day, and every rate leaves it out.
 - A **split or bonus issue inside the window** makes the call unjudgeable rather than a loss. The
   levels were printed in the old money and every price after the split is quoted in the new, so a
   2-for-1 reads as a 50% collapse and files the call as a stop-out — silently, and against whichever
   channel happened to call that stock. A break dated on the window's *first* session still costs the
   call, because the levels were printed before that session opened; that can take a call made after
   the split, and it is the right direction to err in.
-- A channel needs `MINIMUM_JUDGED_TO_RANK` (5) settled calls before its rate is allowed to lead.
-  Without it, two good calls beat a month of evidence.
+### Ranking the channels
+
+Being right often is not the same as being worth following, and the ranking used to assume it was.
+
+- **The order is what a call was worth, not how often it worked.** A hit rate is bought by moving
+  the target closer to the entry: reach for +2% against a -10% stop and nine calls in ten get there,
+  while the tenth takes back more than the nine made. `ChannelScore.averageReturn` - the mean over
+  every judged call - is the headline figure on the card and on the hero, and the hit rate moved
+  down into the figures. It is still measured, still shown, and no longer what decides the order.
+- **A channel still needs `MINIMUM_JUDGED_TO_RANK` (5) settled calls to lead at all.** Without it
+  two good calls beat a month of evidence. Below the floor the figures are reported exactly as
+  measured; they simply stop sorting above channels with a record behind them.
+- Within the floor the sort key is `discountedReturn`: the average pulled toward zero by how little
+  is behind it, `mean × n / (n + 5)`. Six calls at +5% (2.73) sit below fifty at +4.5% (4.09)
+  without either figure being misreported. **A lower bound on the mean was tried first and is wrong
+  for this data** - at the ten-to-thirty calls a channel actually has, the spread of stock returns
+  is worth several points and the gap between two channels' averages a fraction of one, so the bound
+  ranks on variance and almost nothing else. It put a +2%-target source at -1.55 above a source
+  making more per call at -3.80, which is the exact ordering the change existed to overturn.
+- `anyTargetRateFloor` is the **Wilson 95% lower bound** on the hit rate, printed under it as "at
+  least X%". 6 of 6 is a true 100% resting on a floor of 61%; 40 of 50 is 80% resting on 67%, and
+  the second is the better record. The normal approximation puts the first at 100%, which is the
+  claim being questioned, so Wilson rather than that.
+- `averageRiskReward` is (target 1 − entry midpoint) / (entry midpoint − stop), over every call the
+  channel made rather than only the judged ones - it describes the levels it prints, which it
+  printed whatever the market did about them. The context a hit rate cannot be read without: 90% at
+  0.3 to 1 is a losing source. A call whose levels contradict each other is left out rather than
+  counted as risking nothing.
 
 ### Ordering the two events inside one session
 
@@ -299,10 +343,11 @@ trade is then managed, in whatever state it has reached.
   ones included. The win rate and the averages have to, or they stop describing the record — a trade
   that went nowhere for ten sessions is a result. "Closed" is reserved for the section, which means
   what the user means by it: sold by hand, taken by the stop, or the targets reached.
-- `OverdueWorker` is the **only thing that runs while the app is closed**: once a day, no network,
-  no Telegram, and it must never start an analysis. It reads `LocalDataStore` directly rather than
-  through `AppState`, which would drag a Telegram session up with it. Off via a Settings checkbox,
-  which cancels the work rather than letting it wake up and find nothing to say.
+- `OverdueWorker` runs once a day while the app is closed: no network, no Telegram, and it must
+  never start an analysis. It reads `LocalDataStore` directly rather than through `AppState`, which
+  would drag a Telegram session up with it. Off via a Settings checkbox, which cancels the work
+  rather than letting it wake up and find nothing to say. It is no longer the only thing that runs
+  while the app is closed — see **Schedules** below, which reverses that rule deliberately.
 - Positions **travel as revisions**, like wording rules and unlike reports. A position's id is
   derived from the call - `AMOC@2026-07-20` - so the same trade recorded on two devices is one
   holding rather than two that can never be reconciled. A delete is a revision too, so a later edit
@@ -521,8 +566,78 @@ phone only by plugging it into the machine that built it. It reads one public UR
 - **The launch check speaks only when there is something new**, exactly like the launch sync. It is
   independent of Telegram, so it does not wait for a session. Failures are silent: being offline is
   not news. Switchable off in Settings, and the switch travels with the rest.
-- **Nothing new runs in the background.** `OverdueWorker` is still the only thing that runs while
-  the app is closed.
+- **The updater adds nothing to the background.** The one thing that does is **Schedules** below.
+
+## Schedules
+
+Work this phone does on its own, at a time the user chose. This is the one feature that reverses a
+rule the app had held since the beginning — that nothing but `OverdueWorker` runs while the app is
+closed — and it was built free-first on purpose: **nothing schedulable spends cloud credits**, and
+the guard that refuses paid work is in `JobRunner` with no way to switch it off, so a paid job type
+cannot arm it by merely existing.
+
+- **A job is a saved configuration plus a trigger.** `ScheduledJob` in `model/ScheduledJob.kt`:
+  a `JobTrigger` (`Once` at a date and time, or `Repeat` over a set of days at a clock time), a
+  `JobWork` (only `PriceRefresh` so far), a grace window, and what became of the last fire.
+- **Device-local, and never synced.** Everything else the app records travels through the sync
+  channel; a schedule must not, because three phones keeping one schedule is the same work done
+  three times — and once analyses can be scheduled, three times the bill for one answer. Nothing in
+  `*Sync.kt` reads `scheduled_jobs`, and the master switch is deliberately **outside**
+  `AppPreferences` (which is published) as `SettingsRepository.schedulesEnabled`.
+- **Cairo time, always.** A schedule belongs to the exchange, not to wherever the phone is: a user
+  who books a run for after the close means after the close in Cairo, and a job that shifted an hour
+  when they landed somewhere would read a session that had not happened.
+- **`ScheduleClock` is the whole of the timekeeping and has no Android in it**, because a rule about
+  what happens at 18:00 next Sunday cannot be checked by waiting for next Sunday. `nextFire` books
+  the alarm, `previousFire`/`unservedFire` decide what is owed, and the zone is a parameter only so
+  a test can drive it through a daylight-saving gap on purpose.
+- **A fire is compared against the fire last served, never against the wall clock.** `lastFiredAt`
+  stores the *scheduled* moment, so a run that started 20 minutes late still counts as having filled
+  its 18:00 slot — comparing real start times would let one slot fire twice on a phone whose clock
+  moved.
+- **Grace is what makes a schedule work at all**, default two hours. A phone that was off, in Doze
+  or out of signal at the appointed minute is the normal case, and a schedule that fires punctually
+  or not at all mostly does not fire. Past the grace the run is recorded as **missed** rather than
+  started late. Only the most recent unserved fire is ever considered: a week with the phone off
+  comes back owing one run, not seven.
+- **AlarmManager is the clock; WorkManager does the work.** WorkManager's delays are a floor and not
+  a promise — in Doze "18:00" becomes "some time that evening" — so `JobScheduler` books one exact
+  alarm at the earliest fire across every enabled job, and the run that answers it books the next.
+  One alarm rather than one per job: only the nearest matters. `setExactAndAllowWhileIdle` where the
+  user has granted `SCHEDULE_EXACT_ALARM`, falling back to the inexact form where they have not —
+  the app asks rather than declaring `USE_EXACT_ALARM`, which is meant for alarm clocks.
+- **Four things mean re-book**, all handled by `ScheduleReceiver`: the alarm firing, a reboot, an
+  update replacing the app, and the exact-alarm permission changing. An alarm survives none of the
+  last three, and a schedule nobody re-booked has silently stopped keeping time. Re-booking happens
+  in the receiver, which needs no network — a phone that boots into a tunnel still comes out with
+  its alarm set — while the work goes to WorkManager, which waits for one.
+- **`ScheduledJobWorker` goes through `AppState`, which is the opposite of what `OverdueWorker`
+  does, and is deliberate.** That worker answers a question out of the database and touches nothing
+  else. A scheduled job does the same work a button on screen does, and a second implementation of a
+  price refresh would be a second set of rules about what is fetched, what is re-scored and what the
+  record then says — one of the two would eventually be wrong, and it would be the one nobody is
+  watching. The cost is that waking the process brings the catalog, the stale-price check and a sync
+  catch-up with it; none of them is paid.
+- **A price refresh skips when one has already happened since its fire came due.** Without it,
+  opening the app inside a missed job's grace window fetches every stock twice within seconds, and
+  the price feed is a public one the app is a guest on. Hence `lastPriceRefreshAt` beside
+  `lastPriceRefreshDay` — the day cannot answer "since this fire".
+- **Every path records an outcome, including the ones that do nothing.** Silence is the failure mode
+  of every scheduler on this platform: the phone puts the app to sleep, nothing fires, and nothing
+  says so. A schedule whose last line reads "Skipped · prices had already been fetched" is
+  diagnosable; a blank one on a morning it should have run is not.
+- **The UI is a sheet, not a sixth tab.** This app has no back stack — five destinations and modal
+  surfaces for everything else — and a screen set up once does not earn permanent navigation weight
+  at 411dp. `SchedulesSection` puts the card on **Analyze**, which is where a run is configured and
+  therefore where a run-with-a-time-on-it belongs; `SchedulesSettingsSection` puts the same sheet in
+  Settings beside the two system permissions that decide whether any of it works.
+- **The two system permissions are shown whether or not they are granted.** Exact alarms, and
+  Samsung's battery optimization, which puts an app it considers unused to sleep and takes every
+  schedule with it. A page that goes quiet once something is right leaves the reader unable to tell
+  "granted" from "the app forgot to check".
+- **A job from a newer build is kept, shown, and never run.** `JobWork.Unsupported` carries the kind
+  it could not read and is written back unchanged, so a downgrade does not lose a schedule and does
+  not rewrite it into something the build that understands it would no longer recognise.
 
 ## Gotchas
 
@@ -530,11 +645,13 @@ phone only by plugging it into the machine that built it. It reads one public UR
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 13.
+  `onUpgrade`. Currently 14.
 - **Migrations are tested** — `LocalDataStoreMigrationTest` runs under Robolectric, which supplies
   enough of Android for a real SQLite database in a plain unit test. It writes the version-9 table
   by hand and upgrades it, deliberately: a test that builds its "old" schema from today's code
-  tests nothing, because both sides move together. Add a case there for every version bump. Note
+  tests nothing, because both sides move together. Add a case there for every version bump —
+  version 14 has its own in `ScheduledJobStoreTest`, which writes the version-13 `positions` table
+  and checks that gaining `scheduled_jobs` did not cost the trades already on the phone. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it
   went in. **Robolectric needs Java 21** to stand up a sandbox for SDK 36 — it refuses on 17 with
   "requires Java 21 (have Java 17)", which is a green run locally on the JBR and a red one anywhere

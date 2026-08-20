@@ -316,6 +316,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         // than as a loose line under the card it is about.
         MessagesPreview(appState, scope, blocker, attempted)
         AnalysisModelCard(appState, blocker, attempted)
+        SchedulesSection(appState)
             },
         )
         DuplicateAnalysisDialog(appState)

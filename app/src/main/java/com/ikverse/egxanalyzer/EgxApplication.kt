@@ -6,11 +6,13 @@ import com.ikverse.egxanalyzer.data.AnalysisService
 import com.ikverse.egxanalyzer.data.AndroidKeystoreCredentialStore
 import com.ikverse.egxanalyzer.data.CloudAnalysisRepository
 import com.ikverse.egxanalyzer.data.IntradayRepository
+import com.ikverse.egxanalyzer.data.JobScheduler
 import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.OverdueWorker
 import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.PromptStore
 import com.ikverse.egxanalyzer.data.RequestTrace
+import com.ikverse.egxanalyzer.data.ScheduledJobWorker
 import com.ikverse.egxanalyzer.data.SymbolMap
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.TelegramRepository
@@ -61,6 +63,7 @@ class EgxApplication : Application() {
                 AnalysisService.stop(this)
                 if (reason == null) notifier.cancelled() else notifier.failed(reason)
             },
+            schedulesChanged = { jobs, enabled -> JobScheduler(this).rebook(jobs, enabled) },
             overdueRemindersChanged = { enabled ->
                 if (enabled) OverdueWorker.schedule(this) else OverdueWorker.cancel(this)
             },
@@ -69,6 +72,12 @@ class EgxApplication : Application() {
         // has never opened Settings still gets the check, and one whose work was dropped by the
         // system gets it back.
         if (state.appPreferences.overdueRemindersEnabled) OverdueWorker.schedule(this)
+        // Re-booked on every launch, for the reason the overdue check is: an alarm does not
+        // survive a reboot or an app update, and one the system dropped leaves a schedule that
+        // has silently stopped keeping time. The sweep answers a fire that came due while the
+        // phone was off, which is what the grace window on each job is for.
+        JobScheduler(this).rebook(state.scheduledJobs, state.schedulesEnabled)
+        if (state.schedulesEnabled) ScheduledJobWorker.sweep(this)
         state
     }
 }

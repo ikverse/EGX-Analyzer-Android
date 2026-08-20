@@ -182,6 +182,32 @@ class ScoringTest {
     }
 
     @Test
+    fun `a call that ran out of time is worth what the window left it at`() {
+        // Expired reported no return at all, which kept every expired call out of the average
+        // return while leaving it inside the rate that average is read beside: a channel whose
+        // calls fizzle out flat read exactly like one whose calls all resolved.
+        val flat = sessions(10.0 to 9.5, 10.2 to 9.6, 10.3 to 9.7)
+
+        val scored = Scoring.score(flat, 9.8, 10.0, 12.0, null, 8.0, windowSessions = 3)
+
+        assertEquals(Outcome.EXPIRED, scored.outcome)
+        // From the middle of the 9.8-10.0 band to 10.3, the last close of the window.
+        assertEquals(4.04, scored.returnPct!!, 0.01)
+        // Nothing settled: the market reached no level the call named, and the date says so.
+        assertNull(scored.settledOn)
+    }
+
+    @Test
+    fun `a call that ran out of time below the entry says so`() {
+        val down = sessions(10.0 to 9.5, 9.4 to 9.2, 9.1 to 8.9)
+
+        val scored = Scoring.score(down, 9.8, 10.0, 12.0, null, 8.0, windowSessions = 3)
+
+        assertEquals(Outcome.EXPIRED, scored.outcome)
+        assertEquals(-8.08, scored.returnPct!!, 0.01)
+    }
+
+    @Test
     fun `a call still inside its window is open rather than expired`() {
         val scored = Scoring.score(
             sessions = sessions(10.0 to 9.5, 10.2 to 9.6),
@@ -658,5 +684,93 @@ class ScoringTest {
 
         assertEquals(withoutArgument, withEmptySet)
         assertEquals(Outcome.FULL_HIT, withoutArgument.outcome)
+    }
+
+    @Test
+    fun `a T plus one call reaching its target on the sell session is a full hit`() {
+        // Bought on the session it was made for, sold on the next: the whole of the trade the card
+        // described, and a window that stopped before it would judge a call nobody made.
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 14.5 to 10.2),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
+        )
+
+        assertEquals(Outcome.FULL_HIT, scored.outcome)
+        assertEquals(start.plusDays(1), scored.settledOn)
+    }
+
+    @Test
+    fun `a T plus one call whose target arrives after the sell session expires`() {
+        val prices = sessions(10.0 to 9.5, 11.0 to 10.2, 14.5 to 11.0)
+        val tPlusOne = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
+        )
+        // The same prices under the scoring setting are a full hit. The window is the only
+        // difference between the two, which is the whole of what a T+1 card changes.
+        val ordinary = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+
+        assertEquals(Outcome.EXPIRED, tPlusOne.outcome)
+        assertEquals(Outcome.FULL_HIT, ordinary.outcome)
+    }
+
+    @Test
+    fun `a T plus one buy zone that only trades on the sell session is not judged`() {
+        // The instruction was to buy on the first of these and sell on the second. The band never
+        // traded on the buy session, so there was no trade to take - and expiring it would count a
+        // loss against a channel for a trade nobody could have been in.
+        val prices = sessions(11.0 to 10.5, 14.5 to 9.5)
+        val tPlusOne = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
+        )
+        // An ordinary call is judged on the same prices: its band was still being offered on the
+        // second session, so it was taken there and the target counts.
+        val ordinary = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+
+        assertEquals(Outcome.ENTRY_NOT_REACHED, tPlusOne.outcome)
+        // Unjudged is the point of it: it says nothing about the channel either way.
+        assertEquals(false, Outcome.ENTRY_NOT_REACHED.judged)
+        assertEquals(Outcome.FULL_HIT, ordinary.outcome)
+    }
+
+    @Test
+    fun `an unshortened entry window scores exactly as it did before`() {
+        // The default is the whole window, so every existing caller is unaffected.
+        val prices = sessions(11.0 to 10.5, 14.5 to 9.5)
+        val withoutArgument = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+        )
+        val spelledOut = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+            entrySessions = 10,
+        )
+
+        assertEquals(withoutArgument, spelledOut)
     }
 }

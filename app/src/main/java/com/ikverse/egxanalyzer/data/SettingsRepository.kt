@@ -148,7 +148,32 @@ class SettingsRepository(
     fun lastPriceRefreshDay(): String? = preferences.getString(KEY_LAST_PRICE_REFRESH, null)
 
     fun recordPriceRefreshDay(day: String) {
-        preferences.edit().putString(KEY_LAST_PRICE_REFRESH, day).apply()
+        preferences.edit()
+            .putString(KEY_LAST_PRICE_REFRESH, day)
+            .putLong(KEY_LAST_PRICE_REFRESH_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+    /**
+     * The moment prices were last fetched, beside the day they were fetched on.
+     *
+     * The day answers "has today been done"; a scheduled job needs "has this been done since the
+     * fire I am answering", which a date cannot say. A job booked for after the close would
+     * otherwise be talked out of running by a refresh that happened at breakfast.
+     */
+    fun lastPriceRefreshAt(): Long = preferences.getLong(KEY_LAST_PRICE_REFRESH_AT, 0L)
+
+    /**
+     * Whether this phone runs its schedules.
+     *
+     * Deliberately not in [AppPreferences]: everything in there is published to the other devices,
+     * and a schedule that travelled would have every phone doing the same work. This is one
+     * device's own answer, kept beside the settings rather than among them.
+     */
+    fun schedulesEnabled(): Boolean = preferences.getBoolean(KEY_SCHEDULES_ENABLED, false)
+
+    fun saveSchedulesEnabled(value: Boolean) {
+        preferences.edit().putBoolean(KEY_SCHEDULES_ENABLED, value).apply()
     }
 
     fun useDefaultPromptOnly(): Boolean = preferences.getBoolean(KEY_DEFAULT_PROMPT_ONLY, false)
@@ -322,6 +347,8 @@ class SettingsRepository(
         const val KEY_PORTFOLIO_ORDER = "portfolio_order"
         const val KEY_UPDATE_CHECKS = "update_checks_enabled"
         const val KEY_LAST_PRICE_REFRESH = "last_price_refresh_day"
+        const val KEY_LAST_PRICE_REFRESH_AT = "last_price_refresh_at"
+        const val KEY_SCHEDULES_ENABLED = "schedules_enabled"
         const val KEY_PROMPT_HISTORY = "prompt_history"
         const val KEY_SETTINGS_UPDATED_AT = "settings_updated_at"
         const val KEY_SETTINGS_UPDATED_BY = "settings_updated_by"

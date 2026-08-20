@@ -8,6 +8,7 @@ import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.SavedAnalysis
+import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.SourceTrace
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -92,6 +93,88 @@ class PerformanceCalculatorTest {
         val call = report.sessions.flatMap { it.calls }.single()
         assertEquals(9.8, call.entryLow!!, 0.001)
         assertEquals(9.0, call.stopLoss!!, 0.001)
+    }
+
+    @Test
+    fun `a call re-posted on the next analysed session is counted once`() {
+        // Channels re-post a standing recommendation every morning until it resolves. Scored as it
+        // stood, one idea collected a judged call per posting and moved the channel's record three
+        // times - and a channel that posts a daily table outweighed one that posts when it has
+        // something to say, on nothing but how often it posts.
+        val postings = (0..2).map { day ->
+            analysis(id = day.toLong(), targetDate = called.plusDays(day.toLong()))
+        }
+
+        val report = PerformanceCalculator.report(
+            analyses = postings,
+            pricesFrom = called,
+            windowSessions = 10,
+            sessionsFor = { _, _ -> sessions(12.5) },
+        )
+
+        assertEquals(1, report.tracked)
+        assertEquals(1, report.judged)
+        // Still on the record. Each session shows what that channel actually published that day.
+        assertEquals(3, report.sessions.sumOf { it.calls.size })
+        assertEquals(2, report.sessions.flatMap { it.calls }.count { it.repeatOf != null })
+        assertEquals(called, report.sessions.flatMap { it.calls }.first { it.repeatOf != null }.repeatOf)
+        assertEquals(1, report.channels.single().calls)
+        assertEquals(2, report.channels.single().repeats)
+    }
+
+    @Test
+    fun `a call whose levels moved is a new call rather than a repeat`() {
+        // A channel that lifts a target or moves a stop has made a different call, and is scored on
+        // it. The identity is every level printed, exactly as the parser's own collapse keys on.
+        val report = PerformanceCalculator.report(
+            analyses = listOf(
+                analysis(id = 1, targetDate = called),
+                analysis(id = 2, targetDate = called.plusDays(1), stopLoss = 8.5),
+            ),
+            pricesFrom = called,
+            windowSessions = 10,
+            sessionsFor = { _, _ -> sessions(12.5) },
+        )
+
+        assertEquals(2, report.tracked)
+        assertEquals(0, report.sessions.flatMap { it.calls }.count { it.repeatOf != null })
+    }
+
+    @Test
+    fun `a session going by without the call makes the next posting a new one`() {
+        // Adjacency is measured against the sessions actually analysed, not the calendar. A gap
+        // means the channel stopped saying it and started again, which is a second call.
+        val report = PerformanceCalculator.report(
+            analyses = listOf(
+                analysis(id = 1, targetDate = called),
+                analysis(id = 2, targetDate = called.plusDays(1), stopLoss = 8.5),
+                analysis(id = 3, targetDate = called.plusDays(2)),
+            ),
+            pricesFrom = called,
+            windowSessions = 10,
+            sessionsFor = { _, _ -> sessions(12.5) },
+        )
+
+        assertEquals(3, report.tracked)
+        assertEquals(0, report.sessions.flatMap { it.calls }.count { it.repeatOf != null })
+    }
+
+    @Test
+    fun `a filtered view leaves out the re-postings too`() {
+        val postings = (0..2).map { day ->
+            analysis(id = day.toLong(), targetDate = called.plusDays(day.toLong()))
+        }
+        val report = PerformanceCalculator.report(
+            analyses = postings,
+            pricesFrom = called,
+            windowSessions = 10,
+            sessionsFor = { _, _ -> sessions(12.5) },
+        )
+
+        val narrowed = PerformanceCalculator.refine(report) { true }
+
+        assertEquals(report.tracked, narrowed.tracked)
+        assertEquals(report.judged, narrowed.judged)
     }
 
     @Test
@@ -244,9 +327,46 @@ class PerformanceCalculatorTest {
         assertEquals(report.scoringSince, narrowed.scoringSince)
     }
 
-    private fun sessions(high: Double) = listOf(
-        DailySession("AMOC", called, high = high, low = 9.9, close = high, volume = 1000.0, open = 9.9),
-    )
+    @Test
+    fun `a T plus one call is judged over its own two sessions, not the setting`() {
+        // Three sessions: the one the call was made for, the one it said to sell on, and a third on
+        // which the target finally arrives. The trade the card described was over before that third
+        // session opened, so crediting it would credit some other trade than the one it called.
+        val prices = listOf(
+            session(called, high = 10.0),
+            session(called.plusDays(1), high = 11.0),
+            session(called.plusDays(2), high = 12.5),
+        )
+
+        val tPlusOne = PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1, basis = "t_plus_1")),
+            pricesFrom = called,
+            windowSessions = 10,
+            sessionsFor = { _, _ -> prices },
+        )
+        // The same prices, the same setting, the same everything but the basis printed on the card.
+        val ordinary = PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1)),
+            pricesFrom = called,
+            windowSessions = 10,
+            sessionsFor = { _, _ -> prices },
+        )
+
+        val judged = tPlusOne.sessions.single().calls.single()
+        assertEquals(Outcome.EXPIRED, judged.outcome)
+        assertEquals(Scoring.T_PLUS_ONE_WINDOW_SESSIONS, judged.windowSessions)
+        assertEquals(Scoring.T_PLUS_ONE_ENTRY_SESSIONS, judged.entrySessions)
+        // Two of the three sessions were ever looked at.
+        assertEquals(2, judged.sessions.size)
+        assertEquals(Outcome.PARTIAL_HIT, ordinary.sessions.single().calls.single().outcome)
+        // The report still reports the setting: it describes what the user chose, not one call.
+        assertEquals(10, tPlusOne.windowSessions)
+    }
+
+    private fun sessions(high: Double) = listOf(session(called, high))
+
+    private fun session(date: LocalDate, high: Double) =
+        DailySession("AMOC", date, high = high, low = 9.9, close = high, volume = 1000.0, open = 9.9)
 
     private fun analysis(
         id: Long,
@@ -263,6 +383,8 @@ class PerformanceCalculatorTest {
         secondChannel: String? = null,
         /** The same stock and channel described twice, once with fewer levels. */
         withSparseDuplicate: Boolean = false,
+        /** What dated the card, which is what marks a T+1 one. */
+        basis: String = "explicit",
     ) = SavedAnalysis(
         id = id,
         provider = CloudProvider.QWEN,
@@ -306,11 +428,11 @@ class PerformanceCalculatorTest {
                     rank = 1,
                     notesSummary = null,
                     dataPoints = listOfNotNull(
-                        point("42", entryLow, entryHigh, stopLoss),
+                        point("42", entryLow, entryHigh, stopLoss, basis),
                         // The same stock and channel again, stated with fewer levels.
-                        if (withSparseDuplicate) point("42", null, null, null) else null,
+                        if (withSparseDuplicate) point("42", null, null, null, basis) else null,
                         // The same stock quoted by a second channel in the same run.
-                        secondChannel?.let { point("43", entryLow, entryHigh, stopLoss) },
+                        secondChannel?.let { point("43", entryLow, entryHigh, stopLoss, basis) },
                     ),
                 ),
                 // A stock only one run named, so a rerun dropping it is visible.
@@ -322,7 +444,7 @@ class PerformanceCalculatorTest {
                         mentionCount = 1,
                         rank = 2,
                         notesSummary = null,
-                        dataPoints = listOf(point("42", entryLow, entryHigh, stopLoss)),
+                        dataPoints = listOf(point("42", entryLow, entryHigh, stopLoss, basis)),
                     )
                 },
             ),
@@ -334,9 +456,10 @@ class PerformanceCalculatorTest {
         entryLow: Double?,
         entryHigh: Double?,
         stopLoss: Double?,
+        basis: String = "explicit",
     ) = RecommendationDataPoint(
         date = called,
-        effectiveDateBasis = "explicit",
+        effectiveDateBasis = basis,
         visibleSourceDate = called.toString(),
         dateEvidence = null,
         timingEvidence = null,
