@@ -11,7 +11,9 @@ nothing here is constrained by keeping the two in step.
 - **Never implement without approval.** State the change as a list and wait for the literal word
   "approve". "ok", "do it", and a refinement are not approval.
 - **Never start an analysis run.** They cost the owner cloud credits and send their Telegram content
-  to the provider. Build, install, open the app to the right screen, and hand over.
+  to the provider. Build, install, open the app to the right screen, and hand over. This now covers
+  a second way to start one: **never switch on paid schedules**, and never create an analysis job
+  on the owner's device. Arming the clock to spend money later is the same act as spending it.
 - **No on-screen verification unless asked.** Build plus unit tests is the loop. Screenshots are
   expensive twice over: once when taken, then again on every later turn of the session. Worth it
   when a layout complaint cannot be diagnosed any other way; not for confirming an install.
@@ -89,6 +91,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `ui/PortfolioScreen.kt` + `ui/TradeControls.kt` — the Portfolio tab, and the Bought button and
   closing controls that sit on a recommendation card.
 - `model/ScheduleClock.kt` + `model/ScheduledJob.kt` — when a scheduled job fires, and what one is.
+- `model/AnalysisPlan.kt` — what a run covers, said explicitly, so the screen and the scheduler
+  build the same request. See **Schedules** below.
 - `data/JobScheduler.kt` + `data/ScheduleReceiver.kt` + `data/ScheduledJobWorker.kt` +
   `data/JobRunner.kt` — the alarm, the four things that mean re-book it, and what runs. See below.
 - `ui/SchedulesSection.kt` + `ui/SchedulesSheet.kt` — the card on Analyze, the section in Settings,
@@ -572,13 +576,21 @@ phone only by plugging it into the machine that built it. It reads one public UR
 
 Work this phone does on its own, at a time the user chose. This is the one feature that reverses a
 rule the app had held since the beginning — that nothing but `OverdueWorker` runs while the app is
-closed — and it was built free-first on purpose: **nothing schedulable spends cloud credits**, and
-the guard that refuses paid work is in `JobRunner` with no way to switch it off, so a paid job type
-cannot arm it by merely existing.
+closed. It was built free-first on purpose — the whole machinery shipped carrying nothing but a
+price refresh, so alarms, reboots and whatever the phone's battery manager does to a sleeping app
+were proved on work that costs nothing before any of it was trusted with work that bills.
+
+**Two switches, and both have to be on.** `schedulesEnabled` runs schedules at all;
+`paidSchedulesEnabled` lets one send a paid request, and is what stands between the clock and the
+owner's money. `JobRunner.paidWorkAllowed` **defaults to refusing**, which is the point: a paid job
+type cannot arm itself by existing, and a caller that wants one has to say so. A paid job whose
+switch is off is passed over and says so on its card - it is not hidden, and it is not run.
 
 - **A job is a saved configuration plus a trigger.** `ScheduledJob` in `model/ScheduledJob.kt`:
   a `JobTrigger` (`Once` at a date and time, or `Repeat` over a set of days at a clock time), a
-  `JobWork` (only `PriceRefresh` so far), a grace window, and what became of the last fire.
+  `JobWork` (`PriceRefresh`, free; `Analysis`, paid), a grace window, and what became of the last
+  fire. The work's own settings live in a JSON column rather than columns of their own, so the next
+  job type is a new key and not another migration.
 - **Device-local, and never synced.** Everything else the app records travels through the sync
   channel; a schedule must not, because three phones keeping one schedule is the same work done
   three times — and once analyses can be scheduled, three times the bill for one answer. Nothing in
@@ -636,8 +648,79 @@ cannot arm it by merely existing.
   schedule with it. A page that goes quiet once something is right leaves the reader unable to tell
   "granted" from "the app forgot to check".
 - **A job from a newer build is kept, shown, and never run.** `JobWork.Unsupported` carries the kind
-  it could not read and is written back unchanged, so a downgrade does not lose a schedule and does
-  not rewrite it into something the build that understands it would no longer recognise.
+  **and the raw settings** it could not read, and both are written back unchanged, so a downgrade
+  does not lose a schedule and does not rewrite it into something the build that understands it
+  would no longer recognise. An `ANALYSIS` row whose settings will not parse lands here too, rather
+  than being read as an analysis of no chats — which is a paid request for an empty answer.
+
+### The scheduled analysis
+
+- **`AnalysisPlan` exists because a run can now start from two places.** `analyze()` used to read
+  the Analyze screen's fields directly — which chats are ticked, which content types, which target
+  date — and a scheduled run has its own answer to every one. Two functions assembling a request
+  would have been two sets of rules about what gets sent and what the report then claims to cover,
+  and the one that drifted would have been the unattended one. Both paths build a plan and hand it
+  to `executeRun`. Its `onScreen` flag changes **nothing about what is run or saved** — only
+  whether the reader is thrown onto Results and whether the report they had open is swapped. The
+  run state itself is set either way, so the Analyze button shows a scheduled run and cancels it.
+- The plan deliberately **does not carry the provider, model or key**. Those follow Settings at the
+  moment the run starts: a schedule that pinned a model would go on sending to one the user had
+  moved off. The **chats and content types are frozen** when the job is made, for the opposite
+  reason — the same reason a position snapshots its levels. Re-ticking chats on Analyze months
+  later must not silently re-aim a run that happens while nobody is watching.
+- Always the **next session**, never a historical date. A repeating schedule re-reading one fixed
+  day would pay for the same answer every week.
+- **Four guards, and each is a way of being wrong that costs a real request.** All of them end in
+  `JobSkipped` — written down, not charged, tried again at the next fire.
+  - **The session flips at 14:30 Cairo.** A fire delayed across that line — by Doze, by a phone that
+    was off, by the grace window doing exactly what it is for — would buy an analysis of the
+    following day and produce a report that looks entirely ordinary. So the session the fire was
+    booked for is compared with the one a run now would cover, and a disagreement stops it. This is
+    the subtle one, and `RecommendationDateTest` documents the rule it rests on.
+  - **`duplicateOf`**, the same check the Analyze button uses: a report already covering that
+    session and those chats means skip, not pay twice.
+  - **Preconditions** — a credential and model saved, no run already going, and a Telegram session.
+  - **No sources** — chats that posted nothing in the window are a skip, not a failure.
+- **A cold start has to wait for TDLib.** The alarm wakes a process that may have been dead, and the
+  encrypted database has to open and the session come back before a chat can be read. Ninety
+  seconds; past that the fire is skipped rather than run against no session, which would look
+  exactly like a schedule that does not work.
+- **The worker goes foreground for a paid run**, through `setForeground` rather than by starting
+  `AnalysisService`. Two problems, one answer: WorkManager stops ordinary work at about ten minutes
+  and an analysis can outlast that — the response timeout alone reaches fifteen — and from Android
+  12 an app in the background may not start a foreground service at all, so the service the app has
+  always used would be refused precisely when it is needed. Going foreground lifts the ceiling and
+  makes the later `AnalysisService` start legal, because an app already running one may start
+  another. It uses **the same notification id**, so the reader sees one notification that fills in
+  with real numbers rather than two describing one run. `analysisRunning` is wrapped in
+  `runCatching` regardless: losing a paid run that is already under way to an exception about a
+  notification would be the worst possible trade.
+- WorkManager declares `SystemForegroundService` **without a foreground service type**, and from
+  Android 14 one without a type is refused outright. The manifest merges `dataSync` onto it.
+- **A schedule names the chats it covers**, two of them and a count. The whole point of freezing the
+  selection is that it stops matching what is ticked on screen, so a row saying only "Analyse the
+  next session" cannot be checked without opening it.
+- **`blockedReason` is one list, read by the row and the card above it.** They disagreeing is how a
+  card promises "Next Sun 07:00" for a job the row underneath reports as blocked, which happened:
+  the summary only looked at whether a job was enabled, so a paid job with the paid switch off was
+  counted as the next run. The order is what the reader has to fix first — the master switch before
+  the job's own, both before anything the work needs. A card listing four problems fixes none.
+- **An empty chat list is not evidence the chats have gone.** On a cold start Telegram has not
+  loaded, and "its chats are no longer in the app" would be the wrong alarm at the worst moment. It
+  is also only raised when **all** of a job's chats have gone: losing one of four leaves a run that
+  still reads the other three.
+- **Re-aiming is deliberate and never quiet.** `ReaimControl` shows the frozen selection and the
+  current one and offers a button naming which it takes. Freezing is right; a selection that can
+  never be corrected would mean deleting the job to fix a typo.
+- **Defaults differ by work type, and both are about the session.** A price refresh goes at 18:00,
+  after the 14:30 close, when there is a settled session to fetch. An analysis goes at 08:00, before
+  the 10:00 open, while the levels can still be acted on — the same run at six in the evening is a
+  post-mortem. Switching the work type in the editor moves the time and the name **only while they
+  are still the ones the form filled in**; what the user typed is theirs.
+- The scheduler is in `src/main`, so the **`next` build type inherits it** — its own applicationId
+  means its own preferences, where both switches start off. The claim that `next` cannot start an
+  analysis even by accident still holds and now rests on a second thing as well: a scheduled run
+  refuses without a saved credential, and the API key has never synced.
 
 ## Gotchas
 

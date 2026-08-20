@@ -1,5 +1,7 @@
 package com.ikverse.egxanalyzer.data
 
+import com.ikverse.egxanalyzer.model.AnalysedChannel
+import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.JobOutcome
 import com.ikverse.egxanalyzer.model.JobTrigger
 import com.ikverse.egxanalyzer.model.JobWork
@@ -173,13 +175,80 @@ class JobRunnerTest {
     }
 
     @Test
-    fun `free work runs even though nothing is allowed to spend credits yet`() {
-        // The guard that refuses paid work is on by default and has no way to be turned off in this
-        // version. What has to be true today is that it does not stand in the way of work that
-        // costs nothing - the paid branch itself has nothing to test against until a paid job type
-        // exists to point it at.
+    fun `free work runs without anything being allowed to spend credits`() {
         val recorder = run(listOf(job()), at("2026-08-20", "18:01"))
 
         assertEquals(JobOutcome.SUCCEEDED, recorder.written.single().lastOutcome)
+    }
+
+    /** The same schedule, but pointed at work that sends a paid request. */
+    private fun paidJob() = job().copy(
+        id = "analysis",
+        name = "Morning analysis",
+        work = JobWork.Analysis(
+            channels = listOf(AnalysedChannel(1L, "A channel")),
+            contentTypes = setOf(AnalysisContentType.IMAGES),
+        ),
+    )
+
+    @Test
+    fun `paid work does not run until it has been allowed, and says so`() {
+        var ran = false
+        val recorder = Recorder(listOf(paidJob()))
+        runBlocking {
+            JobRunner(
+                jobs = { recorder.jobs },
+                record = recorder::record,
+                schedulesEnabled = { true },
+                now = { at("2026-08-20", "18:01") },
+            ).runDue { _, _ -> ran = true; "Sent" }
+        }
+
+        // Refusing by default is the whole point: a paid job type must not arm itself by existing.
+        assertTrue(!ran)
+        val served = recorder.written.single()
+        assertEquals(JobOutcome.SKIPPED, served.lastOutcome)
+        assertTrue(served.lastMessage!!.contains("cloud credits"))
+        // Stamped, so the refusal is reported once rather than on every wake-up until the fire ages
+        // out - and so that turning the switch on does not immediately run a fire from hours ago.
+        assertEquals(at("2026-08-20", "18:00"), served.lastFiredAt)
+    }
+
+    @Test
+    fun `paid work runs once it has been allowed`() {
+        var sent = false
+        val recorder = Recorder(listOf(paidJob()))
+        runBlocking {
+            JobRunner(
+                jobs = { recorder.jobs },
+                record = recorder::record,
+                schedulesEnabled = { true },
+                paidWorkAllowed = { true },
+                now = { at("2026-08-20", "18:01") },
+            ).runDue { _, _ -> sent = true; "Saved 6 recommendations." }
+        }
+
+        assertTrue(sent)
+        assertEquals(JobOutcome.SUCCEEDED, recorder.written.single().lastOutcome)
+    }
+
+    @Test
+    fun `allowing paid work does not switch schedules on by itself`() {
+        var ran = false
+        val recorder = Recorder(listOf(paidJob()))
+        runBlocking {
+            JobRunner(
+                jobs = { recorder.jobs },
+                record = recorder::record,
+                // The two switches are separate and both have to be on. This is the combination
+                // someone lands in by allowing paid runs and then pausing everything.
+                schedulesEnabled = { false },
+                paidWorkAllowed = { true },
+                now = { at("2026-08-20", "18:01") },
+            ).runDue { _, _ -> ran = true; "Sent" }
+        }
+
+        assertTrue(!ran)
+        assertTrue(recorder.written.isEmpty())
     }
 }

@@ -176,6 +176,21 @@ class SettingsRepository(
         preferences.edit().putBoolean(KEY_SCHEDULES_ENABLED, value).apply()
     }
 
+    /**
+     * Whether a schedule on this phone may start work that spends cloud credits.
+     *
+     * A second switch behind [schedulesEnabled] rather than a property of the job, and off until it
+     * is turned on. Free work proves the alarms, the reboots and whatever the phone's battery
+     * manager does to a sleeping app; only once that is believable is it reasonable to let the same
+     * machinery send a paid request while nobody is watching. Device-local for the same reason
+     * every other schedule setting is - see [schedulesEnabled].
+     */
+    fun paidSchedulesEnabled(): Boolean = preferences.getBoolean(KEY_PAID_SCHEDULES, false)
+
+    fun savePaidSchedulesEnabled(value: Boolean) {
+        preferences.edit().putBoolean(KEY_PAID_SCHEDULES, value).apply()
+    }
+
     fun useDefaultPromptOnly(): Boolean = preferences.getBoolean(KEY_DEFAULT_PROMPT_ONLY, false)
 
     fun saveUseDefaultPromptOnly(value: Boolean) {
@@ -349,6 +364,7 @@ class SettingsRepository(
         const val KEY_LAST_PRICE_REFRESH = "last_price_refresh_day"
         const val KEY_LAST_PRICE_REFRESH_AT = "last_price_refresh_at"
         const val KEY_SCHEDULES_ENABLED = "schedules_enabled"
+        const val KEY_PAID_SCHEDULES = "paid_schedules_enabled"
         const val KEY_PROMPT_HISTORY = "prompt_history"
         const val KEY_SETTINGS_UPDATED_AT = "settings_updated_at"
         const val KEY_SETTINGS_UPDATED_BY = "settings_updated_by"

@@ -50,6 +50,7 @@ import com.ikverse.egxanalyzer.data.syncActions
 import com.ikverse.egxanalyzer.data.recommendedTickers
 import com.ikverse.egxanalyzer.data.TelegramRepository
 import com.ikverse.egxanalyzer.model.AnalysedChannel
+import com.ikverse.egxanalyzer.model.AnalysisPlan
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.AnalysisInput
@@ -90,7 +91,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -116,6 +119,15 @@ enum class AnalysisStatus { IDLE, RUNNING, COMPLETED, FAILED, CANCELLED }
  * a phone put down straight after a change still sends them.
  */
 private const val SETTINGS_PUBLISH_DELAY_MILLISECONDS = 3_000L
+
+/**
+ * How long a scheduled run waits for Telegram to sign back in before giving up on that fire.
+ *
+ * Ninety seconds covers a cold start on a phone that has been asleep - opening the encrypted
+ * database, reconnecting, restoring the session. Long enough that a slow morning does not lose the
+ * run; short enough that a genuinely signed-out app says so rather than holding the wake-up open.
+ */
+private const val TELEGRAM_READY_TIMEOUT_MILLISECONDS = 90_000L
 
 class AppState(
     private val settingsRepository: SettingsRepository,
@@ -1464,11 +1476,31 @@ class AppState(
     var schedulesEnabled by mutableStateOf(settingsRepository.schedulesEnabled())
         private set
 
+    /**
+     * Whether a schedule here may start work that spends cloud credits.
+     *
+     * A second switch behind [schedulesEnabled], off until it is turned on, and the only thing
+     * standing between the clock and the owner's money. Separate because the two decisions are
+     * separate: letting the phone refresh prices while it is asleep says nothing about letting it
+     * send a paid request.
+     */
+    var paidSchedulesEnabled by mutableStateOf(settingsRepository.paidSchedulesEnabled())
+        private set
+
     fun updateSchedulesEnabled(enabled: Boolean) {
         if (enabled == schedulesEnabled) return
         settingsRepository.saveSchedulesEnabled(enabled)
         schedulesEnabled = enabled
         rebookSchedules()
+    }
+
+    fun updatePaidSchedulesEnabled(enabled: Boolean) {
+        if (enabled == paidSchedulesEnabled) return
+        settingsRepository.savePaidSchedulesEnabled(enabled)
+        paidSchedulesEnabled = enabled
+        // Nothing to re-book: the alarm is booked for a paid job either way, and the runner is
+        // what refuses it. Booking on the switch would mean a job that vanished from the schedule
+        // rather than one that says why it was passed over.
     }
 
     fun saveScheduledJob(job: ScheduledJob) {
@@ -1497,6 +1529,7 @@ class AppState(
             jobs = localDataStore::scheduledJobs,
             record = localDataStore::saveScheduledJob,
             schedulesEnabled = settingsRepository::schedulesEnabled,
+            paidWorkAllowed = settingsRepository::paidSchedulesEnabled,
         ).runDue(::performScheduledWork)
         scheduledJobs = localDataStore.scheduledJobs()
         schedulesEnabled = settingsRepository.schedulesEnabled()
@@ -1526,9 +1559,85 @@ class AppState(
             outcome.summary
         }
 
+        is JobWork.Analysis -> runScheduledAnalysis(work, due)
+
         // Never reached: the runner refuses a job this build cannot run before it gets this far.
         is JobWork.Unsupported -> error("This version cannot run ${work.kind}.")
     }
+
+    /**
+     * An analysis started by the clock rather than by a press.
+     *
+     * Everything before the run is a reason not to make it. This is the only thing in the app that
+     * spends the owner's money without being asked to at that moment, so each guard below is a
+     * separate way of being wrong that costs a real request, and every one of them ends in
+     * [JobSkipped] - written down, not charged, and tried again at the next fire.
+     */
+    private suspend fun runScheduledAnalysis(work: JobWork.Analysis, due: Instant): String {
+        if (analysisStatus == AnalysisStatus.RUNNING) {
+            throw JobSkipped("A run was already going when this one came due.")
+        }
+        if (!cloudConfiguration.hasCredential || cloudConfiguration.model.isBlank()) {
+            throw JobSkipped("No provider credential or model is saved.")
+        }
+        // The alarm wakes a process that may have been dead, and TDLib has to open its database and
+        // sign back in before a chat can be read. Without the wait the run would find no session,
+        // read nothing, and file itself as a schedule that does not work.
+        if (!awaitTelegramReady()) {
+            throw JobSkipped("Telegram was not ready in time to read the chats.")
+        }
+        val plan = work.plan()
+        val window = resolveAnalysisWindow(plan.mode, plan.targetDate)
+        // The session a run is for flips at 14:30 Cairo. A fire delayed across that line - by Doze,
+        // by a phone that was off, by the grace window doing its job - would quietly analyse the
+        // day after the one it was booked for, and the report would look perfectly ordinary. So the
+        // session this job was due for is compared with the one it would run for now, and a
+        // disagreement stops it: a schedule is a promise about a particular session.
+        val intended = egxTargetSession(due.atZone(ZoneId.of(EGX_ZONE)))
+        if (intended != window.targetDate) {
+            throw JobSkipped(
+                "Due for the $intended session, but by the time this ran the next one was " +
+                    "${window.targetDate}. Skipped rather than pay to analyse a different day.",
+            )
+        }
+        duplicateOf(window.targetDate, plan.channelIds.toSet())?.let {
+            throw JobSkipped("The $intended session is already analysed for these chats.")
+        }
+        val batch = telegramRepository.collectSources(
+            channelIds = plan.channelIds,
+            start = window.start,
+            endExclusive = window.endExclusive,
+            contentTypes = plan.contentTypes,
+        )
+        if (batch.inputs.isEmpty()) {
+            throw JobSkipped("The chats posted nothing in the window for the $intended session.")
+        }
+        val sources = LoadedSources(
+            inputs = batch.inputs,
+            traces = batch.traces.associateBy(SourceTrace::sourceId),
+            channelOf = batch.traces.associate { it.sourceId to it.channelId },
+        )
+        return when (val outcome = executeRun(plan, sources, onScreen = false)) {
+            is RunOutcome.Saved -> outcome.summary
+            // Refused means nothing was sent and nothing was charged, which is a skip and not a
+            // failure however it reads on the Analyze screen.
+            is RunOutcome.Refused -> throw JobSkipped(outcome.reason)
+            is RunOutcome.Failed -> error(outcome.reason)
+            RunOutcome.Cancelled -> throw JobSkipped("The run was cancelled.")
+        }
+    }
+
+    /**
+     * Waits for a Telegram session to come back, for a run that woke the app rather than found it.
+     *
+     * Returns at once when one is already up, which is every run started from the screen and most
+     * of the ones started by a schedule on a phone that was in use.
+     */
+    private suspend fun awaitTelegramReady(): Boolean =
+        telegramAuthState.step == TelegramAuthStep.READY ||
+            withTimeoutOrNull(TELEGRAM_READY_TIMEOUT_MILLISECONDS) {
+                telegramRepository.authState.first { it.step == TelegramAuthStep.READY }
+            } != null
 
     /**
      * Remembers the order the Portfolio is being read in.
@@ -2128,13 +2237,39 @@ class AppState(
         telegramTraces = telegramTraces - sourceId
     }
 
+    /**
+     * The sources a run will send, and what is known about where each one came from.
+     *
+     * Passed in rather than read off the screen's own fields, because a scheduled run loads its
+     * own: someone who has pulled up this morning's messages must not find them replaced, mid-read,
+     * by the ones a job went and fetched.
+     */
+    private data class LoadedSources(
+        val inputs: List<AnalysisInput>,
+        val traces: Map<String, SourceTrace>,
+        val channelOf: Map<String, Long?>,
+    )
+
+    /**
+     * What a run came to, for a caller that has no screen to read the message off.
+     *
+     * [Refused] is the one worth separating: nothing was sent and nothing was charged, which is a
+     * different thing from a request that failed and wants looking at.
+     */
+    private sealed interface RunOutcome {
+        data class Refused(val reason: String) : RunOutcome
+        data class Saved(val summary: String) : RunOutcome
+        data class Failed(val reason: String) : RunOutcome
+        data object Cancelled : RunOutcome
+    }
+
     suspend fun analyze() {
         if (analysisStatus == AnalysisStatus.RUNNING) return
         if (analysisMode == AnalysisMode.NEXT_DAY) {
             recommendationTargetDate = egxTargetSession()
         }
         if (analysisMode == AnalysisMode.SPECIFIC_DATE &&
-            recommendationTargetDate.isAfter(LocalDate.now(ZoneId.of("Africa/Cairo")))
+            recommendationTargetDate.isAfter(LocalDate.now(ZoneId.of(EGX_ZONE)))
         ) {
             analysisMessage = "Historical analysis can only use today or an earlier Cairo date."
             return
@@ -2149,49 +2284,98 @@ class AppState(
         ) {
             syncTelegramSources()
         }
+        executeRun(
+            plan = screenPlan(),
+            sources = LoadedSources(inputs, telegramTraces, sourceChannelIds),
+            onScreen = true,
+        )
+    }
+
+    /**
+     * The Analyze screen's current selection, as work a schedule can carry.
+     *
+     * This is how an analysis job is made: configure a run the way you always do, then put a time
+     * on it. Nobody should have to re-pick six chats inside a scheduling form, and a second place
+     * to choose them would be a second answer to what a run covers. Null when the screen has
+     * nothing selected, which is a schedule there is no point offering.
+     */
+    fun scheduledAnalysisFromScreen(): JobWork.Analysis? {
+        val plan = screenPlan()
+        return if (plan.isEmpty) null else JobWork.Analysis(plan.channels, plan.contentTypes)
+    }
+
+    /** What the Analyze screen is currently set to run. */
+    private fun screenPlan() = AnalysisPlan(
+        channels = channels.filter(ChannelSelection::selected)
+            .map { AnalysedChannel(it.id, it.displayName) },
+        contentTypes = selectedContentTypes,
+        mode = analysisMode,
+        targetDate = recommendationTargetDate,
+    )
+
+    /**
+     * Runs one plan, whoever asked for it.
+     *
+     * The single path from sources to a saved report. It was the back half of [analyze] and read
+     * the Analyze screen's fields directly, which is exactly why it had to move: a scheduled run
+     * has its own answers to every one of them, and two functions assembling a request would be two
+     * sets of rules about what gets sent, what gets filtered and what the report then claims to
+     * cover. The one that drifted would have been the unattended one.
+     *
+     * [onScreen] does not change what is run or what is saved - only what is done to the screen
+     * afterwards. A background run must not throw the reader onto the Results tab or swap the
+     * report they were reading, while the run state itself is set either way, so the Analyze
+     * button shows a scheduled run and can cancel it.
+     */
+    private suspend fun executeRun(
+        plan: AnalysisPlan,
+        sources: LoadedSources,
+        onScreen: Boolean,
+    ): RunOutcome {
         // A caption is part of its photo or voice note, not a text source of its own, so it is
         // selected by whatever selected the media it belongs to. Filtering it as text meant that
         // with only Images chosen every caption was dropped here - the model read each card with
         // none of the words the channel wrote above it, and the phrase filter below, which reads
         // text and nothing else, could never fire.
-        val mediaSourceIds = inputs.mapNotNull { input ->
+        val mediaSourceIds = sources.inputs.mapNotNull { input ->
             when (input) {
                 is AnalysisInput.Image ->
-                    input.sourceId.takeIf { AnalysisContentType.IMAGES in selectedContentTypes }
+                    input.sourceId.takeIf { AnalysisContentType.IMAGES in plan.contentTypes }
                 is AnalysisInput.Voice ->
-                    input.sourceId.takeIf { AnalysisContentType.AUDIO in selectedContentTypes }
+                    input.sourceId.takeIf { AnalysisContentType.AUDIO in plan.contentTypes }
                 is AnalysisInput.Text -> null
             }
         }.toSet()
-        val contentSelectedInputs = inputs.filter {
+        val contentSelectedInputs = sources.inputs.filter {
             when (it) {
                 is AnalysisInput.Text -> it.sourceId in mediaSourceIds ||
-                    AnalysisContentType.TEXT in selectedContentTypes
-                is AnalysisInput.Image -> AnalysisContentType.IMAGES in selectedContentTypes
-                is AnalysisInput.Voice -> AnalysisContentType.AUDIO in selectedContentTypes
+                    AnalysisContentType.TEXT in plan.contentTypes
+                is AnalysisInput.Image -> AnalysisContentType.IMAGES in plan.contentTypes
+                is AnalysisInput.Voice -> AnalysisContentType.AUDIO in plan.contentTypes
             }
         }
         val rules = ruleSet
         val filtered = AnalysisPolicy.filter(contentSelectedInputs, rules)
         val selectedInputs = filtered.accepted
         if (selectedInputs.isEmpty()) {
-            analysisMessage = if (filtered.excluded.isNotEmpty()) {
-                "All selected sources were excluded by the recommendation filters."
-            } else {
-                "Add at least one selected source."
-            }
-            return
+            return refused(
+                if (filtered.excluded.isNotEmpty()) {
+                    "All selected sources were excluded by the recommendation filters."
+                } else {
+                    "Add at least one selected source."
+                },
+                onScreen,
+            )
         }
-        val window = resolveAnalysisWindow(analysisMode, recommendationTargetDate)
-        recommendationTargetDate = window.targetDate
+        val window = resolveAnalysisWindow(plan.mode, plan.targetDate)
+        if (onScreen) recommendationTargetDate = window.targetDate
         val request = AnalysisRequest(
-            channelIds = channels.filter(ChannelSelection::selected).map(ChannelSelection::id),
-            selectedChannels = channels.filter(ChannelSelection::selected)
-                .map { AnalysedChannel(it.id, it.displayName) },
-            contentTypes = selectedContentTypes,
+            channelIds = plan.channelIds,
+            selectedChannels = plan.channels,
+            contentTypes = plan.contentTypes,
             inputs = selectedInputs,
-            mode = analysisMode,
-            targetDate = recommendationTargetDate,
+            mode = plan.mode,
+            targetDate = window.targetDate,
             provider = cloudConfiguration.provider,
             model = cloudConfiguration.model,
             sourceWindowStart = window.start,
@@ -2200,12 +2384,12 @@ class AppState(
             rules = rules,
             prompt = activePrompt,
             sourceTraces = selectedInputs.map { input ->
-                telegramTraces[input.sourceId] ?: run {
-                val channel = channels.firstOrNull { it.id == sourceChannelIds[input.sourceId] }
+                sources.traces[input.sourceId] ?: run {
+                val channel = plan.channels.firstOrNull { it.id == sources.channelOf[input.sourceId] }
                 SourceTrace(
                     sourceId = input.sourceId,
                     channelId = channel?.id,
-                    channelName = channel?.displayName ?: "On-device import",
+                    channelName = channel?.name ?: "On-device import",
                     messageId = null,
                     timestamp = Instant.now(),
                     contentType = when (input) {
@@ -2232,7 +2416,9 @@ class AppState(
             localDataStore.saveResult(result, cloudConfiguration.provider, cloudConfiguration.model)
             savedResults = localDataStore.results()
             unreadableResults = localDataStore.unreadableResults
-            selectedResult = savedResults.firstOrNull()
+            // The newest report leads only for the reader who asked for it. A scheduled run must
+            // not swap out the report someone has open.
+            if (onScreen) selectedResult = savedResults.firstOrNull()
             analysisStatus = AnalysisStatus.COMPLETED
             // Saving and reading back are two different things, and a run that will not read back
             // is a run that is not there. Saying so beats leaving an older report on screen looking
@@ -2256,21 +2442,35 @@ class AppState(
             savedResults.firstOrNull { it.result.requestId == result.requestId }?.let { saved ->
                 publish { telegramRepository.uploadReport(saved.toSyncedRun()) }
             }
-            destination = AppDestination.RESULTS
+            if (onScreen) destination = AppDestination.RESULTS
+            return RunOutcome.Saved(analysisMessage ?: "Saved.")
         } catch (_: CancellationException) {
             analysisStatus = AnalysisStatus.CANCELLED
             analysisMessage = "Analysis cancelled."
             analysisStopped(null)
+            return RunOutcome.Cancelled
         } catch (error: Exception) {
             if (analysisStatus != AnalysisStatus.CANCELLED) {
                 analysisStatus = AnalysisStatus.FAILED
                 analysisMessage = error.message ?: "Analysis failed."
                 analysisStopped(analysisMessage)
             }
+            return RunOutcome.Failed(error.message ?: "Analysis failed.")
         } finally {
             activeRequestId = null
             analysisStartedAt = null
         }
+    }
+
+    /**
+     * A run that never started, said once.
+     *
+     * The message reaches the screen only when a reader is there to have asked; a scheduled run
+     * carries the same words into its own record instead.
+     */
+    private fun refused(reason: String, onScreen: Boolean): RunOutcome.Refused {
+        if (onScreen) analysisMessage = reason
+        return RunOutcome.Refused(reason)
     }
 
     suspend fun cancelAnalysis() {

@@ -36,9 +36,9 @@ class JobRunner(
     /**
      * Whether work that spends cloud credits may start unattended.
      *
-     * False, and there is no way to make it true yet: the scheduler is being proved on work that
-     * costs nothing before it is trusted with work that bills. The guard lives here rather than in
-     * the absence of a paid job type, so that adding one cannot accidentally arm it.
+     * Defaults to refusing, and the default is the point: a paid job type cannot arm itself by
+     * merely existing, and every caller that wants one has to say so out loud. In the app it reads
+     * a switch of its own, separate from the one that turns schedules on at all.
      */
     private val paidWorkAllowed: () -> Boolean = { false },
     private val now: () -> Instant = Instant::now,

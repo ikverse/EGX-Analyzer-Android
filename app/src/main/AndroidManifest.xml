@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- The app updates itself from its own GitHub releases; nothing else will offer it an update.
          Android still asks the user to allow this app to install apps, and shows its own installer
@@ -44,6 +45,16 @@
             android:name=".data.AnalysisService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- WorkManager's own foreground service, given the type this app uses it for. A scheduled
+             analysis can outlast the ten minutes ordinary work gets, so the worker goes foreground
+             for the length of one - and from Android 14 a foreground service with no declared type
+             is refused outright, which would take the run down with it. WorkManager declares this
+             service without a type, so the type is merged in here. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <!-- The four things that mean the schedule needs re-booking: its alarm firing, a reboot,
              an update replacing the app, and the user granting or revoking exact alarms. Not

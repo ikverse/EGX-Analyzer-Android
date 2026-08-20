@@ -44,6 +44,22 @@ class AnalysisNotifier(private val context: Context) {
             "android.permission.POST_NOTIFICATIONS",
         ) == PackageManager.PERMISSION_GRANTED
 
+    /**
+     * A scheduled run that has woken the app and is getting ready.
+     *
+     * The same id as [running], so the two are one notification rather than two: this one is
+     * replaced the moment the run knows how many sources it is sending. It exists because the work
+     * before that point is not instant - a Telegram session has to come back and the chats have to
+     * be read - and a phone that lit up its screen for a job should say what the job is.
+     */
+    fun starting(): Notification = base()
+        .setContentTitle("Scheduled run")
+        .setContentText("Reading the chats…")
+        .setProgress(0, 0, true)
+        .setOngoing(true)
+        .setContentIntent(openApp(null))
+        .build()
+
     fun running(sources: Int, model: String): Notification = base()
         .setContentTitle("Analysis running")
         .setContentText("$sources ${if (sources == 1) "source" else "sources"} · $model")

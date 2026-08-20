@@ -110,13 +110,41 @@ sealed interface JobWork {
     }
 
     /**
+     * Read the chosen chats for the next EGX session and send them to the cloud model.
+     *
+     * The one piece of work here that costs money, and the reason `JobRunner` carries a guard that
+     * refuses paid work unless the user has separately allowed it. Everything about this type is
+     * arranged so that arming it is a decision rather than a side effect.
+     *
+     * Always the **next session** and never a historical date. A repeating schedule that re-read
+     * one fixed day would pay for the same answer every week, and a one-shot pointed at last month
+     * is a button press, not a schedule. The chats and content types are frozen when the job is
+     * made, like a position snapshots the levels it was taken on: changing what is ticked on the
+     * Analyze screen months later must not quietly re-aim a run that happens while nobody is
+     * looking.
+     */
+    data class Analysis(
+        val channels: List<AnalysedChannel>,
+        val contentTypes: Set<AnalysisContentType>,
+    ) : JobWork {
+        override val displayName = "Analyse the next session"
+        override val spendsCredits = true
+
+        fun plan(): AnalysisPlan = AnalysisPlan(
+            channels = channels,
+            contentTypes = contentTypes,
+            mode = AnalysisMode.NEXT_DAY,
+        )
+    }
+
+    /**
      * A job written by a build newer than this one.
      *
      * Kept and shown rather than dropped: the row is the user's, and an app that silently deletes
      * what it cannot read is one that loses a schedule on every downgrade. Never run, for the
      * obvious reason that this build does not know what it would be starting.
      */
-    data class Unsupported(val kind: String) : JobWork {
+    data class Unsupported(val kind: String, val config: String = "{}") : JobWork {
         override val displayName = "Not supported by this version"
         override val spendsCredits = false
     }

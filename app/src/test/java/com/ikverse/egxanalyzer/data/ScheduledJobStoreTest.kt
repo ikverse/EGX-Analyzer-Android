@@ -4,6 +4,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.ikverse.egxanalyzer.model.AnalysedChannel
+import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.JobOutcome
 import com.ikverse.egxanalyzer.model.JobTrigger
 import com.ikverse.egxanalyzer.model.JobWork
@@ -106,6 +108,52 @@ class ScheduledJobStoreTest {
     }
 
     @Test
+    fun `an analysis job keeps the chats and content types it was made with`() {
+        val store = LocalDataStore(context)
+        val analysis = evenings.copy(
+            id = "morning-analysis",
+            name = "Morning analysis",
+            work = JobWork.Analysis(
+                channels = listOf(AnalysedChannel(-100L, "Signals"), AnalysedChannel(-200L, "Calls")),
+                contentTypes = setOf(AnalysisContentType.IMAGES, AnalysisContentType.TEXT),
+            ),
+        )
+        store.saveScheduledJob(analysis)
+
+        // The whole point of freezing them: this is what the run will cover months from now,
+        // whatever is ticked on the Analyze screen by then.
+        assertEquals(analysis, store.scheduledJobs().single())
+    }
+
+    @Test
+    fun `an analysis job with nothing to read is not treated as an analysis of nothing`() {
+        val store = LocalDataStore(context)
+        store.writableDatabase.insert(
+            "scheduled_jobs",
+            null,
+            ContentValues().apply {
+                put("id", "empty")
+                put("name", "Broken analysis")
+                put("enabled", 1)
+                put("trigger_kind", "REPEAT")
+                put("trigger_at", "07:00")
+                put("trigger_days", "SUNDAY")
+                put("work_kind", "ANALYSIS")
+                put("work_config", """{"channels":[],"contentTypes":[]}""")
+                put("grace_minutes", 60)
+                put("last_outcome", "NEVER")
+                put("created_at", 1_760_000_000_000)
+            },
+        )
+
+        // A paid request over no chats buys an empty answer. Unsupported means it is kept, shown
+        // and never run, which is the right end for a row that cannot say what it covers.
+        val restored = store.scheduledJobs().single()
+        assertTrue(restored.work is JobWork.Unsupported)
+        assertTrue(!restored.runnable)
+    }
+
+    @Test
     fun `a job from a newer build is kept, shown, and never rewritten into something else`() {
         val store = LocalDataStore(context)
         store.writableDatabase.insert(
@@ -126,14 +174,21 @@ class ScheduledJobStoreTest {
             },
         )
 
+        // A newer build's idea of what an analysis job carries. This one knows the kind and cannot
+        // read the settings, which comes to the same thing: it must not run it.
         val unknown = store.scheduledJobs().single()
-        assertEquals(JobWork.Unsupported("ANALYSIS"), unknown.work)
+        assertEquals(JobWork.Unsupported("ANALYSIS", """{"channels":[1,2]}"""), unknown.work)
         assertTrue(!unknown.runnable)
 
         // Switching it off - the one thing this build can usefully do with it - must not file it
-        // under a kind the build that understands it would no longer recognise.
+        // under a kind, or a shape, that the build which understands it would no longer recognise.
+        // Rewriting the settings as an empty object here would gut the schedule on a downgrade and
+        // a re-upgrade, and the row would come back looking intact.
         store.saveScheduledJob(unknown.copy(enabled = false))
-        assertEquals(JobWork.Unsupported("ANALYSIS"), store.scheduledJobs().single().work)
+        assertEquals(
+            JobWork.Unsupported("ANALYSIS", """{"channels":[1,2]}"""),
+            store.scheduledJobs().single().work,
+        )
     }
 
     @Test

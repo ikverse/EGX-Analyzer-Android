@@ -44,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import com.ikverse.egxanalyzer.data.JobScheduler
+import com.ikverse.egxanalyzer.model.AnalysedChannel
 import com.ikverse.egxanalyzer.model.JobTrigger
 import com.ikverse.egxanalyzer.model.JobWork
 import com.ikverse.egxanalyzer.model.ScheduleClock
@@ -66,8 +67,13 @@ import java.util.UUID
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SchedulesSheet(appState: AppState, onDismiss: () -> Unit) {
-    var editing by remember { mutableStateOf<ScheduledJob?>(null) }
+internal fun SchedulesSheet(
+    appState: AppState,
+    /** A job to open straight into, for the entrances that already know what they are scheduling. */
+    initialEdit: ScheduledJob? = null,
+    onDismiss: () -> Unit,
+) {
+    var editing by remember { mutableStateOf(initialEdit) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -100,10 +106,29 @@ private fun ScheduleList(appState: AppState, onEdit: (ScheduledJob) -> Unit) {
         Column(Modifier.padding(start = Space.m)) {
             Text("Run schedules on this phone")
             Text(
-                "Off by default. Nothing here spends cloud credits.",
+                "Off by default, and never synced to your other devices.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+    // A second switch rather than a property of the job, and deliberately sitting under the first:
+    // letting the phone fetch prices while it sleeps says nothing about letting it spend money.
+    if (appState.schedulesEnabled) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(
+                checked = appState.paidSchedulesEnabled,
+                onCheckedChange = appState::updatePaidSchedulesEnabled,
+            )
+            Column(Modifier.padding(start = Space.m)) {
+                Text("Allow runs that spend cloud credits")
+                Text(
+                    "An analysis is a paid request. Off, a schedule that would make one is passed " +
+                        "over and says so.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
     if (appState.schedulesEnabled) ExactAlarmNotice(context)
@@ -145,11 +170,25 @@ private fun ScheduleRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            coverageLine(job.work)?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             // The next fire is the line that says the schedule is alive. A job that is off, spent,
-            // or of a kind this build cannot run says that instead, because a time it will never
-            // reach is worse than no time at all.
+            // blocked, or of a kind this build cannot run says that instead, because a time it will
+            // never reach is worse than no time at all.
             Text(
-                nextRunLine(job, appState.schedulesEnabled, now),
+                nextRunLine(
+                    job = job,
+                    schedulesEnabled = appState.schedulesEnabled,
+                    now = now,
+                    paidAllowed = appState.paidSchedulesEnabled,
+                    hasCredential = appState.cloudConfiguration.hasCredential,
+                    knownChannelIds = appState.channels.mapTo(mutableSetOf()) { it.id },
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -203,6 +242,7 @@ private fun ScheduleEditor(appState: AppState, job: ScheduledJob, onDone: () -> 
         )
     }
     var grace by remember(job.id) { mutableStateOf(job.graceMinutes) }
+    var work by remember(job.id) { mutableStateOf(job.work) }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onDone) {
@@ -257,12 +297,65 @@ private fun ScheduleEditor(appState: AppState, job: ScheduledJob, onDone: () -> 
     )
 
     Text("Does", fontWeight = FontWeight.SemiBold)
-    Text(job.work.displayName)
+    // Fixed once a job exists. Changing what a schedule does is a different schedule, and quietly
+    // turning a free job into a paid one from an edit screen is the last way anyone should be able
+    // to arm a cloud request.
+    if (existing) {
+        Text(work.displayName)
+        (work as? JobWork.Analysis)?.let { frozen ->
+            ReaimControl(appState, frozen) { updated -> work = updated }
+        }
+    } else {
+        val fromScreen = remember { appState.scheduledAnalysisFromScreen() }
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            FilterChip(
+                selected = work is JobWork.PriceRefresh,
+                onClick = {
+                    work = JobWork.PriceRefresh
+                    if (name in defaultNames) name = defaultPriceName
+                    if (time == analysisHour) time = priceHour
+                },
+                label = { Text(JobWork.PriceRefresh.displayName) },
+            )
+            FilterChip(
+                // Nothing to schedule where the Analyze screen has no chats ticked: the selection
+                // is what the job would be made of.
+                enabled = fromScreen != null,
+                selected = work is JobWork.Analysis,
+                onClick = {
+                    fromScreen?.let { work = it }
+                    // Only while the name and time are still the ones this form put there. What
+                    // the user typed or picked is theirs; a card reading "Evening prices" over an
+                    // analysis, or an analysis booked for hours after the session it was meant to
+                    // precede, is worse than either.
+                    if (name in defaultNames) name = defaultAnalysisName
+                    if (time == priceHour) time = analysisHour
+                },
+                label = { Text("Analyse the next session") },
+            )
+        }
+        if (fromScreen == null) {
+            Text(
+                "Tick the chats you want on the Analyze screen first, and they become what the " +
+                    "schedule covers.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
     Text(
-        when (job.work) {
+        when (val chosen = work) {
             JobWork.PriceRefresh ->
                 "Fetches the daily prices for every stock the record names or you hold, and " +
                     "re-scores what changed. Free: no cloud provider is involved."
+
+            is JobWork.Analysis ->
+                "Reads ${chosen.channels.size} " +
+                    "${if (chosen.channels.size == 1) "chat" else "chats"} " +
+                    "(${chosen.contentTypes.joinToString { it.name.lowercase() }}) for the next " +
+                    "EGX session and sends them to the model. This costs cloud credits, and the " +
+                    "chats are fixed as they are now - changing what is ticked on Analyze later " +
+                    "will not re-aim it."
 
             is JobWork.Unsupported ->
                 "Written by a newer version of the app. It is kept and will not be run here."
@@ -270,6 +363,14 @@ private fun ScheduleEditor(appState: AppState, job: ScheduledJob, onDone: () -> 
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    if (work.spendsCredits && !appState.paidSchedulesEnabled) {
+        Text(
+            "Paid schedules are switched off, so this one will be passed over and say so rather " +
+                "than run. The switch is at the top of this sheet.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
 
     Text("Run late by up to", fontWeight = FontWeight.SemiBold)
     Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -304,6 +405,7 @@ private fun ScheduleEditor(appState: AppState, job: ScheduledJob, onDone: () -> 
                     job.copy(
                         name = name.trim(),
                         trigger = trigger,
+                        work = work,
                         graceMinutes = grace,
                         // A trigger that moved is a different slot, so whatever the old one served
                         // must not talk the new one out of its first run - and the new one is armed
@@ -324,6 +426,52 @@ private fun ScheduleEditor(appState: AppState, job: ScheduledJob, onDone: () -> 
                     onDone()
                 },
             ) { Text("Delete") }
+        }
+    }
+}
+
+/**
+ * The one deliberate way past a frozen selection.
+ *
+ * Freezing is right - a schedule must not change what it covers because someone re-ticked a chat on
+ * another screen weeks later - but a selection that can never be corrected is one the user has to
+ * delete the job to fix. So: both sides shown, and a button that says plainly which one it is
+ * taking. Never automatic, and never quiet.
+ */
+@Composable
+private fun ReaimControl(
+    appState: AppState,
+    frozen: JobWork.Analysis,
+    onReaim: (JobWork.Analysis) -> Unit,
+) {
+    val fromScreen = appState.scheduledAnalysisFromScreen()
+    Text(
+        "Covers: ${coverageLine(frozen) ?: "nothing"}",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    when {
+        fromScreen == null -> Text(
+            "Tick chats on the Analyze screen to be able to re-aim this at them.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        fromScreen == frozen -> Text(
+            "Matches what Analyze has ticked.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        else -> {
+            Text(
+                "Analyze now has: ${coverageLine(fromScreen) ?: "nothing"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = { onReaim(fromScreen) }) {
+                Text("Re-aim at the current selection")
+            }
         }
     }
 }
@@ -375,15 +523,83 @@ internal fun triggerProblem(
     else -> null
 }
 
-/** The line under a schedule saying when it next runs, or why it never will. */
-internal fun nextRunLine(job: ScheduledJob, schedulesEnabled: Boolean, now: Instant): String = when {
+/**
+ * What a schedule is waiting on, and it is not always a time.
+ *
+ * Everything above the last branch is a reason the next fire will not happen, and each one is
+ * checked here rather than at the fire, because a card promising "Next Sun 07:00" over a job that
+ * is going to be passed over is the app misleading the one person who could fix it. A schedule that
+ * quietly does nothing is this feature's whole failure mode; a schedule that says why is not.
+ *
+ * [knownChannelIds] is empty when the chat list has not loaded, which on a cold start it has not.
+ * That is deliberately treated as "no opinion" rather than as the chats having gone - claiming a
+ * job is broken because Telegram is still connecting would be exactly the wrong alarm.
+ */
+internal fun nextRunLine(
+    job: ScheduledJob,
+    schedulesEnabled: Boolean,
+    now: Instant,
+    paidAllowed: Boolean = true,
+    hasCredential: Boolean = true,
+    knownChannelIds: Set<Long> = emptySet(),
+): String = blockedReason(job, schedulesEnabled, paidAllowed, hasCredential, knownChannelIds)
+    ?: ScheduleClock.nextFire(job, now)
+        ?.let { "Next ${whenLabel(it, now)}" }
+    ?: "No run left"
+
+/**
+ * Why this schedule will not fire, or null when nothing is stopping it.
+ *
+ * One list, read by the row and by the card above it, because the two disagreeing is how the card
+ * ends up promising a next run for a job the row underneath says is blocked. The order is what the
+ * reader has to fix first: the master switch before the job's own, and both before anything the
+ * work itself needs. A card listing four problems at once fixes none of them.
+ */
+internal fun blockedReason(
+    job: ScheduledJob,
+    schedulesEnabled: Boolean,
+    paidAllowed: Boolean = true,
+    hasCredential: Boolean = true,
+    knownChannelIds: Set<Long> = emptySet(),
+): String? = when {
     !job.runnable -> "This version cannot run it"
     !schedulesEnabled -> "Schedules are off on this phone"
     !job.enabled -> "Switched off"
     job.spent -> "Done - it only ran once"
-    else -> ScheduleClock.nextFire(job, now)
-        ?.let { "Next ${whenLabel(it, now)}" }
-        ?: "No run left"
+    job.work.spendsCredits && !paidAllowed -> "Paid runs are switched off"
+    job.work.spendsCredits && !hasCredential -> "No provider credential saved"
+    job.chatsAreGone(knownChannelIds) -> "Its chats are no longer in the app"
+    else -> null
+}
+
+/**
+ * Whether every chat this job froze has since gone from the app.
+ *
+ * All of them, not some: losing one chat of four leaves a run that still reads the other three, and
+ * a warning about it would be noise on a schedule that works. Losing all four leaves a paid request
+ * with nothing to send.
+ */
+private fun ScheduledJob.chatsAreGone(knownChannelIds: Set<Long>): Boolean {
+    if (knownChannelIds.isEmpty()) return false
+    val analysis = work as? JobWork.Analysis ?: return false
+    return analysis.channels.none { it.id in knownChannelIds }
+}
+
+/**
+ * The chats a job covers, short enough for a row.
+ *
+ * A schedule that names only what it does - "Analyse the next session" - cannot be checked without
+ * opening it, and the whole point of freezing the selection is that it stops matching what is
+ * ticked on screen. Two names and a count is enough to recognise the wrong job at a glance.
+ */
+internal fun coverageLine(work: JobWork, limit: Int = 2): String? {
+    val analysis = work as? JobWork.Analysis ?: return null
+    val names = analysis.channels.map(AnalysedChannel::name)
+    return when {
+        names.isEmpty() -> null
+        names.size <= limit -> names.joinToString(", ")
+        else -> names.take(limit).joinToString(", ") + " +${names.size - limit} more"
+    }
 }
 
 /**
@@ -394,11 +610,49 @@ internal fun nextRunLine(job: ScheduledJob, schedulesEnabled: Boolean, now: Inst
  */
 private fun newSchedule(existing: List<ScheduledJob>): ScheduledJob = ScheduledJob(
     id = UUID.randomUUID().toString(),
-    name = if (existing.isEmpty()) "Evening prices" else "New schedule",
+    name = if (existing.isEmpty()) defaultPriceName else "New schedule",
     enabled = true,
-    trigger = JobTrigger.Repeat(ScheduleClock.tradingDays, LocalTime.of(18, 0)),
+    trigger = JobTrigger.Repeat(ScheduleClock.tradingDays, priceHour),
     work = JobWork.PriceRefresh,
 )
+
+/**
+ * A schedule for the selection the Analyze screen is holding, ready to be given a time.
+ *
+ * The short way in: tick the chats you want, press one button, pick when. Going through the sheet's
+ * own New schedule and finding the right chip is the long way round for the thing most people will
+ * be doing.
+ */
+internal fun newAnalysisSchedule(work: JobWork.Analysis): ScheduledJob = ScheduledJob(
+    id = UUID.randomUUID().toString(),
+    name = defaultAnalysisName,
+    enabled = true,
+    trigger = JobTrigger.Repeat(ScheduleClock.tradingDays, analysisHour),
+    work = work,
+)
+
+private const val defaultPriceName = "Evening prices"
+private const val defaultAnalysisName = "Morning analysis"
+
+/** The names this form fills in itself, and so may replace when the work changes. */
+private val defaultNames = setOf(defaultPriceName, defaultAnalysisName, "New schedule")
+
+/**
+ * After the close, when the day's prices have settled and there is something new to fetch.
+ *
+ * The exchange shuts at 14:30 Cairo, so an evening refresh is the first one that reads a finished
+ * session - and it leaves the record right for whenever the phone is next opened.
+ */
+private val priceHour = LocalTime.of(18, 0)
+
+/**
+ * Before the open, which is the only time an analysis is worth having.
+ *
+ * The exchange opens at 10:00 Cairo and the channels post their calls in the morning ahead of it.
+ * A run at eight reads the night's messages and has the report ready while the levels can still be
+ * acted on; the same run at six in the evening is a post-mortem.
+ */
+private val analysisHour = LocalTime.of(8, 0)
 
 private fun pickTime(context: Context, current: LocalTime, onPicked: (LocalTime) -> Unit) {
     TimePickerDialog(

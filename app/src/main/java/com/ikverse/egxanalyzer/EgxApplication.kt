@@ -54,7 +54,14 @@ class EgxApplication : Application() {
             updateRepository = UpdateRepository(this),
             // The foreground service is what keeps the process alive; the notification is what
             // tells the user so.
-            analysisRunning = { sources, model -> AnalysisService.start(this, sources, model) },
+            // Wrapped, because from Android 12 an app in the background may not start a foreground
+            // service at all. A scheduled run has already put its worker in the foreground before
+            // reaching here, which makes this start legal - but if that was itself refused, the run
+            // is still under way and paid for, and letting an exception about a notification throw
+            // it away would be the worst possible trade.
+            analysisRunning = { sources, model ->
+                runCatching { AnalysisService.start(this, sources, model) }
+            },
             analysisFinished = { resultId, recommendations ->
                 AnalysisService.stop(this)
                 if (resultId != null) notifier.finished(recommendations, resultId)

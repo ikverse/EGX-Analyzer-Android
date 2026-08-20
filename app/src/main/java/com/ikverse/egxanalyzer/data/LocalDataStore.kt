@@ -1432,7 +1432,7 @@ class LocalDataStore(context: Context) :
                     }
                 }
                 put("work_kind", job.work.storedKind())
-                put("work_config", "{}")
+                put("work_config", job.work.storedConfig())
                 put("grace_minutes", job.graceMinutes)
                 put("last_fired_at", job.lastFiredAt?.toEpochMilli())
                 put("last_outcome", job.lastOutcome.name)
@@ -1449,6 +1449,54 @@ class LocalDataStore(context: Context) :
     }
 
     /**
+     * The settings a work kind carries, as JSON in one column.
+     *
+     * A column per field would mean migrating the table for every job type ever added; this way a
+     * new one is a new key. The shape is this app's own and is never read by anything but the
+     * function below it.
+     */
+    private fun JobWork.storedConfig(): String = when (this) {
+        JobWork.PriceRefresh -> "{}"
+        is JobWork.Analysis -> JSONObject()
+            .put(
+                "channels",
+                JSONArray().apply {
+                    channels.forEach { put(JSONObject().put("id", it.id).put("name", it.name)) }
+                },
+            )
+            .put("contentTypes", JSONArray().apply { contentTypes.forEach { put(it.name) } })
+            .toString()
+        // Written back exactly as it arrived. This build cannot read the settings of a job it does
+        // not understand, and rewriting them as an empty object would quietly gut the schedule for
+        // the version that can.
+        is JobWork.Unsupported -> config
+    }
+
+    /**
+     * A work kind and its settings, or [JobWork.Unsupported] where this build cannot read them.
+     *
+     * An `ANALYSIS` row whose JSON will not parse is treated as unsupported rather than as an
+     * analysis of nothing: a run over no chats would be a paid request for an empty answer.
+     */
+    private fun workFrom(kind: String, config: String): JobWork = when (kind) {
+        "PRICE_REFRESH" -> JobWork.PriceRefresh
+        "ANALYSIS" -> runCatching {
+            val json = JSONObject(config)
+            val channels = json.getJSONArray("channels").objects().map {
+                AnalysedChannel(it.getLong("id"), it.getString("name"))
+            }
+            val types = json.getJSONArray("contentTypes").strings()
+                .mapNotNullTo(mutableSetOf()) { name ->
+                    AnalysisContentType.entries.firstOrNull { it.name == name }
+                }
+            require(channels.isNotEmpty() && types.isNotEmpty())
+            JobWork.Analysis(channels, types)
+        }.getOrElse { JobWork.Unsupported(kind, config) }
+
+        else -> JobWork.Unsupported(kind, config)
+    }
+
+    /**
      * The name a work kind is filed under.
      *
      * An unsupported job keeps the name the build that wrote it used, so re-saving a row this
@@ -1457,6 +1505,7 @@ class LocalDataStore(context: Context) :
      */
     private fun JobWork.storedKind(): String = when (this) {
         JobWork.PriceRefresh -> "PRICE_REFRESH"
+        is JobWork.Analysis -> "ANALYSIS"
         is JobWork.Unsupported -> kind
     }
 
@@ -1480,10 +1529,7 @@ class LocalDataStore(context: Context) :
             name = getString(getColumnIndexOrThrow("name")),
             enabled = getInt(getColumnIndexOrThrow("enabled")) == 1,
             trigger = trigger,
-            work = when (kind) {
-                "PRICE_REFRESH" -> JobWork.PriceRefresh
-                else -> JobWork.Unsupported(kind)
-            },
+            work = workFrom(kind, getString(getColumnIndexOrThrow("work_config"))),
             graceMinutes = getInt(getColumnIndexOrThrow("grace_minutes")),
             lastFiredAt = nullableLong("last_fired_at")?.let(Instant::ofEpochMilli),
             lastOutcome = runCatching {

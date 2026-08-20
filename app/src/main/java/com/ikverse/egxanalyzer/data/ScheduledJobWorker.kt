@@ -1,16 +1,20 @@
 package com.ikverse.egxanalyzer.data
 
 import android.content.Context
+import android.content.pm.ServiceInfo
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.ikverse.egxanalyzer.EgxApplication
+import com.ikverse.egxanalyzer.model.ScheduleClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.Instant
 
 /**
  * Runs whatever the schedules owe, once the alarm has woken the phone.
@@ -34,6 +38,7 @@ class ScheduledJobWorker(
     override suspend fun doWork(): Result = runCatching {
         val application = applicationContext as? EgxApplication
             ?: return@runCatching Result.success()
+        if (paidWorkIsDue()) goForeground()
         // AppState is Compose state driven from the main thread; the run itself suspends onto IO
         // inside the repositories, exactly as it does when a screen starts it.
         withContext(Dispatchers.Main) { application.appState.runDueScheduledJobs() }
@@ -42,6 +47,51 @@ class ScheduledJobWorker(
         // minutes later would be answering a fire that has passed, and the schedule's own next
         // run is the only retry that makes sense.
     }.getOrDefault(Result.success())
+
+    /**
+     * Whether anything owed right now is going to send a paid request.
+     *
+     * Asked before the run rather than during it, because what it decides - going foreground - has
+     * to be settled before the long part starts. A free refresh finishes well inside WorkManager's
+     * ordinary window and has no business putting a notification on the phone.
+     */
+    private fun paidWorkIsDue(): Boolean {
+        val settings = SettingsRepository(
+            applicationContext,
+            AndroidKeystoreCredentialStore(applicationContext),
+        )
+        if (!settings.schedulesEnabled() || !settings.paidSchedulesEnabled()) return false
+        val now = Instant.now()
+        return LocalDataStore(applicationContext).scheduledJobs().any { job ->
+            job.work.spendsCredits && ScheduleClock.unservedFire(job, now) != null
+        }
+    }
+
+    /**
+     * Puts this worker in the foreground for the length of a paid run.
+     *
+     * Two problems, one answer. WorkManager stops ordinary work after about ten minutes, and an
+     * analysis of a busy morning can outlast that - the response timeout alone reaches fifteen.
+     * And from Android 12 an app in the background may not start a foreground service at all, so
+     * the service the app has always used to hold itself open would be refused precisely when it
+     * is needed most. Going foreground here fixes the ceiling and makes that later start legal,
+     * because an app already running one is allowed to start another.
+     *
+     * The same notification id the analysis itself uses, so the reader sees one notification that
+     * fills in with real numbers rather than two describing the same run. A refusal is survivable
+     * and deliberately swallowed: the run still goes, it simply gets the ordinary window.
+     */
+    private suspend fun goForeground() {
+        runCatching {
+            setForeground(
+                ForegroundInfo(
+                    AnalysisNotifier.NOTIFICATION_ID,
+                    AnalysisNotifier(applicationContext).starting(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                ),
+            )
+        }
+    }
 
     companion object {
         private const val NAME = "scheduled-jobs"

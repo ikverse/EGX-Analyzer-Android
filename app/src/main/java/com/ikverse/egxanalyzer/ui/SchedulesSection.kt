@@ -44,10 +44,18 @@ import java.util.Locale
 @Composable
 internal fun SchedulesSection(appState: AppState) {
     var sheetOpen by remember { mutableStateOf(false) }
+    var startWith by remember { mutableStateOf<ScheduledJob?>(null) }
     SectionCard(title = "Scheduled runs", icon = Icons.Outlined.Schedule) {
         val now = Instant.now()
         Text(
-            scheduleSummary(appState.scheduledJobs, appState.schedulesEnabled, now),
+            scheduleSummary(
+                jobs = appState.scheduledJobs,
+                enabled = appState.schedulesEnabled,
+                now = now,
+                paidAllowed = appState.paidSchedulesEnabled,
+                hasCredential = appState.cloudConfiguration.hasCredential,
+                knownChannelIds = appState.channels.mapTo(mutableSetOf()) { it.id },
+            ),
             style = MaterialTheme.typography.bodyMedium,
         )
         val last = appState.scheduledJobs
@@ -73,12 +81,33 @@ internal fun SchedulesSection(appState: AppState) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(Modifier.fillMaxWidth()) {
-            TextButton(onClick = { sheetOpen = true }) {
+            TextButton(
+                onClick = {
+                    startWith = null
+                    sheetOpen = true
+                },
+            ) {
                 Text(if (appState.scheduledJobs.isEmpty()) "Add a schedule" else "Manage schedules")
+            }
+            // The short way in, and only when there is a selection to schedule. Ticking the chats
+            // is already how a run is set up, so putting the button beside them beats asking
+            // someone to go and find the right option inside a form.
+            appState.scheduledAnalysisFromScreen()?.let { selection ->
+                TextButton(
+                    onClick = {
+                        startWith = newAnalysisSchedule(selection)
+                        sheetOpen = true
+                    },
+                ) { Text("Schedule this selection") }
             }
         }
     }
-    if (sheetOpen) SchedulesSheet(appState) { sheetOpen = false }
+    if (sheetOpen) {
+        SchedulesSheet(appState, initialEdit = startWith) {
+            sheetOpen = false
+            startWith = null
+        }
+    }
 }
 
 /** Green for a run that worked, red for one that failed, grey for the rest. */
@@ -98,13 +127,33 @@ internal fun scheduleSummary(
     jobs: List<ScheduledJob>,
     enabled: Boolean,
     now: Instant,
+    paidAllowed: Boolean = true,
+    hasCredential: Boolean = true,
+    knownChannelIds: Set<Long> = emptySet(),
     zone: ZoneId = ScheduleClock.ZONE,
 ): String {
-    val live = jobs.filter { it.enabled && it.runnable }
+    // The same rule the rows use, or the card promises a next run for a job the list underneath it
+    // reports as blocked - and the reader has to reconcile two things the app said about one job.
+    val blocked = { job: ScheduledJob ->
+        blockedReason(job, enabled, paidAllowed, hasCredential, knownChannelIds)
+    }
+    val live = jobs.filter { blocked(it) == null }
     return when {
         jobs.isEmpty() -> "Nothing scheduled."
         !enabled -> "Schedules are switched off on this phone."
-        live.isEmpty() -> "Every schedule is switched off."
+        live.isEmpty() -> {
+            // A spent one-shot is not a problem to report - it is a job that did what it was for.
+            // Naming its "reason" would put a complaint on a card where nothing is wrong, and
+            // would hide a real blocker sitting on the job beside it.
+            val actionable = jobs.filterNot(ScheduledJob::spent)
+            when {
+                actionable.isEmpty() -> "Nothing left to run."
+                else -> actionable.firstNotNullOfOrNull(blocked)
+                    ?.let { "Nothing will run - $it." }
+                    ?: "Nothing will run."
+            }
+        }
+
         else -> {
             val next = ScheduleClock.earliestFire(live, now, zone)
             if (next == null) {
@@ -149,7 +198,6 @@ internal fun whenLabel(at: Instant, now: Instant, zone: ZoneId = ScheduleClock.Z
     }
 }
 
-
 /**
  * The same schedules, in Settings, with the two system permissions that decide whether they work.
  *
@@ -165,7 +213,14 @@ internal fun SchedulesSettingsSection(appState: AppState, contentMaxWidth: Dp) {
     ExpandableSection(
         "Schedules",
         icon = Icons.Outlined.Schedule,
-        summary = scheduleSummary(appState.scheduledJobs, appState.schedulesEnabled, Instant.now()),
+        summary = scheduleSummary(
+            jobs = appState.scheduledJobs,
+            enabled = appState.schedulesEnabled,
+            now = Instant.now(),
+            paidAllowed = appState.paidSchedulesEnabled,
+            hasCredential = appState.cloudConfiguration.hasCredential,
+            knownChannelIds = appState.channels.mapTo(mutableSetOf()) { it.id },
+        ),
         contentMaxWidth = contentMaxWidth,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
