@@ -295,9 +295,10 @@ class PortfolioCalculatorTest {
     }
 
     @Test
-    fun `a trade the deadline closed is overdue while no sale is recorded`() {
-        // Not kept open: the window simply ran out and the app closed it. The user never said what
-        // they did, and that is exactly what the count is for.
+    fun `a trade the deadline closed is expired, and never chased for it`() {
+        // Not kept open: the window simply ran out and the app closed it, which is an answer in
+        // itself. The trade sits in the Expired section saying so, and the overdue clock stays at
+        // zero - there is no decision left for the user to make about it.
         val sessions = (0 until 5).map { day ->
             session(called.plusDays(day.toLong()), high = 10.2, low = 9.8)
         }
@@ -311,7 +312,10 @@ class PortfolioCalculatorTest {
 
         assertFalse(view.open)
         assertTrue(view.awaitingSale)
-        assertEquals(7L, view.overdueDays)
+        // Still expired, which is what puts it in that section rather than among the closed.
+        assertTrue(view.ranOutOfTime)
+        assertEquals(0L, view.overdueDays)
+        assertFalse(view.overdue)
     }
 
     @Test
@@ -406,9 +410,10 @@ class PortfolioCalculatorTest {
     }
 
     @Test
-    fun `a partial hit that ran to the deadline is overdue and keeps its own verdict`() {
-        // Target 1 was banked and target 2 never came. The window is what ended this, so it is
-        // overdue - but the card goes on saying the trade got somewhere, which "Expired" would not.
+    fun `a partial hit that ran to the deadline keeps its own verdict, and is not chased`() {
+        // Target 1 was banked and target 2 never came. The window is what ended this, so the card
+        // goes on saying the trade got somewhere, which "Expired" would not - and with Keep Open
+        // unset, the window closing it is the end of the matter rather than the start of a count.
         val sessions = listOf(
             session(called, high = 11.2, low = 10.0),
             session(called.plusDays(1), high = 11.1, low = 10.4),
@@ -425,7 +430,7 @@ class PortfolioCalculatorTest {
         assertEquals(PositionStatus.PARTIAL_TARGET_HIT, view.status)
         assertFalse(view.open)
         assertTrue(view.ranOutOfTime)
-        assertEquals(7L, view.overdueDays)
+        assertEquals(0L, view.overdueDays)
     }
 
     @Test
@@ -479,9 +484,10 @@ class PortfolioCalculatorTest {
         assertEquals(listOf("BBBB", "DDDD"), group.open.map(PositionView::ticker))
         assertEquals(listOf("AAAA"), group.expired.map(PositionView::ticker))
         assertEquals(listOf("CCCC"), group.closed.map(PositionView::ticker))
-        // Two trades are past a deadline with nothing recorded: the expired one and the kept-open
-        // one. Which section they are drawn in does not change that.
-        assertEquals(2, portfolio.stats.overdueCount)
+        // One trade is chased, not two: BBBB is past its deadline because the user is holding it
+        // there, while AAAA's window closed it, and a closed trade is not asked to account for
+        // itself. Which section they are drawn in still does not come into it.
+        assertEquals(1, portfolio.stats.overdueCount)
     }
 
     @Test
@@ -547,9 +553,26 @@ class PortfolioCalculatorTest {
             currentPrice = 10.0,
             today = today,
         )
+        // The clock only runs on a trade the user is holding on purpose, so the days being cleared
+        // are read off a kept-open copy of the same call, judged over the same two windows.
+        val held = PortfolioCalculator.evaluate(
+            position = trade.copy(keepOpen = true),
+            sessions = sessions,
+            currentPrice = 10.0,
+            today = today,
+        )
+        val heldLonger = PortfolioCalculator.evaluate(
+            position = trade.copy(windowSessions = 10, windowCustom = true, keepOpen = true),
+            sessions = sessions,
+            currentPrice = 10.0,
+            today = today,
+        )
 
         assertFalse(before.open)
-        assertEquals(5L, before.overdueDays)
+        // Closed by its own window, so nothing is counted against it either way.
+        assertEquals(0L, before.overdueDays)
+        assertEquals(5L, held.overdueDays)
+        assertEquals(0L, heldLonger.overdueDays)
 
         assertTrue(after.open)
         assertNull(after.deadlineDate)
@@ -613,7 +636,8 @@ class PortfolioCalculatorTest {
 
         val portfolio = PortfolioCalculator.build(
             positions = listOf(
-                // Ran out of time long ago, so urgent-first lifts its session above a newer one.
+                // Ran out of time long ago and kept open through it, so it is overdue and
+                // urgent-first lifts its session above a newer one.
                 position(
                     ticker = "AMOC",
                     recommendationDate = called,
@@ -621,6 +645,7 @@ class PortfolioCalculatorTest {
                     target1 = 20.0,
                     target2 = 22.0,
                     stopLoss = 1.0,
+                    keepOpen = true,
                 ),
                 // Same session, bought two days apart, which is the only date that separates them.
                 position(ticker = "SWDY", recommendationDate = recent, entryDate = recent, windowSessions = 20),

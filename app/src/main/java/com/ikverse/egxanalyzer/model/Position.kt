@@ -142,15 +142,21 @@ data class PositionView(
     /**
      * The deadline passed and the trade ended at no level of its own - no target 2, no stop.
      *
-     * The one shape of unfinished business the app can recognise, and the whole basis of both the
-     * Expired section and the overdue count. A trade that reached target 2 did what it was bought to
-     * do; a trade the stop took out ended where the call said to get out; a trade the user reported
-     * selling ended where they say it did. What is left is a trade that ran out of time while they
-     * were still in it, which is the only case worth chasing them about.
+     * The one shape of unfinished business the app can recognise, and the whole basis of the
+     * Expired section. A trade that reached target 2 did what it was bought to do; a trade the stop
+     * took out ended where the call said to get out; a trade the user reported selling ended where
+     * they say it did. What is left is a trade that ran out of time while they were still in it.
+     *
+     * Not on its own a reason to chase them: see [overdueDays], which asks for [keptOpen] as well.
      */
     val ranOutOfTime: Boolean,
     /**
-     * Days since the deadline on a trade that ran out of time, or zero.
+     * Days since the deadline on a trade the user is keeping open, or zero.
+     *
+     * Zero on anything the window itself closed. A deadline that runs out with Keep Open unset ends
+     * the trade as expired, and expired is an answer: the trade sits in that section saying so and
+     * is never counted or notified about again. The clock runs only while the user is choosing to
+     * stay in a trade the app would otherwise have closed.
      *
      * Calendar days rather than sessions: a deadline that passed a fortnight ago has passed by a
      * fortnight whether or not the feed has caught up with what traded since. Zero on the day it
@@ -173,7 +179,7 @@ data class PositionView(
     /** A sale can still be recorded against any position the user has not reported selling. */
     val awaitingSale: Boolean get() = position.exitPrice == null
 
-    /** Out of time, and late with it. */
+    /** Past its deadline and still held on purpose, which is the only state the app asks about. */
     val overdue: Boolean get() = overdueDays > 0
 
     /**
@@ -216,7 +222,7 @@ data class PortfolioGroup(
     val closed: List<PositionView>
         get() = positions.filter { !it.open && !it.ranOutOfTime }
 
-    /** Holds something past its deadline with no sale recorded, and so wants reading first. */
+    /** Holds something the user is keeping open past its deadline, and so wants reading first. */
     val hasOverdue: Boolean get() = positions.any(PositionView::overdue)
 }
 

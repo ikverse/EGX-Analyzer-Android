@@ -106,9 +106,15 @@ object PortfolioCalculator {
             marketStatus != PositionStatus.FULL_TARGET_HIT &&
             (position.keepOpen || !settledByMarket)
 
+        // The one state the overdue clock runs on. Keeping a trade past its deadline is a decision
+        // the user made and can unmake, so the app has something to ask them about; a deadline that
+        // merely ran out is the app's own answer, and chasing that would be chasing itself.
+        val keptOpen = open && position.keepOpen
+
         // Ran out of time rather than ending anywhere: no target 2, no stop, and no sale the user
-        // told us about. Both the Expired section and the overdue count are this and nothing else,
-        // so a trade that reached its target is never chased and one that went nowhere always is.
+        // told us about. This is the whole of the Expired section, and half of the overdue clock -
+        // the other half being [keptOpen], so a trade that reached its target is never chased and
+        // one that went nowhere is chased only while the user is choosing to stay in it.
         val ranOutOfTime = !soldByHand &&
             deadlineDate != null &&
             marketStatus != PositionStatus.FULL_TARGET_HIT &&
@@ -151,26 +157,30 @@ object PortfolioCalculator {
             deadlineDate = deadlineDate,
             settledOn = scored.settledOn,
             ranOutOfTime = ranOutOfTime,
-            overdueDays = overdueDays(ranOutOfTime, deadlineDate, today),
+            overdueDays = overdueDays(ranOutOfTime && keptOpen, deadlineDate, today),
             priceScaleChanged = priceScaleChanged,
         )
     }
 
     /**
-     * How far past its deadline a trade that ran out of time has run.
+     * How far past its deadline a trade the user is deliberately still holding has run.
      *
-     * Only for a trade that ended nowhere, which is the whole of the rule: a position the user
-     * reported selling is over, a target reached is the trade doing what it was bought to do, and a
-     * stop broken is the call's own instruction being followed. Chasing any of those would be
-     * scolding the user over a trade that already has an answer. Zero on the day the deadline lands,
-     * so the pill starts the morning after.
+     * Two conditions, and both are the rule. The trade ended nowhere - a position the user reported
+     * selling is over, a target reached is the trade doing what it was bought to do, and a stop
+     * broken is the call's own instruction being followed - and the user marked it Keep Open. A
+     * window that simply ran out closes the trade as expired, which is an answer in itself: it sits
+     * in the Expired section saying so, and nothing counts it or asks after it again. What is left
+     * is a trade running past its deadline only because the user said it should, which is the one
+     * thing here worth a reminder.
+     *
+     * Zero on the day the deadline lands, so the pill starts the morning after.
      */
     private fun overdueDays(
-        ranOutOfTime: Boolean,
+        chased: Boolean,
         deadlineDate: LocalDate?,
         today: LocalDate,
     ): Long {
-        if (!ranOutOfTime || deadlineDate == null) return 0
+        if (!chased || deadlineDate == null) return 0
         return ChronoUnit.DAYS.between(deadlineDate, today).coerceAtLeast(0)
     }
 

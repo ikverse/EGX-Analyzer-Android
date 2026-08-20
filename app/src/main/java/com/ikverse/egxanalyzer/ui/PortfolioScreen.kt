@@ -165,9 +165,8 @@ private fun ColumnScope.PortfolioSummary(stats: PortfolioStats) {
  *
  * Overdue is the only state in the app that asks the user for something, and until now it was only
  * ever found: a count in the record card, then a scroll through folded sessions looking for the
- * cards it was counting. Each tile carries what a decision needs - which stock, how late, when it
- * was bought, and whether the deadline closed it or the user is holding it deliberately - and
- * presses through to the trade itself.
+ * cards it was counting. Each tile carries what a decision needs - which stock, how late, and when
+ * it was bought - and presses through to the trade itself.
  *
  * Absent entirely when nothing is late, exactly as the tile it replaces was. A card reading "no
  * overdue trades" is a permanent reminder of a state the app is not in.
@@ -177,7 +176,7 @@ private fun OverdueCard(overdue: List<PositionView>, onOpen: (String) -> Unit) {
     if (overdue.isEmpty()) return
     SectionCard(title = "Overdue", icon = Icons.Outlined.HourglassEmpty) {
         Text(
-            "Past the deadline with no sale recorded, and ended at neither target 2 nor the stop.",
+            "Still running past their deadline because you chose to keep them open.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -200,7 +199,7 @@ private fun OverdueCard(overdue: List<PositionView>, onOpen: (String) -> Unit) {
 }
 
 /**
- * One late trade, in four facts and a press.
+ * One late trade, in three facts and a press.
  *
  * The day count is the only thing here in the error colour, and it carries no word beside it: "6d"
  * in red under a heading that already says Overdue cannot be read as anything else, and the room
@@ -219,9 +218,6 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
             append("${view.overdueDays}d")
         }
         append(" · ${shortEntryDate(view.position.entryDate)}")
-        // Kept open is the user holding on purpose; expired is the app having stopped tracking a
-        // trade they are still in. Without this the tile would claim the two are the same thing.
-        append(" · ${if (view.keptOpen) "kept open" else "expired"}")
     }
     Card(
         onClick = onOpen,
@@ -239,6 +235,7 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
             verticalArrangement = Arrangement.spacedBy(Space.xs),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                StockLogo(view.ticker, LogoSize.Tile, Modifier.padding(end = Space.s))
                 Text(view.ticker, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                 Text(
                     formatPercent(view.returnPct),
@@ -254,8 +251,9 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
                     modifier = Modifier.padding(start = Space.xs).size(IconSize.Inline),
                 )
             }
-            // One line, and the state word is what gives way on a tile too narrow to hold it all -
-            // it is the one fact here that the card's own heading half says already.
+            // Two facts and nothing to say about the state: every trade on this card is one the
+            // user is keeping open, so a word for it would be the card's own heading repeated on
+            // every tile. The single line and the ellipsis stay as the guard for a long date.
             Text(
                 meta,
                 style = MaterialTheme.typography.labelSmall,
@@ -298,6 +296,7 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
     // kept instead - it hides nothing, so finding it as you left it costs a moment's thought rather
     // than a search for trades that look as though they have gone.
     var dateFilter by appState.pages.portfolioDate
+    var stockFilter by appState.pages.portfolioStock
     val order = appState.appPreferences.portfolioOrder
     // Which session cards are open, held here rather than inside each card. A card cannot open
     // itself on someone else's behalf, and arriving from a call on the Insights tab has to open the
@@ -328,7 +327,16 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
     val allDates = remember(groups) {
         groups.map { it.recommendationDate.toString() }.distinct().sortedDescending()
     }
-    FilterRow(active = dateFilter != null, onClearAll = { dateFilter = null }) {
+    FilterRow(
+        active = dateFilter != null || stockFilter.isNotBlank(),
+        onClearAll = {
+            dateFilter = null
+            stockFilter = ""
+        },
+    ) {
+        // Search leads, as it does in Results: it is the control someone arrives at the screen
+        // already knowing they want, and the only one that can empty the list on a keystroke.
+        StockFilterField(value = stockFilter, onValueChange = { stockFilter = it })
         SingleSelectFilter(
             label = "dates",
             options = allDates,
@@ -348,21 +356,31 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
     // Filtered here rather than in the calculator. The whole record has other readers - the overdue
     // worker raises the daily reminder off it - and a date someone picked on this screen must not
     // silence a notification about a trade they scrolled past.
-    val shown = remember(groups, dateFilter, order) {
+    val shown = remember(groups, dateFilter, stockFilter, order) {
+        // Normalized once for the whole record rather than once per trade, through the rule the
+        // other two tabs search by. See StockSearch.
+        val wanted = StockSearch.query(stockFilter)
         groups
             .filter { dateFilter == null || it.recommendationDate.toString() == dateFilter }
-            .map { it.copy(positions = it.positions.sortedWith(order.positions)) }
+            // A search narrows the trades inside a card and then empties the card itself, rather
+            // than leaving a session heading standing over nothing. The summary line is read off
+            // the positions, so it recounts itself around what is left and cannot end up
+            // describing trades the search has taken away.
+            .mapNotNull { group ->
+                val kept = group.positions.filter { it.matches(wanted) }
+                if (kept.isEmpty()) null else group.copy(positions = kept.sortedWith(order.positions))
+            }
             .sortedWith(order.groups)
     }
 
     // Arriving from a call pressed on the Insights tab: open the session holding that trade and
-    // scroll to it. The date filter is cleared only when it is what hides the trade, for the reason
+    // scroll to it. Either filter is cleared only when it is what hides the trade, for the reason
     // Insights gives beside its own - a link that lands on an empty screen is a broken link, and a
     // filter thrown away on a trip the reader is about to make back is a filter they have to set
     // again.
     val pendingPosition = appState.pendingPositionId
     val reveal = remember { BringIntoViewRequester() }
-    LaunchedEffect(pendingPosition, groups, dateFilter) {
+    LaunchedEffect(pendingPosition, groups, dateFilter, stockFilter) {
         if (pendingPosition == null) return@LaunchedEffect
         val target = groups.firstOrNull { group ->
             group.positions.any { it.position.id == pendingPosition }
@@ -379,6 +397,13 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
             // The list is about to be rebuilt around the cleared filter; this effect restarts on it.
             return@LaunchedEffect
         }
+        // The search goes the same way as the date, and for the same reason: cleared when it is
+        // what hides the trade, kept when the trade answers to it anyway.
+        val held = target.positions.first { it.position.id == pendingPosition }
+        if (!held.matches(StockSearch.query(stockFilter))) {
+            stockFilter = ""
+            return@LaunchedEffect
+        }
         openGroups = openGroups + target.recommendationDate
         // The card is unfolding as this runs, and a scroll measured against a height it is about to
         // leave behind stops short of the trade that was asked for.
@@ -387,11 +412,24 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
     }
 
     if (shown.isEmpty()) {
+        // The stock is named when it is what emptied the list, as it is in Results: "nothing called
+        // on that date" beside a box holding COMI reads as though the app had not noticed what was
+        // typed.
+        val searching = stockFilter.isNotBlank()
         EmptyState(
             icon = Icons.Outlined.AccountBalanceWallet,
-            title = "Nothing called on $dateFilter",
-            detail = "No trade you recorded belongs to that session. Clear the filter to see the " +
-                "rest of your positions.",
+            title = if (searching) {
+                "No trades in ${stockFilter.trim()}"
+            } else {
+                "Nothing called on $dateFilter"
+            },
+            detail = if (searching) {
+                "Nothing you recorded is a holding in a stock by that code or name. Clear the " +
+                    "stock filter to see the rest of your positions."
+            } else {
+                "No trade you recorded belongs to that session. Clear the filter to see the " +
+                    "rest of your positions."
+            },
         )
         return
     }
@@ -623,6 +661,7 @@ private fun PositionCard(
             // A fixed two lines for the name, so a company whose name wraps does not make its card
             // taller than the one beside it.
             Row(Modifier.heightIn(min = PositionHeaderHeight), verticalAlignment = Alignment.Top) {
+                StockLogo(position.ticker, LogoSize.Card, Modifier.padding(end = Space.s))
                 Column(Modifier.weight(1f)) {
                     Text(position.ticker, style = MaterialTheme.typography.titleSmall)
                     listOfNotNull(position.companyArabic, position.companyEnglish)
@@ -712,7 +751,11 @@ private fun PositionCard(
                     verticalArrangement = Arrangement.spacedBy(Space.xs),
                 ) {
                     if (view.overdue) OverdueChip(view.overdueDays)
-                    if (view.keptOpen) KeptOpenChip()
+                    // One chip, not two saying the same thing: a trade can only be overdue by being
+                    // kept open now, so Overdue already carries the state and adds how late it is.
+                    // The instruction the chip also held is not lost - the Sell button below is on
+                    // the card for as long as no sale has been recorded.
+                    if (view.keptOpen && !view.overdue) KeptOpenChip()
                     if (view.priceScaleChanged) PriceScaleChip()
                 }
                 position.keepOpenNote?.takeIf(String::isNotBlank)?.let { why ->
@@ -864,11 +907,12 @@ private fun PositionView.deadline(): String {
 }
 
 /**
- * Says why a trade is still running after its deadline, next to how late it is.
+ * Says why a trade is still running, on the trades where Overdue is not already saying it.
  *
- * This carries the state on its own - there is no button repeating it. The instruction in it is the
- * point: the way to end a trade being kept open is to sell it, and the card's menu holds the way to
- * hand it back to its deadline instead.
+ * Only up before the deadline passes: after it, Overdue means kept open and this would be the same
+ * fact twice on one row. The instruction in it is the point while it is up: the way to end a trade
+ * being kept open is to sell it, and the card's menu holds the way to hand it back to its deadline
+ * instead.
  */
 @Composable
 private fun KeptOpenChip() {
