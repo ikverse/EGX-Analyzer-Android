@@ -62,6 +62,7 @@ import com.ikverse.egxanalyzer.ui.theme.extraColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 /**
  * What the user actually bought, and what it has done since.
@@ -217,7 +218,7 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
         withStyle(SpanStyle(color = MaterialTheme.colorScheme.error)) {
             append("${view.overdueDays}d")
         }
-        append(" · ${view.position.entryDate}")
+        append(" · ${shortEntryDate(view.position.entryDate)}")
         // Kept open is the user holding on purpose; expired is the app having stopped tracking a
         // trade they are still in. Without this the tile would claim the two are the same thing.
         append(" · ${if (view.keptOpen) "kept open" else "expired"}")
@@ -970,3 +971,24 @@ private val PositionCardMinWidth = 300.dp
  * 165dp there - the same width they take on the Fold, where four fit across instead of two.
  */
 private val OverdueTileMinWidth = 150.dp
+
+/**
+ * The entry date on an overdue tile, short enough to sit beside the two facts either side of it.
+ *
+ * `2026-08-14` was the longest thing on a row that already carries the day count and the state
+ * word, and on a cover-screen tile it was what pushed that row into an ellipsis. `14 Aug` is the
+ * same date in six characters, and the same shape Insights dates an outcome in.
+ *
+ * The year comes back only for a trade bought in another one, which is the only time its absence
+ * can be read wrong. Every tile in a normal season stays at the short form.
+ */
+private fun shortEntryDate(date: LocalDate): String =
+    if (date.year == LocalDate.now().year) {
+        ShortDate.format(date)
+    } else {
+        ShortDateWithYear.format(date)
+    }
+
+private val ShortDate: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM")
+
+private val ShortDateWithYear: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yy")
