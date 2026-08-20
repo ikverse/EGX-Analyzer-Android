@@ -33,19 +33,20 @@ import kotlin.math.min
 /**
  * How a source's settled calls actually divided, as one band.
  *
- * This is the screen's whole argument in one object. A hit rate is a single number that hides the
- * two things a reader most needs: how much evidence is behind it, and how the failures divide. Four
- * printed counts said the second and not the first, and said it one number at a time - nothing on
- * the card related 94 judged calls to the 3 behind the channel underneath.
+ * A hit rate is a single number that hides how the calls behind it divided. Four printed counts said
+ * that, but one number at a time, and nothing on the card said they were a division of one quantity
+ * at all. So **the whole width is this source's judged calls and the segments are the verdicts**:
+ * the mix is read as a shape rather than assembled out of four figures.
  *
- * So **length is the sample and the segments are the verdicts**. [scale] is the largest judged count
- * among the sources being compared, which makes every bar on the screen measurable against every
- * other: the leader runs the full width, a source with a third of the record runs a third of it, and
- * a source with three settled calls is a stub that no rate printed beside it can talk up.
+ * Length carries no meaning - every bar runs the full width of its card, so a source with three
+ * settled calls draws the same band as one with ninety. How much evidence is behind a rate is said
+ * in words instead, in the card's own "N of M calls judged" directly above, where it cannot be
+ * misread as an outcome. The bar was previously scaled against the largest record on screen, which
+ * did say it, at the cost of leaving most of a thin source's bar empty.
  *
  * The four counts partition [ChannelScore.judged] exactly - those are the only four outcomes
- * `Outcome.judged` is true for - so the segments fill the bar's own length with nothing left over
- * and nothing counted twice.
+ * `Outcome.judged` is true for - so the segments fill the bar with nothing left over and nothing
+ * counted twice.
  *
  * Read without colour three ways over: the order is fixed whatever the data does, the two target
  * segments are one hue at two weights rather than two hues, and each segment carries its count.
@@ -53,16 +54,13 @@ import kotlin.math.min
 @Composable
 internal fun OutcomeBar(
     score: ChannelScore,
-    /** The largest judged count on screen. Length is meaningless without something to measure against. */
-    scale: Int,
     modifier: Modifier = Modifier,
     height: Dp = OutcomeBarHeight,
     /** The surface behind the bar, which the softened segment is mixed onto. */
     on: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
 ) {
-    if (scale <= 0) return
+    if (score.judged <= 0) return
     val parts = score.segments(on)
-    val remainder = (scale - score.judged).coerceAtLeast(0)
     Box(
         modifier
             .fillMaxWidth()
@@ -74,9 +72,6 @@ internal fun OutcomeBar(
     ) {
         Row(Modifier.fillMaxWidth().fillMaxHeight()) {
             parts.forEach { part -> Segment(part, height) }
-            // What this source has not settled, next to the one that has settled most. Left as the
-            // track colour rather than filled, because it is an absence rather than an outcome.
-            if (remainder > 0) Box(Modifier.weight(remainder.toFloat()))
         }
     }
 }

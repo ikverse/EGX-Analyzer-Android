@@ -103,7 +103,9 @@ import com.ikverse.egxanalyzer.data.OpinionParser
 import com.ikverse.egxanalyzer.data.OpinionPrompt
 import com.ikverse.egxanalyzer.data.OpinionPromptStore
 import com.ikverse.egxanalyzer.data.OpinionRequest
+import com.ikverse.egxanalyzer.data.OpinionSearchBrief
 import com.ikverse.egxanalyzer.model.ScoredCall
+import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.StockOpinion
 import com.ikverse.egxanalyzer.model.opinionId
 
@@ -135,6 +137,15 @@ private const val SETTINGS_PUBLISH_DELAY_MILLISECONDS = 3_000L
  * run; short enough that a genuinely signed-out app says so rather than holding the wake-up open.
  */
 private const val TELEGRAM_READY_TIMEOUT_MILLISECONDS = 90_000L
+
+/**
+ * How far back an opinion reads the price feed, in calendar days.
+ *
+ * Sized for the longest average it has to produce: fifty *sessions* is about seventy days once
+ * weekends and holidays are taken out, and a year of calendar days reaches that comfortably even
+ * on a stock that has been suspended for a stretch. Read once per press and never held.
+ */
+private const val OPINION_HISTORY_DAYS = 400L
 
 class AppState(
     private val settingsRepository: SettingsRepository,
@@ -639,6 +650,36 @@ class AppState(
 
     fun opinionSearchEnabled(): Boolean = settingsRepository.opinionSearchEnabled()
 
+    /** How far back a searched request looks for news, in days. */
+    fun opinionNewsWindowDays(): Int = settingsRepository.opinionNewsWindowDays()
+
+    fun updateOpinionNewsWindow(days: Int) {
+        settingsRepository.saveOpinionNewsWindowDays(days)
+        opinionSettingsRevision += 1
+    }
+
+    /**
+     * How many web results a searched request asks for.
+     *
+     * On the screen because it is the setting that moves the bill most: every result is injected
+     * into the request whole, so twelve of them is several thousand characters the model is
+     * charged for reading. It shipped as a stored value with no control, which meant a default
+     * nobody could turn down.
+     */
+    fun opinionSearchResults(): Int = settingsRepository.opinionSearchResults()
+
+    fun updateOpinionSearchResults(count: Int) {
+        settingsRepository.saveOpinionSearchResults(count)
+        opinionSettingsRevision += 1
+    }
+
+    fun opinionDeepSearch(): Boolean = settingsRepository.opinionDeepSearchEnabled()
+
+    fun updateOpinionDeepSearch(enabled: Boolean) {
+        settingsRepository.saveOpinionDeepSearchEnabled(enabled)
+        opinionSettingsRevision += 1
+    }
+
     fun updateOpinionModel(model: String) {
         settingsRepository.saveOpinionModel(cloudConfiguration.provider, model)
         // Nothing derives from it, but the Settings summary reads it back through a snapshot that
@@ -678,12 +719,31 @@ class AppState(
             opinionPending = id
             val model = opinionModel()
             val searched = settingsRepository.opinionSearchEnabled()
+            val windowDays = settingsRepository.opinionNewsWindowDays()
+            // One date for the whole press. Read twice, a request started either side of midnight
+            // would search one window and file the answer against another.
+            val today = LocalDate.now()
             try {
                 runAction(
                     label = "Asking about ${call.ticker}",
                     success = { "${call.ticker}: ${it.verdict.arabic}" },
                 ) {
+                    // Built once and used twice: it goes into the question, where it aims what the
+                    // provider searches for, and its preamble goes to OpenRouter, where it decides
+                    // which of the results that came back are still inside the window.
+                    val brief = if (searched) {
+                        OpinionSearchBrief.query(call, today, windowDays)
+                    } else {
+                        null
+                    }
                     val answer = withContext(Dispatchers.IO) {
+                        // Read here rather than taken from the call: a call carries only the
+                        // sessions it was judged on, and an average of ten sessions called a
+                        // fifty-session average is a wrong number, not a rounded one.
+                        val history = localDataStore.sessionsFrom(
+                            Scoring.normalizeTicker(call.ticker),
+                            today.minusDays(OPINION_HISTORY_DAYS),
+                        )
                         analysisRepository.ask(
                             OpinionRequest(
                                 requestId = "opinion-$id",
@@ -694,18 +754,29 @@ class AppState(
                                     channel = performance.channels
                                         .firstOrNull { it.channel == call.channel },
                                     held = heldFor(call.ticker, call.openedOn),
-                                    today = LocalDate.now(),
+                                    today = today,
+                                    history = history,
+                                    otherCalls = callsOn(call.ticker),
+                                    search = brief,
                                 ),
                                 model = model,
                                 search = searched,
+                                searchResults = settingsRepository.opinionSearchResults(),
+                                searchPrompt = brief?.let {
+                                    OpinionSearchBrief.resultPreamble(today, windowDays)
+                                },
+                                deepSearch = settingsRepository.opinionDeepSearchEnabled(),
                             ),
                         )
                     }
                     val opinion = OpinionParser.parse(
                         response = answer,
                         model = model,
-                        askedOn = LocalDate.now(),
+                        askedOn = today,
                         searched = searched,
+                        // Zero where nothing was searched, so the sheet says "no live news" rather
+                        // than "nothing in 15 days" about a request that never looked.
+                        newsWindowDays = if (searched) windowDays else 0,
                     )
                     withContext(Dispatchers.IO) {
                         localDataStore.saveStockOpinion(
@@ -724,6 +795,21 @@ class AppState(
                 opinionPending = null
             }
         }
+    }
+
+    /**
+     * Every call the report holds on one stock, whoever made it.
+     *
+     * Two things at once, and deliberately: the ones still open are other channels crowding into
+     * the same trade, and the settled ones are the only record the app has of what happened the
+     * last times this particular stock was recommended. Neither is on the card, and no web search
+     * would find either - they are measurements of this user's own history.
+     */
+    private fun callsOn(ticker: String): List<ScoredCall> {
+        val wanted = Scoring.normalizeTicker(ticker)
+        return performance.sessions
+            .flatMap(ScoredSession::calls)
+            .filter { Scoring.normalizeTicker(it.ticker) == wanted }
     }
 
     /** Forgets one opinion, so the card offers to ask again from nothing. */

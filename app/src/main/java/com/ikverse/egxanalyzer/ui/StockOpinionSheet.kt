@@ -32,10 +32,15 @@ import com.ikverse.egxanalyzer.ui.theme.extraColors
 /**
  * What the model made of one stock and the call on it.
  *
- * Two answers and a footer. Every figure the reader might otherwise want is on the card this opened
- * from, which is why the prompt forbids the model from repeating them - a sheet that restated the
- * entry band and the sessions elapsed would be a second copy of the card, and the reader pressed
- * the button to get something the card cannot tell them.
+ * Two judgements, then what they rest on, then a footer. Every figure the reader might otherwise
+ * want is on the card this opened from, which is why the prompt forbids the model from repeating
+ * them - a sheet that restated the entry band and the sessions elapsed would be a second copy of
+ * the card, and the reader pressed the button to get something the card cannot tell them.
+ *
+ * What it can tell them is below the two judgements: the news a searched request actually found,
+ * dated and attributed, what is scheduled ahead, and what goes wrong. Those are listed rather than
+ * written into the prose on purpose - a headline is only worth anything beside its date, and prose
+ * hides the date.
  *
  * The answer is Arabic and reads right to left; the section headings stay English, exactly as an
  * English label already sits over an Arabic company name everywhere else in the app.
@@ -108,6 +113,46 @@ internal fun StockOpinionSheet(
                 }
             }
 
+            // Shown even when it found nothing. An empty list here is a finding - it says the
+            // fortnight was quiet - and it only reads as one beside the window it covered, which is
+            // why the window rather than [StockOpinion.searched] is what admits the section. An
+            // answer given before the window existed carries a zero and is left out: it was
+            // searched, but under a prompt that told it to report no news either way, so an empty
+            // list under this heading would be this build putting words in its mouth.
+            if (opinion.news.isNotEmpty() || opinion.newsWindowDays > 0) {
+                HorizontalDivider()
+                OpinionSection("What it found") {
+                    if (opinion.news.isEmpty()) {
+                        Text(
+                            opinion.newsWindowDays
+                                .takeIf { it > 0 }
+                                ?.let { "Nothing published about this company in the last $it days." }
+                                ?: "The search turned up nothing about this company.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        opinion.news.forEach { NewsRow(it) }
+                    }
+                }
+            }
+
+            if (opinion.catalysts.isNotEmpty()) {
+                HorizontalDivider()
+                OpinionSection("What is coming") {
+                    opinion.catalysts.forEach { CatalystRow(it) }
+                }
+            }
+
+            if (opinion.risks.isNotEmpty()) {
+                HorizontalDivider()
+                OpinionSection("What goes wrong") {
+                    opinion.risks.forEach { line ->
+                        ArabicText("• $line", MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+
             // Deliberately last and deliberately grey. It is the part that stops a thin answer
             // reading as an authoritative one, and it is not what the reader came for.
             if (opinion.unknowns.isNotEmpty()) {
@@ -127,8 +172,7 @@ internal fun StockOpinionSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "${opinion.model} · asked ${opinion.askedOn}" +
-                            (if (opinion.searched) " · with live search" else " · no live news"),
+                        "${opinion.model} · asked ${opinion.askedOn}" + opinion.searchNote(),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -144,7 +188,7 @@ internal fun StockOpinionSheet(
                 // second billed request, and the ring is reserved for reopening what is already
                 // paid for - which is this sheet.
                 AskAiButton(
-                    label = if (onAskAgain == null) "Asking\u2026" else "Ask again",
+                    label = if (onAskAgain == null) "Asking…" else "Ask again",
                     onClick = { onAskAgain?.invoke() },
                     enabled = onAskAgain != null,
                     working = onAskAgain == null,
@@ -152,6 +196,69 @@ internal fun StockOpinionSheet(
                 )
             }
         }
+    }
+}
+
+/**
+ * How the answer was reached, in the footer.
+ *
+ * The window is named rather than only the fact of a search. "With live search" said nothing about
+ * whether the model looked at this fortnight or at whatever it happened to find, and the reader has
+ * to know which before deciding what an empty news list means.
+ */
+private fun StockOpinion.searchNote(): String = when {
+    !searched -> " · no live news"
+    newsWindowDays > 0 -> " · searched the last $newsWindowDays days"
+    else -> " · with live search"
+}
+
+/**
+ * One thing the search found.
+ *
+ * The date and the source sit under the headline in grey, and they are the point of the row. A
+ * headline with neither is a rumour; with both it is something the reader can go and check, which
+ * is the only basis on which any of this is worth paying for.
+ */
+@Composable
+private fun NewsRow(item: StockOpinion.NewsItem) {
+    Column(
+        Modifier.padding(bottom = Space.s),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            ArabicText(
+                item.headline,
+                MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            ToneChip(item.tone)
+        }
+        Text(
+            listOf(item.date, item.source).filter(String::isNotBlank).joinToString(" · ")
+                .ifBlank { "undated, unattributed" },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun CatalystRow(item: StockOpinion.Catalyst) {
+    Column(
+        Modifier.padding(bottom = Space.s),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        ArabicText(item.what, MaterialTheme.typography.bodyMedium)
+        listOf(item.on, item.source)
+            .filter(String::isNotBlank)
+            .takeIf(List<String>::isNotEmpty)
+            ?.let {
+                Text(
+                    it.joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
     }
 }
 
@@ -167,6 +274,7 @@ private fun ArabicText(
     value: String,
     style: androidx.compose.ui.text.TextStyle,
     color: Color = MaterialTheme.colorScheme.onSurface,
+    modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Text(
@@ -174,7 +282,7 @@ private fun ArabicText(
             style = style,
             color = color,
             textAlign = TextAlign.Start,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = modifier,
         )
     }
 }
@@ -236,6 +344,22 @@ private fun StanceChip(stance: StockOpinion.Stance) {
     Chip(stance.arabic, container, onContainer)
 }
 
+/** What one item means for the price, in the same three colours the rest of the sheet uses. */
+@Composable
+private fun ToneChip(tone: StockOpinion.Tone) {
+    val container = when (tone) {
+        StockOpinion.Tone.BULLISH -> MaterialTheme.colorScheme.tertiaryContainer
+        StockOpinion.Tone.BEARISH -> MaterialTheme.colorScheme.errorContainer
+        StockOpinion.Tone.NEUTRAL -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val onContainer = when (tone) {
+        StockOpinion.Tone.BULLISH -> MaterialTheme.colorScheme.onTertiaryContainer
+        StockOpinion.Tone.BEARISH -> MaterialTheme.colorScheme.onErrorContainer
+        StockOpinion.Tone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Chip(tone.arabic, container, onContainer)
+}
+
 @Composable
 private fun Chip(text: String, container: Color, onContainer: Color) {
     Surface(color = container, shape = CircleShape) {
@@ -252,14 +376,17 @@ private fun Chip(text: String, container: Color, onContainer: Color) {
  * What pressing Ask AI costs, before it is spent.
  *
  * Every other paid thing in this app is confirmed before it runs, and this is no different: one
- * press, one billed request. It names the model and whether a search is attached, because those are
- * the two things that change what is charged and what comes back.
+ * press, one billed request. It names the model, whether a search is attached and how far back that
+ * search reaches, because those are the three things that change what is charged and what comes
+ * back.
  */
 @Composable
 internal fun AskAiDialog(
     call: ScoredCall,
     model: String,
     searching: Boolean,
+    /** The lookback a searched request would be given, in days. */
+    newsWindowDays: Int,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -272,8 +399,10 @@ internal fun AskAiDialog(
                     "today's price and what it makes of ${call.channel}'s levels. " +
                     (
                         if (searching) {
-                            "A live web search is attached, which costs more and can pick up " +
-                                "anything that is on the web, verified or not. "
+                            "It searches the web for news about this company from the last " +
+                                "$newsWindowDays days, and reports what it found with dates and " +
+                                "sources. That costs more than asking without a search, and it " +
+                                "can pick up anything that is on the web, verified or not. "
                         } else {
                             "No live search, so it works from this call's own figures and " +
                                 "whatever it learned before it was trained. "

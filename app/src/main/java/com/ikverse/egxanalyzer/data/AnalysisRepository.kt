@@ -13,6 +13,7 @@ import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.UnaccountedImage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -60,7 +61,30 @@ data class OpinionRequest(
     val model: String,
     /** Whether to ask the provider to attach a live web search. */
     val search: Boolean,
-)
+    /**
+     * How many web results to ask for.
+     *
+     * Five is what OpenRouter attaches when nobody says otherwise, and five results about a company
+     * whose news is published in Arabic is one or two usable items. Raised from Settings; ignored
+     * by providers that take no count.
+     */
+    val searchResults: Int = DEFAULT_SEARCH_RESULTS,
+    /**
+     * What OpenRouter prints above the results it retrieved.
+     *
+     * Not the query - the query comes from the question. This is the last thing the model reads
+     * before deciding which results to believe, which is where the date window has to be repeated.
+     * Null leaves OpenRouter's own wording in place.
+     */
+    val searchPrompt: String? = null,
+    /** Whether to ask Qwen to search repeatedly rather than take a single pass. */
+    val deepSearch: Boolean = false,
+) {
+    companion object {
+        /** The provider default, so a request that says nothing behaves as it always did. */
+        const val DEFAULT_SEARCH_RESULTS = 5
+    }
+}
 
 /**
  * Boundary for the upcoming provider adapter.
@@ -434,39 +458,104 @@ class CloudAnalysisRepository(
         val credential = credentialStore.read(config.provider)
             ?: error("No credential is saved for ${config.provider.displayName}.")
         try {
-            val body = JSONObject().apply {
-                put("model", searchModel(request, config.provider))
-                // Warmer than the 0.0 an extraction pins. Reading a price off a card has one right
-                // answer; a view on a stock does not, and at zero the same question returns the
-                // same cautious paragraph whatever is asked about.
-                put("temperature", OPINION_TEMPERATURE)
-                put("messages", JSONArray().apply {
-                    put(JSONObject().put("role", "system").put("content", request.systemPrompt))
-                    put(JSONObject().put("role", "user").put("content", request.question))
-                })
-                put("response_format", JSONObject().put("type", "json_object"))
-                // DashScope takes the search as a request flag; OpenRouter takes it as a suffix on
-                // the model id, which `searchModel` has already applied. Sent only where the
-                // provider is known to read it - an unknown key is rejected outright by some
-                // OpenAI-compatible gateways, which would fail the request rather than the search.
-                if (request.search && config.provider == CloudProvider.QWEN) {
-                    put("enable_search", true)
-                }
+            val deep = request.deepSearch &&
+                request.search &&
+                config.provider == CloudProvider.QWEN
+            val response = try {
+                executeCompletion(
+                    request.requestId, opinionBody(request, config, deep), config,
+                    preferences(), credential,
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Exception) {
+                // The deep strategy is the one key here a model may not accept, and a rejected key
+                // fails the whole request rather than only the search. Asked once more without it
+                // rather than left to a user who cannot tell a bad key from an unsupported one.
+                if (!deep || !failure.mentionsSearch()) throw failure
+                executeCompletion(
+                    request.requestId, opinionBody(request, config, deepSearch = false), config,
+                    preferences(), credential,
+                )
             }
-            executeCompletion(request.requestId, body, config, preferences(), credential)
-                .let(::contentOf)
+            contentOf(response)
         } finally {
             credential.fill('\u0000')
             activeConnections.remove(request.requestId)?.disconnect()
         }
     }
 
-    /** OpenRouter reads `:online` off the model id; every other provider is asked in the body. */
+    /**
+     * One opinion request, built for whichever provider is configured.
+     *
+     * Built by a function rather than inline because it is now built twice: once as asked for, and
+     * once again without the deep-search strategy where the model would not take it.
+     */
+    private fun opinionBody(
+        request: OpinionRequest,
+        config: CloudConfiguration,
+        deepSearch: Boolean,
+    ): JSONObject = JSONObject().apply {
+        put("model", searchModel(request, config.provider))
+        // Warmer than the 0.0 an extraction pins. Reading a price off a card has one right
+        // answer; a view on a stock does not, and at zero the same question returns the
+        // same cautious paragraph whatever is asked about.
+        put("temperature", OPINION_TEMPERATURE)
+        put("messages", JSONArray().apply {
+            put(JSONObject().put("role", "system").put("content", request.systemPrompt))
+            put(JSONObject().put("role", "user").put("content", request.question))
+        })
+        put("response_format", JSONObject().put("type", "json_object"))
+        // Each provider is asked in its own dialect and only in its own dialect. An unknown key is
+        // rejected outright by some OpenAI-compatible gateways, which fails the request rather
+        // than only the search - so nothing here is sent on the chance that it might be read.
+        if (!request.search) return@apply
+        when (config.provider) {
+            CloudProvider.QWEN -> {
+                put("enable_search", true)
+                if (deepSearch) {
+                    put(
+                        "search_options",
+                        JSONObject().put("search_strategy", DEEP_SEARCH_STRATEGY),
+                    )
+                }
+            }
+            // The web plugin rather than the ONLINE_SUFFIX the model id used to carry. Both attach
+            // a search; only this one takes a result count and a preamble, which are the two
+            // things that decide whether the search is worth what it costs.
+            CloudProvider.OPENROUTER -> put(
+                "plugins",
+                JSONArray().put(
+                    JSONObject().apply {
+                        put("id", "web")
+                        put(
+                            "max_results",
+                            request.searchResults.coerceIn(MIN_SEARCH_RESULTS, MAX_SEARCH_RESULTS),
+                        )
+                        request.searchPrompt
+                            ?.takeIf(String::isNotBlank)
+                            ?.let { put("search_prompt", it) }
+                    },
+                ),
+            )
+            else -> Unit
+        }
+    }
+
+    /** Whether a failure is the provider refusing the search keys rather than the request. */
+    private fun Exception.mentionsSearch(): Boolean =
+        message?.contains("search", ignoreCase = true) == true
+
+    /**
+     * OpenRouter used to read the online suffix off the model id; it now reads the web plugin.
+     *
+     * The suffix is taken back off where the user typed it themselves. Left on, it would ask
+     * OpenRouter for a second search on top of the plugin's, and bill for both.
+     */
     private fun searchModel(request: OpinionRequest, provider: CloudProvider): String = when {
         !request.search -> request.model
         provider != CloudProvider.OPENROUTER -> request.model
-        request.model.endsWith(ONLINE_SUFFIX) -> request.model
-        else -> request.model + ONLINE_SUFFIX
+        else -> request.model.removeSuffix(ONLINE_SUFFIX)
     }
 
     override suspend fun cancel(requestId: String): Boolean =
@@ -783,8 +872,20 @@ class CloudAnalysisRepository(
          */
         const val OPINION_TEMPERATURE = 0.4
 
-        /** OpenRouter's marker for "answer this with a live web search attached". */
+        /** OpenRouter's older marker for "answer this with a live web search attached". */
         const val ONLINE_SUFFIX = ":online"
+
+        /**
+         * Qwen's repeated-search strategy: search, read the pages, search again on what it found.
+         *
+         * The single pass its default runs is enough to learn that a company exists. It is not
+         * enough to find out whether that company published results a fortnight ago.
+         */
+        const val DEEP_SEARCH_STRATEGY = "agent_max"
+
+        /** Bounds on the result count, so a stored setting can never send a nonsensical one. */
+        const val MIN_SEARCH_RESULTS = 1
+        const val MAX_SEARCH_RESULTS = 20
     }
 }
 

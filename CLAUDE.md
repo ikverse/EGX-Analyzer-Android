@@ -97,8 +97,9 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   `data/JobRunner.kt` — the alarm, the four things that mean re-book it, and what runs. See below.
 - `ui/SchedulesSection.kt` + `ui/SchedulesSheet.kt` — the card on Analyze, the section in Settings,
   and the sheet both open.
-- `data/OpinionPrompt.kt` + `data/OpinionPromptStore.kt` + `data/OpinionParser.kt` +
-  `ui/StockOpinionSheet.kt` — Ask AI, on a call card in Insights. See below.
+- `data/OpinionPrompt.kt` + `data/OpinionPromptStore.kt` + `data/OpinionSearchBrief.kt` +
+  `data/OpinionParser.kt` + `ui/StockOpinionSheet.kt` — Ask AI, on a call card in Insights.
+  See below.
 - `ui/` — one file per screen, plus `CommonUi.kt` and `DesignSystem.kt` for shared pieces.
 
 ## Scoring, and why each rule is there
@@ -403,10 +404,48 @@ comes back in Arabic and is kept on the card.
   the card cannot colour. Prices and dates stay in Western digits so a figure the answer names
   matches the one printed beside it.
 - **Live search is on by default**, and that is the point of it: without one the model has nothing
-  the app does not already have. DashScope takes `enable_search` in the request body, OpenRouter
-  takes `:online` on the model id, and no other provider is sent anything — an unknown key is
-  rejected outright by some OpenAI-compatible gateways, which would fail the request rather than
-  the search. News is prompted as reported, not verified, and may never overturn a price fact.
+  the app does not already have. DashScope takes `enable_search` in the request body plus
+  `search_options.search_strategy` for the deep pass; OpenRouter takes the **`web` plugin** —
+  `plugins: [{id: "web", max_results, search_prompt}]` — and no other provider is sent anything, an
+  unknown key being rejected outright by some OpenAI-compatible gateways, which would fail the
+  request rather than the search. News is prompted as reported, not verified, and may never
+  overturn a price fact.
+- **The prompt used to suppress the search the request had just paid for.** Section 5 described a
+  `NEWS` block and ended "with no NEWS section, say nothing about recent news either way" — and
+  nothing in the app has ever built a `NEWS` block, so on every searched request the provider
+  injected results and the prompt told the model to ignore them. That is why a searched answer read
+  like an unsearched one. `stock_opinion.md` is schema **2**: news is required output when a
+  `SEARCH` block is present, and `news`, `catalysts`, `risks` and `unknowns` are always-present
+  lists.
+- **`OpinionSearchBrief` is what the search is aimed with, and it produces two texts that are not
+  the same text.** `query` goes into the question, naming the company in both scripts plus every
+  alias `EgxCatalog` holds — a search on `COMI` alone finds a four-letter string, while the Arabic
+  name is what Mubasher prints and "CIB" is what everyone says — along with the dated window, what
+  to look for, and where Egyptian company news is actually published. `resultPreamble` goes to
+  OpenRouter as `search_prompt`, which is **not** the query: it introduces the results after the
+  question has been read, which is the last and cheapest place to reject a stale headline.
+- **The news window is a lookback and defaults to 15 days**, set in Settings (15/30/90/180) and
+  recorded on the answer as `newsWindowDays` rather than read back from Settings when the sheet
+  draws — the setting moves, and an opinion has to keep saying what window it was actually given.
+  Neither provider offers a real date filter on the OpenAI-compatible endpoint, so the window is
+  enforced by instruction plus by requiring a date on every item. A short window returning nothing
+  is the honest result and is printed as one; **upcoming catalysts are not clipped to it**, because
+  a lookback is a claim about staleness and a dividend three weeks out is not stale.
+- **The model prints no levels of its own, deliberately.** Section 2 forbids an entry, a stop or a
+  target: the reader has a call in front of them and asked what to make of it, not for a second set
+  of numbers to reconcile with the first. What it may say about price is what it would want to see
+  before paying today's, in words.
+- **The block carries what the app had and never sent.** Volume was in `DailySession` from the
+  beginning and never reached the model, so a call was judged with no idea whether the stock could
+  be traded at size; `OpinionPrompt` now sends average volume, average value traded, and a
+  reference position as a share of one session's turnover, plus 20- and 50-session average closes,
+  the period high and low, and every other call the app holds on that stock. The averages are
+  **computed in Kotlin or not stated** — the same rule risk-to-reward already followed, for the
+  same reason. Ten sessions called a fifty-session average is a wrong figure, not a rounded one, so
+  it is omitted instead.
+- **Other channels calling the same stock are crowding, not confirmation**, and the prompt says so.
+  Settled calls on that stock go in a second list, which is the only record the app holds of what
+  happens when this particular stock is recommended.
 - **Its own model setting**, `SettingsRepository.opinionModel`, defaulting to `qwen-plus`. The
   analysis runs on a vision model because it reads screenshots; this request carries no image, and
   paying vision rates for it buys nothing. Device-local like the analysis model and unlike
@@ -803,14 +842,16 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 15.
+  `onUpgrade`. Currently 16.
 - **Migrations are tested** — `LocalDataStoreMigrationTest` runs under Robolectric, which supplies
   enough of Android for a real SQLite database in a plain unit test. It writes the version-9 table
   by hand and upgrades it, deliberately: a test that builds its "old" schema from today's code
   tests nothing, because both sides move together. Add a case there for every version bump —
   version 14 has its own in `ScheduledJobStoreTest`, which writes the version-13 `positions` table
   and checks that gaining `scheduled_jobs` did not cost the trades already on the phone, and
-  version 15 has the same case in `StockOpinionStoreTest` for `stock_opinions`. Note
+  version 15 has the same case in `StockOpinionStoreTest` for `stock_opinions`, and version 16
+  has one beside it for the findings columns — added by `ALTER`, one guard per column, so the risk
+  is not that the upgrade fails but that it takes the answers already on the phone with it. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it
   went in. **Robolectric needs Java 21** to stand up a sandbox for SDK 36 — it refuses on 17 with
   "requires Java 21 (have Java 17)", which is a green run locally on the JBR and a red one anywhere

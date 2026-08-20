@@ -65,6 +65,18 @@ object EgxCatalog {
         )
     }
 
+    /**
+     * One stock by ticker, with whatever names and aliases the catalog holds for it.
+     *
+     * [enrich] already does this lookup, but folded into a rewrite of a recommendation - it takes a
+     * result and hands back a result. Ask AI needs the names on their own, to search on, and had no
+     * way to reach them.
+     */
+    fun find(ticker: String): EgxStock? {
+        val cleaned = ticker.trim().uppercase().removeSuffix(".CA")
+        return stocks.firstOrNull { it.ticker == cleaned }
+    }
+
     fun size(): Int = stocks.size
 
     fun entries(): List<EgxStock> = stocks

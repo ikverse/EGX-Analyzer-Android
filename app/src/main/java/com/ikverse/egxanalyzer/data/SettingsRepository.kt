@@ -125,6 +125,53 @@ class SettingsRepository(
         preferences.edit().putBoolean(KEY_OPINION_SEARCH, value).apply()
     }
 
+    /**
+     * How far back the news search reaches, in days.
+     *
+     * A setting rather than a constant because the right answer is not the same for two stocks. A
+     * fortnight on a bank that discloses weekly is a full picture; a fortnight on a company that
+     * says nothing between quarters returns an empty list, and a reader who wants to know why the
+     * stock moved needs to be able to reach further back without waiting for a release to do it.
+     *
+     * Bounded on read rather than on write, so a value stored by an older or a newer build can
+     * never send a window nobody meant.
+     */
+    fun opinionNewsWindowDays(): Int =
+        preferences.getInt(KEY_OPINION_NEWS_WINDOW, OPINION_NEWS_WINDOW_DEFAULT)
+            .coerceIn(OPINION_NEWS_WINDOW_MIN, OPINION_NEWS_WINDOW_MAX)
+
+    fun saveOpinionNewsWindowDays(days: Int) {
+        preferences.edit()
+            .putInt(
+                KEY_OPINION_NEWS_WINDOW,
+                days.coerceIn(OPINION_NEWS_WINDOW_MIN, OPINION_NEWS_WINDOW_MAX),
+            )
+            .apply()
+    }
+
+    /**
+     * Whether to pay for a search that reads what it finds and searches again.
+     *
+     * On by default, because the single pass it replaces is what made a searched answer read like
+     * an unsearched one. Off is here for the press where the model refuses the strategy or where
+     * the bill matters more than the second pass.
+     */
+    fun opinionDeepSearchEnabled(): Boolean =
+        preferences.getBoolean(KEY_OPINION_DEEP_SEARCH, true)
+
+    fun saveOpinionDeepSearchEnabled(value: Boolean) {
+        preferences.edit().putBoolean(KEY_OPINION_DEEP_SEARCH, value).apply()
+    }
+
+    /** How many web results to ask for. More costs more, and five was finding one usable item. */
+    fun opinionSearchResults(): Int =
+        preferences.getInt(KEY_OPINION_SEARCH_RESULTS, OPINION_SEARCH_RESULTS_DEFAULT)
+            .coerceIn(1, 20)
+
+    fun saveOpinionSearchResults(count: Int) {
+        preferences.edit().putInt(KEY_OPINION_SEARCH_RESULTS, count.coerceIn(1, 20)).apply()
+    }
+
     fun loadPreferences(): AppPreferences = AppPreferences(
         themeMode = enumPreference(KEY_THEME_MODE, ThemeMode.SYSTEM),
         analysisLanguage = enumPreference(KEY_ANALYSIS_LANGUAGE, AnalysisLanguage.BILINGUAL),
@@ -402,6 +449,9 @@ class SettingsRepository(
         const val KEY_SCHEDULES_ENABLED = "schedules_enabled"
         const val KEY_PAID_SCHEDULES = "paid_schedules_enabled"
         const val KEY_OPINION_SEARCH = "opinion_search_enabled"
+        const val KEY_OPINION_NEWS_WINDOW = "opinion_news_window_days"
+        const val KEY_OPINION_DEEP_SEARCH = "opinion_deep_search"
+        const val KEY_OPINION_SEARCH_RESULTS = "opinion_search_results"
 
         /**
          * What Ask AI runs on until the user picks something else.
@@ -412,6 +462,20 @@ class SettingsRepository(
          * actually offers.
          */
         const val OPINION_MODEL_DEFAULT = "qwen-plus"
+
+        /**
+         * A fortnight, which is what the user asked for.
+         *
+         * Short enough that anything it returns is genuinely current, and short enough that most
+         * stocks come back with nothing on most days. That is the honest result and the prompt is
+         * written to report it as one rather than reaching further back to fill the list.
+         */
+        const val OPINION_NEWS_WINDOW_DEFAULT = 15
+        const val OPINION_NEWS_WINDOW_MIN = 7
+        const val OPINION_NEWS_WINDOW_MAX = 365
+
+        /** Twelve rather than the provider's five, which was one usable Arabic item per press. */
+        const val OPINION_SEARCH_RESULTS_DEFAULT = 12
         const val KEY_PROMPT_HISTORY = "prompt_history"
         const val KEY_SETTINGS_UPDATED_AT = "settings_updated_at"
         const val KEY_SETTINGS_UPDATED_BY = "settings_updated_by"

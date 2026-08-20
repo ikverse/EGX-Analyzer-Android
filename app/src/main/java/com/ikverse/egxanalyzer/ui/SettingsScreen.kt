@@ -29,11 +29,11 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.QuestionAnswer
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -117,7 +117,16 @@ internal fun SettingsScreen(appState: AppState) {
         appState.opinionModel()
     }
     val askSearching = remember(appState.opinionSettingsRevision) { appState.opinionSearchEnabled() }
-    val askAiSummary = if (askSearching) "$askModel \u00b7 live search" else "$askModel \u00b7 no search"
+    val askWindow = remember(appState.opinionSettingsRevision) { appState.opinionNewsWindowDays() }
+    val askDeep = remember(appState.opinionSettingsRevision) { appState.opinionDeepSearch() }
+    val askResults = remember(appState.opinionSettingsRevision) { appState.opinionSearchResults() }
+    // The window is in the summary because it is the setting most worth seeing without opening
+    // the card: a fortnight and half a year are the same button and very different answers.
+    val askAiSummary = if (askSearching) {
+        "$askModel \u00b7 news from $askWindow days"
+    } else {
+        "$askModel \u00b7 no search"
+    }
 
     Screen(
         title = "Settings",
@@ -370,52 +379,14 @@ internal fun SettingsScreen(appState: AppState) {
 
             }
             }
-        }
 
-        SchedulesSettingsSection(appState, FormWidth)
-
-        ExpandableSection(
-            "Appearance",
-            icon = Icons.Outlined.Palette,
-            summary = appState.appPreferences.themeMode.displayName,
-            contentMaxWidth = FormWidth,
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Box {
-                    OutlinedButton(onClick = { themeMenuOpen = true }) {
-                        Text("Theme: ${appState.appPreferences.themeMode.displayName}")
-                    }
-                    DropdownMenu(
-                        expanded = themeMenuOpen,
-                        onDismissRequest = { themeMenuOpen = false },
-                    ) {
-                        ThemeMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = { Text(mode.displayName) },
-                                onClick = {
-                                    appState.updateThemeMode(mode)
-                                    themeMenuOpen = false
-                                },
-                            )
-                        }
-                    }
-                }
-                Text(
-                    "The choice is applied immediately on outer and inner displays.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        // Its own card rather than a row inside Analysis. Ask AI shares the provider and the key
-        // with a run and nothing else - not the prompt, not the model, not the wording rules - and
-        // filing its settings under Analysis would say the opposite of what is true.
-        ExpandableSection(
-            "Ask AI",
-            icon = Icons.Outlined.QuestionAnswer,
-            summary = askAiSummary,
-            contentMaxWidth = FormWidth,
-        ) {
+            // Ask AI shares the provider and the key with a run and nothing else - not the
+            // prompt, not the model, not the wording rules - so it sits last, after everything
+            // a run actually uses.
+            SubSection(
+                "Ask AI",
+                summary = askAiSummary,
+            ) {
             Text(
                 "The button on a call card in Insights. It asks what the model makes of the stock " +
                     "at today's price and what it makes of the levels the channel printed, and it " +
@@ -475,6 +446,107 @@ internal fun SettingsScreen(appState: AppState) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // Everything below only bears on a searched request, so it is hidden with the search
+            // rather than left greyed out under an unticked box.
+            if (askSearching) {
+                Text(
+                    "How far back it looks for news",
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    NEWS_WINDOWS.forEach { days ->
+                        FilterChip(
+                            selected = askWindow == days,
+                            onClick = { appState.updateOpinionNewsWindow(days) },
+                            label = { Text("$days days") },
+                        )
+                    }
+                }
+                Text(
+                    "The window is a lookback, and a shorter one is not a worse one: anything it " +
+                        "brings back from a fortnight is genuinely current, and on most days most " +
+                        "stocks will have nothing in it. An empty list is reported as an empty " +
+                        "list rather than filled from further back. Widen it when you want to " +
+                        "know why a stock has moved rather than what happened this week. What is " +
+                        "already scheduled ahead - results, coupons, assemblies - is reported " +
+                        "whatever this is set to.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "How many results it reads",
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    SEARCH_RESULTS.forEach { count ->
+                        FilterChip(
+                            selected = askResults == count,
+                            onClick = { appState.updateOpinionSearchResults(count) },
+                            label = { Text("$count") },
+                        )
+                    }
+                }
+                Text(
+                    "This is what the search costs. Every result is put into the request whole, so " +
+                        "twelve of them is several thousand characters the model is charged for " +
+                        "reading before it answers. Five is the provider's own default and was " +
+                        "finding one usable Arabic item per press; twelve is why it now finds " +
+                        "several. Turn it down when the bill matters more than the second source.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = askDeep,
+                        onCheckedChange = appState::updateOpinionDeepSearch,
+                    )
+                    Text("Search deeply")
+                }
+                Text(
+                    "One pass finds that the company exists. This asks the model to read what it " +
+                        "found and search again on it, which is what turns up a disclosure nobody " +
+                        "wrote a headline about. It costs more and takes longer, and a model that " +
+                        "will not accept it is asked again without it rather than failing.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            }
+        }
+
+        SchedulesSettingsSection(appState, FormWidth)
+
+        ExpandableSection(
+            "Appearance",
+            icon = Icons.Outlined.Palette,
+            summary = appState.appPreferences.themeMode.displayName,
+            contentMaxWidth = FormWidth,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                Box {
+                    OutlinedButton(onClick = { themeMenuOpen = true }) {
+                        Text("Theme: ${appState.appPreferences.themeMode.displayName}")
+                    }
+                    DropdownMenu(
+                        expanded = themeMenuOpen,
+                        onDismissRequest = { themeMenuOpen = false },
+                    ) {
+                        ThemeMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.displayName) },
+                                onClick = {
+                                    appState.updateThemeMode(mode)
+                                    themeMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+                }
+                Text(
+                    "The choice is applied immediately on outer and inner displays.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         ExpandableSection(
@@ -845,5 +917,23 @@ private fun UpdateControls(appState: AppState) {
 }
 
 /** Wide enough for a long model name, narrow enough that a field still reads as a field. */
+/**
+ * The lookbacks offered, in days.
+ *
+ * Four rather than a free number field. The exact figure never mattered - what matters is whether
+ * the reader is asking about this week, this quarter or this year - and a text box invites a 3 that
+ * returns nothing on every stock.
+ */
+private val NEWS_WINDOWS = listOf(15, 30, 90, 180)
+
+/**
+ * The result counts offered.
+ *
+ * Five is the provider's own default, twelve is what the app ships, and twenty is the ceiling
+ * `AnalysisRepository` clamps to - offering a number the request would quietly reduce would be a
+ * setting that lies about what it does.
+ */
+private val SEARCH_RESULTS = listOf(5, 8, 12, 20)
+
 private val FormWidth = 560.dp
 

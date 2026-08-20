@@ -107,6 +107,7 @@ internal fun InsightsScreen(appState: AppState) {
         appState.opinionModel()
     }
     val searching = remember(appState.opinionSettingsRevision) { appState.opinionSearchEnabled() }
+    val newsWindow = remember(appState.opinionSettingsRevision) { appState.opinionNewsWindowDays() }
 
     Screen(
         title = "Insights",
@@ -263,6 +264,7 @@ internal fun InsightsScreen(appState: AppState) {
                             askingFor = { call -> appState.opinionPending == call.opinionKey() },
                             askModel = askModel,
                             searching = searching,
+                            newsWindow = newsWindow,
                             onAsk = { call, again -> appState.askAboutCall(call, again) },
                             onOpenTrade = appState::openPosition,
                             revealCall = pendingCall,
@@ -281,6 +283,7 @@ internal fun InsightsScreen(appState: AppState) {
                                 askingFor = { call -> appState.opinionPending == call.opinionKey() },
                                 askModel = askModel,
                                 searching = searching,
+                                newsWindow = newsWindow,
                                 onAsk = { call, again -> appState.askAboutCall(call, again) },
                                 onOpenTrade = appState::openPosition,
                                 // A folded card draws none of its calls, so the highlight only ever
@@ -384,8 +387,8 @@ private val OUTCOME_DATE = DateTimeFormatter.ofPattern("d MMM")
  * The source with the best record, and what that record is actually made of.
  *
  * The page opens on this rather than on a filter row, because the tab exists to settle one argument.
- * The bar is the argument: a rate on its own hides how much evidence is behind it, and a bar whose
- * length is the sample size cannot.
+ * The bar is the argument: a rate on its own hides how the calls behind it divided, and the bar
+ * under it does not. How much evidence that rests on is the line of counts beside it.
  *
  * Nothing here is drawn in a card. The hero is the page rather than something on it, and a card
  * around it would put an edge between the reader and the first thing they came for.
@@ -398,7 +401,6 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
     // beside its own card that greys the figure as too thin to rank - is the screen contradicting
     // itself in two places at once.
     val best = ranked.firstOrNull { it.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK }
-    val scale = ranked.maxOfOrNull(ChannelScore::judged) ?: 0
     val window = "${report.windowSessions}-${report.windowSessions.sessionWord().removeSuffix("s")} window"
     // A T+1 call is judged over its own two sessions, so the setting no longer describes every call
     // on the page. Said only where the record actually holds one, rather than qualifying a figure
@@ -438,7 +440,7 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            OutcomeBar(best, scale = scale, on = MaterialTheme.colorScheme.background)
+            OutcomeBar(best, on = MaterialTheme.colorScheme.background)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
                 verticalAlignment = Alignment.Bottom,
@@ -492,7 +494,6 @@ private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
     // first and the rate second. This used to re-sort on the rate alone, which floated a source with
     // three settled calls to the top of the list and into the summary line as "Best".
     val best = channels.firstOrNull { it.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK }
-    val scale = channels.maxOfOrNull(ChannelScore::judged) ?: 0
     ExpandableSection(
         title = "Sources ranked",
         icon = Icons.Outlined.Leaderboard,
@@ -511,7 +512,7 @@ private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
             val columns = responsiveColumns(minColumnWidth = ChannelCardMinWidth, maxColumns = 2)
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 ResponsiveRows(channels, columns) { channel, cardModifier ->
-                    ChannelCard(channel, scale, cardModifier)
+                    ChannelCard(channel, cardModifier)
                 }
             }
         }
@@ -520,7 +521,7 @@ private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
 
 /** One source, and everything known about how it has done. */
 @Composable
-private fun ChannelCard(channel: ChannelScore, scale: Int, modifier: Modifier = Modifier) {
+private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
     Card(
         modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -581,10 +582,9 @@ private fun ChannelCard(channel: ChannelScore, scale: Int, modifier: Modifier = 
 
             // The four counts these figures used to print are inside the bar. They partition the
             // judged calls, so they were always a division of one quantity rather than four
-            // separate ones - and printed apart, nothing said so, nothing said how the failures
-            // divided, and nothing related this source's 94 settled calls to the 3 behind the card
-            // underneath it. The bar says all three.
-            OutcomeBar(channel, scale = scale, height = OutcomeBarCompact)
+            // separate ones - and printed apart, nothing said so and nothing said how the failures
+            // divided. The bar says both. How much record is behind them is the line above it.
+            OutcomeBar(channel, height = OutcomeBarCompact)
             FigureGroup(
                 "The record behind it",
                 listOf(
@@ -662,6 +662,8 @@ private fun SessionCard(
     askingFor: (ScoredCall) -> Boolean,
     askModel: String,
     searching: Boolean,
+    /** How far back a searched request would look, which the confirmation names. */
+    newsWindow: Int,
     onAsk: (ScoredCall, Boolean) -> Unit,
     /** Opens a held call's trade on the Portfolio tab, by the id the two share. */
     onOpenTrade: (String) -> Unit,
@@ -725,6 +727,7 @@ private fun SessionCard(
                         asking = askingFor(call),
                         askModel = askModel,
                         searching = searching,
+                        newsWindow = newsWindow,
                         onAsk = { again -> onAsk(call, again) },
                         held = held,
                         // Only a call the user is actually in leads anywhere: there is no trade to
@@ -757,6 +760,8 @@ private fun ScoredCallRow(
     askModel: String,
     /** Whether a live search would be attached, which the confirmation also has to say. */
     searching: Boolean,
+    /** The news lookback that search would be given, in days. Named in the confirmation too. */
+    newsWindow: Int,
     /** Sends the question. The flag is a deliberate re-ask, the only way to pay for one twice. */
     onAsk: (askAgain: Boolean) -> Unit,
     held: PositionView?,
@@ -785,6 +790,7 @@ private fun ScoredCallRow(
             call = call,
             model = askModel,
             searching = searching,
+            newsWindowDays = newsWindow,
             onConfirm = {
                 confirming = false
                 awaiting = true

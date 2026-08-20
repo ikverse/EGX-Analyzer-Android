@@ -19,8 +19,14 @@ class OpinionParserTest {
 
     private val askedOn = LocalDate.parse("2026-08-20")
 
-    private fun parse(response: String, searched: Boolean = true) =
-        OpinionParser.parse(response, model = "qwen-plus", askedOn = askedOn, searched = searched)
+    private fun parse(response: String, searched: Boolean = true, windowDays: Int = 15) =
+        OpinionParser.parse(
+            response,
+            model = "qwen-plus",
+            askedOn = askedOn,
+            searched = searched,
+            newsWindowDays = windowDays,
+        )
 
     private val whole = """
         {
@@ -132,5 +138,121 @@ class OpinionParserTest {
     @Test
     fun `an answer that searched and one that did not are told apart`() {
         assertTrue(!parse(whole, searched = false).searched)
+    }
+
+    private val withFindings = """
+        {
+          "verdict": "BUY_NOW",
+          "horizon": "SHORT",
+          "confidence": "HIGH",
+          "headline": "نتائج قوية وسعر لم يستوعبها بعد",
+          "outlook": "شركة أسمدة تتحرك مع سعر اليوريا.",
+          "on_the_call": { "stance": "SOUND", "detail": "المستويات معقولة." },
+          "news": [
+            {
+              "headline": "أرباح الربع الثاني تقفز 22%",
+              "date": "2026-08-12",
+              "source": "مباشر",
+              "tone": "BULLISH"
+            },
+            {
+              "headline": "الشركة توقع عقد توريد جديد",
+              "date": "2026-08-18",
+              "source": "Reuters",
+              "tone": "bullish"
+            }
+          ],
+          "catalysts": [
+            { "what": "قسيمة التوزيع", "when": "2026-09-14", "source": "إفصاح البورصة" }
+          ],
+          "risks": ["سيولة ضعيفة", "تعرض لسعر الغاز"],
+          "unknowns": ["التقييم"]
+        }
+    """.trimIndent()
+
+    /**
+     * The findings come back as findings rather than as a paragraph.
+     *
+     * This is the whole reason the contract grew. News melted into prose loses its dates, and a
+     * headline without a date is indistinguishable from one a year old - which is exactly how a
+     * searched answer used to read.
+     */
+    @Test
+    fun `news catalysts and risks are read back`() {
+        val opinion = parse(withFindings)
+
+        assertEquals(2, opinion.news.size)
+        assertEquals(1, opinion.catalysts.size)
+        assertEquals(2, opinion.risks.size)
+        assertEquals("2026-09-14", opinion.catalysts.first().on)
+        assertEquals("إفصاح البورصة", opinion.catalysts.first().source)
+    }
+
+    /** Newest first, whatever order the model happened to list them in. */
+    @Test
+    fun `news is ordered by its own dates`() {
+        val opinion = parse(withFindings)
+
+        assertEquals("2026-08-18", opinion.news.first().date)
+        assertEquals("2026-08-12", opinion.news.last().date)
+    }
+
+    /** A tone is a token like every other, so a model shouting it still parses. */
+    @Test
+    fun `a tone in the wrong case is still a tone`() {
+        assertEquals(StockOpinion.Tone.BULLISH, parse(withFindings).news.first().tone)
+    }
+
+    /**
+     * An item with no headline is nothing; one with no source is still a finding.
+     *
+     * The line between them is whether anything was actually reported. Dropping a dated item over
+     * a missing attribution would be throwing away something the user paid for, silently.
+     */
+    @Test
+    fun `an item with no headline goes and an item with no source stays`() {
+        val ragged = """
+            {
+              "verdict": "WAIT",
+              "outlook": "لا جديد.",
+              "news": [
+                { "date": "2026-08-12", "source": "مباشر", "tone": "BULLISH" },
+                { "headline": "خبر بلا مصدر", "date": "2026-08-14" }
+              ]
+            }
+        """.trimIndent()
+
+        val news = parse(ragged).news
+
+        assertEquals(1, news.size)
+        assertEquals("خبر بلا مصدر", news.first().headline)
+        // Defaulted rather than refused: an unstated tone is neutral, which is what it reads as.
+        assertEquals(StockOpinion.Tone.NEUTRAL, news.first().tone)
+    }
+
+    /**
+     * An answer with nothing found keeps its window, and one that never searched does not.
+     *
+     * The sheet says "nothing in the last 15 days" from this, and it can only say that honestly
+     * about a request that actually looked.
+     */
+    @Test
+    fun `the window it was given is recorded on the answer`() {
+        val quiet = """
+            { "verdict": "WAIT", "outlook": "لا جديد.", "news": [] }
+        """.trimIndent()
+
+        assertEquals(15, parse(quiet).newsWindowDays)
+        assertTrue(parse(quiet).news.isEmpty())
+    }
+
+    /** An older answer, saved before any of this existed, still parses to a whole opinion. */
+    @Test
+    fun `an answer with no findings at all is still an answer`() {
+        val opinion = parse(whole)
+
+        assertTrue(opinion.news.isEmpty())
+        assertTrue(opinion.catalysts.isEmpty())
+        assertTrue(opinion.risks.isEmpty())
     }
 }

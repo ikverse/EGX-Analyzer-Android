@@ -51,7 +51,8 @@ class OpinionPromptTest {
         call: ScoredCall = this.call,
         latest: LatestPrice? = null,
         channel: ChannelScore? = null,
-    ) = OpinionPrompt.build(call, latest, channel, held = null, today = today)
+        history: List<DailySession> = emptyList(),
+    ) = OpinionPrompt.build(call, latest, channel, held = null, today = today, history = history)
 
     @Test
     fun `the levels go in exactly as the card prints them`() {
@@ -160,5 +161,141 @@ class OpinionPromptTest {
         val repeat = call.copy(repeatOf = LocalDate.parse("2026-08-10"))
 
         assertTrue(build(repeat).contains("One bet, not two."))
+    }
+
+    /**
+     * A run of sessions at one price, long enough for both averages to be real.
+     *
+     * Flat on purpose. What these tests are checking is that the figures are produced and labelled
+     * correctly, and a mean of a constant is the one mean whose right answer cannot be argued with.
+     */
+    private fun history(
+        count: Int,
+        close: Double = 70.0,
+        volume: Double? = 100_000.0,
+    ): List<DailySession> = (0 until count).map { index ->
+        DailySession(
+            ticker = "ABUK",
+            date = LocalDate.parse("2026-06-01").plusDays(index.toLong()),
+            high = close + 1,
+            low = close - 1,
+            close = close,
+            volume = volume,
+            open = close,
+        )
+    }
+
+    /**
+     * The volume the app has always held and never sent.
+     *
+     * It is the figure that decides whether a call can be taken at all: levels on a stock turning
+     * over a few thousand pounds a session are decoration, because the exit is the whole trade. It
+     * sat in the feed unused while the model was asked to judge the trade without it.
+     */
+    @Test
+    fun `how much the stock trades is measured rather than left out`() {
+        val prompt = build(history = history(20))
+
+        assertTrue(prompt.contains("Average volume         100k shares a session"))
+        assertTrue(prompt.contains("Average value traded   7.0M EGP a session"))
+        // The ratio rather than the two totals: the question is whether getting out takes a
+        // morning or a fortnight, and that is not something to leave to a model's arithmetic.
+        assertTrue(prompt.contains("A 100k EGP position is 1.4% of one session's turnover."))
+    }
+
+    @Test
+    fun `a feed with no volume says so rather than implying the stock is liquid`() {
+        val prompt = build(history = history(20, volume = null))
+
+        assertTrue(prompt.contains("no volume recorded in the feed"))
+        assertFalse(prompt.contains("Average value traded"))
+    }
+
+    @Test
+    fun `the session table carries the volume beside the prices`() {
+        val prompt = build(history = history(20))
+
+        assertTrue(prompt.contains("date        open    high    low     close   volume"))
+        assertTrue(prompt.contains("100k"))
+    }
+
+    /**
+     * The averages are worked out here or not stated.
+     *
+     * Asking a model to mean fifty closes off a table it is reading is asking for a number that
+     * looks right and is not, stated with the same confidence as the ones that are.
+     */
+    @Test
+    fun `the moving averages are computed where there are enough sessions`() {
+        val prompt = build(history = history(50))
+
+        assertTrue(prompt.contains("20-session average close   70"))
+        assertTrue(prompt.contains("50-session average close   70"))
+        assertTrue(prompt.contains("Over the last 50 sessions: high 71"))
+    }
+
+    /**
+     * Ten sessions called a fifty-session average is a wrong figure, not a rounded one.
+     */
+    @Test
+    fun `an average with too little behind it is left out entirely`() {
+        val prompt = build(history = history(20))
+
+        assertTrue(prompt.contains("20-session average close"))
+        assertFalse(prompt.contains("50-session average close"))
+    }
+
+    /**
+     * Who else is in the same trade, and how it went the last time.
+     *
+     * Split into two lists because they are read for opposite reasons: calls open now are other
+     * channels crowding in, which the prompt is careful to say is not confirmation, and settled
+     * ones are the only record the app holds of what happens when this stock is recommended.
+     */
+    @Test
+    fun `other calls on the same stock are separated into crowding and record`() {
+        val open = call.copy(channel = "Cairo Calls", openedOn = LocalDate.parse("2026-08-18"))
+        val settled = call.copy(
+            channel = "Nile Trades",
+            openedOn = LocalDate.parse("2026-06-02"),
+            outcome = Outcome.FULL_HIT,
+            returnPct = 8.1,
+        )
+
+        val prompt = OpinionPrompt.build(
+            call, null, null, held = null, today = today, otherCalls = listOf(open, settled),
+        )
+
+        assertTrue(prompt.contains("Other channels calling this stock now:"))
+        assertTrue(prompt.contains("\"Cairo Calls\" on 2026-08-18"))
+        assertTrue(prompt.contains("Earlier calls on this stock, already judged:"))
+        assertTrue(prompt.contains("\"Nile Trades\" on 2026-06-02: full hit, +8.1%"))
+    }
+
+    /** The card that opened the sheet is not listed back as another channel agreeing with itself. */
+    @Test
+    fun `the call being asked about is not listed among the others`() {
+        val prompt = OpinionPrompt.build(
+            call, null, null, held = null, today = today, otherCalls = listOf(call),
+        )
+
+        assertFalse(prompt.contains("Other channels calling this stock now:"))
+    }
+
+    /**
+     * The search brief goes in last, where the model reads it after the figures it has to respect.
+     */
+    @Test
+    fun `the search brief is appended when one is given`() {
+        val prompt = OpinionPrompt.build(
+            call, null, null, held = null, today = today, search = "SEARCH\nlook here",
+        )
+
+        assertTrue(prompt.endsWith("SEARCH\nlook here"))
+    }
+
+    @Test
+    fun `an unsearched request carries no search block at all`() {
+        assertFalse(build().contains("SEARCH"))
     }
 }

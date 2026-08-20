@@ -102,6 +102,33 @@ class LocalDataStore(context: Context) :
         db.addPositionWindowColumns()
         db.addOpenColumn()
         db.createStockOpinions()
+        db.addOpinionDetailColumns()
+    }
+
+    /**
+     * Brings an opinions table written before an answer carried its findings up to date.
+     *
+     * Asked for one column at a time, exactly as the positions table learned to be: a build that
+     * ships two of four leaves phones holding two, and a single guard over the first would decide
+     * the other three had arrived. The defaults are what an opinion given before any of this
+     * existed actually had - nothing found, because nothing was ever asked for.
+     */
+    private fun SQLiteDatabase.addOpinionDetailColumns() {
+        val columns = rawQuery("PRAGMA table_info(stock_opinions)", null).use { cursor ->
+            generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }.toSet()
+        }
+        if ("news" !in columns) {
+            execSQL("ALTER TABLE stock_opinions ADD COLUMN news TEXT NOT NULL DEFAULT '[]'")
+        }
+        if ("catalysts" !in columns) {
+            execSQL("ALTER TABLE stock_opinions ADD COLUMN catalysts TEXT NOT NULL DEFAULT '[]'")
+        }
+        if ("risks" !in columns) {
+            execSQL("ALTER TABLE stock_opinions ADD COLUMN risks TEXT NOT NULL DEFAULT '[]'")
+        }
+        if ("news_window" !in columns) {
+            execSQL("ALTER TABLE stock_opinions ADD COLUMN news_window INTEGER NOT NULL DEFAULT 0")
+        }
     }
 
     /**
@@ -1177,7 +1204,11 @@ class LocalDataStore(context: Context) :
             outlook TEXT NOT NULL,
             stance TEXT NOT NULL,
             stance_detail TEXT NOT NULL,
+            news TEXT NOT NULL DEFAULT '[]',
+            catalysts TEXT NOT NULL DEFAULT '[]',
+            risks TEXT NOT NULL DEFAULT '[]',
             unknowns TEXT NOT NULL DEFAULT '[]',
+            news_window INTEGER NOT NULL DEFAULT 0,
             model TEXT NOT NULL,
             asked_on TEXT NOT NULL,
             searched INTEGER NOT NULL DEFAULT 0
@@ -1212,7 +1243,11 @@ class LocalDataStore(context: Context) :
             put("outlook", opinion.outlook)
             put("stance", opinion.onTheCall.stance.name)
             put("stance_detail", opinion.onTheCall.detail)
+            put("news", opinion.news.newsJson().toString())
+            put("catalysts", opinion.catalysts.catalystJson().toString())
+            put("risks", JSONArray(opinion.risks).toString())
             put("unknowns", JSONArray(opinion.unknowns).toString())
+            put("news_window", opinion.newsWindowDays)
             put("model", opinion.model)
             put("asked_on", opinion.askedOn.toString())
             put("searched", if (opinion.searched) 1 else 0)
@@ -1247,13 +1282,82 @@ class LocalDataStore(context: Context) :
             stance = StockOpinion.Stance.valueOf(getString(getColumnIndexOrThrow("stance"))),
             detail = getString(getColumnIndexOrThrow("stance_detail")),
         ),
-        unknowns = JSONArray(getString(getColumnIndexOrThrow("unknowns"))).let { array ->
-            (0 until array.length()).map { array.getString(it) }
-        },
+        news = getString(getColumnIndexOrThrow("news")).toNewsItems(),
+        catalysts = getString(getColumnIndexOrThrow("catalysts")).toCatalysts(),
+        risks = getString(getColumnIndexOrThrow("risks")).toStringList(),
+        unknowns = getString(getColumnIndexOrThrow("unknowns")).toStringList(),
+        newsWindowDays = getInt(getColumnIndexOrThrow("news_window")),
         model = getString(getColumnIndexOrThrow("model")),
         askedOn = LocalDate.parse(getString(getColumnIndexOrThrow("asked_on"))),
         searched = getInt(getColumnIndexOrThrow("searched")) == 1,
     )
+
+    /**
+     * The lists an opinion carries, stored as JSON in one column each.
+     *
+     * A column per field would mean a migration every time the prompt learns to report one more
+     * thing, and these are read back only to be printed - nothing queries inside them. The tone is
+     * written by name for the same reason the verdict is: a number would survive a reordering of
+     * the enum and come back meaning something else.
+     */
+    private fun List<StockOpinion.NewsItem>.newsJson(): JSONArray = JSONArray().also { array ->
+        forEach { item ->
+            array.put(
+                JSONObject()
+                    .put("headline", item.headline)
+                    .put("date", item.date)
+                    .put("source", item.source)
+                    .put("tone", item.tone.name),
+            )
+        }
+    }
+
+    private fun List<StockOpinion.Catalyst>.catalystJson(): JSONArray = JSONArray().also { array ->
+        forEach { item ->
+            array.put(
+                JSONObject()
+                    .put("what", item.what)
+                    .put("when", item.on)
+                    .put("source", item.source),
+            )
+        }
+    }
+
+    /**
+     * A stored list back into items, forgiving a row this build cannot fully read.
+     *
+     * An opinion cannot be re-asked for free, so a tone this build no longer knows costs the item
+     * its colour rather than costing the reader the whole answer.
+     */
+    private fun String.toNewsItems(): List<StockOpinion.NewsItem> =
+        runCatching { JSONArray(this) }.getOrNull().jsonObjects().map { item ->
+            StockOpinion.NewsItem(
+                headline = item.optString("headline"),
+                date = item.optString("date"),
+                source = item.optString("source"),
+                tone = runCatching { StockOpinion.Tone.valueOf(item.optString("tone")) }
+                    .getOrDefault(StockOpinion.Tone.NEUTRAL),
+            )
+        }
+
+    private fun String.toCatalysts(): List<StockOpinion.Catalyst> =
+        runCatching { JSONArray(this) }.getOrNull().jsonObjects().map { item ->
+            StockOpinion.Catalyst(
+                what = item.optString("what"),
+                on = item.optString("when"),
+                source = item.optString("source"),
+            )
+        }
+
+    private fun String.toStringList(): List<String> =
+        runCatching { JSONArray(this) }.getOrNull()?.let { array ->
+            (0 until array.length()).map { array.getString(it) }
+        }.orEmpty()
+
+    private fun JSONArray?.jsonObjects(): List<JSONObject> {
+        if (this == null) return emptyList()
+        return (0 until length()).mapNotNull { optJSONObject(it) }
+    }
 
     /** Removes a report by the identity that travels between devices. */
     fun deleteResultByRequestId(requestId: String) {
@@ -1667,7 +1771,10 @@ class LocalDataStore(context: Context) :
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
         /**
-         * 15 for `stock_opinions`, what Ask AI said about a call. 14 was `scheduled_jobs`, the work
+         * 16 for the findings an opinion carries - the news it found, what is scheduled ahead, and
+         * what it thinks goes wrong - which are columns on `stock_opinions` rather than a table of
+         * their own. 15 was `stock_opinions` itself, what Ask AI said about a call. 14 was
+         * `scheduled_jobs`, the work
          * this phone runs on its own. 13 was `intraday_bars`
          * and `intraday_fetches`, which order the two events inside a session that daily figures
          * cannot separate. 12 was `price_events`, which records where a stock's prices changed
@@ -1676,6 +1783,6 @@ class LocalDataStore(context: Context) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 15
+        const val DATABASE_VERSION = 16
     }
 }

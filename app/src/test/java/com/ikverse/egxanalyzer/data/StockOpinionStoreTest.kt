@@ -260,4 +260,126 @@ class StockOpinionStoreTest {
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
     }
+
+    /**
+     * The findings survive the round trip, tone and dates included.
+     *
+     * They are stored as JSON in a column each rather than as columns, so nothing but this test
+     * stands between a reordered enum or a renamed key and a sheet that quietly prints every item
+     * as neutral.
+     */
+    @Test
+    fun `the news catalysts and risks come back exactly as they went in`() {
+        val store = LocalDataStore(context)
+        val rich = opinion.copy(
+            news = listOf(
+                StockOpinion.NewsItem(
+                    headline = "أرباح الربع الثاني تقفز 22%",
+                    date = "2026-08-12",
+                    source = "مباشر",
+                    tone = StockOpinion.Tone.BULLISH,
+                ),
+            ),
+            catalysts = listOf(
+                StockOpinion.Catalyst(
+                    what = "قسيمة التوزيع",
+                    on = "2026-09-14",
+                    source = "إفصاح البورصة",
+                ),
+            ),
+            risks = listOf("سيولة ضعيفة"),
+            newsWindowDays = 15,
+        )
+        store.saveStockOpinion(
+            id = call,
+            requestId = "run-1",
+            ticker = "ABUK",
+            openedOn = LocalDate.parse("2026-08-11"),
+            channel = "EGX Signals",
+            opinion = rich,
+        )
+
+        assertEquals(rich, store.stockOpinions()[call])
+    }
+
+    /**
+     * A phone holding opinions from before they carried findings keeps every one of them.
+     *
+     * The columns arrive by ALTER, so the risk is not that the upgrade fails - it is that it takes
+     * the answers already on the phone with it, and an opinion cannot be re-asked for free.
+     */
+    @Test
+    fun `an opinion saved before findings existed survives the upgrade`() {
+        Version15(context).writableDatabase.use { old ->
+            old.insert("stock_opinions", null, version15Opinion())
+        }
+
+        val store = LocalDataStore(context)
+        val restored = store.stockOpinions().getValue(call)
+
+        assertEquals(StockOpinion.Verdict.WAIT, restored.verdict)
+        assertEquals("الفرصة فاتت عند هذه المستويات", restored.headline)
+        // Nothing was ever searched for, so nothing is claimed to have been found - and the window
+        // is zero, which is what stops the sheet saying "nothing in the last 0 days".
+        assertTrue(restored.news.isEmpty())
+        assertTrue(restored.catalysts.isEmpty())
+        assertTrue(restored.risks.isEmpty())
+        assertEquals(0, restored.newsWindowDays)
+        // The list it did carry is untouched by the upgrade.
+        assertEquals(listOf("آخر نتائج أعمال معلنة"), restored.unknowns)
+    }
+
+    private fun version15Opinion() = ContentValues().apply {
+        put("id", call)
+        put("request_id", "run-1")
+        put("ticker", "ABUK")
+        put("opened_on", "2026-08-11")
+        put("channel", "EGX Signals")
+        put("verdict", "WAIT")
+        put("horizon", "SHORT")
+        put("confidence", "MEDIUM")
+        put("headline", "الفرصة فاتت عند هذه المستويات")
+        put("outlook", "سهم توزيعات محكوم بسعر اليوريا وسعر الغاز.")
+        put("stance", "OVERTAKEN")
+        put("stance_detail", "المستويات كانت معقولة وقت النشر.")
+        put("unknowns", """["آخر نتائج أعمال معلنة"]""")
+        put("model", "qwen-plus")
+        put("asked_on", "2026-08-20")
+        put("searched", 0)
+    }
+
+    /**
+     * The opinions table as version 15 wrote it - no news, no catalysts, no risks, no window.
+     *
+     * Written by hand for the reason [Version14] is: an "old" schema generated from today's code
+     * moves whenever today's code moves, so it can never catch the migration going wrong.
+     */
+    private class Version15(context: Context) :
+        SQLiteOpenHelper(context, LocalDataStore.DATABASE_NAME, null, 15) {
+
+        override fun onCreate(db: SQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS stock_opinions (
+                    id TEXT PRIMARY KEY,
+                    request_id TEXT NOT NULL,
+                    ticker TEXT NOT NULL,
+                    opened_on TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    verdict TEXT NOT NULL,
+                    horizon TEXT NOT NULL,
+                    confidence TEXT NOT NULL,
+                    headline TEXT NOT NULL,
+                    outlook TEXT NOT NULL,
+                    stance TEXT NOT NULL,
+                    stance_detail TEXT NOT NULL,
+                    unknowns TEXT NOT NULL DEFAULT '[]',
+                    model TEXT NOT NULL,
+                    asked_on TEXT NOT NULL,
+                    searched INTEGER NOT NULL DEFAULT 0
+                )""",
+            )
+        }
+
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    }
 }
