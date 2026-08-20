@@ -49,10 +49,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.data.PerformanceCalculator
 import com.ikverse.egxanalyzer.model.Ambiguity
 import com.ikverse.egxanalyzer.model.ChannelScore
@@ -429,17 +435,19 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                // What following this source was worth per call, which is the question the page
-                // exists to answer. The hit rate used to stand here and cannot answer it on its
-                // own: a source printing its target 2% above the entry reaches it nearly every
-                // time and hands it all back on the call that goes wrong.
+                // How often following this source worked, split at the two levels it printed. The
+                // average return used to stand here and stands beside it now: what one call was
+                // worth is the other half of the answer, and neither figure is readable alone -
+                // a source printing its target 2% above the entry reaches it nearly every time and
+                // hands it all back on the call that goes wrong.
                 Text(
-                    best.averageReturn.signedPercent(),
+                    best.winRateSplit(HeroRateSecondary),
                     style = MaterialTheme.typography.headlineLarge.copy(fontFamily = TabularFigures),
-                    color = PriceRole.forReturn(best.averageReturn),
+                    color = best.anyTargetRate.rateTone(),
                 )
                 Text(
-                    "per call · ${formatPercent(best.anyTargetRate, signed = false)} reached a target",
+                    "reached target 1 / target 2 · " +
+                        "${best.averageReturn.signedPercent()} per call",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = HeroLabelBaseline),
@@ -529,22 +537,30 @@ private fun ChannelCard(channel: ChannelScore, scale: Int, modifier: Modifier = 
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // What one call was worth, which is what these cards are now ordered on. The hit
-                // rate moved down into the figures: it is worth knowing and it is not the verdict.
+                // How often this source worked, split at the two levels it printed. What one call
+                // was worth moved down into the figures, where it is still what the cards are
+                // ordered on - the two answer different questions and neither is the whole verdict.
                 Text(
-                    channel.averageReturn.signedPercent(),
+                    channel.winRateSplit(ChannelRateSecondary),
                     style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
                     fontWeight = FontWeight.Bold,
                     color = if (thin) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {
-                        PriceRole.forReturn(channel.averageReturn)
+                        channel.anyTargetRate.rateTone()
                     },
                 )
             }
             Text(
                 listOfNotNull(
-                    if (thin) "too few judged to rank" else "per judged call",
+                    if (thin) "too few judged to rank" else "reached target 1 / target 2",
+                    // The rate the evidence will bear, under the rate that was measured. Six of six
+                    // is a true 100% and a floor of 61%; a long record at 80% floors above that,
+                    // which is why the order is not the rate. It qualifies the first figure only -
+                    // target 2 is a rate this line does not bound, and saying which is the point.
+                    channel.anyTargetRateFloor?.let {
+                        "target 1 at least ${formatPercent(it, signed = false)}"
+                    },
                     "${channel.judged} of ${channel.calls} calls judged",
                     // Said out loud rather than left as a smaller number of calls than the sessions
                     // below plainly show. The same call posted again is the same bet, and a channel
@@ -565,22 +581,19 @@ private fun ChannelCard(channel: ChannelScore, scale: Int, modifier: Modifier = 
                 "The record behind it",
                 listOf(
                     {
+                        // Still what the list is ordered on, so the card has to keep saying it.
+                        // A rate cannot answer whether following a source pays: reach for +2%
+                        // against a -10% stop and nine calls in ten get there, and the tenth takes
+                        // back more than the nine made.
                         Figure(
-                            "Reached a target",
-                            formatPercent(channel.anyTargetRate, signed = false),
-                            Modifier.weight(1f), tone = channel.anyTargetRate.rateTone(),
-                            // The rate the evidence will bear, under the rate that was measured.
-                            // Six of six is a true 100% and a floor of 61%; a long record at 80%
-                            // floors above that, which is why the order is not the rate.
-                            caption = channel.anyTargetRateFloor?.let {
-                                "at least ${formatPercent(it, signed = false)}"
+                            "Per judged call", channel.averageReturn.signedPercent(),
+                            Modifier.weight(1f),
+                            tone = if (thin) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                PriceRole.forReturn(channel.averageReturn)
                             },
-                        )
-                    },
-                    {
-                        Figure(
-                            "Target 2 rate", formatPercent(channel.fullHitRate, signed = false),
-                            Modifier.weight(1f), tone = channel.fullHitRate.rateTone(),
+                            caption = "what one call was worth",
                         )
                     },
                     {
@@ -1173,6 +1186,39 @@ private fun Double?.rateTone(): Color = when {
     this == null -> MaterialTheme.colorScheme.onSurfaceVariant
     this >= 50.0 -> MaterialTheme.colorScheme.primary
     else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+/** The target-2 figure beside a channel card's `headlineSmall` target-1 rate. */
+private val ChannelRateSecondary = 16.sp
+
+/** The same, beside the hero's `headlineLarge`. */
+private val HeroRateSecondary = 22.sp
+
+/**
+ * The win rate, divided at the two levels the source printed: how often a call reached target 1,
+ * and how often it went all the way to target 2.
+ *
+ * **Nested, not disjoint.** The second figure is a subset of the first, so "62% / 35%" reads as
+ * "reached a target on 62% of judged calls, and ran the whole way on 35%". Slicing them apart into
+ * target-1-only and target-2 would make them sum to the win rate and would print a first number
+ * *lower* than the rate the channel actually achieved - a source that keeps reaching target 2 would
+ * show a shrinking target-1 figure for doing better, which is the wrong way round.
+ *
+ * The second is drawn smaller and quieter because it is the deeper cut of the same rate rather than
+ * a rival to it - and because two full-size numbers beside a two-line Arabic name do not fit a card
+ * at [ChannelCardMinWidth]. The colour of the first is the caller's, so a thin record loses its
+ * highlight; this one is fixed, because the quiet colour is what makes it read as the sub-figure.
+ */
+@Composable
+private fun ChannelScore.winRateSplit(secondary: TextUnit): AnnotatedString {
+    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+    return buildAnnotatedString {
+        append(formatPercent(anyTargetRate, signed = false))
+        withStyle(SpanStyle(fontSize = secondary, color = quiet)) {
+            append(" / ")
+            append(formatPercent(fullHitRate, signed = false))
+        }
+    }
 }
 
 /**

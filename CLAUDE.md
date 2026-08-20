@@ -154,8 +154,18 @@ Being right often is not the same as being worth following, and the ranking used
 - **The order is what a call was worth, not how often it worked.** A hit rate is bought by moving
   the target closer to the entry: reach for +2% against a -10% stop and nine calls in ten get there,
   while the tenth takes back more than the nine made. `ChannelScore.averageReturn` - the mean over
-  every judged call - is the headline figure on the card and on the hero, and the hit rate moved
-  down into the figures. It is still measured, still shown, and no longer what decides the order.
+  every judged call - is what decides the order, on the card and on the hero both.
+- **The headline figure is the win rate, divided at the two targets** - `62% / 35%`, from
+  `anyTargetRate` and `fullHitRate`, drawn by `winRateSplit` in `ui/InsightsScreen.kt`. The two are
+  **nested, not disjoint**: the second is a subset of the first, so it reads as "reached a target on
+  62% of judged calls, and ran the whole way on 35%". Splitting them into target-1-only and target-2
+  would make them sum to the win rate and would print a first number *lower* than the rate the
+  channel achieved, so a source that kept reaching target 2 would show a shrinking target-1 figure
+  for doing better. The second is smaller and in `onSurfaceVariant` because it is the deeper cut of
+  one rate rather than a rival to it - and because two full-size numbers beside a two-line Arabic
+  name do not fit a card at `ChannelCardMinWidth` (280dp). `averageReturn` sits under it as the
+  **Per judged call** figure, which is what keeps the card able to say why the list is in the order
+  it is: neither number answers alone, and a rate on its own is the one that misleads.
 - **A channel still needs `MINIMUM_JUDGED_TO_RANK` (5) settled calls to lead at all.** Without it
   two good calls beat a month of evidence. Below the floor the figures are reported exactly as
   measured; they simply stop sorting above channels with a record behind them.
@@ -166,10 +176,12 @@ Being right often is not the same as being worth following, and the ranking used
   is worth several points and the gap between two channels' averages a fraction of one, so the bound
   ranks on variance and almost nothing else. It put a +2%-target source at -1.55 above a source
   making more per call at -3.80, which is the exact ordering the change existed to overturn.
-- `anyTargetRateFloor` is the **Wilson 95% lower bound** on the hit rate, printed under it as "at
-  least X%". 6 of 6 is a true 100% resting on a floor of 61%; 40 of 50 is 80% resting on 67%, and
-  the second is the better record. The normal approximation puts the first at 100%, which is the
-  claim being questioned, so Wilson rather than that.
+- `anyTargetRateFloor` is the **Wilson 95% lower bound** on the hit rate, in the card's sub-line as
+  "target 1 at least X%". 6 of 6 is a true 100% resting on a floor of 61%; 40 of 50 is 80% resting
+  on 67%, and the second is the better record. The normal approximation puts the first at 100%,
+  which is the claim being questioned, so Wilson rather than that. It is named for **target 1**
+  because it bounds `anyTargetRate` and nothing else - beside a headline carrying two rates, an
+  unqualified "at least X%" would read as a floor under both.
 - `averageRiskReward` is (target 1 − entry midpoint) / (entry midpoint − stop), over every call the
   channel made rather than only the judged ones - it describes the levels it prints, which it
   printed whatever the market did about them. The context a hit rate cannot be read without: 90% at
