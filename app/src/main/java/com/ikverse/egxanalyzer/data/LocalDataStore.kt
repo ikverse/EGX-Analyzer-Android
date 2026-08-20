@@ -39,6 +39,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import com.ikverse.egxanalyzer.model.StockOpinion
 
 class LocalDataStore(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
@@ -77,6 +78,7 @@ class LocalDataStore(context: Context) :
         db.createPromptVersions()
         db.createPositions()
         db.createScheduledJobs()
+        db.createStockOpinions()
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -99,6 +101,7 @@ class LocalDataStore(context: Context) :
         db.addPositionRevisionColumns()
         db.addPositionWindowColumns()
         db.addOpenColumn()
+        db.createStockOpinions()
     }
 
     /**
@@ -1147,16 +1150,126 @@ class LocalDataStore(context: Context) :
         }.also { unreadableResults = unreadable }
     }
 
+    /**
+     * What Ask AI said about one call, kept so re-opening a card costs nothing.
+     *
+     * Keyed by the call rather than by the stock: two channels calling one stock on one session are
+     * two cards printing different levels, and an opinion on one of them is not an opinion on the
+     * other. `request_id` is the report the call was read out of, and it is here for one purpose -
+     * deleting the report deletes the opinions with it, because an opinion about a card that no
+     * longer exists is an orphan nothing will ever show or clean up.
+     *
+     * Deliberately **not** synced. Everything else that travels is a record of what happened - a
+     * report, a trade, a rule. This is one model's answer to one question at one moment, and the
+     * cheapest way for another device to have it is to ask the question there.
+     */
+    private fun SQLiteDatabase.createStockOpinions() = execSQL(
+        """CREATE TABLE IF NOT EXISTS stock_opinions (
+            id TEXT PRIMARY KEY,
+            request_id TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            opened_on TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            verdict TEXT NOT NULL,
+            horizon TEXT NOT NULL,
+            confidence TEXT NOT NULL,
+            headline TEXT NOT NULL,
+            outlook TEXT NOT NULL,
+            stance TEXT NOT NULL,
+            stance_detail TEXT NOT NULL,
+            unknowns TEXT NOT NULL DEFAULT '[]',
+            model TEXT NOT NULL,
+            asked_on TEXT NOT NULL,
+            searched INTEGER NOT NULL DEFAULT 0
+        )"""
+    )
+
+    /** Every opinion on this device, by the call it is about. */
+    fun stockOpinions(): Map<String, StockOpinion> = readableDatabase
+        .query("stock_opinions", null, null, null, null, null, null)
+        .use { cursor ->
+            buildMap {
+                while (cursor.moveToNext()) {
+                    val id = cursor.getString(cursor.getColumnIndexOrThrow("id"))
+                    // A row whose verdict this build no longer knows is dropped rather than
+                    // defaulted: a card colouring an unknown answer green would be inventing one.
+                    runCatching { put(id, cursor.toStockOpinion()) }
+                }
+            }
+        }
+
+    fun saveStockOpinion(id: String, requestId: String, ticker: String, openedOn: LocalDate, channel: String, opinion: StockOpinion) {
+        val values = ContentValues().apply {
+            put("id", id)
+            put("request_id", requestId)
+            put("ticker", ticker)
+            put("opened_on", openedOn.toString())
+            put("channel", channel)
+            put("verdict", opinion.verdict.name)
+            put("horizon", opinion.horizon.name)
+            put("confidence", opinion.confidence.name)
+            put("headline", opinion.headline)
+            put("outlook", opinion.outlook)
+            put("stance", opinion.onTheCall.stance.name)
+            put("stance_detail", opinion.onTheCall.detail)
+            put("unknowns", JSONArray(opinion.unknowns).toString())
+            put("model", opinion.model)
+            put("asked_on", opinion.askedOn.toString())
+            put("searched", if (opinion.searched) 1 else 0)
+        }
+        writableDatabase.insertWithOnConflict(
+            "stock_opinions", null, values, SQLiteDatabase.CONFLICT_REPLACE,
+        )
+    }
+
+    fun deleteStockOpinion(id: String) {
+        writableDatabase.delete("stock_opinions", "id = ?", arrayOf(id))
+    }
+
+    /**
+     * Drops every opinion belonging to a report.
+     *
+     * Called from each of the three delete paths rather than left to a foreign key: `analyses` is
+     * keyed on an autoincrementing id while everything that travels is keyed on the request id, and
+     * a cascade wired to the wrong one of those deletes nothing while looking correct.
+     */
+    private fun deleteOpinionsFor(requestId: String) {
+        writableDatabase.delete("stock_opinions", "request_id = ?", arrayOf(requestId))
+    }
+
+    private fun Cursor.toStockOpinion(): StockOpinion = StockOpinion(
+        verdict = StockOpinion.Verdict.valueOf(getString(getColumnIndexOrThrow("verdict"))),
+        horizon = StockOpinion.Horizon.valueOf(getString(getColumnIndexOrThrow("horizon"))),
+        confidence = StockOpinion.Confidence.valueOf(getString(getColumnIndexOrThrow("confidence"))),
+        headline = getString(getColumnIndexOrThrow("headline")),
+        outlook = getString(getColumnIndexOrThrow("outlook")),
+        onTheCall = StockOpinion.CallView(
+            stance = StockOpinion.Stance.valueOf(getString(getColumnIndexOrThrow("stance"))),
+            detail = getString(getColumnIndexOrThrow("stance_detail")),
+        ),
+        unknowns = JSONArray(getString(getColumnIndexOrThrow("unknowns"))).let { array ->
+            (0 until array.length()).map { array.getString(it) }
+        },
+        model = getString(getColumnIndexOrThrow("model")),
+        askedOn = LocalDate.parse(getString(getColumnIndexOrThrow("asked_on"))),
+        searched = getInt(getColumnIndexOrThrow("searched")) == 1,
+    )
+
     /** Removes a report by the identity that travels between devices. */
     fun deleteResultByRequestId(requestId: String) {
+        deleteOpinionsFor(requestId)
         writableDatabase.delete("analyses", "request_id = ?", arrayOf(requestId))
     }
 
     fun deleteResult(id: Long) {
+        // Read back before the row goes: the opinions are keyed on the request id, and after the
+        // delete there is nothing left to look it up from.
+        requestIdOf(id)?.let(::deleteOpinionsFor)
         writableDatabase.delete("analyses", "id = ?", arrayOf(id.toString()))
     }
 
     fun deleteAllResults() {
+        writableDatabase.delete("stock_opinions", null, null)
         writableDatabase.delete("analyses", null, null)
     }
 
@@ -1554,7 +1667,8 @@ class LocalDataStore(context: Context) :
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
         /**
-         * 14 for `scheduled_jobs`, the work this phone runs on its own. 13 was `intraday_bars`
+         * 15 for `stock_opinions`, what Ask AI said about a call. 14 was `scheduled_jobs`, the work
+         * this phone runs on its own. 13 was `intraday_bars`
          * and `intraday_fetches`, which order the two events inside a session that daily figures
          * cannot separate. 12 was `price_events`, which records where a stock's prices changed
          * scale.
@@ -1562,6 +1676,6 @@ class LocalDataStore(context: Context) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 14
+        const val DATABASE_VERSION = 15
     }
 }

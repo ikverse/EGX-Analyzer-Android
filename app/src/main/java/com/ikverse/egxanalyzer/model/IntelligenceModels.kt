@@ -65,6 +65,16 @@ data class ScoredCall(
      * session's record is what was posted - and every rate leaves it out.
      */
     val repeatOf: LocalDate? = null,
+    /**
+     * The analysis this call was read out of, by the identity that travels between devices.
+     *
+     * Carried for one reason: an Ask AI opinion is stored against it, and deleting the report has to
+     * take the opinion with it. Everything else about a call is derived from prices and would
+     * survive the report going; an opinion about a card nobody can see any more is an orphan.
+     *
+     * Null only for a call built without one, which is every test fixture and nothing on a device.
+     */
+    val requestId: String? = null,
 )
 
 /**

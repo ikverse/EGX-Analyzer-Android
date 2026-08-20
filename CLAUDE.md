@@ -97,6 +97,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   `data/JobRunner.kt` — the alarm, the four things that mean re-book it, and what runs. See below.
 - `ui/SchedulesSection.kt` + `ui/SchedulesSheet.kt` — the card on Analyze, the section in Settings,
   and the sheet both open.
+- `data/OpinionPrompt.kt` + `data/OpinionPromptStore.kt` + `data/OpinionParser.kt` +
+  `ui/StockOpinionSheet.kt` — Ask AI, on a call card in Insights. See below.
 - `ui/` — one file per screen, plus `CommonUi.kt` and `DesignSystem.kt` for shared pieces.
 
 ## Scoring, and why each rule is there
@@ -359,6 +361,67 @@ trade is then managed, in whatever state it has reached.
 - `PortfolioCalculator` computes `PortfolioStats` (win rate, averages, best and worst) whether or
   not the screen draws them, so a new figure is a UI change. There are no trade sizes, so every
   total is an average of percentages; a money total would be invented.
+
+## Ask AI
+
+A button on a call card in Insights sends one paid request and asks two questions: what the model
+makes of the stock at today's price, and what it makes of the levels the channel printed. The answer
+comes back in Arabic and is kept on the card.
+
+- **Its own prompt, and nothing of the analysis reaches it.** `assets/stock_opinion.md`, read by
+  `OpinionPromptStore` — a separate class from `PromptStore` on purpose. The analysis prompt carries
+  a schema the desktop agreed on, a rules anchor `PromptComposer` fills in, and a version history
+  the user approves; this one carries none of that, no wording rule is folded into it, and no run's
+  `promptId` ever names it. Two stores rather than a second method on one, because sharing a class
+  is how a rule about reading a Telegram card eventually reaches an opinion about a stock.
+- **The whole of section 1 exists to stop the model reading the card back.** The DATA block is
+  printed on the card the sheet opens from — entry band, stop, targets, peak, trough, sessions
+  elapsed, return, latest close — so listing them back is not an opinion, and explaining arithmetic
+  the reader can do is worse. It may name a figure where it carries a point and never more than two
+  in a row. The escape hatch is honesty rather than padding: where price history is genuinely all it
+  has, it says so in one sentence and returns `LOW` confidence.
+- **Two figures the card does not carry are supplied rather than left to be worked out**: risk to
+  reward from the middle of the entry band, and the move from that midpoint to the latest close.
+  A language model asked to divide two prices gets it wrong often enough to matter, and it would be
+  wrong *confidently*, inside a verdict.
+- **The answer is Arabic; the four token fields are not.** `verdict`, `horizon`, `confidence` and
+  `stance` come back as English tokens and the screen prints its own Arabic for them
+  (`StockOpinion.Verdict.arabic` and friends). Letting the model answer those in Arabic would put
+  the parser at the mercy of its choice of synonym, and a verdict that fails to parse is a verdict
+  the card cannot colour. Prices and dates stay in Western digits so a figure the answer names
+  matches the one printed beside it.
+- **Live search is on by default**, and that is the point of it: without one the model has nothing
+  the app does not already have. DashScope takes `enable_search` in the request body, OpenRouter
+  takes `:online` on the model id, and no other provider is sent anything — an unknown key is
+  rejected outright by some OpenAI-compatible gateways, which would fail the request rather than
+  the search. News is prompted as reported, not verified, and may never overturn a price fact.
+- **Its own model setting**, `SettingsRepository.opinionModel`, defaulting to `qwen-plus`. The
+  analysis runs on a vision model because it reads screenshots; this request carries no image, and
+  paying vision rates for it buys nothing. Device-local like the analysis model and unlike
+  `AppPreferences`: a model id means nothing on a phone pointed at another provider.
+- **`ask()` shares the transport with `analyze()` and nothing else** — endpoint, saved credential,
+  timeout, cancel map. A second repository would mean a second copy of the credential zeroing and
+  the connection handling, which drift apart the first time either is touched. Temperature is 0.4
+  rather than the 0.0 an extraction pins: reading a price off a card has one right answer, a view on
+  a stock does not, and at zero every question came back in the same cautious register.
+- **One press is one paid request, confirmed first.** The dialog names the model and whether a
+  search is attached, because those are what change the bill and the answer. Once answered the
+  button reads `AI opinion · <verdict>` and reopens the saved answer for nothing; `Ask again` is the
+  only way to pay twice, and a card whose request is already out cannot start a second.
+- **An opinion is keyed by ticker, session *and* channel** (`opinionId`), which is deliberately not
+  `positionId`. Two channels calling one stock on one session are two cards printing different
+  levels, so an opinion on one is not an opinion on the other — where a holding is one holding
+  however many sources called it.
+- **Deleting the report deletes its opinions**, on all three paths and on a report another device
+  buried. `ScoredCall.requestId` exists for this and only this. `deleteResult(id)` has to read the
+  request id back *before* the row goes — the opinions are keyed on the request id, and doing it the
+  other way round is a cascade that deletes nothing while looking correct, which
+  `StockOpinionStoreTest` covers on both paths.
+- **Never synced.** Everything else that travels is a record of what happened; this is one model's
+  answer to one question at one moment, and the cheapest way for another device to have it is to ask
+  there.
+- A stored row whose verdict this build cannot read is **dropped rather than defaulted**: a card
+  colouring an answer it could not read would be inventing one.
 
 ## Exporting a report to Excel
 
@@ -728,13 +791,14 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 14.
+  `onUpgrade`. Currently 15.
 - **Migrations are tested** — `LocalDataStoreMigrationTest` runs under Robolectric, which supplies
   enough of Android for a real SQLite database in a plain unit test. It writes the version-9 table
   by hand and upgrades it, deliberately: a test that builds its "old" schema from today's code
   tests nothing, because both sides move together. Add a case there for every version bump —
   version 14 has its own in `ScheduledJobStoreTest`, which writes the version-13 `positions` table
-  and checks that gaining `scheduled_jobs` did not cost the trades already on the phone. Note
+  and checks that gaining `scheduled_jobs` did not cost the trades already on the phone, and
+  version 15 has the same case in `StockOpinionStoreTest` for `stock_opinions`. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it
   went in. **Robolectric needs Java 21** to stand up a sandbox for SDK 36 — it refuses on 17 with
   "requires Java 21 (have Java 17)", which is a green run locally on the JBR and a red one anywhere

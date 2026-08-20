@@ -358,7 +358,9 @@ object PerformanceCalculator {
         val best = linkedMapOf<Pair<String, Long?>, Pair<Int, ScoredCall>>()
         saved.result.consolidated.forEach { stock ->
             stock.dataPoints.forEach { point ->
-                val call = point.toCall(stock, channelNames, channelIds, targetDate, window)
+                val call = point.toCall(
+                    stock, channelNames, channelIds, targetDate, window, saved.result.requestId,
+                )
                     ?: return@forEach
                 if (call.openedOn < since) return@forEach
                 val levels = listOf(
@@ -378,6 +380,8 @@ object PerformanceCalculator {
         channelIds: Map<String, Long?>,
         targetDate: LocalDate?,
         window: Int,
+        /** The report this was read out of, so an opinion stored against it can be deleted with it. */
+        requestId: String,
     ): ScoredCall? {
         val ticker = Scoring.normalizeTicker(stock.stockCode)
         // The session the run was aimed at, which is the one the recommendation is for. Reading the
@@ -412,6 +416,7 @@ object PerformanceCalculator {
             sessionsElapsed = 0,
             windowSessions = deadline.sessions,
             entrySessions = deadline.entrySessions,
+            requestId = requestId,
         )
     }
 

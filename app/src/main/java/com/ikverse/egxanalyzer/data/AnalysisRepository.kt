@@ -27,12 +27,40 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
+import com.ikverse.egxanalyzer.model.CloudProvider
 
 interface AnalysisRepository {
     suspend fun analyze(request: AnalysisRequest): AnalysisResult
     suspend fun listModels(): List<String>
     suspend fun cancel(requestId: String): Boolean
+
+    /**
+     * One text-only question, answered by whichever model the caller names.
+     *
+     * Shares the endpoint, the saved credential, the timeout and the cancel path with [analyze] and
+     * nothing else. That is transport; a second repository would mean a second copy of the
+     * credential zeroing and the connection map, which drift apart the first time either is
+     * touched. The prompt, the model and the response format all come from the caller, so nothing
+     * about an analysis run reaches this and nothing here can reach one.
+     */
+    suspend fun ask(request: OpinionRequest): String
 }
+
+/**
+ * A question put to the model on its own, with no images and no analysis behind it.
+ *
+ * [model] is passed rather than read from the configuration because Ask AI has a model of its own:
+ * the analysis runs on a vision model because it reads screenshots, and this request carries none.
+ */
+data class OpinionRequest(
+    val requestId: String,
+    /** The whole system prompt, already composed by the caller. */
+    val systemPrompt: String,
+    val question: String,
+    val model: String,
+    /** Whether to ask the provider to attach a live web search. */
+    val search: Boolean,
+)
 
 /**
  * Boundary for the upcoming provider adapter.
@@ -392,6 +420,55 @@ class CloudAnalysisRepository(
         }
     }
 
+    /**
+     * Asks one question and hands back what the model said, unparsed.
+     *
+     * Deliberately does not touch [promptStore], the wording rules, or the prompt version: the
+     * caller supplies its own prompt, so nothing an analysis is configured with can leak into an
+     * opinion and nothing here can change what a run sends.
+     */
+    override suspend fun ask(request: OpinionRequest): String = withContext(Dispatchers.IO) {
+        val config = configuration()
+        require(config.endpoint.startsWith("https://")) { "Cloud endpoint must use HTTPS." }
+        require(request.model.isNotBlank()) { "Choose a model for Ask AI in Settings." }
+        val credential = credentialStore.read(config.provider)
+            ?: error("No credential is saved for ${config.provider.displayName}.")
+        try {
+            val body = JSONObject().apply {
+                put("model", searchModel(request, config.provider))
+                // Warmer than the 0.0 an extraction pins. Reading a price off a card has one right
+                // answer; a view on a stock does not, and at zero the same question returns the
+                // same cautious paragraph whatever is asked about.
+                put("temperature", OPINION_TEMPERATURE)
+                put("messages", JSONArray().apply {
+                    put(JSONObject().put("role", "system").put("content", request.systemPrompt))
+                    put(JSONObject().put("role", "user").put("content", request.question))
+                })
+                put("response_format", JSONObject().put("type", "json_object"))
+                // DashScope takes the search as a request flag; OpenRouter takes it as a suffix on
+                // the model id, which `searchModel` has already applied. Sent only where the
+                // provider is known to read it - an unknown key is rejected outright by some
+                // OpenAI-compatible gateways, which would fail the request rather than the search.
+                if (request.search && config.provider == CloudProvider.QWEN) {
+                    put("enable_search", true)
+                }
+            }
+            executeCompletion(request.requestId, body, config, preferences(), credential)
+                .let(::contentOf)
+        } finally {
+            credential.fill('\u0000')
+            activeConnections.remove(request.requestId)?.disconnect()
+        }
+    }
+
+    /** OpenRouter reads `:online` off the model id; every other provider is asked in the body. */
+    private fun searchModel(request: OpinionRequest, provider: CloudProvider): String = when {
+        !request.search -> request.model
+        provider != CloudProvider.OPENROUTER -> request.model
+        request.model.endsWith(ONLINE_SUFFIX) -> request.model
+        else -> request.model + ONLINE_SUFFIX
+    }
+
     override suspend fun cancel(requestId: String): Boolean =
         activeConnections.remove(requestId)?.let {
             it.disconnect()
@@ -697,6 +774,17 @@ class CloudAnalysisRepository(
 
     private companion object {
         const val CONNECT_TIMEOUT_MS = 30_000
+
+        /**
+         * How much room the opinion request leaves the model.
+         *
+         * An extraction pins 0.0 because reading a price off a card has one right answer. A view on
+         * a stock does not, and at zero every question came back in the same cautious register.
+         */
+        const val OPINION_TEMPERATURE = 0.4
+
+        /** OpenRouter's marker for "answer this with a live web search attached". */
+        const val ONLINE_SUFFIX = ":online"
     }
 }
 

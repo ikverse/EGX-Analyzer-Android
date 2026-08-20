@@ -64,6 +64,8 @@ import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
+import com.ikverse.egxanalyzer.model.StockOpinion
+import com.ikverse.egxanalyzer.model.opinionId
 import com.ikverse.egxanalyzer.model.positionId
 import com.ikverse.egxanalyzer.model.sessionFor
 import com.ikverse.egxanalyzer.ui.theme.extraColors
@@ -84,6 +86,13 @@ import java.time.format.DateTimeFormatter
 internal fun InsightsScreen(appState: AppState) {
     val scope = rememberCoroutineScope()
     val full = appState.performance
+    // Read once for the page rather than per card: both are one SharedPreferences lookup, and a
+    // card asking on every recomposition would do it a hundred times a scroll. Keyed on the
+    // revision so changing either in Settings reaches a card that is already on screen.
+    val askModel = remember(appState.opinionSettingsRevision, appState.cloudConfiguration) {
+        appState.opinionModel()
+    }
+    val searching = remember(appState.opinionSettingsRevision) { appState.opinionSearchEnabled() }
 
     Screen(
         title = "Insights",
@@ -236,6 +245,11 @@ internal fun InsightsScreen(appState: AppState) {
                             onExpandedChange = { openSession = null },
                             heldFor = appState::heldFor,
                             latestFor = { ticker -> report.latestPrices[ticker] },
+                            opinionFor = appState::opinionFor,
+                            askingFor = { call -> appState.opinionPending == call.opinionKey() },
+                            askModel = askModel,
+                            searching = searching,
+                            onAsk = { call, again -> appState.askAboutCall(call, again) },
                             onOpenTrade = appState::openPosition,
                             revealCall = pendingCall,
                             onRevealShown = appState::consumePendingCall,
@@ -249,6 +263,11 @@ internal fun InsightsScreen(appState: AppState) {
                                 onExpandedChange = { openSession = session.key() },
                                 heldFor = appState::heldFor,
                                 latestFor = { ticker -> report.latestPrices[ticker] },
+                                opinionFor = appState::opinionFor,
+                                askingFor = { call -> appState.opinionPending == call.opinionKey() },
+                                askModel = askModel,
+                                searching = searching,
+                                onAsk = { call, again -> appState.askAboutCall(call, again) },
                                 onOpenTrade = appState::openPosition,
                                 // A folded card draws none of its calls, so the highlight only ever
                                 // lands on the one this arrival opened.
@@ -598,6 +617,9 @@ private fun ChannelCard(channel: ChannelScore, scale: Int, modifier: Modifier = 
  * `Bundle` can carry and the card can still be open after the page is rebuilt. Both `toString`
  * forms are unambiguous and cannot be mistaken for each other.
  */
+/** The call an opinion is filed under, which is the ticker, the session and the channel. */
+private fun ScoredCall.opinionKey(): String = opinionId(ticker, openedOn, channel)
+
 private fun ScoredSession.key(): String = (targetDate ?: lastRunAt).toString()
 
 /** Two lines of channel name, so a row of source cards stays level. */
@@ -613,6 +635,13 @@ private fun SessionCard(
     heldFor: (String, java.time.LocalDate?) -> PositionView?,
     /** Where a stock stands as of the last refresh, by ticker. */
     latestFor: (String) -> LatestPrice?,
+    /** What Ask AI has said about a call, if anything. */
+    opinionFor: (ScoredCall) -> StockOpinion?,
+    /** Whether that call's own request is currently out. */
+    askingFor: (ScoredCall) -> Boolean,
+    askModel: String,
+    searching: Boolean,
+    onAsk: (ScoredCall, Boolean) -> Unit,
     /** Opens a held call's trade on the Portfolio tab, by the id the two share. */
     onOpenTrade: (String) -> Unit,
     /** The trade the reader has just pressed their way here from, if this is that arrival. */
@@ -671,7 +700,12 @@ private fun SessionCard(
                     ScoredCallRow(
                         call,
                         latestFor(call.ticker),
-                        held,
+                        opinionFor(call),
+                        asking = askingFor(call),
+                        askModel = askModel,
+                        searching = searching,
+                        onAsk = { again -> onAsk(call, again) },
+                        held = held,
                         // Only a call the user is actually in leads anywhere: there is no trade to
                         // open for one they read and left alone.
                         onOpenTrade = held?.let { { onOpenTrade(it.position.id) } },
@@ -694,6 +728,16 @@ private fun ScoredCallRow(
     call: ScoredCall,
     /** Where this stock stands as of the last refresh. Absent for a stock with no prices at all. */
     latest: LatestPrice?,
+    /** What Ask AI has already said about this call, if it has been asked. */
+    opinion: StockOpinion?,
+    /** True while this card's own request is out. */
+    asking: Boolean,
+    /** Named in the confirmation, because it is what the request will be billed against. */
+    askModel: String,
+    /** Whether a live search would be attached, which the confirmation also has to say. */
+    searching: Boolean,
+    /** Sends the question. The flag is a deliberate re-ask, the only way to pay for one twice. */
+    onAsk: (askAgain: Boolean) -> Unit,
     held: PositionView?,
     /** Opens the trade taken on this call. Absent where none was, which is most cards. */
     onOpenTrade: (() -> Unit)?,
@@ -702,6 +746,48 @@ private fun ScoredCallRow(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    // Chrome, so a `remember` is the right home for all three: a fold closes the sheet, and the
+    // answer behind it is on disk rather than in the composition. See PageState.
+    var confirming by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    // Set while this card's own request is out, so the answer opens itself when it lands. Without
+    // it every card already holding an opinion would spring open the moment any request finished.
+    var awaiting by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    LaunchedEffect(opinion) {
+        if (awaiting && opinion != null) {
+            awaiting = false
+            showing = true
+        }
+    }
+    if (confirming) {
+        AskAiDialog(
+            call = call,
+            model = askModel,
+            searching = searching,
+            onConfirm = {
+                confirming = false
+                awaiting = true
+                onAsk(false)
+            },
+            onDismiss = { confirming = false },
+        )
+    }
+    if (showing && opinion != null) {
+        StockOpinionSheet(
+            call = call,
+            opinion = opinion,
+            onAskAgain = if (asking) {
+                null
+            } else {
+                {
+                    showing = false
+                    awaiting = true
+                    onAsk(true)
+                }
+            },
+            onDismiss = { showing = false },
+        )
+    }
     val colors = CardDefaults.cardColors(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     )
@@ -845,18 +931,41 @@ private fun ScoredCallRow(
                     },
                 ),
             )
-            if (call.sessions.isNotEmpty()) {
-                TextButton(onClick = { expanded = !expanded }) {
+            // Wrapped rather than laid in a row: at 280dp the two labels together are wider than
+            // the card, and a button pushed off the edge is a button nobody can press.
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+                TextButton(
+                    onClick = { if (opinion == null) confirming = true else showing = true },
+                    // A second request while the first is still out would be paid for twice and
+                    // answer the same question.
+                    enabled = !asking,
+                ) {
                     Text(
-                        if (expanded) {
-                            "Hide sessions"
-                        } else {
-                            "${call.sessions.size} " +
-                                (if (call.sessions.size == 1) "session" else "sessions") +
-                                " from the price feed"
+                        when {
+                            asking -> "Asking\u2026"
+                            // Named for what it holds once there is something to open. The button
+                            // that spends money and the button that reopens a saved answer must not
+                            // read alike, or the free press looks like the paid one.
+                            opinion != null -> "AI opinion \u00b7 ${opinion.verdict.arabic}"
+                            else -> "Ask AI"
                         },
                     )
                 }
+                if (call.sessions.isNotEmpty()) {
+                    TextButton(onClick = { expanded = !expanded }) {
+                        Text(
+                            if (expanded) {
+                                "Hide sessions"
+                            } else {
+                                "${call.sessions.size} " +
+                                    (if (call.sessions.size == 1) "session" else "sessions") +
+                                    " from the price feed"
+                            },
+                        )
+                    }
+                }
+            }
+            if (call.sessions.isNotEmpty()) {
                 AnimatedVisibility(expanded) { SessionTable(call.sessions) }
             }
         }

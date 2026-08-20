@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.QuestionAnswer
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -79,6 +80,7 @@ internal fun SettingsScreen(appState: AppState) {
     var endpointMenuOpen by remember { mutableStateOf(false) }
     var themeMenuOpen by remember { mutableStateOf(false) }
     var languageMenuOpen by remember { mutableStateOf(false) }
+    var askModelMenuOpen by remember { mutableStateOf(false) }
     var credential by remember { mutableStateOf("") }
     var confirmDeleteAll by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -108,6 +110,14 @@ internal fun SettingsScreen(appState: AppState) {
             },
         )
     }
+
+    // One SharedPreferences read each, keyed on the revision the setters bump: neither value is
+    // observable on its own, so without the key the card would go on printing what it opened with.
+    val askModel = remember(appState.opinionSettingsRevision, appState.cloudConfiguration) {
+        appState.opinionModel()
+    }
+    val askSearching = remember(appState.opinionSettingsRevision) { appState.opinionSearchEnabled() }
+    val askAiSummary = if (askSearching) "$askModel \u00b7 live search" else "$askModel \u00b7 no search"
 
     Screen(
         title = "Settings",
@@ -395,6 +405,76 @@ internal fun SettingsScreen(appState: AppState) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+
+        // Its own card rather than a row inside Analysis. Ask AI shares the provider and the key
+        // with a run and nothing else - not the prompt, not the model, not the wording rules - and
+        // filing its settings under Analysis would say the opposite of what is true.
+        ExpandableSection(
+            "Ask AI",
+            icon = Icons.Outlined.QuestionAnswer,
+            summary = askAiSummary,
+            contentMaxWidth = FormWidth,
+        ) {
+            Text(
+                "The button on a call card in Insights. It asks what the model makes of the stock " +
+                    "at today's price and what it makes of the levels the channel printed, and it " +
+                    "answers in Arabic. Each press is one paid request, confirmed first, and the " +
+                    "answer is kept on the card - opening it again costs nothing.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = askModel,
+                onValueChange = appState::updateOpinionModel,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Model") },
+                singleLine = true,
+            )
+            if (appState.availableModels.isNotEmpty()) {
+                Box {
+                    OutlinedButton(onClick = { askModelMenuOpen = true }) { Text("Choose model") }
+                    DropdownMenu(
+                        expanded = askModelMenuOpen,
+                        onDismissRequest = { askModelMenuOpen = false },
+                    ) {
+                        // The list the analysis picker loaded, because it is the same key asking
+                        // the same provider what it has. Typing over it stays allowed: a provider
+                        // that lists nothing still has models.
+                        appState.availableModels.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option) },
+                                onClick = {
+                                    appState.updateOpinionModel(option)
+                                    askModelMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            Text(
+                "A text model, not the vision one a run needs. The analysis reads screenshots; this " +
+                    "request carries no image, and paying vision rates for it buys nothing.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = askSearching,
+                    onCheckedChange = appState::updateOpinionSearch,
+                )
+                Text("Let it search the web")
+            }
+            Text(
+                "Without a search the model has nothing this app does not already have, so its view " +
+                    "rests on the call's own figures and on whatever it learned before it was " +
+                    "trained. With one it can find real news, and can also repeat something " +
+                    "unverified it found. It costs more per press and takes longer. Only Qwen and " +
+                    "OpenRouter are asked to search; other providers ignore it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         ExpandableSection(

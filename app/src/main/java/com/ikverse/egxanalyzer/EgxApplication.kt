@@ -11,6 +11,7 @@ import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.OverdueWorker
 import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.PromptStore
+import com.ikverse.egxanalyzer.data.OpinionPromptStore
 import com.ikverse.egxanalyzer.data.RequestTrace
 import com.ikverse.egxanalyzer.data.ScheduledJobWorker
 import com.ikverse.egxanalyzer.data.SymbolMap
@@ -28,6 +29,9 @@ class EgxApplication : Application() {
         // One instance: the composer reads the same shipped text the repository falls back to, and
         // two readers of one asset that could disagree is a bug waiting for an app update.
         val promptStore = PromptStore(assets)
+        // Its own store, reading its own asset. The Ask AI prompt shares nothing with the analysis
+        // prompt - no rules, no schema, no version history - and two stores is what keeps it so.
+        val opinionPromptStore = OpinionPromptStore(assets)
         val analysisRepository = CloudAnalysisRepository(
             contentResolver = contentResolver,
             credentialStore = credentialStore,
@@ -50,6 +54,7 @@ class EgxApplication : Application() {
             priceRepository = PriceRepository(localDataStore, symbols),
             intradayRepository = IntradayRepository(localDataStore, symbols),
             promptStore = promptStore,
+            opinionPromptStore = opinionPromptStore,
             // The app is sideloaded, so nothing else will ever offer it an update.
             updateRepository = UpdateRepository(this),
             // The foreground service is what keeps the process alive; the notification is what

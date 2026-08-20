@@ -99,6 +99,13 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
+import com.ikverse.egxanalyzer.data.OpinionParser
+import com.ikverse.egxanalyzer.data.OpinionPrompt
+import com.ikverse.egxanalyzer.data.OpinionPromptStore
+import com.ikverse.egxanalyzer.data.OpinionRequest
+import com.ikverse.egxanalyzer.model.ScoredCall
+import com.ikverse.egxanalyzer.model.StockOpinion
+import com.ikverse.egxanalyzer.model.opinionId
 
 enum class AppDestination(val label: String, val shortLabel: String) {
     ANALYZE("Analyze", "AI"),
@@ -138,6 +145,13 @@ class AppState(
     private val intradayRepository: IntradayRepository,
     /** The shipped prompt, which every generated version is composed from. */
     private val promptStore: PromptStore,
+    /**
+     * The Ask AI prompt, which shares nothing with the one above.
+     *
+     * A separate store rather than a second method on [promptStore] so an opinion can never pick up
+     * the analysis prompt, the wording rules folded into it, or its schema. See [OpinionPromptStore].
+     */
+    private val opinionPromptStore: OpinionPromptStore,
     /**
      * Where a newer build is found and fetched from.
      *
@@ -601,6 +615,123 @@ class AppState(
         private set
 
     private var positions = localDataStore.positions()
+
+    /**
+     * What Ask AI has said, by the call it was asked about.
+     *
+     * Loaded whole at start rather than queried per card: the map is one small row per call the
+     * user has actually pressed the button on, and a card has to know on sight whether to offer
+     * "Ask AI" or "AI opinion" without a database read while the list scrolls.
+     */
+    var opinions by mutableStateOf(localDataStore.stockOpinions())
+        private set
+
+    /** Non-null while one opinion is being fetched, so only that card shows a spinner. */
+    var opinionPending by mutableStateOf<String?>(null)
+        private set
+
+    fun opinionFor(call: ScoredCall): StockOpinion? =
+        opinions[opinionId(call.ticker, call.openedOn, call.channel)]
+
+    /** What an opinion request would run on and whether it would search, for the confirm dialog. */
+    fun opinionModel(): String = settingsRepository.opinionModel(cloudConfiguration.provider)
+        .ifBlank { cloudConfiguration.model }
+
+    fun opinionSearchEnabled(): Boolean = settingsRepository.opinionSearchEnabled()
+
+    fun updateOpinionModel(model: String) {
+        settingsRepository.saveOpinionModel(cloudConfiguration.provider, model)
+        // Nothing derives from it, but the Settings summary reads it back through a snapshot that
+        // only recomposes when something observable moves.
+        opinionSettingsRevision += 1
+    }
+
+    fun updateOpinionSearch(enabled: Boolean) {
+        settingsRepository.saveOpinionSearchEnabled(enabled)
+        opinionSettingsRevision += 1
+    }
+
+    /** Bumped whenever an Ask AI setting changes, so the Settings card redraws its summary. */
+    var opinionSettingsRevision by mutableStateOf(0)
+        private set
+
+    /**
+     * Asks the model about one call and keeps what it says.
+     *
+     * A paid request, started only by the user pressing through the confirmation - never by a
+     * refresh, a sync, or a card being drawn. The answer is stored against the call so re-opening
+     * the sheet costs nothing; [askAgain] is the only way to pay twice.
+     */
+    fun askAboutCall(call: ScoredCall, askAgain: Boolean = false) {
+        val id = opinionId(call.ticker, call.openedOn, call.channel)
+        if (opinionPending != null) return
+        if (!askAgain && opinions.containsKey(id)) return
+        val requestId = call.requestId
+        if (requestId == null) {
+            statusMessage = StatusMessage(
+                "This call is not attached to a saved report, so an opinion could not be filed.",
+                succeeded = false,
+            )
+            return
+        }
+        appScope.launch {
+            opinionPending = id
+            val model = opinionModel()
+            val searched = settingsRepository.opinionSearchEnabled()
+            try {
+                runAction(
+                    label = "Asking about ${call.ticker}",
+                    success = { "${call.ticker}: ${it.verdict.arabic}" },
+                ) {
+                    val answer = withContext(Dispatchers.IO) {
+                        analysisRepository.ask(
+                            OpinionRequest(
+                                requestId = "opinion-$id",
+                                systemPrompt = opinionPromptStore.opinionPrompt(),
+                                question = OpinionPrompt.build(
+                                    call = call,
+                                    latest = performance.latestPrices[call.ticker],
+                                    channel = performance.channels
+                                        .firstOrNull { it.channel == call.channel },
+                                    held = heldFor(call.ticker, call.openedOn),
+                                    today = LocalDate.now(),
+                                ),
+                                model = model,
+                                search = searched,
+                            ),
+                        )
+                    }
+                    val opinion = OpinionParser.parse(
+                        response = answer,
+                        model = model,
+                        askedOn = LocalDate.now(),
+                        searched = searched,
+                    )
+                    withContext(Dispatchers.IO) {
+                        localDataStore.saveStockOpinion(
+                            id = id,
+                            requestId = requestId,
+                            ticker = call.ticker,
+                            openedOn = call.openedOn,
+                            channel = call.channel,
+                            opinion = opinion,
+                        )
+                    }
+                    opinions = opinions + (id to opinion)
+                    opinion
+                }
+            } finally {
+                opinionPending = null
+            }
+        }
+    }
+
+    /** Forgets one opinion, so the card offers to ask again from nothing. */
+    fun deleteOpinion(call: ScoredCall) {
+        val id = opinionId(call.ticker, call.openedOn, call.channel)
+        localDataStore.deleteStockOpinion(id)
+        opinions = opinions - id
+    }
 
     /**
      * The position taken on one call, if there is one.
@@ -2034,6 +2165,9 @@ class AppState(
             localDataStore.deleteResultByRequestId(requestId)
             forgotten++
         }
+        // A report buried on another device takes its opinions here too, for the same reason a
+        // local delete does: an opinion about a card nobody can open is an orphan.
+        if (forgotten > 0) opinions = localDataStore.stockOpinions()
 
         var downloaded = 0
         toDownload.forEach { requestId ->
@@ -2494,6 +2628,9 @@ class AppState(
     fun deleteResult(result: SavedAnalysis) {
         localDataStore.recordDeletion(result.result.requestId)
         localDataStore.deleteResult(result.id)
+        // The database dropped this report's opinions on the way out; the map on screen has to
+        // agree, or a card would go on offering to reopen an answer that is no longer stored.
+        opinions = localDataStore.stockOpinions()
         savedResults = localDataStore.results()
         unreadableResults = localDataStore.unreadableResults
         selectedResult = savedResults.firstOrNull()
@@ -2510,6 +2647,7 @@ class AppState(
         val doomed = savedResults.map { it.result.requestId }
         doomed.forEach(localDataStore::recordDeletion)
         localDataStore.deleteAllResults()
+        opinions = emptyMap()
         savedResults = emptyList()
         unreadableResults = 0
         selectedResult = null

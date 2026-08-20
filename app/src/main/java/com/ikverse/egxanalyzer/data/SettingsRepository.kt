@@ -90,6 +90,41 @@ class SettingsRepository(
         preferences.edit().remove(provider.modelListKey()).apply()
     }
 
+    /**
+     * What Ask AI runs on, per provider.
+     *
+     * Its own setting because the analysis model is chosen for something this request does not do:
+     * the run reads screenshots and needs vision, an opinion is text in and text out, and paying
+     * vision rates for it is money for nothing. Falls back to [OPINION_MODEL_DEFAULT] and then to
+     * whatever the analysis is set to, so a provider that has never heard of qwen-plus still
+     * answers rather than failing on a model name from a different vendor.
+     *
+     * Device-local and never published, like the analysis model and unlike [AppPreferences]: a
+     * model id means nothing on a phone pointed at another provider, and syncing one would rewrite
+     * a working setting with a name that does not resolve.
+     */
+    fun opinionModel(provider: CloudProvider): String =
+        preferences.getString(provider.opinionModelKey(), null)?.takeIf(String::isNotBlank)
+            ?: OPINION_MODEL_DEFAULT
+
+    fun saveOpinionModel(provider: CloudProvider, model: String) {
+        preferences.edit().putString(provider.opinionModelKey(), model.trim()).apply()
+    }
+
+    /**
+     * Whether an opinion request asks the provider for a live web search.
+     *
+     * On by default, and that is the whole point of the feature: without it the model has nothing
+     * the app does not already have, so a view on a stock can only restate the card it was opened
+     * from or half-remember something from training. Off is for a provider that charges too much
+     * for it or answers with noise.
+     */
+    fun opinionSearchEnabled(): Boolean = preferences.getBoolean(KEY_OPINION_SEARCH, true)
+
+    fun saveOpinionSearchEnabled(value: Boolean) {
+        preferences.edit().putBoolean(KEY_OPINION_SEARCH, value).apply()
+    }
+
     fun loadPreferences(): AppPreferences = AppPreferences(
         themeMode = enumPreference(KEY_THEME_MODE, ThemeMode.SYSTEM),
         analysisLanguage = enumPreference(KEY_ANALYSIS_LANGUAGE, AnalysisLanguage.BILINGUAL),
@@ -344,6 +379,7 @@ class SettingsRepository(
     private fun CloudProvider.endpointKey() = "endpoint_${name.lowercase()}"
     private fun CloudProvider.modelKey() = "model_${name.lowercase()}"
     private fun CloudProvider.modelListKey() = "model_list_${name.lowercase()}"
+    private fun CloudProvider.opinionModelKey() = "opinion_model_${name.lowercase()}"
 
     private companion object {
         const val KEY_PROVIDER = "provider"
@@ -365,6 +401,17 @@ class SettingsRepository(
         const val KEY_LAST_PRICE_REFRESH_AT = "last_price_refresh_at"
         const val KEY_SCHEDULES_ENABLED = "schedules_enabled"
         const val KEY_PAID_SCHEDULES = "paid_schedules_enabled"
+        const val KEY_OPINION_SEARCH = "opinion_search_enabled"
+
+        /**
+         * What Ask AI runs on until the user picks something else.
+         *
+         * A text model, deliberately: the analysis default is a vision model because it reads
+         * screenshots, and this request carries no image. A provider whose catalogue has no such
+         * name is handled at the call site rather than here - the picker lists what the key
+         * actually offers.
+         */
+        const val OPINION_MODEL_DEFAULT = "qwen-plus"
         const val KEY_PROMPT_HISTORY = "prompt_history"
         const val KEY_SETTINGS_UPDATED_AT = "settings_updated_at"
         const val KEY_SETTINGS_UPDATED_BY = "settings_updated_by"
