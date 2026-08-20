@@ -1,7 +1,10 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.RowScope
@@ -26,6 +30,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Insights
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Leaderboard
 import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material3.AlertDialog
@@ -34,6 +39,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -46,7 +52,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -967,17 +975,7 @@ private fun ScoredCallRow(
                     phaseKey = call.ticker,
                 )
                 if (call.sessions.isNotEmpty()) {
-                    TextButton(onClick = { expanded = !expanded }) {
-                        Text(
-                            if (expanded) {
-                                "Hide sessions"
-                            } else {
-                                "${call.sessions.size} " +
-                                    (if (call.sessions.size == 1) "session" else "sessions") +
-                                    " from the price feed"
-                            },
-                        )
-                    }
+                    PriceFeedButton(expanded) { expanded = !expanded }
                 }
             }
             if (call.sessions.isNotEmpty()) {
@@ -1008,6 +1006,47 @@ private fun ScoredCallRow(
             border = border,
             shape = MaterialTheme.shapes.medium,
             content = body,
+        )
+    }
+}
+
+/**
+ * Opens the session table, and says which way it is about to go.
+ *
+ * The label used to carry the count - "12 sessions from the price feed" - which made the widest
+ * control on the card the one with the least to say: the number is in the first column of the
+ * table it opens, and it changed the button's width on every card. The arrow carries the state
+ * instead, so the label can stay still and stay short.
+ */
+@Composable
+private fun PriceFeedButton(expanded: Boolean, onClick: () -> Unit) {
+    // Turned rather than swapped for an up arrow: the rotation is what shows which of the two
+    // states the press moved between, where two glyphs only show where it landed.
+    val turn by animateFloatAsState(if (expanded) 180f else 0f, label = "priceFeed")
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        Modifier
+            .minimumInteractiveComponentSize()
+            .height(PillHeight)
+            // The card's own hairline, not a heavier one. Beside a filled pill that spends money
+            // this is the quiet half of the row, and it should read as an outline of a control
+            // rather than a second call to press something.
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .semantics {
+                onClick(label = if (expanded) "Hide the price feed" else "Show the price feed", action = null)
+            }
+            .padding(start = Space.m, end = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        Text("Price feed", style = MaterialTheme.typography.labelMedium, color = ink)
+        Icon(
+            Icons.Outlined.KeyboardArrowDown,
+            contentDescription = null,
+            modifier = Modifier.size(IconSize.Inline).graphicsLayer { rotationZ = turn },
+            tint = ink,
         )
     }
 }

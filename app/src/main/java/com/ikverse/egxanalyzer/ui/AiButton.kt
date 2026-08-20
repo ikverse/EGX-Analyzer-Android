@@ -196,7 +196,7 @@ private fun Pill(
             // The pill is shorter than a fingertip. This keeps the target the full 48dp without
             // making the button look like one.
             .minimumInteractiveComponentSize()
-            .height(AiHeight)
+            .height(PillHeight)
             .then(painted)
             // After the paint, so the ripple is bounded by the pill while the halo drawn above is
             // free to fall outside it.
@@ -240,8 +240,6 @@ private fun Spark(gold: List<Color>) {
     )
 }
 
-/** Shorter than a Material button on purpose: it shares a row with plain text buttons. */
-private val AiHeight: Dp = 32.dp
 private val AiPadding: Dp = 12.dp
 private val AiGap: Dp = 6.dp
 private val SparkSize: Dp = 14.dp
@@ -250,7 +248,14 @@ private val OutlineWidth: Dp = 1.5.dp
 /** How far the halo reaches past the pill, and how it thins on the way out. */
 private val GlowSpread: Dp = 14.dp
 private const val GlowRings = 6
-private const val GlowAlpha = 0.13f
+
+/**
+ * How strong the innermost ring is, before the falloff and the breath scale it.
+ *
+ * Halved from 0.13. At the old strength the halo was the loudest thing on a card of prices, which
+ * is the wrong order: the button is worth noticing, not worth looking at first.
+ */
+private const val GlowAlpha = 0.065f
 
 /** Half a cycle: the breath is four seconds out and back. */
 private const val BreathHalfMs = 2000

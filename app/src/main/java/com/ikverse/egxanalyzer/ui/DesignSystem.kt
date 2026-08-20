@@ -102,6 +102,15 @@ object Space {
  * [Inline] sits beside text - section headings, chips, list rows. [Action] is for anything with a
  * touch target of its own: navigation, buttons, menu affordances.
  */
+/**
+ * How tall a pill-shaped button stands.
+ *
+ * Shorter than a Material button, because these share a row with each other rather than anchoring
+ * a screen. Defined here rather than beside either of them: two pills side by side at two heights
+ * is the kind of almost-aligned this scale exists to stop.
+ */
+val PillHeight: Dp = 32.dp
+
 object IconSize {
     val Inline: Dp = 20.dp
     val Action: Dp = 24.dp
