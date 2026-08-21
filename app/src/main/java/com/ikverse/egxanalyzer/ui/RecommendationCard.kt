@@ -234,13 +234,19 @@ private fun StockHeader(
     // Top-aligned so the right-hand column starts level with the ticker rather than floating
     // against the middle of however many name lines this stock happens to have.
     Row(verticalAlignment = Alignment.Top) {
-        StockLogo(stock.stockCode, LogoSize.Header, Modifier.padding(end = Space.m))
         Column(Modifier.weight(1f)) {
-            Text(
-                stock.stockCode,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-            )
+            // The logo rides the ticker's own line rather than sitting beside the whole column.
+            // Beside the column it left a hole under itself the height of the names below the
+            // ticker, and it pushed those names in past the ladder and the levels, which start at
+            // the card's edge - one card, two left edges. Here the names stay flush with them.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StockLogo(stock.stockCode, LogoSize.Header, Modifier.padding(end = Space.s))
+                Text(
+                    stock.stockCode,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
             // The Arabic name is the one printed in the source, so it is the reliable identity.
             stock.stockNameArabic?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium)

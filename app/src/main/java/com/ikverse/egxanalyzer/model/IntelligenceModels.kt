@@ -52,6 +52,14 @@ data class ScoredCall(
     val ambiguity: Ambiguity? = null,
     /** The first target was banked and the stop was reached afterwards. */
     val stoppedAfterPartial: Boolean = false,
+    /**
+     * The session that stop broke on.
+     *
+     * Not [settledOn], which is the session the target was reached - that is what the call is
+     * scored on, and the card used to name it as the day the stop broke because it was the only
+     * date it had.
+     */
+    val stoppedOn: LocalDate? = null,
     /** False while the window is still running, so a partial hit may still become a full one. */
     val windowComplete: Boolean = false,
     /** The sessions this call was judged on, so the card can show them without another query. */

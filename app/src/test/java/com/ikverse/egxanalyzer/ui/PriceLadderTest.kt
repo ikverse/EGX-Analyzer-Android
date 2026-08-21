@@ -75,33 +75,35 @@ class PriceLadderTest {
     }
 
     /**
-     * A range is one fact, so both its ends print on one side.
+     * A range is one fact, so both its ends print on one side and on one line.
      *
      * An entry band with its floor under the line and its ceiling over it is two prices that happen
-     * to be near each other, which is not what it means.
+     * to be near each other, which is not what it means - and the same is true of one end sitting a
+     * row above the other.
      */
     @Test
-    fun `both ends of a range move together`() {
+    fun `both ends of a range share a row`() {
         val slots = place(
             centers = listOf(100f, 108f, 116f),
             widths = listOf(30f, 30f, 30f),
             groups = listOf(0, 1, 1),
         )
 
-        // The stop took the row below; the pair could not both follow it, so both went above.
-        assertTrue(!slots[0].above)
-        assertTrue(slots[1].above)
-        assertTrue(slots[2].above)
+        assertEquals(slots[1].above, slots[2].above)
+        assertEquals(slots[1].row, slots[2].row)
+        // Side by side, in axis order, clear of each other by the gap.
+        assertTrue(slots[2].left >= slots[1].left + 30f + 6f)
     }
 
     /**
      * The real case: an entry band a fifth of a piastre wide.
      *
-     * Its two ends can never sit side by side, so the row below keeps the stop and the targets and
-     * the band takes two rows over the line - rather than one end below and the other stranded.
+     * Centred on their own marks its two ends would overlap, and the one that lost used to be
+     * bumped to a second row above - so the ladder carried a third line for a single price with the
+     * space beside it empty. Packed side by side the pair fits the row below, beside the stop.
      */
     @Test
-    fun `an entry band too narrow to fit takes both ends above`() {
+    fun `a band too narrow to centre is packed side by side, not stacked`() {
         val slots = place(
             // stop, entry low, entry high, target 1, target 2
             centers = listOf(10f, 60f, 63f, 160f, 290f),
@@ -109,8 +111,24 @@ class PriceLadderTest {
             groups = listOf(0, 1, 1, 2, 3),
         )
 
+        // The pair still goes over the line - the stop has the room below - but on one row, which
+        // is the whole point. Nothing sits on a second row any more.
         assertEquals(listOf(false, true, true, false, false), slots.map { it.above })
-        assertEquals(listOf(0, 0, 1, 0, 0), slots.map { it.row })
+        assertEquals(List(5) { 0 }, slots.map { it.row })
+        // Side by side: one label width plus the gap between their left edges.
+        assertEquals(34f + 6f, slots[2].left - slots[1].left, 0.01f)
+        // And the pair straddles the band rather than each end sitting on its own mark.
+        assertTrue(slots[1].left < 61.5f && slots[2].left > 61.5f)
+    }
+
+    /** A group of one is placed exactly where centring it on its mark would. */
+    @Test
+    fun `a lone label is untouched by the packing`() {
+        val grouped = place(centers = listOf(150f), widths = listOf(30f), groups = listOf(7))
+        val ungrouped = place(centers = listOf(150f), widths = listOf(30f))
+
+        assertEquals(135f, grouped.single().left, 0.01f)
+        assertEquals(ungrouped.single().left, grouped.single().left, 0.01f)
     }
 
     @Test

@@ -21,29 +21,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * How big a logo is drawn, per place it appears.
+ * How big a logo is drawn: as tall as the ticker line it sits on, rounded to 4dp.
  *
- * One rule behind all four: a logo is as tall as the text it identifies, rounded to 4dp. It is
- * standing in for the company's name, so matching the name's own block is what makes it read as
- * part of the heading rather than as an image dropped beside one - and it is what keeps every row
- * exactly as tall as it is today, which was the point. The comment on each value is the block it
- * was measured against; change the typography and these are what to re-measure.
+ * Two sizes because there are two ticker styles, and the rule is the whole of it. It was four, and
+ * the rule was "as tall as the name block" - which put a 40dp logo beside 82dp of names and left
+ * 42dp of nothing under it, on every card. Worse, a logo beside the block indents the block: the
+ * names started 52dp in while the ladder, the levels and the buttons under them started at the
+ * card's edge, so one card had two left edges. On the ticker's own line it has neither problem, and
+ * no card is taller than it was before logos existed.
  *
- * Named for the surface rather than by size, so the call sites say where they are and a later
- * change to one place cannot silently resize another that happened to share a number.
+ * Named for the type style rather than the surface, because that is what actually decides the
+ * number - change the typography and these are what to re-measure.
  */
 internal object LogoSize {
-    /** A trade tile: one 20dp `titleSmall` line, with the return and a chevron beside it. */
-    val Tile: Dp = 24.dp
+    /** Beside a 27dp `headlineSmall` ticker: the results card header, and the opinion sheet. */
+    val Header: Dp = 28.dp
 
-    /** A table row and an insights card - a 32dp block, and half the width on a wide screen. */
-    val Row: Dp = 28.dp
-
-    /** A position card: `titleSmall` over two `bodySmall` name lines, in a 52dp box. */
-    val Card: Dp = 32.dp
-
-    /** A card header or the opinion sheet: a 27dp `headlineSmall` ticker over its names. */
-    val Header: Dp = 40.dp
+    /** Beside a `titleMedium` or `titleSmall` ticker: table rows, trade tiles, and cards. */
+    val Row: Dp = 24.dp
 }
 
 /**

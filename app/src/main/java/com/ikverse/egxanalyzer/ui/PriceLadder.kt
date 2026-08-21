@@ -38,10 +38,35 @@ internal fun PriceLadder(
     point: RecommendationDataPoint,
     modifier: Modifier = Modifier,
     peak: Double? = null,
+) = PriceLadder(
+    stopLoss = point.stopLoss,
+    entryLow = point.buyPriceLow ?: point.buyPrice,
+    entryHigh = point.buyPriceHigh ?: point.buyPrice,
+    target1 = point.target1,
+    target2 = point.target2,
+    modifier = modifier,
+    peak = peak,
+)
+
+/**
+ * The same ladder, taking the levels themselves.
+ *
+ * A scored call carries the same five numbers under different names and is not a
+ * [RecommendationDataPoint] - it is what one became after the prices caught up with it. The drawing
+ * never needed the source object, only the levels, so this is what actually draws and the overload
+ * above is the Results tab's way in.
+ */
+@Composable
+internal fun PriceLadder(
+    stopLoss: Double?,
+    entryLow: Double?,
+    entryHigh: Double?,
+    target1: Double?,
+    target2: Double?,
+    modifier: Modifier = Modifier,
+    peak: Double? = null,
 ) {
-    val entryLow = point.buyPriceLow ?: point.buyPrice
-    val entryHigh = point.buyPriceHigh ?: point.buyPrice
-    val levels = listOfNotNull(point.stopLoss, entryLow, entryHigh, point.target1, point.target2)
+    val levels = listOfNotNull(stopLoss, entryLow, entryHigh, target1, target2)
     if (levels.size < 2) return
 
     val low = levels.min()
@@ -60,12 +85,12 @@ internal fun PriceLadder(
     // entry band are one fact, and a range printed with its floor below the line and its ceiling
     // above it stops reading as a range at all.
     val marks = buildList {
-        point.stopLoss?.let { add(Mark(it, stopColor, STOP_GROUP, MarkSide.BELOW)) }
+        stopLoss?.let { add(Mark(it, stopColor, STOP_GROUP, MarkSide.BELOW)) }
         entryLow?.let { add(Mark(it, entryColor, ENTRY_GROUP, MarkSide.CENTRE)) }
         entryHigh?.takeIf { it != entryLow }
             ?.let { add(Mark(it, entryColor, ENTRY_GROUP, MarkSide.CENTRE)) }
-        point.target1?.let { add(Mark(it, targetColor, TARGET1_GROUP, MarkSide.ABOVE)) }
-        point.target2?.let { add(Mark(it, targetColor, TARGET2_GROUP, MarkSide.ABOVE)) }
+        target1?.let { add(Mark(it, targetColor, TARGET1_GROUP, MarkSide.ABOVE)) }
+        target2?.let { add(Mark(it, targetColor, TARGET2_GROUP, MarkSide.ABOVE)) }
         // Drawn as an arrow rather than a tick, so its side is never read. See drawPeak.
         peak?.let { add(Mark(it, peakColor, PEAK_GROUP, MarkSide.CENTRE)) }
     }
@@ -178,9 +203,16 @@ internal data class LabelSlot(val left: Float, val row: Int, val above: Boolean 
  * no second row below: a label pushed down sits further from the mark it belongs to than from its
  * neighbour's, and the eye reads it as belonging to the wrong price.
  *
- * Labels sharing a [groups] entry describe one fact and move as a unit. An entry band with its
- * floor printed below the line and its ceiling above it is two prices, not a range - and a band
- * whose ends cannot sit side by side takes both of them above rather than leaving one behind.
+ * Labels sharing a [groups] entry describe one fact and are placed as **one block, side by side**,
+ * centred on the span of their own marks - see [packGroup]. A range is a pair of numbers read
+ * together, so the two have to sit on one line; centring each on its own mark instead put them on
+ * top of each other whenever the band was narrow, and the loser was bumped to a row of its own. A
+ * ladder then grew a third line to carry one price, with the space beside it empty. Packing costs
+ * each end a few pixels of drift off its own tick, which a range can afford precisely because the
+ * two ends are one fact.
+ *
+ * A group of one packs to exactly the same place centring it would give, so an ordinary level is
+ * unaffected by any of this.
  *
  * Everything is clamped inside the track, so the outermost prices stay readable rather than running
  * off the edge.
@@ -193,8 +225,6 @@ internal fun layoutPriceLabels(
     groups: List<Int> = centers.indices.toList(),
 ): List<LabelSlot> {
     val slots = arrayOfNulls<LabelSlot>(centers.size)
-    fun left(index: Int) =
-        (centers[index] - widths[index] / 2f).coerceIn(0f, max(0f, trackWidth - widths[index]))
 
     // The single row under the line, and as many above it as the crowding needs.
     var belowEnd = 0f
@@ -208,28 +238,52 @@ internal fun layoutPriceLabels(
         .sortedBy { members -> members.minOf { centers[it] } }
         .forEach { members ->
             val ordered = members.sortedBy { centers[it] }
-            // The row below takes the whole group or none of it: half a range down there is worse
-            // than all of it out of the way.
-            val fitsBelow = ordered.fold(belowEnd) { end, index ->
-                if (left(index) < end) return@fold Float.MAX_VALUE
-                left(index) + widths[index] + gap
-            }
-            if (fitsBelow != Float.MAX_VALUE) {
-                ordered.forEach { index ->
-                    slots[index] = LabelSlot(left(index), row = 0, above = false)
+            // Packed once and then placed as a unit, so the group occupies one row wherever it
+            // lands. The row below takes the whole block or none of it: half a range down there is
+            // worse than all of it out of the way.
+            val packed = packGroup(ordered, centers, widths, trackWidth, gap)
+            val blockLeft = packed.first()
+            val blockEnd = packed.last() + widths[ordered.last()] + gap
+            if (blockLeft >= belowEnd) {
+                ordered.forEachIndexed { position, index ->
+                    slots[index] = LabelSlot(packed[position], row = 0, above = false)
                 }
-                belowEnd = fitsBelow
+                belowEnd = blockEnd
                 return@forEach
             }
-            ordered.forEach { index ->
-                var row = 0
-                while (row < aboveEnds.size && left(index) < aboveEnds[row]) row++
-                if (row == aboveEnds.size) aboveEnds += 0f
-                aboveEnds[row] = left(index) + widths[index] + gap
-                slots[index] = LabelSlot(left(index), row = row, above = true)
+            var row = 0
+            while (row < aboveEnds.size && blockLeft < aboveEnds[row]) row++
+            if (row == aboveEnds.size) aboveEnds += 0f
+            aboveEnds[row] = blockEnd
+            ordered.forEachIndexed { position, index ->
+                slots[index] = LabelSlot(packed[position], row = row, above = true)
             }
         }
     return slots.map { requireNotNull(it) }
+}
+
+/**
+ * One group's labels laid side by side, as a block centred on the span of its marks.
+ *
+ * Returns a left edge per member, in the order given - which must be axis order, so the prices
+ * still read left to right. The block is clamped inside the track like any single label, so a range
+ * at either end of the ladder stays readable instead of running off it.
+ */
+private fun packGroup(
+    ordered: List<Int>,
+    centers: List<Float>,
+    widths: List<Float>,
+    trackWidth: Float,
+    gap: Float,
+): List<Float> {
+    val blockWidth = ordered.sumOf { widths[it].toDouble() }.toFloat() + gap * (ordered.size - 1)
+    val centre = (centers[ordered.first()] + centers[ordered.last()]) / 2f
+    var left = (centre - blockWidth / 2f).coerceIn(0f, max(0f, trackWidth - blockWidth))
+    return ordered.map { index ->
+        val start = left
+        left += widths[index] + gap
+        start
+    }
 }
 
 /**

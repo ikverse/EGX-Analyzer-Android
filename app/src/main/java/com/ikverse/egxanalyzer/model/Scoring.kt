@@ -233,7 +233,8 @@ object Scoring {
                     if (hitStop) {
                         return partial(
                             partialTarget ?: fullTarget, day.date, elapsed, peak, peakOn, trough,
-                            troughOn, entryLow, entryHigh, stoppedAfter = true, windowComplete = true,
+                            troughOn, entryLow, entryHigh, stoppedAfter = true,
+                            stoppedOn = day.date, windowComplete = true,
                         )
                     }
                     // The entry first became available on the same session a target was reached.
@@ -268,7 +269,7 @@ object Scoring {
                     if (partialOn != null && hitStop) {
                         return partial(partialTarget, partialOn, partialElapsed, peak, peakOn,
                             trough, troughOn, entryLow, entryHigh, stoppedAfter = true,
-                            windowComplete = true)
+                            stoppedOn = day.date, windowComplete = true)
                     }
                     return Scored(
                         Outcome.FULL_HIT, day.date, fullTarget, elapsed, peak, peakOn, trough,
@@ -284,7 +285,7 @@ object Scoring {
                     if (partialOn != null) {
                         return partial(partialTarget, partialOn, partialElapsed, peak, peakOn,
                             trough, troughOn, entryLow, entryHigh, stoppedAfter = true,
-                            windowComplete = true)
+                            stoppedOn = day.date, windowComplete = true)
                     }
                     return Scored(
                         Outcome.STOPPED, day.date, stopLoss, elapsed, peak, peakOn, trough,
@@ -309,7 +310,7 @@ object Scoring {
                 Scored(Outcome.ENTRY_NOT_REACHED, null, null, considered.size, peak, peakOn, trough, troughOn, null)
             partialOn != null -> partial(partialTarget, partialOn, partialElapsed, peak, peakOn,
                 trough, troughOn, entryLow, entryHigh, stoppedAfter = false,
-                windowComplete = complete)
+                stoppedOn = null, windowComplete = complete)
             complete -> Scored(
                 Outcome.EXPIRED, null, lastClose, considered.size, peak, peakOn, trough, troughOn,
                 returnPct(entryLow, entryHigh, lastClose),
@@ -329,6 +330,8 @@ object Scoring {
         entryLow: Double?,
         entryHigh: Double?,
         stoppedAfter: Boolean,
+        /** The session the stop broke on, which is not [on] unless both happened in one. */
+        stoppedOn: LocalDate?,
         windowComplete: Boolean,
     ) = Scored(
         outcome = Outcome.PARTIAL_HIT,
@@ -341,6 +344,7 @@ object Scoring {
         troughOn = troughOn,
         returnPct = returnPct(entryLow, entryHigh, target),
         stoppedAfterPartial = stoppedAfter,
+        stoppedOn = stoppedOn,
         windowComplete = windowComplete,
     )
 
@@ -596,6 +600,14 @@ data class Scored(
     val returnPct: Double?,
     /** The first target was banked and the stop was reached afterwards. */
     val stoppedAfterPartial: Boolean = false,
+    /**
+     * The session the stop broke on, for a call that banked the first target before it.
+     *
+     * Carried separately because [settledOn] is the session the target was reached, which is what
+     * the call is scored on - and the two are only the same session when both happened in one. A
+     * card naming the stop needs the day it actually broke.
+     */
+    val stoppedOn: LocalDate? = null,
     /** Set only for [Outcome.AMBIGUOUS], saying which pair of events could not be ordered. */
     val ambiguity: Ambiguity? = null,
     /** False while the window is still running, so a partial hit may still become a full one. */

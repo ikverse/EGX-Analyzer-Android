@@ -64,6 +64,11 @@ class ScoringTest {
         )
         assertEquals(Outcome.PARTIAL_HIT, scored.outcome)
         assertEquals(true, scored.stoppedAfterPartial)
+        // Two different sessions, and the card names both. It is scored on the day it reached the
+        // target; the stop that undid it came a session later, and saying so used to mean printing
+        // the target's date beside the word "stop".
+        assertEquals(start.plusDays(1), scored.settledOn)
+        assertEquals(start.plusDays(2), scored.stoppedOn)
     }
 
     @Test
@@ -118,6 +123,10 @@ class ScoringTest {
         )
         assertEquals(Outcome.PARTIAL_HIT, scored.outcome)
         assertEquals(true, scored.stoppedAfterPartial)
+        // One session, so the two dates are the same one - which is the case the card words as
+        // "reached target 1 and fell back to the stop on <date>" rather than as two events.
+        assertEquals(start, scored.settledOn)
+        assertEquals(start, scored.stoppedOn)
         assertNull(scored.ambiguity)
     }
 

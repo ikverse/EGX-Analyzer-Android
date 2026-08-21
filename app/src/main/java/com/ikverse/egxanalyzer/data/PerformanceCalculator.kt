@@ -102,6 +102,7 @@ object PerformanceCalculator {
                         sessionsElapsed = scored.sessionsElapsed,
                         ambiguity = scored.ambiguity,
                         stoppedAfterPartial = scored.stoppedAfterPartial,
+                        stoppedOn = scored.stoppedOn,
                         windowComplete = scored.windowComplete,
                         sessions = sessions,
                     )

@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -81,6 +80,7 @@ import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.StockOpinion
 import com.ikverse.egxanalyzer.model.opinionId
 import com.ikverse.egxanalyzer.model.positionId
+import com.ikverse.egxanalyzer.model.riskReward
 import com.ikverse.egxanalyzer.model.sessionFor
 import com.ikverse.egxanalyzer.ui.theme.extraColors
 import kotlinx.coroutines.delay
@@ -345,7 +345,15 @@ private fun ScoredCall.reason(): String {
     return when (outcome) {
         Outcome.FULL_HIT -> "Reached target 2 on $on."
         Outcome.PARTIAL_HIT -> when {
-            stoppedAfterPartial -> "Reached target 1, then fell back to the stop on $on."
+            // Two dates, because they are two sessions. This used to name the target's date as the
+            // day the stop broke, for want of any other date to name - the call is scored on the
+            // session it reached the target, and the stop that undid it came later.
+            stoppedAfterPartial -> when (val stop = stoppedOn?.format(OUTCOME_DATE)) {
+                // Scored before the stop's own date was recorded, so only the fact survives.
+                null -> "Reached target 1 on $on, then fell back to the stop."
+                on -> "Reached target 1 and fell back to the stop on $on."
+                else -> "Reached target 1 on $on, then fell back to the stop on $stop."
+            }
             // Not final yet: target 2 is still in reach, and a card that said only "reached
             // target 1" would read as the verdict.
             !windowComplete ->
@@ -386,6 +394,16 @@ private fun ScoredCall.reason(): String {
 }
 
 private val OUTCOME_DATE = DateTimeFormatter.ofPattern("d MMM")
+
+/**
+ * The same date carrying its year, for the line that dates the call itself.
+ *
+ * A caption under a figure is read against the card it sits on and can drop the year; the line that
+ * says when a call was made is the one place a reader is placing it in time, and a record going back
+ * more than a year has two 3 Augusts in it. This line used to print the raw ISO date, which was the
+ * only date on the card not in this app's own format.
+ */
+private val CALL_DATE = DateTimeFormatter.ofPattern("d MMM yyyy")
 
 /**
  * The source with the best record, and what that record is actually made of.
@@ -835,9 +853,14 @@ private fun ScoredCallRow(
                 Modifier.heightIn(min = CardHeaderHeight),
                 verticalAlignment = Alignment.Top,
             ) {
-                StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
                 Column(Modifier.weight(1f)) {
-                    Text(call.ticker, style = MaterialTheme.typography.titleSmall)
+                    // On the ticker's line, not beside the block: this row is held at a minimum
+                    // height, so a logo beside the column left a fixed gap under itself on every
+                    // card however short the name was.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                        Text(call.ticker, style = MaterialTheme.typography.titleSmall)
+                    }
                     listOfNotNull(call.companyArabic, call.companyEnglish)
                         .filter(String::isNotBlank)
                         .distinct()
@@ -855,11 +878,11 @@ private fun ScoredCallRow(
                 OutcomeLabel(call)
             }
             Text(
-                "${call.channel} · called ${call.openedOn}" +
-                    (call.settledOn?.let { " · settled $it" } ?: "") +
+                "${call.channel} · called ${call.openedOn.format(CALL_DATE)}" +
+                    (call.settledOn?.let { " · settled ${it.format(CALL_DATE)}" } ?: "") +
                     // The channel did post it that day, so the card stays; it is the same bet as
                     // the call it repeats, so no rate counts it twice.
-                    (call.repeatOf?.let { " · repeat of $it, counted once" } ?: ""),
+                    (call.repeatOf?.let { " · repeat of ${it.format(CALL_DATE)}, counted once" } ?: ""),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -894,49 +917,119 @@ private fun ScoredCallRow(
                     }
                 }
             }
+            // The shape of the call, which four prices in a column cannot show: whether it risked a
+            // little for a lot or the reverse, and how far up that scale the stock actually got.
+            // The same drawing the Results tab has always used for the same five levels, so a call
+            // read on one tab and again on the other is the same picture in both places.
+            PriceLadder(
+                stopLoss = call.stopLoss,
+                entryLow = call.entryLow,
+                entryHigh = call.entryHigh,
+                target1 = call.target1,
+                target2 = call.target2,
+                // The extreme inside the judged window, which is what the figure below it says too.
+                peak = call.peakHigh,
+            )
             // Two groups rather than eight loose figures: what the channel asked for, and what the
             // market did about it. Colour says which is which without reading the labels.
             FigureGroup(
-                "The call",
+                // On the heading rather than in a figure of its own, because it is not a fifth
+                // level - it is what the four below come to. Without it the card prints four prices
+                // and leaves the reader dividing them to find out what the call was actually worth.
+                "The call" + (call.riskReward?.let { " · risk : reward ${it.asRatio()}" } ?: ""),
                 listOf(
                     // Paid and risked first, aimed at second: wrapped two-up this keeps the targets
                     // side by side in reading order rather than splitting them across rows.
-                    { Figure("Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry) },
-                    { Figure("Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f), tone = PriceRole.stop) },
-                    { Figure("Target 1", formatPrice(call.target1), Modifier.weight(1f), tone = PriceRole.target) },
-                    { Figure("Target 2", formatPrice(call.target2), Modifier.weight(1f), tone = PriceRole.target) },
+                    {
+                        Figure(
+                            "Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry,
+                            // The base the three percentages below are measured from, said once
+                            // where they can all be read against it.
+                            caption = call.entryMidCaption(),
+                        )
+                    },
+                    // A price on its own says nothing across stocks: 59.80 is a wide stop on one
+                    // share and a tight one on another, and the distance is the half that compares.
+                    {
+                        Figure(
+                            "Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f),
+                            tone = PriceRole.stop, caption = call.fromEntry(call.stopLoss).distance(),
+                        )
+                    },
+                    {
+                        Figure(
+                            "Target 1", formatPrice(call.target1), Modifier.weight(1f),
+                            tone = PriceRole.target, caption = call.fromEntry(call.target1).distance(),
+                        )
+                    },
+                    {
+                        Figure(
+                            "Target 2", formatPrice(call.target2), Modifier.weight(1f),
+                            tone = PriceRole.target, caption = call.fromEntry(call.target2).distance(),
+                        )
+                    },
                 ),
             )
+            // The heading below is a boundary the eye loses once a group wraps onto three rows, so
+            // the two groups are ruled apart. Nothing separates the header from the figures: the
+            // group headings already do that work, and a third hairline starts to read as a table.
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             FigureGroup(
                 "What happened",
                 listOf(
+                    // "In window" rather than "since call": the scorer stops at the session a call
+                    // settles on, so on a call that settled three weeks ago these are the extremes
+                    // up to that day and not up to today. The label used to promise today.
                     {
                         Figure(
-                            "Peak since call", formatPrice(call.peakHigh), Modifier.weight(1f),
+                            "Peak in window", formatPrice(call.peakHigh), Modifier.weight(1f),
                             tone = PriceRole.market, on = call.peakOn,
                         )
                     },
                     {
                         Figure(
-                            "Trough since call", formatPrice(call.troughLow), Modifier.weight(1f),
+                            "Trough in window", formatPrice(call.troughLow), Modifier.weight(1f),
                             tone = PriceRole.market, on = call.troughOn,
                         )
                     },
-                    { Figure("Sessions elapsed", call.sessionsElapsed.toString(), Modifier.weight(1f)) },
+                    {
+                        Figure(
+                            // Two different facts under one label: sessions to settlement on a call
+                            // that settled, sessions so far on one still running. Said, rather than
+                            // left to the reader to infer from the outcome chip.
+                            if (call.settledOn != null) "Sessions to settle" else "Sessions elapsed",
+                            // The denominator is the point. Twelve sessions against a twenty-session
+                            // window is a call with room left; twelve of twelve is a call out of it,
+                            // and the bare count read the same either way.
+                            "${call.sessionsElapsed} of ${call.windowSessions}",
+                            Modifier.weight(1f),
+                            // The one call whose window is its own rather than the setting's, so
+                            // the figure above is not read against the window named on the page.
+                            caption = "T+1 call".takeIf { call.entrySessions < call.windowSessions },
+                        )
+                    },
                     {
                         Figure(
                             "Return",
                             call.returnPct.signedPercent(),
                             Modifier.weight(1f),
-                            tone = PriceRole.forReturn(call.returnPct),
+                            // Amber, not green. The figure is the return to target 1 and it is
+                            // correct, but the trade gave it back - and drawn in the target's own
+                            // colour it read as a win on a card whose only other word for it was
+                            // hidden behind the chip.
+                            tone = if (call.stoppedAfterPartial) {
+                                extraColors.expired
+                            } else {
+                                PriceRole.forReturn(call.returnPct)
+                            },
                             // A call that ran out of time reached no level it named, so its return
                             // is measured to wherever the window left it. Said on the card, because
                             // that is a different kind of figure from a return to a target the
                             // market actually got to.
-                            caption = if (call.outcome == Outcome.EXPIRED) {
-                                "to the last close"
-                            } else {
-                                null
+                            caption = when {
+                                call.stoppedAfterPartial -> "to target 1, then stopped"
+                                call.outcome == Outcome.EXPIRED -> "to the last close"
+                                else -> null
                             },
                         )
                     },
@@ -953,7 +1046,7 @@ private fun ScoredCallRow(
                             caption = latest?.let { price ->
                                 listOfNotNull(
                                     price.session.date.format(OUTCOME_DATE),
-                                    call.moveSince(price.session.close)?.let { formatPercent(it) },
+                                    call.fromEntry(price.session.close).distance(),
                                     // Named as what it is rather than as a warning: the session has
                                     // not closed, so the figure beside it is going to move.
                                     if (price.provisional) "still trading" else null,
@@ -963,6 +1056,9 @@ private fun ScoredCallRow(
                     },
                 ),
             )
+            // Ruled off the figures above: a filled pill hard against the last row of a group reads
+            // as another figure in it, and one of these two spends money.
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             // Wrapped rather than laid in a row: at 280dp the two labels together are wider than
             // the card, and a button pushed off the edge is a button nobody can press.
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
@@ -1112,10 +1208,14 @@ private fun SessionRow(
 }
 
 /**
- * Four figures that belong together, laid out two-up when the width cannot take four.
+ * Figures that belong together, laid out two-up when the width cannot take four.
  *
  * The cover screen has plenty of height and little width, so wrapping beats shrinking: four
  * columns at 443dp truncates every price it is supposed to show.
+ *
+ * Four was once the whole story and is now only the cap - "What happened" carries five, and a group
+ * whose last row is short spreads that row across the width rather than padding it out to the
+ * column count.
  */
 @Composable
 private fun FigureGroup(title: String, figures: List<@Composable RowScope.() -> Unit>) {
@@ -1139,9 +1239,13 @@ private fun FigureGroup(title: String, figures: List<@Composable RowScope.() -> 
             }
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 figures.chunked(perRow).forEach { row ->
+                    // A short last row spreads across the width rather than being padded out to the
+                    // column count. Every figure here already carries `weight(1f)`, so dropping the
+                    // spacers is what lets the odd one out have the room: "Latest close" was left
+                    // on half a row with its caption broken over three lines and the other half
+                    // of the row empty.
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                         row.forEach { figure -> figure() }
-                        repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }
@@ -1274,20 +1378,41 @@ private fun ChannelScore.winRateSplit(secondary: TextUnit): AnnotatedString {
 }
 
 /**
- * Where the stock is now against the middle of the buy zone.
+ * The middle of the buy zone: the one place every percentage on a call card is measured from.
  *
- * The same base the scored return uses, so the two figures on one card are measured from the same
- * place and only their end points differ - one stops where the call settled, this one does not stop.
+ * The same base the scored return uses, so the figures on one card differ only in their end points.
  */
-private fun ScoredCall.moveSince(close: Double?): Double? {
-    val entry = if (entryLow != null && entryHigh != null) {
-        (entryLow + entryHigh) / 2
-    } else {
-        entryLow ?: entryHigh ?: return null
-    }
-    if (entry == 0.0 || close == null) return null
-    return (close - entry) / entry * 100
+private fun ScoredCall.entryMid(): Double? = if (entryLow != null && entryHigh != null) {
+    (entryLow + entryHigh) / 2
+} else {
+    entryLow ?: entryHigh
 }
+
+/**
+ * Where a price sits against [entryMid], as a percentage.
+ *
+ * One rule for the levels the call named and for where the stock has since got to: a stop 4% below
+ * the entry and a close 7% below it are then two figures on one scale, and the card can be read
+ * down rather than worked out.
+ */
+private fun ScoredCall.fromEntry(price: Double?): Double? {
+    val entry = entryMid() ?: return null
+    if (entry == 0.0 || price == null) return null
+    return (price - entry) / entry * 100
+}
+
+/**
+ * A distance, named as one.
+ *
+ * A bare percentage under a price is read as the day's move, which is the one thing it is not.
+ */
+private fun Double?.distance(): String? = this?.let { "${formatPercent(it)} from entry" }
+
+/** The midpoint, where the zone is a range. A single price is its own middle and says so already. */
+private fun ScoredCall.entryMidCaption(): String? =
+    entryMid()
+        ?.takeIf { entryLow != null && entryHigh != null && entryLow != entryHigh }
+        ?.let { "mid ${formatPrice(it)}" }
 
 private fun ScoredCall.entryRange(): String = when {
     entryLow == null && entryHigh == null -> Dash
@@ -1307,11 +1432,8 @@ private fun Double?.signedPercent(): String = formatPercent(this)
 private fun Double?.asRatio(): String =
     if (this == null || isNaN()) Dash else "1 : ${formatPrice(this)}"
 
-private fun Double.trimZero(): String = formatPrice(this)
-
 private fun Double?.orDash(): String = formatPrice(this)
 
-private fun Int?.orDash(): String = this?.toString() ?: Dash
 
 /** Ticker plus two lines of company name, so every call card starts the same height. */
 private val CardHeaderHeight = 76.dp

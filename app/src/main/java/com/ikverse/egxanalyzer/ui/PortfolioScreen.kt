@@ -201,10 +201,16 @@ private fun OverdueCard(overdue: List<PositionView>, onOpen: (String) -> Unit) {
 /**
  * One late trade, in three facts and a press.
  *
- * The day count is the only thing here in the error colour, and it carries no word beside it: "6d"
- * in red under a heading that already says Overdue cannot be read as anything else, and the room
- * that buys goes to the entry date - the one figure saying how long the trade has actually been
- * held, which the session date the card opens into does not.
+ * The mark and the ticker have the top line to themselves, and everything measured sits under them.
+ * Four things on one row is what the logo made impossible: the ticker was the only one of them that
+ * could give way, so at four tiles across it wrapped a letter to a line. Nothing up there competes
+ * for the width now, and the ticker is held to a single line so it cannot stack again whatever the
+ * screen does.
+ *
+ * The day count carries no word beside it: "6d" in red under a heading that already says Overdue
+ * cannot be read as anything else. Beside it the entry date, which is the one figure saying how
+ * long the trade has actually been held - the session date the card opens into does not - and then
+ * the return, in the same green or red it wears everywhere else in the app.
  *
  * The press is the trip a call in Insights already makes: [AppState.openPosition] hands the id to
  * the arrival effect in [PositionSection], which clears the date filter only if it is what hides
@@ -213,11 +219,17 @@ private fun OverdueCard(overdue: List<PositionView>, onOpen: (String) -> Unit) {
  */
 @Composable
 private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifier = Modifier) {
+    // Read before the builder rather than inside it: the colour is a composable lookup and the line
+    // it belongs to is plain text.
+    val returnColor = PriceRole.forReturn(view.returnPct)
     val meta = buildAnnotatedString {
         withStyle(SpanStyle(color = MaterialTheme.colorScheme.error)) {
             append("${view.overdueDays}d")
         }
-        append(" · ${shortEntryDate(view.position.entryDate)}")
+        append(" · ${shortEntryDate(view.position.entryDate)} · ")
+        withStyle(SpanStyle(color = returnColor)) {
+            append(formatPercent(view.returnPct))
+        }
     }
     Card(
         onClick = onOpen,
@@ -230,37 +242,48 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
         border = cardOutline,
         shape = MaterialTheme.shapes.medium,
     ) {
-        Column(
+        // The logo leads the tile and both lines sit in one column beside it, which is the one
+        // arrangement that gives this card a single left edge: with the logo inside the top row,
+        // the measured line underneath it began at the card's padding while the ticker began past
+        // the logo, and the two disagreed by the width of it.
+        Row(
             Modifier.padding(horizontal = Space.m, vertical = Space.s),
-            verticalArrangement = Arrangement.spacedBy(Space.xs),
+            verticalAlignment = Alignment.Top,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                StockLogo(view.ticker, LogoSize.Tile, Modifier.padding(end = Space.s))
-                Text(view.ticker, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            StockLogo(view.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+            Column(
+                Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        view.ticker,
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Outlined.ArrowForward,
+                        // Named by the press it belongs to, one level up; a reader announcing the
+                        // glyph as well would say it twice.
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = Space.xs).size(IconSize.Inline),
+                    )
+                }
+                // Everything measured, on the line that has room for it. No word for the state:
+                // every trade on this card is one the user is keeping open, so saying so would be
+                // the card's own heading repeated on every tile. One line, ellipsis as the guard.
                 Text(
-                    formatPercent(view.returnPct),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = PriceRole.forReturn(view.returnPct),
-                )
-                Icon(
-                    Icons.AutoMirrored.Outlined.ArrowForward,
-                    // Named by the press it belongs to, one level up; a reader announcing the glyph
-                    // as well would say it twice.
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = Space.xs).size(IconSize.Inline),
+                    meta,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            // Two facts and nothing to say about the state: every trade on this card is one the
-            // user is keeping open, so a word for it would be the card's own heading repeated on
-            // every tile. The single line and the ellipsis stay as the guard for a long date.
-            Text(
-                meta,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
@@ -661,9 +684,11 @@ private fun PositionCard(
             // A fixed two lines for the name, so a company whose name wraps does not make its card
             // taller than the one beside it.
             Row(Modifier.heightIn(min = PositionHeaderHeight), verticalAlignment = Alignment.Top) {
-                StockLogo(position.ticker, LogoSize.Card, Modifier.padding(end = Space.s))
                 Column(Modifier.weight(1f)) {
-                    Text(position.ticker, style = MaterialTheme.typography.titleSmall)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StockLogo(position.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                        Text(position.ticker, style = MaterialTheme.typography.titleSmall)
+                    }
                     listOfNotNull(position.companyArabic, position.companyEnglish)
                         .filter(String::isNotBlank)
                         .distinct()
