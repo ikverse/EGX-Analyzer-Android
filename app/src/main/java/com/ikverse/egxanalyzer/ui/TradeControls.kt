@@ -219,14 +219,11 @@ internal fun TradeAction(
  */
 @Composable
 internal fun OverdueChip(days: Long) {
-    Surface(color = MaterialTheme.colorScheme.errorContainer, shape = CircleShape) {
-        Text(
-            "Overdue $days ${days.dayWord()}",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onErrorContainer,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-        )
-    }
+    OutlinePill(
+        "Overdue $days ${days.dayWord()}",
+        outline = MaterialTheme.colorScheme.error,
+        textColor = MaterialTheme.colorScheme.onErrorContainer,
+    )
 }
 
 /**
@@ -239,14 +236,11 @@ internal fun OverdueChip(days: Long) {
  */
 @Composable
 internal fun PriceScaleChip() {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = CircleShape) {
-        Text(
-            Outcome.PRICE_BREAK.label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-        )
-    }
+    OutlinePill(
+        Outcome.PRICE_BREAK.label,
+        outline = MaterialTheme.colorScheme.outline,
+        textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /**
@@ -482,15 +476,42 @@ private fun String.toWindowOrNull(): Int? = trim().toIntOrNull()
 /** Where the position stands, in one word, coloured the same everywhere it appears. */
 @Composable
 internal fun PositionStatusChip(view: PositionView) {
-    Surface(color = view.status.container(), shape = CircleShape) {
+    OutlinePill(
+        view.status.label,
+        outline = view.status.pillOutline(),
+        textColor = view.status.onContainer(),
+    )
+}
+
+/**
+ * The shape every pill on a card wears, and the only place it is described.
+ *
+ * A ring rather than a block of colour. A card can carry three of these at once - the status, how
+ * late it is, and why it is still open - and three filled pills stacked over the prices were
+ * competing with the figures they are supposed to annotate. The outline says the same thing in the
+ * same colour without taking a colour's worth of space, and the pill lands at 24dp instead of 28dp.
+ *
+ * [outline] is the status hue and [textColor] is the one the filled pill already used, so the
+ * wording keeps the weight it reads at while the colour moves to the edge.
+ */
+@Composable
+internal fun OutlinePill(text: String, outline: Color, textColor: Color) {
+    Surface(
+        color = Color.Transparent,
+        contentColor = textColor,
+        shape = CircleShape,
+        border = BorderStroke(PillOutline, outline),
+    ) {
         Text(
-            view.status.label,
+            text,
             style = MaterialTheme.typography.labelMedium,
-            color = view.status.onContainer(),
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = Space.s, vertical = Space.xs),
         )
     }
 }
+
+/** A hairline. The card's own [HeldOutline] is twice it, so a pill never competes with the edge. */
+private val PillOutline = 1.dp
 
 /**
  * The outline that marks a card as one you are actually in.
@@ -526,16 +547,17 @@ internal fun PositionStatus.tone(): Color = when (this) {
     PositionStatus.CLOSED_MANUALLY -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
+/**
+ * The ring a status pill wears, which is [tone] wherever the status means something.
+ *
+ * The exception is a position the user closed by hand. Its tone is `onSurfaceVariant`, a colour
+ * meant for text, and a ring drawn in it reads louder than the red on the card beside it - which is
+ * backwards for the one state that is finished business. `outline` is the role Material keeps for a
+ * border with nothing to say.
+ */
 @Composable
-internal fun PositionStatus.container(): Color = when (this) {
-    PositionStatus.OPEN -> MaterialTheme.colorScheme.primaryContainer
-    PositionStatus.PARTIAL_TARGET_HIT, PositionStatus.FULL_TARGET_HIT ->
-        MaterialTheme.colorScheme.tertiaryContainer
-    PositionStatus.STOPPED_OUT -> MaterialTheme.colorScheme.errorContainer
-    PositionStatus.EXPIRED -> extraColors.expiredContainer
-    // The most muted pair in the scheme, for the one state that is finished business.
-    PositionStatus.CLOSED_MANUALLY -> MaterialTheme.colorScheme.surfaceVariant
-}
+internal fun PositionStatus.pillOutline(): Color =
+    if (this == PositionStatus.CLOSED_MANUALLY) MaterialTheme.colorScheme.outline else tone()
 
 @Composable
 internal fun PositionStatus.onContainer(): Color = when (this) {

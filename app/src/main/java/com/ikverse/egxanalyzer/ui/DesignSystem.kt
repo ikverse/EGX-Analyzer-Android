@@ -116,12 +116,6 @@ object Space {
 }
 
 /**
- * Two icon sizes, and no others.
- *
- * [Inline] sits beside text - section headings, chips, list rows. [Action] is for anything with a
- * touch target of its own: navigation, buttons, menu affordances.
- */
-/**
  * How tall a pill-shaped button stands.
  *
  * Shorter than a Material button, because these share a row with each other rather than anchoring
@@ -130,7 +124,19 @@ object Space {
  */
 val PillHeight: Dp = 32.dp
 
+/**
+ * Three icon sizes, and no others.
+ *
+ * [Inline] sits beside text - section headings, chips, list rows. [Action] is for anything with a
+ * touch target of its own: navigation, buttons, menu affordances.
+ *
+ * [Hint] is the exception the overdue tile earned: a glyph whose whole job is to say the surface
+ * leads somewhere, on a card small enough that an [Inline] arrow stands nearly as tall as the logo
+ * across from it and reads as a control rather than a hint. Not for anything that is pressed on its
+ * own - it is under the touch target every such thing has to clear.
+ */
 object IconSize {
+    val Hint: Dp = 16.dp
     val Inline: Dp = 20.dp
     val Action: Dp = 24.dp
 }

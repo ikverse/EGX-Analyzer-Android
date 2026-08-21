@@ -299,18 +299,27 @@ private val SparkSize: Dp = 14.dp
 private val OutlineWidth: Dp = 1.5.dp
 
 /** How far the halo reaches past the pill, and how it thins on the way out. */
-private val GlowSpread: Dp = 14.dp
+private val GlowSpread: Dp = 10.dp
 private const val GlowRings = 6
 
 /**
  * How strong the innermost ring is, before the falloff and the breath scale it.
  *
- * Halved from 0.13. At the old strength the halo was the loudest thing on a card of prices, which
- * is the wrong order: the button is worth noticing, not worth looking at first.
+ * Down from 0.13 to 0.065 to here. At the old strengths the halo was the loudest thing on a card of
+ * prices, which is the wrong order: the button is worth noticing, not worth looking at first. This
+ * lands where the violet reads as a lit edge rather than as light spilling onto the card.
  */
-private const val GlowAlpha = 0.065f
+private const val GlowAlpha = 0.038f
 
 /** Half a cycle: the breath is four seconds out and back. */
 private const val BreathHalfMs = 2000
-private const val GlowPeak = 1.55f
+
+/**
+ * How much the halo swells at the top of the breath.
+ *
+ * Shallow on purpose. The breath is there to say the control is alive, and past about a third the
+ * swell stops reading as breathing and starts reading as blinking - which on a list of twenty cards
+ * is movement the eye has to keep dismissing.
+ */
+private const val GlowPeak = 1.30f
 private const val SweepMs = 2200
