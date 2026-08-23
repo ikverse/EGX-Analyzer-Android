@@ -200,8 +200,15 @@ class PriceRepository(
         // 404. Rebuilt from the intraday feed, which does hold it. Asked only when the stock really
         // is that thin, so a healthy series never pays for the request; once a history has been
         // built it is on disk, the stock is no longer thin, and it is never asked again.
+        //
+        // The whole hourly window rather than [from]. `from` is the incremental one - three days
+        // behind the newest stored session - and a rebuild handed it returns three days of history
+        // and stops. That is precisely how VLMRA ended up on five sessions: enough to clear
+        // [THIN_HISTORY_SESSIONS] and never be asked again, and nowhere near the 30 a call is
+        // judged over. This is the one fetch that must ignore where the stored history stops,
+        // because where it stops is the hole it exists to fill.
         val days = if (isThin(history, reported)) {
-            merge(derivedHistory(ticker, from, today), reported)
+            merge(derivedHistory(ticker, null, today), reported)
         } else {
             reported
         }
@@ -231,9 +238,20 @@ class PriceRepository(
     private fun isStale(previous: DailySession?, days: List<DailySession>, today: LocalDate) =
         PriceSanity.isStale(listOfNotNull(previous) + days, today)
 
-    /** Whether the daily feeds have given this stock anything worth calling a history. */
+    /**
+     * Whether the daily feeds have given this stock anything worth calling a history.
+     *
+     * Reported sessions only, and the exclusion is the point: a derived row is what the rebuild
+     * produced, so counting those lets a short rebuild answer the question that decides whether to
+     * rebuild. A stock then freezes at whatever its first attempt happened to return - five
+     * sessions, in the case this was found in. What is being asked is only ever what the daily
+     * feeds carry, and they never carry a derived row.
+     */
     private fun isThin(history: List<DailySession>, fetched: List<DailySession>): Boolean =
-        (history.map(DailySession::date) + fetched.map(DailySession::date))
+        (
+            history.filterNot(DailySession::derived).map(DailySession::date) +
+                fetched.map(DailySession::date)
+            )
             .distinct()
             .size < THIN_HISTORY_SESSIONS
 

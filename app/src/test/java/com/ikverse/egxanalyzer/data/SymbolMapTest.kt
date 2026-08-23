@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.data
 
 import org.json.JSONArray
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -33,8 +34,43 @@ class SymbolMapTest {
     @Test
     fun `no two stocks claim the same Yahoo symbol`() {
         // Name matching alone once produced three different stocks pointing at one symbol.
-        val symbols = each().map { it.getString("yahoo") }.toList()
+        // A declared alias is the one exception: two exchange codes naming one listing is a fact
+        // about what the sources write, not a mapping mistake. It has to say so in the row, so an
+        // accidental collision still fails here exactly as it did before.
+        val symbols = each()
+            .filter { it.optString("alias_of").isBlank() }
+            .map { it.getString("yahoo") }
+            .toList()
         assertEquals(symbols.size, symbols.toSet().size)
+    }
+
+    @Test
+    fun `an alias names a row that exists and carries that row's symbol`() {
+        val byCode = each().associateBy { it.getString("egx") }
+        each().filter { it.optString("alias_of").isNotBlank() }.forEach { row ->
+            val code = row.getString("egx")
+            val target = byCode[row.getString("alias_of")]
+            assertNotNull("alias $code names a code that is not in the mapping", target)
+            assertEquals("alias $code drifted from its target", target!!.getString("yahoo"), row.getString("yahoo"))
+            assertEquals("alias $code drifted from its target", target.optString("isin"), row.optString("isin"))
+        }
+    }
+
+    @Test
+    fun `the codes the sources write reach the listing they mean`() {
+        val actual = each().associate { it.getString("egx") to it.getString("yahoo") }
+        // Joined on this phone's own stored rows: the candidate's 16 July high and low equal the
+        // stored session's to the last float digit, which nothing else listed in Cairo does.
+        assertEquals("EGS65AN1C018.CA", actual["ADRI"])
+        assertEquals("EGS22171C010.CA", actual["IEEC"])
+        // Joined on the quoted stop instead, there being no stored row: 13.90 is the 20 August low
+        // of EGS3E1E1C013.CA exactly.
+        assertEquals("EGS3E1E1C013.CA", actual["AMII"])
+        // One listing under two codes. The model writes the left one, the exchange the right, and
+        // before this the left simply never priced.
+        assertEquals(actual["EFIH"], actual["EFHI"])
+        assertEquals(actual["QNBE"], actual["QNBA"])
+        assertEquals(actual["KRDI"], actual["NAKH"])
     }
 
     @Test

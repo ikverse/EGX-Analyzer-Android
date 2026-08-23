@@ -63,6 +63,13 @@
   "verified": "price"
  },
  {
+  "egx": "ADRI",
+  "yahoo": "EGS65AN1C018.CA",
+  "isin": "EGS65AN1C018",
+  "company": "Arab Development & Real Estate",
+  "verified": "price"
+ },
+ {
   "egx": "AFDI",
   "yahoo": "EGS69021C011.CA",
   "isin": "EGS69021C011",
@@ -130,6 +137,13 @@
   "yahoo": "EGS67221C019.CA",
   "isin": "EGS67221C019",
   "company": "Arab Moltaka Investments Co",
+  "verified": "price"
+ },
+ {
+  "egx": "AMII",
+  "yahoo": "EGS3E1E1C013.CA",
+  "isin": "EGS3E1E1C013",
+  "company": "Arabian Metal Industries And In",
   "verified": "price"
  },
  {
@@ -448,6 +462,14 @@
   "verified": "price"
  },
  {
+  "egx": "EFHI",
+  "yahoo": "EGS743O1C013.CA",
+  "isin": "EGS743O1C013",
+  "company": "E-finance For Digital and Finan",
+  "verified": "price",
+  "alias_of": "EFIH"
+ },
+ {
   "egx": "EFIC",
   "yahoo": "EGS38381C017.CA",
   "isin": "EGS38381C017",
@@ -763,6 +785,13 @@
   "verified": "price"
  },
  {
+  "egx": "IEEC",
+  "yahoo": "EGS22171C010.CA",
+  "isin": "EGS22171C010",
+  "company": "Industrial & Engineering Projec",
+  "verified": "price"
+ },
+ {
   "egx": "IFAP",
   "yahoo": "EGS07061C012.CA",
   "isin": "EGS07061C012",
@@ -1022,6 +1051,14 @@
   "verified": "price"
  },
  {
+  "egx": "NAKH",
+  "yahoo": "EGS02291C010.CA",
+  "isin": "EGS02291C010",
+  "company": "Al Khair River For Development ",
+  "verified": "price",
+  "alias_of": "KRDI"
+ },
+ {
   "egx": "NAPR",
   "yahoo": "EGS370O1C013.CA",
   "isin": "EGS370O1C013",
@@ -1202,6 +1239,14 @@
   "isin": "EGS691A1C011",
   "company": "Prime Holding",
   "verified": "price"
+ },
+ {
+  "egx": "QNBA",
+  "yahoo": "EGS60081C014.CA",
+  "isin": "EGS60081C014",
+  "company": "Qatar National Bank",
+  "verified": "price",
+  "alias_of": "QNBE"
  },
  {
   "egx": "QNBE",
