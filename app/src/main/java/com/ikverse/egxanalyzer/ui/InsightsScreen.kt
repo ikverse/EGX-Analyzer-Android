@@ -1107,7 +1107,17 @@ private fun ScoredCallRow(
                             )
                         }
                 }
-                OutcomeLabel(call)
+                // Stacked rather than set loose on the card: both chips are about how this one
+                // call was judged - what the market did with it, and how long it was ever given -
+                // and the timing used to sit a line under the channel's name, where it read as
+                // part of the date. Right-aligned, so the two rings share an edge.
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(Space.xs),
+                ) {
+                    OutcomeLabel(call)
+                    TimingLabel(call)
+                }
             }
             Text(
                 "${call.channel} · called ${call.openedOn.format(AppDates.DayMonthYear)}" +
@@ -1118,7 +1128,6 @@ private fun ScoredCallRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            TimingLabel(call)
             SourceRecord(channelScore)
             CallContext(call)
             ExtractionWarning(call)
@@ -1455,10 +1464,10 @@ private fun CallContext(call: ScoredCall) {
  * behind the chip, so a two-session call and a thirty-session one looked identical until one of
  * them expired.
  *
- * Tappable and outlined like the two chips beside it, for the reason [OutcomeLabel] gives: a chip
- * that is only sometimes tappable teaches nobody that it can be tapped. Drawn in `primary`, the
- * app's own voice, because it is neither a verdict nor a warning - the two things every other hue
- * on this card already means.
+ * Tappable and outlined like the outcome chip it sits under, for the reason [OutcomeLabel] gives:
+ * a chip that is only sometimes tappable teaches nobody that it can be tapped. Drawn in `primary`,
+ * the app's own voice, because it is neither a verdict nor a warning - the two things every other
+ * hue on this card already means.
  */
 @Composable
 private fun TimingLabel(call: ScoredCall) {

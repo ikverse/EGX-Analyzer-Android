@@ -8,7 +8,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,7 +35,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
@@ -164,10 +162,10 @@ private fun RecommendationCard(
 
             // No ladder here, deliberately. This card is a row of the report that would not fit as
             // a row: what it owes the reader is the call's figures, and a drawing of the same five
-            // numbers doubled the card's height to say what LevelRow says underneath it. The
+            // numbers doubled the card's height to say what LevelGrid says underneath it. The
             // occurrence sheet and the Portfolio card still draw it, where a single call is the
             // whole subject rather than one of a dozen being scanned.
-            LevelRow(point)
+            LevelGrid(point)
             point.riskRewardRatio()?.let { ratio ->
                 Text(
                     "Risk / reward  1 : ${"%.1f".format(ratio)}",
@@ -205,7 +203,7 @@ private fun RecommendationCard(
             AnimatedVisibility(expanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                     HorizontalDivider()
-                    OccurrenceDetail(stock, point, imagePath) { viewingImage = true }
+                    OccurrenceDetail(point, imagePath) { viewingImage = true }
                 }
             }
         }
@@ -307,34 +305,66 @@ private fun TimingChip(point: RecommendationDataPoint) {
  * Entry, targets and stop as labelled figures, each with its percentage where the source gave one,
  * followed by the two market levels the call was drawn against.
  *
+ * Six fixed slots in two columns, not a flow. A tile is as wide as its number happens to print, so
+ * flowing them put the same figure in a different place on every card - support trailing the stop
+ * on one, alone on a line of its own on the next - and a column of cards read as six loose numbers
+ * rather than one shape repeated. Fixed slots mean a card can be read down as well as across, and
+ * the market levels always land last. Left to right then down, which is the order the table, the
+ * occurrence sheet and the export all print these in.
+ *
+ * Every slot is drawn whether or not the source filled it: a card whose rows move depending on what
+ * the channel happened to publish is the thing this layout exists to stop, and a dash says "no
+ * figure given" where a closed gap says nothing at all.
+ *
  * Support and resistance belong here rather than under the source trace: they are figures the call
  * was made on, not evidence for where it came from. A stop sitting a hair under support is the
- * reason that stop is where it is, and that only reads when the two are on the same line.
+ * reason that stop is where it is, and that only reads when the two are a glance apart.
  */
 @Composable
-private fun LevelRow(point: RecommendationDataPoint) {
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(Space.xl),
-        verticalArrangement = Arrangement.spacedBy(Space.s),
-    ) {
-        Level("Entry", entryText(point), PriceRole.entry)
-        point.target1?.let {
-            Level("Target 1", figure(it, point.returnTp1Pct ?: impliedReturn(point, it)), PriceRole.target)
-        }
-        point.target2?.let {
-            Level("Target 2", figure(it, point.returnTp2Pct ?: impliedReturn(point, it)), PriceRole.target)
-        }
-        point.stopLoss?.let { Level("Stop loss", figure(it, point.riskPct), PriceRole.stop) }
+private fun LevelGrid(point: RecommendationDataPoint) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+        LevelPair(
+            { Level("Entry", entryText(point), PriceRole.entry, it) },
+            { Level("Target 1", figure(point.target1, returnPct(point, point.target1, point.returnTp1Pct)), PriceRole.target, it) },
+        )
+        LevelPair(
+            { Level("Target 2", figure(point.target2, returnPct(point, point.target2, point.returnTp2Pct)), PriceRole.target, it) },
+            { Level("Stop loss", figure(point.stopLoss, point.riskPct), PriceRole.stop, it) },
+        )
         // Plain, with no percentage beside them. The other four are distances from the entry, which
         // is what a percentage measures here; a support is simply a price the stock has held at.
-        point.support?.let { Level("Support", formatPrice(it), PriceRole.market) }
-        point.resistance?.let { Level("Resistance", formatPrice(it), PriceRole.market) }
+        LevelPair(
+            { Level("Support", formatPrice(point.support), PriceRole.market, it) },
+            { Level("Resistance", formatPrice(point.resistance), PriceRole.market, it) },
+        )
+    }
+}
+
+/**
+ * One row of the grid: two slots of equal width, whatever their numbers print at.
+ *
+ * The width is handed to each slot rather than taken by it, so the columns are the row's business
+ * and a [Level] stays a label over a figure.
+ */
+@Composable
+private fun LevelPair(
+    left: @Composable (Modifier) -> Unit,
+    right: @Composable (Modifier) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+        left(Modifier.weight(1f))
+        right(Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun Level(label: String, value: String, tone: androidx.compose.ui.graphics.Color) {
-    Column {
+private fun Level(
+    label: String,
+    value: String,
+    tone: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier) {
         Text(
             label.uppercase(),
             style = MaterialTheme.typography.labelSmall,
@@ -346,7 +376,6 @@ private fun Level(label: String, value: String, tone: androidx.compose.ui.graphi
 
 @Composable
 private fun OccurrenceDetail(
-    stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     imagePath: String?,
     onOpenImage: () -> Unit,
@@ -375,13 +404,6 @@ private fun OccurrenceDetail(
         point.timingEvidence?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
         }
-        // This occurrence's own note, or the stock's summary where the extraction pass wrote none.
-        // The card face no longer prints it, so this panel is where it survives, and the fallback
-        // has to come with it - otherwise a call whose source said nothing of its own loses the
-        // stock's paragraph altogether. Last in the panel, under the evidence it was written from.
-        (point.notesArabic ?: stock.notesSummary)?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End, modifier = Modifier.fillMaxWidth())
-        }
     }
 }
 
@@ -394,8 +416,17 @@ private fun entryText(point: RecommendationDataPoint): String {
     }
 }
 
-private fun figure(value: Double, percent: Double?): String =
-    if (percent == null) formatPrice(value) else "${formatPrice(value)}  (${formatPercent(percent)})"
+/** A price with its percentage, or the dash where the source gave no such level at all. */
+private fun figure(value: Double?, percent: Double?): String =
+    if (value == null || percent == null) {
+        formatPrice(value)
+    } else {
+        "${formatPrice(value)}  (${formatPercent(percent)})"
+    }
+
+/** What a source printed against a target, or what the entry implies where it printed nothing. */
+private fun returnPct(point: RecommendationDataPoint, target: Double?, stated: Double?): Double? =
+    stated ?: impliedReturn(point, target)
 
 /** Entry midpoint to target, so a card shows the upside even when the source never printed it. */
 private fun impliedReturn(point: RecommendationDataPoint, target: Double?): Double? {
