@@ -83,7 +83,179 @@ data class ScoredCall(
      * Null only for a call built without one, which is every test fixture and nothing on a device.
      */
     val requestId: String? = null,
+    /**
+     * What looks wrong about the levels this call was read out of a screenshot with.
+     *
+     * A **mark and never a subtraction**: every rate counts this call exactly as it did before, and
+     * the card gains a chip saying what does not add up. See [CallSanity], which explains why a
+     * heuristic is allowed to caption a card and not to move a published figure.
+     *
+     * Derived on every recompute like the outcome, never stored: it is a reading of the levels, and
+     * the levels are already on disk.
+     */
+    val faults: Set<CallFault> = emptySet(),
+    /**
+     * How many **other** sources called this stock for this same session.
+     *
+     * Detected since the two cards learned to press through to each other - they share a
+     * [positionId] - and counted by nothing until now. It is deliberately labelled crowding rather
+     * than confirmation: several channels reading the same chart on the same morning is one idea
+     * going round, not three independent readings of it, and whether it is worth anything is a
+     * question the record answers rather than a claim this field makes.
+     */
+    val alsoCalledBy: Int = 0,
+    /**
+     * How many times the source re-posted this call on a later analysed session.
+     *
+     * The other side of [repeatOf], which is a mark on the later postings so no rate counts them
+     * twice. Read from the first posting it is a figure in its own right: a channel that printed
+     * the same call every morning for a week kept it standing, and one that posted once and moved
+     * on did not. Zero on a call that was never repeated, and on the repeats themselves.
+     */
+    val repostings: Int = 0,
+    /**
+     * Which of the cheap local signals this call carries, and the whole basis of the shortlist.
+     *
+     * Derived from figures the app already holds, costs nothing, and predicts nothing - see
+     * [CallSignal]. Kept on the call so an order and a card read the same set rather than each
+     * working it out from a different set of inputs.
+     */
+    val signals: Set<CallSignal> = emptySet(),
 )
+
+/**
+ * A cheap local reason a call might be worth a closer look.
+ *
+ * The point is **which of twenty cards to spend a paid request on**, not what the market will do.
+ * Every one of these is a fact the app already holds and can state in words, which is the test each
+ * had to pass: a signal that cannot be explained on the card is a score wearing a statistic's
+ * clothes, and this app does not do that anywhere else.
+ *
+ * They are counted, never weighted. Weights would imply the four had been calibrated against
+ * outcomes, and they have not been - a count says exactly what it is, which is how many separate
+ * things happen to line up on one card.
+ */
+enum class CallSignal(val label: String) {
+    /** The source has a real record and it is a positive one. */
+    STRONG_SOURCE("strong source"),
+
+    /** The levels the channel printed offer more than they risk, by a clear margin. */
+    GOOD_RISK_REWARD("good risk to reward"),
+
+    /** Calls on this stock have paid, across every source that has made one. */
+    STOCK_DELIVERS("stock delivers"),
+
+    /** The price is inside the buy zone now, so the call is actually takeable today. */
+    PRICE_IN_BAND("price in the band"),
+    ;
+
+    companion object {
+        /** Above this, a source's or a stock's average is treated as a positive record. */
+        const val POSITIVE_RETURN = 0.0
+
+        /**
+         * The risk-to-reward a call has to offer before it counts for anything.
+         *
+         * Two to one. Below it the figure is not a signal - a source reaching a target 1.2 times
+         * its risk needs to be right most of the time, which is the thing the other signals are
+         * about and not this one.
+         */
+        const val GOOD_RISK_REWARD_RATIO = 2.0
+    }
+}
+
+/**
+ * The figures any group of scored calls yields, whatever the group is about.
+ *
+ * Extracted so a source's record and a stock's are computed by **one** piece of arithmetic rather
+ * than two that agree today. The rules folded in here - repeats excluded from every rate, risk to
+ * reward measured over every call rather than only the judged ones, the median rather than the mean
+ * for how long a call took - were argued out once for channels and are just as true of stocks.
+ */
+data class CallTally(
+    val calls: Int,
+    val judged: Int,
+    val fullHits: Int,
+    val partialHits: Int,
+    val stopped: Int,
+    val expired: Int,
+    val notTradable: Int,
+    val fullHitRate: Double?,
+    val anyTargetRate: Double?,
+    val averageReturn: Double?,
+    val medianSessionsToHit: Double?,
+    val medianSessionsToStop: Double?,
+    val discountedReturn: Double?,
+    val anyTargetRateFloor: Double?,
+    val averageRiskReward: Double?,
+    val repeats: Int,
+)
+
+/**
+ * What happens when one stock gets recommended, across every source that has recommended it.
+ *
+ * The only record of its kind anywhere: the app holds every call made on every stock and, until
+ * now, used that fact in exactly one place - a list inside the Ask AI prompt. A channel's record
+ * says whether to read the channel; this says whether the market has ever done what anybody
+ * printed about this particular stock, which is a different question and one no rate on the
+ * Insights page could answer.
+ *
+ * Same discipline as [ChannelScore] and by construction, since both are built from one [CallTally]:
+ * repeats excluded, the `MINIMUM_JUDGED_TO_RANK` floor deciding what may lead, figures below it
+ * reported exactly as measured and simply not ranked.
+ */
+data class StockScore(
+    val ticker: String,
+    val companyEnglish: String?,
+    val companyArabic: String?,
+    /**
+     * How many distinct sources have called it.
+     *
+     * The figure that separates a stock the whole channel list is pushing from one a single source
+     * likes. Counted over every call, repeats included: a source that named it is a source that
+     * named it, however many mornings it said so.
+     */
+    val sources: Int,
+    val tally: CallTally,
+)
+
+/**
+ * One subset of the record set beside the rest of it.
+ *
+ * Built for the two questions the app could always have answered and never asked - whether calls
+ * several sources agree on do better, and whether calls a source keeps re-posting do - and shaped
+ * so a third costs a line rather than a type.
+ *
+ * **It states two figures and never a verdict.** At the ten to thirty judged calls each side of one
+ * of these actually has, the spread of stock returns swamps the gap between two means; saying
+ * "consensus calls do better" would be reading noise out loud. The counts are printed beside the
+ * figures for exactly that reason, and [stateable] is what keeps a split off the screen entirely
+ * until both sides have enough behind them to be worth a reader's time.
+ */
+data class RecordSplit(
+    /** What the matching calls have in common, as a heading. */
+    val subject: String,
+    /** What the split is asking, in a sentence, for the reader who wants to know why it is here. */
+    val detail: String,
+    val matching: CallTally,
+    val rest: CallTally,
+) {
+    /**
+     * Whether both sides carry enough judged calls to be worth printing at all.
+     *
+     * Higher than the ranking floor on purpose. Ranking picks one source out of several and is
+     * wrong in a recoverable way; a split makes a claim about a *difference*, and a difference
+     * needs more behind it than an ordering does.
+     */
+    val stateable: Boolean
+        get() = matching.judged >= MINIMUM_JUDGED_TO_COMPARE &&
+            rest.judged >= MINIMUM_JUDGED_TO_COMPARE
+
+    companion object {
+        /** Judged calls needed on **each** side before a split is shown. */
+        const val MINIMUM_JUDGED_TO_COMPARE = 10
+    }
+}
 
 /**
  * What the call offered against what it risked, measured from the middle of the buy zone.
@@ -106,6 +278,71 @@ val ScoredCall.riskReward: Double?
         if (reward <= 0 || risk <= 0) return null
         return reward / risk
     }
+
+/**
+ * How the calls inside one session card are laid out.
+ *
+ * A **view**, never the record: every option orders the same calls and none of them hides one, so
+ * this can be changed freely without any figure on the page moving. `PerformanceCalculator` keeps
+ * ordering by ticker, which stays the default here - that is the canonical order of the record, and
+ * anything reading a report without a screen gets it.
+ *
+ * It exists because alphabetical is the one order that carries no information. A fresh report is a
+ * grid of twenty cards, and the two worth reading were placed by the first letter of the stock.
+ *
+ * The comparator takes the channel record rather than living on [ScoredCall], because the figure
+ * one option sorts on belongs to the source and not to the call. Nulls sort last in every option: a
+ * call whose source has no record yet, or whose levels contradict each other, has not earned the
+ * top of the list by being unmeasurable.
+ */
+enum class CallOrder(val label: String) {
+    /** The record's own order, and the one the calculator produces. */
+    TICKER("Ticker"),
+
+    /**
+     * Best source first, on the figure the ranking itself is ordered by.
+     *
+     * [ChannelScore.discountedReturn] and not the raw average, so a card and the channel ranking can
+     * never disagree about which of two sources is ahead - and so three lucky calls do not lead a
+     * session the way they are already stopped from leading the ranking.
+     */
+    SOURCE("Source record, best first"),
+
+    /** What the call offers against what it risks, from the levels the channel printed. */
+    RISK_REWARD("Risk to reward, best first"),
+
+    /**
+     * Most local signals first, which is what a paid question is best aimed at.
+     *
+     * The signals are counted and not weighted - see [CallSignal] - so this puts the cards where
+     * the most separate things happen to line up at the top. It ranks attention and predicts
+     * nothing, and the card names its own signals so the order can be checked by eye.
+     */
+    WORTH_ASKING("Worth a closer look"),
+    ;
+
+    fun sort(calls: List<ScoredCall>, scoreFor: (String) -> ChannelScore?): List<ScoredCall> =
+        when (this) {
+            TICKER -> calls.sortedBy(ScoredCall::ticker)
+            SOURCE -> calls.sortedWith(
+                compareByDescending<ScoredCall> {
+                    scoreFor(it.channel)?.discountedReturn ?: Double.NEGATIVE_INFINITY
+                }.thenBy(ScoredCall::ticker),
+            )
+            RISK_REWARD -> calls.sortedWith(
+                compareByDescending<ScoredCall> { it.riskReward ?: Double.NEGATIVE_INFINITY }
+                    .thenBy(ScoredCall::ticker),
+            )
+            // Ties broken by risk to reward before the ticker: at four signals a great many cards
+            // will carry the same count, and the alphabet is the order this whole enum exists to
+            // stop deciding which of them a reader sees first.
+            WORTH_ASKING -> calls.sortedWith(
+                compareByDescending<ScoredCall> { it.signals.size }
+                    .thenByDescending { it.riskReward ?: Double.NEGATIVE_INFINITY }
+                    .thenBy(ScoredCall::ticker),
+            )
+        }
+}
 
 /**
  * One trading session and every call made for it, scored.
@@ -236,6 +473,20 @@ data class PerformanceReport(
     val anyTargetRate: Double? = null,
     val byOutcome: Map<Outcome, Int> = emptyMap(),
     val channels: List<ChannelScore> = emptyList(),
+    /**
+     * What happens when each stock gets recommended, whoever recommended it.
+     *
+     * Recomputed by `refine` beside the channels, so a filtered view never quotes a stock's whole
+     * record beside rates that have been narrowed.
+     */
+    val stocks: List<StockScore> = emptyList(),
+    /**
+     * Subsets of the record set beside the rest of it, for the questions no single rate answers.
+     *
+     * Always built, and each one shown only where [RecordSplit.stateable] - so the screen has them
+     * ready the day there is enough behind them, and says nothing until then.
+     */
+    val splits: List<RecordSplit> = emptyList(),
     val sessions: List<ScoredSession> = emptyList(),
     /**
      * Where each stock stands now, as of the last refresh.

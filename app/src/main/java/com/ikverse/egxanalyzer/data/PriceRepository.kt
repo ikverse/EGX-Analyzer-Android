@@ -35,6 +35,14 @@ data class PriceRefresh(
      * that has actually happened here.
      */
     val stale: List<String> = emptyList(),
+    /**
+     * Stocks whose daily history was rebuilt from the intraday feed because no daily feed carries
+     * them.
+     *
+     * Reported rather than done quietly. It is the app building sessions rather than reading them,
+     * and every other place it does anything of the kind - a heal, a recorded break - says so.
+     */
+    val rebuilt: List<String> = emptyList(),
 )
 
 /**
@@ -49,6 +57,19 @@ class PriceRepository(
     private val localDataStore: LocalDataStore,
     private val symbolMap: SymbolMap,
     private val endpointTemplate: String = YAHOO_CHART_URL,
+    /**
+     * Builds a daily history for a stock the daily feeds do not carry, out of finer bars.
+     *
+     * A lambda rather than an `IntradayRepository` held here, for the reason `refresh` already
+     * takes `neededFrom` as one: this needs an answer, not a collaborator, and the two repositories
+     * are built side by side and know nothing of each other. Defaulting to none keeps every test
+     * that constructs a `PriceRepository` fetching exactly what it always did.
+     */
+    private val derivedHistory: suspend (
+        ticker: String,
+        from: LocalDate?,
+        today: LocalDate,
+    ) -> List<DailySession> = { _, _, _ -> emptyList() },
 ) {
     /**
      * Brings stored prices up to date.
@@ -103,7 +124,13 @@ class PriceRepository(
                 localDataStore.clearPriceBreaks(result.ticker)
                 localDataStore.clearIntraday(result.ticker)
             }
-            if (stored.isNotEmpty()) localDataStore.saveSessions(stored, SOURCE)
+            // Written under the source they actually came from, and the derived rows first. The
+            // table is keyed on (ticker, session_date) and replaces on conflict, so writing them
+            // the other way round would let a rebuilt session overwrite one the exchange really
+            // reported - the one direction this must never go.
+            val (built, reported) = stored.partition(DailySession::derived)
+            if (built.isNotEmpty()) localDataStore.saveSessions(built, DERIVED_SOURCE)
+            if (reported.isNotEmpty()) localDataStore.saveSessions(reported, SOURCE)
             localDataStore.savePriceBreaks(fetched.flatMap(Fetched::breaks))
         }
         PriceRefresh(
@@ -115,6 +142,9 @@ class PriceRepository(
             unpriced = fetched.filter { it.sessions.isEmpty() }.map(Fetched::ticker),
             suspect = fetched.filter { it.breaks.isNotEmpty() }.map(Fetched::ticker),
             stale = fetched.filter(Fetched::stale).map(Fetched::ticker),
+            rebuilt = fetched
+                .filter { result -> result.sessions.any(DailySession::derived) }
+                .map(Fetched::ticker),
         )
     }
 
@@ -151,7 +181,7 @@ class PriceRepository(
         from: LocalDate?,
         today: LocalDate,
     ): Fetched {
-        val days = fetchAllFeeds(ticker, from, today)
+        val reported = fetchAllFeeds(ticker, from, today)
         // The whole stored series rather than its last session alone. The boundary between disk and
         // this fetch is where a break usually falls, but it is not the only place one can be: a
         // split that happened while an earlier version of this app was storing prices is already
@@ -159,6 +189,16 @@ class PriceRepository(
         // it back costs one indexed query against a table this same call is about to write to.
         val history = if (previous == null) emptyList() else withContext(Dispatchers.IO) {
             localDataStore.allSessions(ticker)
+        }
+        // A stock the daily feeds do not carry has almost nothing after that merge, however wide a
+        // window was asked for - the ISIN endpoint serves one session and the legacy symbol is a
+        // 404. Rebuilt from the intraday feed, which does hold it. Asked only when the stock really
+        // is that thin, so a healthy series never pays for the request; once a history has been
+        // built it is on disk, the stock is no longer thin, and it is never asked again.
+        val days = if (isThin(history, reported)) {
+            merge(derivedHistory(ticker, from, today), reported)
+        } else {
+            reported
         }
         val found = PriceSanity.breaks(ticker, history + days)
         // Nothing to heal, or nothing a refetch could heal: with no stored history this fetch was
@@ -185,6 +225,31 @@ class PriceRepository(
 
     private fun isStale(previous: DailySession?, days: List<DailySession>, today: LocalDate) =
         PriceSanity.isStale(listOfNotNull(previous) + days, today)
+
+    /** Whether the daily feeds have given this stock anything worth calling a history. */
+    private fun isThin(history: List<DailySession>, fetched: List<DailySession>): Boolean =
+        (history.map(DailySession::date) + fetched.map(DailySession::date))
+            .distinct()
+            .size < THIN_HISTORY_SESSIONS
+
+    /**
+     * Derived sessions with the reported ones laid over them.
+     *
+     * The order is the whole of it: what the exchange actually reported for a session always wins,
+     * so a derived row can only ever fill a day the daily feeds had nothing for. That is also what
+     * makes this safe to run again - the day a stock's real feed comes back, its rows replace the
+     * derived ones for free.
+     */
+    private fun merge(
+        derived: List<DailySession>,
+        reported: List<DailySession>,
+    ): List<DailySession> {
+        if (derived.isEmpty()) return reported
+        val byDate = LinkedHashMap<LocalDate, DailySession>()
+        derived.forEach { byDate[it.date] = it }
+        reported.forEach { byDate[it.date] = it }
+        return byDate.values.sortedBy(DailySession::date)
+    }
 
     /**
      * Reads every feed that carries this stock and merges them under the exchange's own code.
@@ -299,8 +364,37 @@ class PriceRepository(
         private const val OVERLAP_DAYS = 3L
 
         private const val USER_AGENT = "Mozilla/5.0 (compatible; EGX-Analyzer)"
-        private const val SOURCE = "Yahoo Finance"
         private const val CONCURRENCY = 4
+
+        /**
+         * Below how many known sessions a stock counts as one the daily feeds are not carrying.
+         *
+         * Measured behaviour on both sides of this. A stock with a working legacy symbol answers a
+         * 40-day window with about 25 sessions; one without answers with the ISIN feed's single
+         * session and nothing else, whatever window is asked for. Five sits in a gap so wide that
+         * no threshold inside it behaves differently.
+         *
+         * A genuinely new listing is thin too, and rebuilding its history from the intraday feed
+         * returns exactly the sessions that exist - which is right, not wrong.
+         */
+        internal const val THIN_HISTORY_SESSIONS = 5
+
+        /** What the daily feeds reported, which is every row the app has ever stored until now. */
+        internal const val SOURCE = "Yahoo Finance"
+
+        /**
+         * A session this app built by aggregating finer bars, rather than one a daily feed reported.
+         *
+         * The `source` column has carried provenance since the table was created and was written by
+         * exactly one value, so a second value is the column being used for its purpose rather than
+         * a flag smuggled through it - and it needed no migration, which on this table means no
+         * chance of an upgrade taking the prices already on the phone with it.
+         *
+         * `LocalDataStore` compares against this constant to fill [DailySession.derived]. Changing
+         * the string would silently reclassify every row already written under it, which is what
+         * `PriceRepositoryDerivedTest` pins.
+         */
+        internal const val DERIVED_SOURCE = "Yahoo Finance (1h aggregated)"
 
         /**
          * Where a stock's fetch has to start, or null to ask for the full history.

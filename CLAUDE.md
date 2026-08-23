@@ -80,8 +80,14 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   image it is citing, which produced exclusions naming the wrong card.
 - `data/ConsolidatedParser.kt` — the model's JSON into `ConsolidatedRecommendation`.
 - `model/Scoring.kt` — how a call is judged. See below.
-- `data/IntradayRepository.kt` — five-minute bars for the sessions daily figures cannot order.
+- `data/IntradayRepository.kt` — five-minute bars for the sessions daily figures cannot order, and
+  hourly bars for the stocks no daily feed carries at all. See below.
+- `data/DailyFromIntraday.kt` — bars aggregated into daily sessions, for those stocks. See below.
+- `model/CallSanity.kt` — whether a call's levels can be believed. See below.
+- `model/CallShortlist.kt` — which card is worth a paid question. See below.
+- `model/CallAlerts.kt` + `data/CallAlertNotifier.kt` — a stock reaching a buy zone nobody took.
 - `data/PerformanceCalculator.kt` — per-channel and per-session rollups, and the ranking.
+- `data/PriceHealth.kt` — which stocks the feed has gone quiet about, and what it costs. See below.
 - `data/PortfolioCalculator.kt` + `model/Position.kt` — the trades the user actually took. See below.
 - `model/TradeAlerts.kt` + `data/TradeStatusNotifier.kt` — what has changed about a trade since the
   user was last told, and how the phone says so. See below.
@@ -217,6 +223,37 @@ Being right often is not the same as being worth following, and the ranking used
   printed whatever the market did about them. The context a hit rate cannot be read without: 90% at
   0.3 to 1 is a losing source. A call whose levels contradict each other is left out rather than
   counted as risking nothing.
+- **The record reaches the call card, which is where the decision is made.** `SourceRecord` in
+  `ui/InsightsScreen.kt` prints one line under the channel's name: what a call from this source has
+  been worth on average, over how many judged. Every other figure on that card judges the one call;
+  this is the only thing on it that says anything about who made it. The whole record was measured
+  for every channel and reached only the ranking — a page the reader has to think to go and read
+  separately, while the grid of fresh cards is where a call is actually weighed. `averageReturn`
+  rather than the hit rate, for the reason the ranking is ordered on it. Below
+  `MINIMUM_JUDGED_TO_RANK` the figure **keeps its number and loses its colour**, which is the rule
+  the channel card already followed; the words "too few to rank" are added here and not there
+  because a card sitting in a session has no ranking around it to say so. Absent, not blank, for a
+  source with nothing judged — a line reading "no record yet" on every card of a fresh install is a
+  line on every card.
+- **`CallOrder` lets the reader sort a session's calls, and alphabetical is still the default.**
+  `PerformanceCalculator` goes on ordering by ticker — that is the record's own order, and anything
+  reading a report without a screen gets it — while `AppPreferences.callOrder` decides what the
+  screen lays out. Alphabetical is the one order that carries no information: a fresh report is a
+  grid of twenty cards where the two worth reading were placed by the first letter of the stock.
+  `SOURCE` sorts on `discountedReturn` and **not** the raw average, so a card and the ranking can
+  never disagree about which of two sources is ahead. Nulls sort **last** in every option — a call
+  whose source has no record, or whose levels contradict each other, has not earned the top of the
+  list by being unmeasurable, and sorting them high would make a fresh install's order arbitrary.
+  It is a view and never the record: `CallOrderTest` checks that every option lays out every call,
+  because an order that quietly dropped the one unmeasurable card would be strictly worse than the
+  alphabet it replaced. Stored by **name** like `portfolioOrder`, travels with the other settings,
+  and moves no figure on the page.
+- **`refine` re-runs the second pass, it does not carry it over.** Crowding, re-postings and the
+  shortlist signals all describe a call against the calls *around* it, and a filter changes which
+  calls those are — a card left reading "2 other sources" beside a page showing one of them would
+  be the screen disagreeing with itself. `enrich` is one function called by both `report` and
+  `refine` for the same reason every other figure is recomputed in both: the figures on screen
+  describe the calls on screen.
 
 ### Ordering the two events inside one session
 
@@ -271,6 +308,222 @@ and no single label was true of all three - the date says the part that matters.
   `DailySession.inconsistent` catches the same thing from the other side — GBCO came back on 16
   August with a close of 30.16 beneath a low of 30.31, the two fields written at different moments
   of an unfinished session.
+
+### What happens when a stock gets recommended
+
+`ChannelScore` says whether to read a source. `StockScore` says whether the market has ever done
+what anybody printed about **this stock**, across every source that named it — a different question,
+and one no rate on the page could answer. The app has held the only record of its kind in existence
+since the beginning and used it in exactly one place: a list inside the Ask AI prompt, which is to
+say a paid request nobody had made yet.
+
+- **One piece of arithmetic, two groupings.** `PerformanceCalculator.tally` returns every figure a
+  group of calls yields, and both `channelScores` and `stockScores` are built from it. Two copies
+  would be two copies that agree until one is touched, and every rule folded in — repeats out of
+  every rate, risk to reward over every call rather than only the judged ones, medians rather than
+  means — was argued out for channels and is just as true of stocks.
+- Grouped on the **normalized** ticker, or `COMI` and `COMI.CA` split one stock's record in half and
+  rank both halves. Same floor, same order, same thin-record rule as the channel cards.
+- `sources` counts distinct channels **over every posting**, repeats included: a source that named a
+  stock named it, however many mornings it went on saying so.
+
+### The two questions the record can ask itself
+
+`RecordSplit` sets one subset of the record beside the rest of it. Both instances rest on something
+the app has always detected and always thrown away — that several sources named one stock for one
+session, and that a source kept re-posting a call rather than saying it once.
+
+- **Two figures, never a verdict.** At the ten to thirty judged calls each side actually has, the
+  spread of stock returns swamps the gap between two means, so "consensus calls do better" would be
+  reading noise out loud. The counts are printed beside the percentages and the section ends by
+  saying so in as many words.
+- **`MINIMUM_JUDGED_TO_COMPARE` is 10, higher than the ranking floor**, and deliberately: ranking
+  picks one source out of several and is wrong recoverably, while a split makes a claim about a
+  *difference*, which needs more behind it than an ordering does. Below it the split is **absent**
+  rather than hedged — and on a fresh record one side is usually empty, which is exactly the state
+  a hedge would dress up as a finding.
+- `ScoredCall.alsoCalledBy` counts the **other** sources, not all of them: a card saying "1 source"
+  about itself is a card counting itself as company. `repostings` is zero on a repeat, because the
+  figure belongs to the call that was kept standing rather than to the standing.
+
+### Aiming the paid question
+
+`CallShortlist.signals` answers which of twenty cards is worth an Ask AI request. Everything it
+needs was already computed and already on the screen; the request was simply being fired at whatever
+card the reader had scrolled to.
+
+- **It ranks attention and predicts nothing.** No signal is evidence about where a stock is going;
+  each is a reason this card is a better *question* than the one beside it.
+- **Counted, never weighted.** Weights would imply the four had been calibrated against outcomes,
+  and they have not been. A count says exactly what it is — how many separate things line up on one
+  card — and the card names its own signals, so the order can be checked by eye. A bare score would
+  be a recommendation wearing a statistic's clothes, which nothing else on this page does.
+- **A missing input raises no signal rather than a negative one.** A source with no record, a stock
+  nobody else called, a call with no levels, a stock with no price: the shortlist is a reason to
+  look, and absence of evidence is not a reason to look away.
+- `MINIMUM_JUDGED_FOR_A_RECORD` **must equal** `PerformanceCalculator.MINIMUM_JUDGED_TO_RANK`, or a
+  card raises "strong source" off a record the ranking itself declines to rank. It is stated rather
+  than imported because `model` depends on nothing above it, the same reason `Scoring` holds its own
+  constants, and `CallShortlistTest` pins the two equal.
+- `CallOrder.WORTH_ASKING` sorts on the signal count, with risk to reward as the tie-break — at four
+  signals a great many cards share a count, and the alphabet deciding which is seen first is the
+  thing that enum exists to stop.
+
+### Telling the user a call has become takeable
+
+`TradeAlerts` watches trades the user is in. `CallAlerts` watches the calls they are **not** in,
+which was the gap: prices refresh through the session on their own, so the app knew at eleven in the
+morning that a stock had traded into a buy zone a source printed, and told nobody unless they opened
+it.
+
+- **A fact, never an instruction.** *AMOC has traded into the buy zone this source printed* — the
+  same register as "your trade hit its target". The channel is named because the band is its claim
+  and not the app's.
+- **Default off, and alone in that.** Every other notification here reports something that happened
+  to a thing the user chose — a trade they took, a deadline they set. This one arrives unprompted
+  about a call they only read, and a feature that starts buzzing about stocks on its own is one that
+  gets the whole app silenced. Its own channel beside the trade one, because Android silences a
+  whole channel at a time and the two are different questions.
+- **Only the crossing *into* the band.** A price drifting back out is not news, and announcing both
+  directions would double every notification for a stock moving around inside its own zone.
+- **First sight is recorded and never announced**, exactly as `TradeAlerts` needed. A settled call,
+  a call already held, and a re-posting all say nothing — the first is history, the second is the
+  Portfolio's to speak about, and the third is the same bet as the call it repeats.
+- **A call whose stock has no price is kept, not forgotten.** It is marked as still watched *before*
+  the price is looked for. Dropping the reading would lose which side of the band it was on, so the
+  day a quiet feed comes back, a band the price had been sitting in for a fortnight would be
+  announced as though it had just been reached. `CallAlertsTest` caught this before it shipped.
+- **Keyed on the call, not the holding.** `alertId` is `opinionId`'s key — ticker, session *and*
+  channel — because two channels calling one stock print two different buy zones and the price can
+  be inside one and outside the other. Keyed on the shared `positionId` the second call could never
+  be announced at all. The notification still *carries* `positionId`, because that is what
+  `AppState.openCall` and the arrival effect match on.
+- **Device-local and never synced**, for the reason `position_status_seen` is: two devices holding
+  one record would each announce the same stock coming into range.
+- **It books no background work.** The sweep rides the price refresh that was already happening, so
+  switching it on adds a notification and not a wake-up. The switch gates the notification and never
+  the sweep, so turning it on reports what happens next rather than a backlog.
+
+### Rebuilding a history the daily feeds do not carry
+
+A stock whose legacy `SYMBOL.CA` symbol is a 404 gets only the ISIN feed's single session, so a call
+on it keeps a permanent hole in its window: it never completes, so it never expires, never resolves,
+and sits pending for good while quietly sitting outside every rate. `IntradayRepository.dailyHistory`
+builds one out of the intraday feed, which does hold the stock.
+
+- **Hourly, not five-minute**, and that decides whether the feature is worth having. Both were
+  measured on 19 August 2026: the 5m feed reaches back about four weeks — under the 30 sessions a
+  call is judged over, so it would leave the exact hole this exists to fill — while `interval=1h`
+  reaches back about two years. A daily bar needs a session's extremes and its two ends, and an hour
+  gives those as exactly as five minutes does. `HOURLY_RANGE_DAYS` is 700, inside the measured two
+  years with room: a window wider than the feed keeps is refused outright rather than trimmed, and
+  a refusal costs the whole history rather than its oldest end.
+- **Nothing is invented.** The open is the day's first bar's open, the close its last bar's close,
+  the high and low the extremes across it, the volume the sum. That is the definition of a daily
+  bar, not an approximation of one. A day whose bars carry no usable price is **dropped**, not
+  stored as a session that traded at nothing — a low of zero sits under every stop ever printed.
+- **Every rebuilt session is marked, and the mark is the point.** This app records rather than
+  corrects everywhere else — it refuses to guess a split ratio and rescale a year of prices — so a
+  fabricated row presented as what the exchange reported would be the sharpest break with its own
+  rules in the codebase. `DailySession.derived` carries it; the call card's session table says how
+  many of its rows were rebuilt and why; the refresh says "N rebuilt from hourly bars".
+- **It rests on the `source` column and needed no migration.** That column has carried provenance
+  since the table was created and had exactly one value in it, so a second value is the column being
+  used for its purpose rather than a flag smuggled through it — and on `daily_prices` no migration
+  means no chance of an upgrade taking the prices already on the phone with it. What can go wrong is
+  the string, so `PriceRepositoryDerivedTest` pins the round trip on **all three** read paths, plus
+  the case of a row with no source at all, which reads as reported because that is what it is.
+- **A reported session always replaces a rebuilt one.** The table is keyed on (ticker, session_date)
+  and replaces on conflict, and the refresh writes the rebuilt rows **first** and the reported ones
+  second — so the day a stock's real feed comes back, its rows take over for free and this can only
+  ever narrow. It is also why `merge` lays the reported sessions over the derived ones and not the
+  other way round.
+- **Asked for only when the stock really is that thin** — fewer than `THIN_HISTORY_SESSIONS` (5)
+  known sessions after the daily merge. A working legacy symbol answers a 40-day window with about
+  25 sessions and one without answers with a single session whatever is asked, so five sits in a gap
+  no threshold inside behaves differently in. Once a history is built the stock is no longer thin
+  and is never asked again. A genuinely new listing is thin too, and rebuilding its history returns
+  exactly the sessions that exist — right, not wrong.
+- **The granularity is checked, not assumed**, which is why `parseSessionBars` is its own function.
+  Legacy symbols ignore `interval` and answer with daily rows; aggregating those would produce a
+  "derived" session built from one daily bar, identical to what it came from and marked as though
+  finer evidence stood behind it. `dailyHistory` refuses a legacy symbol outright for the same
+  reason `fetchOne` does.
+- **`SessionBar` is deliberately not `IntradayBar`.** The stored bar carries a high and a low and
+  nothing else, because that is all the ordering question needs; one type for both jobs would have
+  fields that are populated or null depending on whether the bar had been through the database, and
+  the aggregation would silently build sessions with no open on every bar that had. `SessionBar` is
+  only ever built fresh from a response and never stored.
+
+### Reading the extraction as sceptically as the feed
+
+`PriceSanity` has guarded the price feed since the beginning and nothing has ever guarded the
+**extraction**, which is the other half of every judgement the app makes. `CallSanity.faults` is
+that check, run on every recompute and stored nowhere.
+
+- **The failure it catches is a misread, not a bad call.** A source can be wrong about a stock all
+  day and still print four numbers that hang together; a vision model reading a screenshot can put
+  the decimal point in the wrong place, swap two target rows, or pick up the stop from the card
+  above. A band read somewhere the stock has never traded mostly neutralises itself — the entry
+  never trades and the call leaves every rate — but a **stop read into the target row scores
+  perfectly plausibly**, and counts against whichever channel happened to be misread.
+- **It marks and never excludes, and that was a deliberate choice.** Every rate counts a suspect
+  call exactly as before; the card gains an amber chip that opens an explanation. Excluding one
+  would move published figures on the strength of a heuristic, and a heuristic that is 95% right
+  would then be silently rewriting a channel's record on the other 5%. Reporting is recoverable;
+  a rate that quietly dropped calls is not.
+- **Amber, not error red.** Red on a call card already means the stop took it out, and a second red
+  meaning something entirely different is one the reader has to stop and disambiguate.
+- **The distance threshold is loose on purpose.** `MAX_DISTANCE_FACTOR` is 2: a patient call naming
+  a dip well under today's price is ordinary and must stay clean, while a misplaced decimal is out
+  by a factor of ten. Measured against the session's **traded range** rather than its close, or a
+  stock that moved 5% that day would collect a fault for a band inside the range it actually traded.
+- **An unpriced stock collects no fault for being unpriced.** Without a session the structural
+  checks still run — they need no price — and only the distance check is skipped. The other way
+  round, every call on a stock the feed has never carried would be captioned as misread, which is
+  the app blaming the extraction for its own missing data.
+- Pure, with no Android in it, like `Scoring` and `PriceSanity`. `CallSanityTest` spends most of its
+  length on the calls that must come back **clean**, because the two mistakes do not cost the same:
+  a missed misread leaves the app where it has always been, and a false one puts a caveat on an
+  honest call on the one screen whose purpose is to be trusted.
+
+### When the feed goes quiet
+
+Three things can happen to a stock's prices, and all three end the same way: the app goes quiet
+about that stock rather than wrong about it, and every rate on the page quietly rests on fewer calls
+than the reader thinks. That is exactly why they need saying out loud. `PriceHealth.assess` is the
+one place that does, drawn by `PriceFeedHealth` on Insights.
+
+- **It replaces nothing and it is not the toast.** The refresh still finishes with
+  "Priced 40/42 · 2 unpriced · 1 stale"; that reports a **refresh**, and is gone from the screen a
+  second later. This reports a **state**. `unpricedStocks` and `awaitingSessions` had been on
+  `PerformanceReport` since the beginning and were drawn by nothing at all, so the state a reader
+  most needs before believing a hit rate was the one state the page never showed.
+- **Derived, never stored.** Every input is already read on a recompute — the newest session per
+  stock, `price_events`, and the scored calls — so it needed no table and no migration, and it is
+  right after a restart for the same reason an outcome is. Computed on the IO thread inside
+  `recomputePerformance`, off the read that recompute has already paid for.
+- **The figure it exists for is `callsHeld`**, not the count of stocks. A tally of stale symbols is
+  trivia; "these 4 stocks are holding 11 calls out of every rate above" is the sentence that changes
+  how the page is read.
+- **That claim has to be true, so the rule is deliberately narrow.** Only `UNPRICED` under a missing
+  or frozen feed, only `PRICE_BREAK` under a recorded break, and only `OPEN` under a stale one. A
+  call whose entry never traded is unjudged because of what the **market** did, and sweeping every
+  unjudged call in would let one stale symbol appear to suppress a source's whole record. Repeats
+  are excluded, the same rule the rates follow.
+- **A stock carries every fault it has, not the worst one.** Frozen *and* split is a real state, and
+  a list naming only the more severe would hide the other on the stocks with most wrong with them.
+  The one exception is that a stock with no history at all is `UNPRICED` and never also `STALE` —
+  both are true in a loose reading, and reporting both counts one broken stock twice in a list whose
+  whole point is a count.
+- **Only stocks the record names.** The catalog holds every Cairo listing; reporting a frozen feed
+  for a stock nobody was ever recommended is a page of noise hiding the four rows that matter.
+- **Absent whenever nothing is wrong**, like the Overdue card, and closed by default unlike the
+  ranking above it — this explains a figure rather than being one. Read off the **whole** record and
+  never the filtered view, for the reason `PortfolioCalculator` is not filtered: a channel filter is
+  a view of the calls, never a claim about which prices are broken.
+- No Android in it, like `PriceSanity`, and it borrows that file's `MAX_SESSION_AGE_DAYS` rather
+  than choosing its own — two answers to "how old is too old" is one of them being wrong.
 
 ## The portfolio
 
@@ -952,7 +1205,8 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 18.
+  `onUpgrade`. Currently 19. Adding it to only one of the two is the mistake that gets made:
+  `CallAlertStoreTest` caught exactly that on version 19 before it shipped.
 - **Migrations are tested** — `LocalDataStoreMigrationTest` runs under Robolectric, which supplies
   enough of Android for a real SQLite database in a plain unit test. It writes the version-9 table
   by hand and upgrades it, deliberately: a test that builds its "old" schema from today's code
@@ -960,8 +1214,9 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   version 14 has its own in `ScheduledJobStoreTest`, which writes the version-13 `positions` table
   and checks that gaining `scheduled_jobs` did not cost the trades already on the phone, and
   version 15 has the same case in `StockOpinionStoreTest` for `stock_opinions`, version 16
-  has one beside it for the findings columns, and version 18 has one in `TradeStatusStoreTest` for
-  `position_status_seen` — added by `ALTER`, one guard per column, so the risk
+  has one beside it for the findings columns, version 18 has one in `TradeStatusStoreTest` for
+  `position_status_seen`, and version 19 has one in `CallAlertStoreTest` for `call_alert_seen`
+  — added by `ALTER`, one guard per column, so the risk
   is not that the upgrade fails but that it takes the answers already on the phone with it. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it
   went in. **Robolectric needs Java 21** to stand up a sandbox for SDK 36 — it refuses on 17 with
@@ -992,22 +1247,25 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   which is alive and deep (25 sessions in a 40-day window), and the ISIN symbol contributes the
   current session. This is why `fetchAllFeeds` must keep reading both — dropping the legacy feed
   would leave every stock with a one-day history.
-- **A stock with no legacy symbol can never build a daily history.** VLMRA is the case: `VLMRA.CA`
-  is a 404, so the merge has only the ISIN feed's single session and a call made on it keeps a
-  permanent hole in its window — which never completes, so the call never expires. The data does
-  exist on the 5m feed and could be aggregated into daily bars; nothing does that yet.
+- **A stock with no legacy symbol had no daily history at all, and now has a rebuilt one.** VLMRA is
+  the case: `VLMRA.CA` is a 404, so the merge had only the ISIN feed's single session and a call
+  made on it kept a permanent hole in its window — which never completes, so the call never expired
+  and sat pending for good, outside every rate. `IntradayRepository.dailyHistory` aggregates the
+  intraday feed into daily sessions instead. See **Rebuilding a history the daily feeds do not
+  carry**.
 - **The legacy `SYMBOL.CA` feed ignores `interval` and answers with daily rows.** Nothing in the
   response shape says so — only `meta.dataGranularity` does. Taken at face value, the one daily bar
   it returns would be read as the whole session and would "prove" that the entry and the target
   happened at the same instant: a confident verdict on a question the feed was never asked.
-  `parseIntradayBars` checks the granularity and refuses anything that is not `5m`, and intraday is
-  only ever requested against the ISIN symbol. Also measured: a 5m window reaching back **59 days
-  answers, 90 days is refused outright with HTTP 422** rather than trimmed, so the window has to be
-  clamped by the caller or the whole request fails.
+  `parseSessionBars` checks the granularity against whatever was **asked for** and refuses a
+  mismatch, and intraday is only ever requested against the ISIN symbol. Also measured: a 5m window
+  reaching back **59 days answers, 90 days is refused outright with HTTP 422** rather than trimmed,
+  so the window has to be clamped by the caller or the whole request fails.
 - **A frozen feed is not the same as an unpriced stock, and is harder to see.** `unpriced` means no
   history at all; `stale` means the series answers every request while its newest session stays put.
-  That has happened here — the ISIN migration — and nothing noticed. Seven days, which clears the
-  Friday–Saturday weekend plus a public holiday.
+  That has happened here — the ISIN migration — and nothing noticed at the time. Seven days, which
+  clears the Friday–Saturday weekend plus a public holiday. Both are now standing state on Insights
+  rather than a count in a toast — see **When the feed goes quiet**.
 - **The two shells are two call sites, so no page may hold its own state.** `EgxAnalyzerApp` branches
   on `rail` around one `AppContent` for the rail and another for the pill, and again around
   `AnimatedContent` versus `DestinationPager`. Folding the phone flips `rail`, Compose disposes one

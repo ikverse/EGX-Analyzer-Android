@@ -28,6 +28,7 @@ import com.ikverse.egxanalyzer.model.JobWork
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.Quote
+import com.ikverse.egxanalyzer.model.CallState
 import com.ikverse.egxanalyzer.model.TradeState
 import com.ikverse.egxanalyzer.model.ScheduledJob
 import com.ikverse.egxanalyzer.model.RecommendationResult
@@ -83,6 +84,7 @@ class LocalDataStore(context: Context) :
         db.createScheduledJobs()
         db.createPositionStatusSeen()
         db.createStockOpinions()
+        db.createCallAlertSeen()
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -109,6 +111,7 @@ class LocalDataStore(context: Context) :
         db.addOpenColumn()
         db.createStockOpinions()
         db.addOpinionDetailColumns()
+        db.createCallAlertSeen()
     }
 
     /**
@@ -735,7 +738,7 @@ class LocalDataStore(context: Context) :
      */
     fun latestSession(ticker: String): DailySession? = readableDatabase.query(
         "daily_prices",
-        arrayOf("ticker", "session_date", "high", "low", "close", "volume", "open"),
+        arrayOf("ticker", "session_date", "high", "low", "close", "volume", "open", "source"),
         "ticker = ?",
         arrayOf(ticker),
         null,
@@ -753,6 +756,7 @@ class LocalDataStore(context: Context) :
             close = cursor.nullableDouble(4),
             volume = cursor.nullableDouble(5),
             open = cursor.nullableDouble(6),
+            derived = cursor.isDerived(7),
         )
     }
 
@@ -766,7 +770,7 @@ class LocalDataStore(context: Context) :
      */
     fun latestSessions(): Map<String, DailySession> = readableDatabase
         .rawQuery(
-            "SELECT ticker, MAX(session_date), high, low, close, volume, open " +
+            "SELECT ticker, MAX(session_date), high, low, close, volume, open, source " +
                 "FROM daily_prices GROUP BY ticker",
             null,
         )
@@ -786,6 +790,7 @@ class LocalDataStore(context: Context) :
                             close = cursor.nullableDouble(4),
                             volume = cursor.nullableDouble(5),
                             open = cursor.nullableDouble(6),
+                            derived = cursor.isDerived(7),
                         ),
                     )
                 }
@@ -818,7 +823,7 @@ class LocalDataStore(context: Context) :
     /** Sessions for one stock from the day a call was made onward, oldest first. */
     fun sessionsFrom(ticker: String, from: LocalDate): List<DailySession> = readableDatabase.query(
         "daily_prices",
-        arrayOf("ticker", "session_date", "high", "low", "close", "volume", "open"),
+        arrayOf("ticker", "session_date", "high", "low", "close", "volume", "open", "source"),
         "ticker = ? AND session_date >= ?",
         arrayOf(ticker, from.toString()),
         null,
@@ -836,6 +841,7 @@ class LocalDataStore(context: Context) :
                         close = cursor.nullableDouble(4),
                         volume = cursor.nullableDouble(5),
                         open = cursor.nullableDouble(6),
+                        derived = cursor.isDerived(7),
                     ),
                 )
             }
@@ -888,6 +894,17 @@ class LocalDataStore(context: Context) :
 
     private fun Cursor.nullableDouble(index: Int): Double? =
         if (isNull(index)) null else getDouble(index)
+
+    /**
+     * Whether a stored session was built here rather than reported by a daily feed.
+     *
+     * Read off `source`, which has carried provenance since the table was created. Every row the
+     * app has ever written names the feed it came from, so a row whose source is the aggregating
+     * one is the only kind this can be true of - and an old row, or one with no source at all,
+     * reads as reported, which is exactly what it is.
+     */
+    private fun Cursor.isDerived(index: Int): Boolean =
+        !isNull(index) && getString(index) == PriceRepository.DERIVED_SOURCE
 
     /** The downloaded EGX catalog, so correct company names survive a restart. */
     fun stocks(): List<EgxStock> = readableDatabase
@@ -1739,6 +1756,74 @@ class LocalDataStore(context: Context) :
     )
 
     /**
+     * Where each call stood relative to its buy zone the last time anything was said about it.
+     *
+     * The sibling of `position_status_seen` and device-local for the identical reason: a phone and
+     * a tablet holding one record would each announce the same stock coming into range, and being
+     * told twice about one call is how a notification channel gets switched off. Nothing in
+     * `*Sync.kt` reads it.
+     *
+     * Keyed on the call's own id - ticker, session **and** channel - rather than on the holding
+     * key two channels share. Two channels calling one stock print two different buy zones, and the
+     * price can be inside one and outside the other.
+     */
+    private fun SQLiteDatabase.createCallAlertSeen() = execSQL(
+        """CREATE TABLE IF NOT EXISTS call_alert_seen (
+            call_id TEXT PRIMARY KEY,
+            in_band INTEGER NOT NULL,
+            at INTEGER NOT NULL
+        )""",
+    )
+
+    /** The whole table, one row per watched call, read in full on every sweep. */
+    fun callAlertSeen(): Map<String, CallState> = readableDatabase
+        .query("call_alert_seen", null, null, null, null, null, null)
+        .use { cursor ->
+            buildMap {
+                while (cursor.moveToNext()) {
+                    put(
+                        cursor.getString(cursor.getColumnIndexOrThrow("call_id")),
+                        CallState(
+                            inBand = cursor.getInt(cursor.getColumnIndexOrThrow("in_band")) == 1,
+                        ),
+                    )
+                }
+            }
+        }
+
+    /**
+     * Writes down what has just been said, and forgets the calls that have gone.
+     *
+     * One transaction and only what moved, exactly as [savePositionStatusSeen] does: a record of a
+     * hundred calls has a handful cross their band on a busy day.
+     */
+    fun saveCallAlertSeen(seen: Map<String, CallState>, forgotten: Set<String> = emptySet()) {
+        if (seen.isEmpty() && forgotten.isEmpty()) return
+        val now = System.currentTimeMillis()
+        writableDatabase.beginTransaction()
+        try {
+            seen.forEach { (id, state) ->
+                writableDatabase.insertWithOnConflict(
+                    "call_alert_seen",
+                    null,
+                    ContentValues().apply {
+                        put("call_id", id)
+                        put("in_band", if (state.inBand) 1 else 0)
+                        put("at", now)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            }
+            forgotten.forEach {
+                writableDatabase.delete("call_alert_seen", "call_id = ?", arrayOf(it))
+            }
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    /**
      * The whole table, which is one row per trade and read in full on every sweep.
      *
      * A status this build no longer knows the name of is dropped rather than crashing the read, and
@@ -1914,6 +1999,10 @@ class LocalDataStore(context: Context) :
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
         /**
+         * 19 is `call_alert_seen`, where each *untaken* call stood against its buy zone when the
+         * user was last told - the same fact `position_status_seen` holds for trades, and needed
+         * for the same reason: an alert about a crossing is a question about two readings, and
+         * only one of them is derivable.
          * 18 is `position_status_seen`, what the user has already been told about each trade -
          * the one thing a notification about a *change* needs and the prices cannot supply.
          * 17 for a schedule that repeats inside a window - `trigger_every_minutes` and
@@ -1930,6 +2019,6 @@ class LocalDataStore(context: Context) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 18
+        const val DATABASE_VERSION = 19
     }
 }

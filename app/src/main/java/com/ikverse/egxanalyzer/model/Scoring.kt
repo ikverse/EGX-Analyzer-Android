@@ -548,6 +548,20 @@ data class DailySession(
     val volume: Double?,
     /** Null for sessions stored before the open was recorded; a refresh fills it in. */
     val open: Double? = null,
+    /**
+     * Built here out of finer bars rather than read from the daily feed.
+     *
+     * A stock the daily feeds do not carry has no history at all, and a call on one keeps a
+     * permanent hole in its window - so it never completes, never expires, and never shows as
+     * overdue. Aggregating the intraday feed is the only way to give it one, and this flag is what
+     * stops the result being passed off as what the exchange reported. It is a fact about where the
+     * row came from, exactly as `source` in the table is, and it is read back from that column.
+     *
+     * A real daily row for the same session replaces a derived one automatically - the table is
+     * keyed on (ticker, session_date) and the daily feed writes its own source - so this can only
+     * ever narrow over time.
+     */
+    val derived: Boolean = false,
 ) {
     /**
      * The same session with any price that is not positive read as unknown.

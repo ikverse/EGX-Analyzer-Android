@@ -85,7 +85,9 @@ data class SettingsSnapshot(
             .put("scoringWindowSessions", preferences.defaultTradeWindowSessions)
             .put("overdueRemindersEnabled", preferences.overdueRemindersEnabled)
             .put("tradeAlertsEnabled", preferences.tradeAlertsEnabled)
+            .put("callAlertsEnabled", preferences.callAlertsEnabled)
             .put("portfolioOrder", preferences.portfolioOrder.name)
+            .put("callOrder", preferences.callOrder.name)
             .put("updateChecksEnabled", preferences.updateChecksEnabled)
             .put("useDefaultPromptOnly", useDefaultPromptOnly)
             .put("provider", provider.name)
@@ -170,7 +172,12 @@ data class SettingsSnapshot(
                         "tradeAlertsEnabled",
                         defaults.tradeAlertsEnabled,
                     ),
+                    callAlertsEnabled = json.optBoolean(
+                        "callAlertsEnabled",
+                        defaults.callAlertsEnabled,
+                    ),
                     portfolioOrder = json.enumOr("portfolioOrder", defaults.portfolioOrder),
+                    callOrder = json.enumOr("callOrder", defaults.callOrder),
                     updateChecksEnabled = json.optBoolean(
                         "updateChecksEnabled",
                         defaults.updateChecksEnabled,
@@ -238,7 +245,8 @@ data class SettingsSnapshot(
             "updatedAt", "updatedBy", "themeMode", "analysisLanguage", "responseTimeoutSeconds",
             "defaultContentTypes", "customSystemPrompt", "includePhrases", "excludePhrases",
             "correctionRetries", "catalogEnrichmentEnabled", "scoringWindowSessions",
-            "overdueRemindersEnabled", "tradeAlertsEnabled", "portfolioOrder",
+            "overdueRemindersEnabled", "tradeAlertsEnabled", "callAlertsEnabled",
+            "portfolioOrder", "callOrder",
             "updateChecksEnabled",
             "useDefaultPromptOnly", "provider", "providers", "promptHistory",
         )

@@ -4,6 +4,7 @@ import android.app.Application
 import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import com.ikverse.egxanalyzer.data.AnalysisService
 import com.ikverse.egxanalyzer.data.AndroidKeystoreCredentialStore
+import com.ikverse.egxanalyzer.data.CallAlertNotifier
 import com.ikverse.egxanalyzer.data.CloudAnalysisRepository
 import com.ikverse.egxanalyzer.data.IntradayRepository
 import com.ikverse.egxanalyzer.data.JobScheduler
@@ -65,13 +66,21 @@ class EgxApplication : Application() {
         // One mapping for both feeds, so the daily series and the bars that order a session inside
         // it can never disagree about which Yahoo symbol a stock is.
         val symbols = SymbolMap(assets)
+        // Built first so the daily repository can call it for a stock no daily feed carries. The
+        // two stay separate types - different granularity, different retention, different table -
+        // and are joined by one function rather than by either holding the other.
+        val intraday = IntradayRepository(localDataStore, symbols)
         AppState(
             settingsRepository = settingsRepository,
             analysisRepository = analysisRepository,
             localDataStore = localDataStore,
             telegramProvider = telegramProvider,
-            priceRepository = PriceRepository(localDataStore, symbols),
-            intradayRepository = IntradayRepository(localDataStore, symbols),
+            priceRepository = PriceRepository(
+                localDataStore,
+                symbols,
+                derivedHistory = intraday::dailyHistory,
+            ),
+            intradayRepository = intraday,
             promptStore = promptStore,
             opinionPromptStore = opinionPromptStore,
             // The app is sideloaded, so nothing else will ever offer it an update.
@@ -103,6 +112,12 @@ class EgxApplication : Application() {
             // exception about a notification would trade the record for the announcement of it.
             tradesChanged = { changes ->
                 runCatching { TradeStatusNotifier(this).announce(changes) }
+            },
+            // Wrapped for the same reason: the sweep has already been written down by the time
+            // this is called, and losing that to an exception about a notification would trade the
+            // record for the announcement of it.
+            callsChanged = { changes ->
+                runCatching { CallAlertNotifier(this).announce(changes) }
             },
             headless = startedForSchedule,
         ).also { state = it }

@@ -1,6 +1,7 @@
 package com.ikverse.egxanalyzer.data
 
 import android.content.Context
+import com.ikverse.egxanalyzer.model.CallOrder
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.PortfolioOrder
 import org.junit.Assert.assertEquals
@@ -46,6 +47,24 @@ class SettingsRepositoryTest {
             .commit()
 
         assertEquals(PortfolioOrder.URGENT, repository().loadPreferences().portfolioOrder)
+    }
+
+    @Test
+    fun `the call order is kept across a restart and falls back on a value this build lost`() {
+        // Ticker until asked otherwise: the record's own order, and what the calculator produces.
+        assertEquals(CallOrder.TICKER, repository().loadPreferences().callOrder)
+
+        repository().let { it.savePreferences(it.loadPreferences().copy(callOrder = CallOrder.SOURCE)) }
+        assertEquals(CallOrder.SOURCE, repository().loadPreferences().callOrder)
+
+        // Stored by name for the same reason the portfolio order is - by ordinal, reordering the
+        // options would silently reinterpret every install's choice rather than failing visibly.
+        context.getSharedPreferences("egx_android_settings", Context.MODE_PRIVATE)
+            .edit()
+            .putString("call_order", "BY_SESSIONS_ELAPSED")
+            .commit()
+
+        assertEquals(CallOrder.TICKER, repository().loadPreferences().callOrder)
     }
 
     /**

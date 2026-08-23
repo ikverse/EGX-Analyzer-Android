@@ -8,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import com.ikverse.egxanalyzer.data.OverdueNotifier
+import com.ikverse.egxanalyzer.data.CallAlertNotifier
 import com.ikverse.egxanalyzer.data.TradeStatusNotifier
 import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppRoot
@@ -67,5 +68,10 @@ class MainActivity : ComponentActivity() {
         intent?.getStringExtra(TradeStatusNotifier.EXTRA_POSITION_ID)
             ?.takeIf(String::isNotBlank)
             ?.let(appState::openPosition)
+        // A buy-zone alert names one call, so it opens that call. `openCall` is the same entrance
+        // the Portfolio uses to press through to a recommendation, for the same reason as above.
+        intent?.getStringExtra(CallAlertNotifier.EXTRA_CALL_ID)
+            ?.takeIf(String::isNotBlank)
+            ?.let(appState::openCall)
     }
 }

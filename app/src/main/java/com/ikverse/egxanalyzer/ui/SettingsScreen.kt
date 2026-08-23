@@ -638,6 +638,22 @@ internal fun SettingsScreen(appState: AppState) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = appState.appPreferences.callAlertsEnabled,
+                    onCheckedChange = appState::updateCallAlerts,
+                )
+                Text("Tell me when a stock reaches a buy zone")
+            }
+            Text(
+                "For calls you have not taken: the price has traded into the entry band a channel " +
+                    "printed. Off unless you switch it on - it is the one notification here about " +
+                    "something you have not committed to. It says what the market did and never " +
+                    "what to do about it, and it books no extra work: the check rides a price " +
+                    "refresh that was happening anyway.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         ExpandableSection(

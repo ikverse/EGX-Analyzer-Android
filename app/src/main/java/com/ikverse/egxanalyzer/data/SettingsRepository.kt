@@ -4,6 +4,7 @@ import android.content.Context
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.AppPreferences
+import com.ikverse.egxanalyzer.model.CallOrder
 import com.ikverse.egxanalyzer.model.ResponseTimeout
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudProvider
@@ -193,8 +194,10 @@ class SettingsRepository(
         ),
         overdueRemindersEnabled = preferences.getBoolean(KEY_OVERDUE_REMINDERS, true),
         tradeAlertsEnabled = preferences.getBoolean(KEY_TRADE_ALERTS, true),
+        callAlertsEnabled = preferences.getBoolean(KEY_CALL_ALERTS, false),
         updateChecksEnabled = preferences.getBoolean(KEY_UPDATE_CHECKS, true),
         portfolioOrder = enumPreference(KEY_PORTFOLIO_ORDER, PortfolioOrder.URGENT),
+        callOrder = enumPreference(KEY_CALL_ORDER, CallOrder.TICKER),
     )
 
     fun savePreferences(value: AppPreferences) {
@@ -217,10 +220,12 @@ class SettingsRepository(
             .putInt(KEY_SCORING_WINDOW, Scoring.clampWindow(value.defaultTradeWindowSessions))
             .putBoolean(KEY_OVERDUE_REMINDERS, value.overdueRemindersEnabled)
             .putBoolean(KEY_TRADE_ALERTS, value.tradeAlertsEnabled)
+            .putBoolean(KEY_CALL_ALERTS, value.callAlertsEnabled)
             .putBoolean(KEY_UPDATE_CHECKS, value.updateChecksEnabled)
             // By name rather than by ordinal: reordering the options or dropping one would otherwise
             // silently reinterpret what every existing install had chosen.
             .putString(KEY_PORTFOLIO_ORDER, value.portfolioOrder.name)
+            .putString(KEY_CALL_ORDER, value.callOrder.name)
             .apply()
     }
 
@@ -451,6 +456,8 @@ class SettingsRepository(
         const val KEY_OVERDUE_REMINDERS = "overdue_reminders_enabled"
         const val KEY_TRADE_ALERTS = "trade_alerts_enabled"
         const val KEY_PORTFOLIO_ORDER = "portfolio_order"
+        const val KEY_CALL_ORDER = "call_order"
+        const val KEY_CALL_ALERTS = "call_alerts"
         const val KEY_UPDATE_CHECKS = "update_checks_enabled"
         const val KEY_LAST_PRICE_REFRESH = "last_price_refresh_day"
         const val KEY_LAST_PRICE_REFRESH_AT = "last_price_refresh_at"

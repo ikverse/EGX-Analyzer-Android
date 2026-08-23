@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Assessment
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
@@ -63,17 +64,23 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ikverse.egxanalyzer.data.FeedFault
 import com.ikverse.egxanalyzer.data.PerformanceCalculator
+import com.ikverse.egxanalyzer.data.PriceHealthReport
 import com.ikverse.egxanalyzer.model.Ambiguity
+import com.ikverse.egxanalyzer.model.CallOrder
+import com.ikverse.egxanalyzer.model.CallSignal
 import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.RecordSplit
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.StockOpinion
+import com.ikverse.egxanalyzer.model.StockScore
 import com.ikverse.egxanalyzer.model.opinionId
 import com.ikverse.egxanalyzer.model.positionId
 import com.ikverse.egxanalyzer.model.riskReward
@@ -130,6 +137,9 @@ internal fun InsightsScreen(appState: AppState) {
         var channels by appState.pages.insightsChannels
         var outcomes by appState.pages.insightsOutcomes
         var stock by appState.pages.insightsStock
+        // Kept across restarts where the filters above are not, and the difference is what each one
+        // does: an order hides nothing. See AppPreferences.callOrder.
+        val callOrder = appState.appPreferences.callOrder
         val everyChannel = remember(full.channels) { full.channels.map(ChannelScore::channel).sorted() }
 
         // Recomputed, not merely hidden: a rate or a session count still describing calls the
@@ -187,6 +197,15 @@ internal fun InsightsScreen(appState: AppState) {
                 onClear = { outcomes = emptySet() },
             )
             StockFilterField(value = stock, onValueChange = { stock = it })
+            // Outside the clear-all, exactly as on Results and the Portfolio: an order is not
+            // something a list can be cleared of, and resetting it would look like a filter had
+            // silently gone missing.
+            SortFilter(
+                options = CallOrder.entries,
+                selected = callOrder,
+                label = CallOrder::label,
+                onSelect = appState::updateCallOrder,
+            )
         }
 
         // Arriving from a trade pressed on the Portfolio tab. The filters this screen was left on
@@ -218,6 +237,15 @@ internal fun InsightsScreen(appState: AppState) {
         // The ranking leads. It is the question the tab exists to answer - which source is worth
         // reading - and it used to sit below two summary cards as a collapsed line.
         ChannelRanking(report.channels)
+        // Under the ranking and above the sessions, because it is a caveat on the figures rather
+        // than one of them. Read off the whole record deliberately: a channel filter is a view of
+        // the calls and never a claim about which prices are broken.
+        // The stock's record after the source's, because the tab's own question is which source to
+        // read and this is a second one. Both narrow with the filters, so a filtered page never
+        // quotes a whole record beside rates that have been cut down.
+        StockRanking(report.stocks)
+        RecordSplits(report.splits)
+        PriceFeedHealth(appState.priceHealth)
         // One collapsed card per row wasted most of a wide screen: each held a single line of
         // text across the full width. The count is derived, so an untested width still behaves.
         // Collapsed cards share a row; an open one takes the whole width, because its contents are
@@ -243,6 +271,13 @@ internal fun InsightsScreen(appState: AppState) {
             delay(REVEAL_SETTLE_MS)
             reveal.bringIntoView()
         }
+        // Built once for the page rather than searched per card. Keyed on the filtered report, so a
+        // channel filter narrows the record a card quotes to the same calls the page is counting -
+        // a card quoting the whole record beside a hero that had been narrowed would be the screen
+        // disagreeing with itself about one source.
+        val scoreByChannel = remember(report.channels) {
+            report.channels.associateBy(ChannelScore::channel)
+        }
         BoxWithConstraints {
             val columns = responsiveColumns(minColumnWidth = SessionCardMinWidth, maxColumns = 3)
             // Grouped before rendering rather than while: the open session interrupts the grid, and
@@ -259,6 +294,8 @@ internal fun InsightsScreen(appState: AppState) {
                             onExpandedChange = { openSession = null },
                             heldFor = appState::heldFor,
                             latestFor = { ticker -> report.latestPrices[ticker] },
+                            scoreFor = { channel -> scoreByChannel[channel] },
+                            order = callOrder,
                             opinionFor = appState::opinionFor,
                             askingFor = { call -> appState.opinionPending == call.opinionKey() },
                             askModel = askModel,
@@ -278,6 +315,8 @@ internal fun InsightsScreen(appState: AppState) {
                                 onExpandedChange = { openSession = session.key() },
                                 heldFor = appState::heldFor,
                                 latestFor = { ticker -> report.latestPrices[ticker] },
+                                scoreFor = { channel -> scoreByChannel[channel] },
+                                order = callOrder,
                                 opinionFor = appState::opinionFor,
                                 askingFor = { call -> appState.opinionPending == call.opinionKey() },
                                 askModel = askModel,
@@ -499,6 +538,258 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
 /** Lifts the label off the baseline of the figure beside it, which is four times its size. */
 private val HeroLabelBaseline = 4.dp
 
+/**
+ * What happens when each stock gets recommended, whoever recommended it.
+ *
+ * The app holds the only record of its kind in existence - every call every source has made on
+ * every Egyptian stock - and until now it reached exactly one place: a list inside the Ask AI
+ * prompt, which is to say a paid request nobody had made yet. A channel's record says whether to
+ * read the channel. This says whether the market has ever done what anyone printed about *this
+ * stock*, and some tickers get pushed repeatedly and never deliver.
+ *
+ * Same floor and same order as the channel ranking, and by construction rather than by agreement -
+ * both are built from one `CallTally`. Closed by default: it is a second question, and the tab
+ * opens on its first one.
+ */
+@Composable
+private fun ColumnScope.StockRanking(stocks: List<StockScore>) {
+    if (stocks.isEmpty()) return
+    val ranked = stocks.filter { it.tally.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK }
+    ExpandableSection(
+        title = "Stocks ranked",
+        icon = Icons.Outlined.Timeline,
+        summary = "${stocks.size} ${if (stocks.size == 1) "stock" else "stocks"} · " +
+            if (ranked.isEmpty()) {
+                "none with ${PerformanceCalculator.MINIMUM_JUDGED_TO_RANK} settled calls yet"
+            } else {
+                "led by ${ranked.first().ticker}"
+            },
+    ) {
+        Text(
+            "What the market did about this stock, across every source that named it. A source's " +
+                "record says whether to read the source; this says nothing about any of them.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        BoxWithConstraints {
+            val columns = responsiveColumns(minColumnWidth = ChannelCardMinWidth, maxColumns = 3)
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                ResponsiveRows(stocks, columns, spacing = Space.s) { stock, cardModifier ->
+                    StockCard(stock, cardModifier)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StockCard(stock: StockScore, modifier: Modifier = Modifier) {
+    // The same rule the channel card follows: a figure resting on two settled calls is measured
+    // exactly and is worth nothing as a verdict, so it keeps its number and loses its colour.
+    val thin = stock.tally.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+    ) {
+        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StockLogo(stock.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                Column(Modifier.weight(1f)) {
+                    Text(stock.ticker, style = MaterialTheme.typography.titleSmall)
+                    listOfNotNull(stock.companyArabic, stock.companyEnglish)
+                        .filter(String::isNotBlank)
+                        .distinct()
+                        .takeIf(List<String>::isNotEmpty)
+                        ?.let {
+                            Text(
+                                it.joinToString(" · "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                }
+            }
+            FigureGroup(
+                "What the market did",
+                listOf(
+                    {
+                        Figure(
+                            "Per judged call",
+                            stock.tally.averageReturn.signedPercent(),
+                            Modifier.weight(1f),
+                            tone = if (thin) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                PriceRole.forReturn(stock.tally.averageReturn)
+                            },
+                            caption = "${stock.tally.judged} judged",
+                        )
+                    },
+                    {
+                        Figure(
+                            "Reached target 1",
+                            formatPercent(stock.tally.anyTargetRate, signed = false),
+                            Modifier.weight(1f),
+                            tone = if (thin) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            // The figure that separates a stock the whole channel list is pushing
+                            // from one a single source happens to like.
+                            caption = "${stock.sources} " +
+                                if (stock.sources == 1) "source" else "sources",
+                        )
+                    },
+                ),
+            )
+        }
+    }
+}
+
+/**
+ * Two halves of the record set beside each other, for the questions no single rate answers.
+ *
+ * Both rest on something the app has always detected and always thrown away. **Neither states a
+ * verdict** - at the judged calls each side actually has, the spread of stock returns swamps the
+ * gap between two means, and "consensus calls do better" would be reading noise out loud. The
+ * counts sit beside the figures for exactly that reason, and a split whose sides are too thin is
+ * absent rather than hedged.
+ */
+@Composable
+private fun ColumnScope.RecordSplits(splits: List<RecordSplit>) {
+    val stateable = splits.filter(RecordSplit::stateable)
+    if (stateable.isEmpty()) return
+    ExpandableSection(
+        title = "Does it matter?",
+        icon = Icons.Outlined.HelpOutline,
+        summary = "${stateable.size} ${if (stateable.size == 1) "question" else "questions"} " +
+            "the record can answer about itself",
+    ) {
+        stateable.forEachIndexed { index, split ->
+            if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Text(split.subject, style = MaterialTheme.typography.titleSmall)
+            Text(
+                split.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FigureGroup(
+                "What one call was worth",
+                listOf(
+                    {
+                        Figure(
+                            "These calls",
+                            split.matching.averageReturn.signedPercent(),
+                            Modifier.weight(1f),
+                            tone = PriceRole.forReturn(split.matching.averageReturn),
+                            caption = "${split.matching.judged} judged",
+                        )
+                    },
+                    {
+                        Figure(
+                            "Everything else",
+                            split.rest.averageReturn.signedPercent(),
+                            Modifier.weight(1f),
+                            tone = PriceRole.forReturn(split.rest.averageReturn),
+                            caption = "${split.rest.judged} judged",
+                        )
+                    },
+                ),
+            )
+        }
+        Text(
+            "Two figures, not a finding. At these numbers of calls the gap between two averages " +
+                "is smaller than the spread inside either of them, so read the counts as carefully " +
+                "as the percentages.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Which stocks the price feed has gone quiet about, and what that is costing every rate above.
+ *
+ * The three faults were only ever reported by the refresh toast - "3 unpriced · 1 stale" - which
+ * names counts and no stocks, and is gone from the screen a second later. `unpricedStocks` and
+ * `awaitingSessions` had been computed on every report since the beginning and drawn by nothing at
+ * all. So the state a reader most needs before believing a hit rate was the one state the page
+ * never showed.
+ *
+ * **Absent whenever nothing is wrong**, like the Overdue card. A section reading "0 problems" on
+ * every healthy day is a section that stops being read on the day it says something.
+ *
+ * Closed by default, and unlike the ranking above it: this explains a figure rather than being one,
+ * and a page that opens on its own caveats leads with the wrong thing.
+ */
+@Composable
+private fun ColumnScope.PriceFeedHealth(health: PriceHealthReport) {
+    if (health.clean) return
+    val stocks = health.faults.size
+    val held = health.callsHeld
+    ExpandableSection(
+        title = "Price feed",
+        icon = Icons.Outlined.CloudOff,
+        // The count of stocks is the small half of this. What the reader needs is the second
+        // clause: a rate resting on fewer calls than they think is what a quiet feed actually does.
+        summary = "$stocks of ${health.stocksNamed} ${if (stocks == 1) "stock" else "stocks"}" +
+            if (held > 0) {
+                " · holding $held ${if (held == 1) "call" else "calls"} out of every rate above"
+            } else {
+                " · no call is waiting on them"
+            },
+        summaryTone = if (held > 0) MaterialTheme.colorScheme.error else null,
+    ) {
+        Text(
+            "These stocks are not being judged wrongly - they are not being judged at all. " +
+                "A refresh fixes the first kind; the other two the app cannot fix by asking again.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        health.faults.forEach { stock ->
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalAlignment = Alignment.Top,
+            ) {
+                StockLogo(stock.ticker, LogoSize.Row)
+                Column(Modifier.weight(1f)) {
+                    Text(stock.ticker, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        stock.faults.joinToString(" · ", transform = FeedFault::label),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // The date the feed stopped at, which is the one fact that separates "this
+                    // broke last week" from "this has never worked". Absent for a stock with no
+                    // history at all, where there is no date to name.
+                    Text(
+                        stock.newestSession?.let { session ->
+                            "newest session $session" +
+                                (stock.ageDays?.let { ", $it ${it.dayWord()} ago" } ?: "")
+                        } ?: "nothing stored",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (stock.callsHeld > 0) {
+                    Text(
+                        "${stock.callsHeld}",
+                        style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
     if (channels.isEmpty()) return
@@ -684,6 +975,10 @@ private fun SessionCard(
     heldFor: (String, java.time.LocalDate?) -> PositionView?,
     /** Where a stock stands as of the last refresh, by ticker. */
     latestFor: (String) -> LatestPrice?,
+    /** The record of the source that made a call, by channel name. */
+    scoreFor: (String) -> ChannelScore?,
+    /** How the calls inside this card are laid out. Orders them; never hides one. */
+    order: CallOrder,
     /** What Ask AI has said about a call, if anything. */
     opinionFor: (ScoredCall) -> StockOpinion?,
     /** Whether that call's own request is currently out. */
@@ -745,12 +1040,18 @@ private fun SessionCard(
             val scrollTo = remember(run.calls, revealCall) {
                 revealCall?.let { id -> run.calls.firstOrNull { it.positionId == id } }
             }
+            // Sorted on every composition rather than remembered: the key would have to include the
+            // channel records the order reads, and a `remember` holding a stale one would lay the
+            // cards out by a ranking the page no longer agrees with. Forty items is nothing beside
+            // composing forty cards.
+            val ordered = order.sort(run.calls, scoreFor)
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                ResponsiveRows(run.calls, columns, spacing = Space.s) { call, cardModifier ->
+                ResponsiveRows(ordered, columns, spacing = Space.s) { call, cardModifier ->
                     val held = heldFor(call.ticker, call.openedOn)
                     ScoredCallRow(
                         call,
                         latestFor(call.ticker),
+                        scoreFor(call.channel),
                         opinionFor(call),
                         asking = askingFor(call),
                         askModel = askModel,
@@ -780,6 +1081,14 @@ private fun ScoredCallRow(
     call: ScoredCall,
     /** Where this stock stands as of the last refresh. Absent for a stock with no prices at all. */
     latest: LatestPrice?,
+    /**
+     * What the source that made this call has delivered elsewhere.
+     *
+     * The record was measured for every channel and reached only the ranking, which is a page the
+     * reader has to go and read separately - so the one screen where a call is actually weighed
+     * knew nothing about who made it.
+     */
+    channelScore: ChannelScore?,
     /** What Ask AI has already said about this call, if it has been asked. */
     opinion: StockOpinion?,
     /** True while this card's own request is out. */
@@ -892,6 +1201,9 @@ private fun ScoredCallRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            SourceRecord(channelScore)
+            CallContext(call)
+            ExtractionWarning(call)
             // What the outline means, in one line. Everything else on this card judges the channel
             // on the levels it printed; this is the only figure here measured from what was paid.
             held?.let { position ->
@@ -1138,6 +1450,147 @@ private fun ScoredCallRow(
  * table it opens, and it changed the button's width on every card. The arrow carries the state
  * instead, so the label can stay still and stay short.
  */
+/**
+ * What the source has delivered on its other calls, in one line under the channel's name.
+ *
+ * Every other figure on this card judges this one call. This is the only thing on it that says
+ * anything about who made it - and the record behind it was already measured for every channel and
+ * reached only the ranking, which is a separate page a reader has to think to go and read. The
+ * decision is made here.
+ *
+ * The average per judged call rather than the hit rate, for the same reason the ranking is ordered
+ * on it: a rate is bought by moving the target closer to the entry, so what one of this source's
+ * calls has been worth is the figure that answers "is this worth reading".
+ *
+ * Below [PerformanceCalculator.MINIMUM_JUDGED_TO_RANK] the figure **keeps its number and loses its
+ * colour**, which is the rule the channel card already follows - a mean off three calls is measured
+ * exactly and is worth nothing as a verdict. The words are added here and not there because a card
+ * in a session has no ranking around it to say so.
+ *
+ * Absent, not blank, for a source with nothing judged: a line reading "no record yet" on every card
+ * of a fresh install is a line on every card.
+ */
+@Composable
+private fun SourceRecord(score: ChannelScore?) {
+    if (score == null || score.judged == 0) return
+    val thin = score.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
+    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+    val tone = if (thin) quiet else PriceRole.forReturn(score.averageReturn)
+    Text(
+        buildAnnotatedString {
+            append("This source: ")
+            withStyle(SpanStyle(color = tone, fontWeight = FontWeight.Medium)) {
+                append(score.averageReturn.signedPercent())
+            }
+            append(" per call over ${score.judged} judged")
+            if (thin) append(" · too few to rank")
+        },
+        style = MaterialTheme.typography.labelSmall,
+        color = quiet,
+    )
+}
+
+/**
+ * The two things about a call that only the calls around it can say, and its local signals.
+ *
+ * **Crowding, not confirmation**, and the wording is the point: several channels reading one chart
+ * on one morning is one idea going round, not three independent readings of it. Whether it is worth
+ * anything is a question for the record - see the splits on this page - and not a claim a card
+ * makes. The app has detected this since the two cards learned to press through to each other, and
+ * counted it nowhere.
+ *
+ * **Kept standing** is the other side of `repeatOf`, which exists to stop a daily table outweighing
+ * a source that posts when it has something to say. Correct, and it threw the information away: a
+ * call re-posted five mornings running is a different claim from one posted once.
+ *
+ * The signals are named rather than scored - see [CallSignal]. A bare number here would be a
+ * recommendation wearing a statistic's clothes, and nothing else on this page does that.
+ */
+@Composable
+private fun CallContext(call: ScoredCall) {
+    val parts = listOfNotNull(
+        call.alsoCalledBy.takeIf { it > 0 }?.let {
+            "also called by $it other ${if (it == 1) "source" else "sources"}"
+        },
+        call.repostings.takeIf { it > 0 }?.let {
+            "kept standing over $it more ${it.sessionWord()}"
+        },
+        call.signals.takeIf(Set<CallSignal>::isNotEmpty)
+            ?.joinToString(", ", transform = CallSignal::label),
+    )
+    if (parts.isEmpty()) return
+    Text(
+        parts.joinToString(" · "),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * What does not add up about the levels this call was read out of a screenshot with.
+ *
+ * `PriceSanity` has guarded the price feed since the beginning; nothing has ever guarded the
+ * **extraction**, which is the other half of every judgement on this page. A stop read into the
+ * target row scores perfectly plausibly and counts against whichever channel happened to be
+ * misread.
+ *
+ * A caption and not a subtraction. The outcome above it, the return beside it and every rate on the
+ * page are untouched - see `CallSanity` for why a heuristic may caption a card and not move a
+ * published figure. So it is drawn in **amber rather than error red**: red on this card already
+ * means the stop took the call out, and a second red saying something quite different is one the
+ * reader has to stop and disambiguate.
+ *
+ * Tappable, and it says so by looking the same as [OutcomeLabel] - a chip that is only sometimes
+ * tappable teaches nobody that it can be tapped.
+ */
+@Composable
+private fun ExtractionWarning(call: ScoredCall) {
+    if (call.faults.isEmpty()) return
+    var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    val amber = extraColors.expired
+    OutlinePill(
+        if (call.faults.size == 1) {
+            call.faults.first().label
+        } else {
+            "${call.faults.size} levels look misread"
+        },
+        outline = amber,
+        textColor = amber,
+        onClick = { showing = true },
+    )
+    if (showing) {
+        AlertDialog(
+            onDismissRequest = { showing = false },
+            title = { Text("${call.ticker} · levels to check") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Text(
+                        "This call was read out of a screenshot, and these levels do not hang " +
+                            "together the way a printed card would. Nothing about the record has " +
+                            "been changed: the call is still scored, and every rate still counts " +
+                            "it. Worth reading the original card against.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    call.faults.forEach { fault ->
+                        Column {
+                            Text(fault.label, style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                fault.detail,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showing = false }) { Text("Close") }
+            },
+        )
+    }
+}
+
 @Composable
 private fun PriceFeedButton(expanded: Boolean, onClick: () -> Unit) {
     // Turned rather than swapped for an up arrow: the rotation is what shows which of the two
@@ -1190,6 +1643,21 @@ private fun SessionTable(sessions: List<DailySession>) {
                     )
                 }
             }
+        }
+        // Said here rather than marked per row, which would cost the table a seventh column and
+        // shift every figure in it. A derived session is a real session - a day's bars carry its
+        // extremes and its two ends exactly - but it is one the app built rather than read, and
+        // this app says so everywhere it does that.
+        val rebuilt = sessions.count(DailySession::derived)
+        if (rebuilt > 0) {
+            Text(
+                "$rebuilt of these ${sessions.size} sessions were rebuilt from hourly bars: no " +
+                    "daily feed carries this stock, so without them it would have no history to " +
+                    "be judged against at all.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = Space.xs),
+            )
         }
     }
 }

@@ -41,6 +41,8 @@ import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.PerformanceCalculator
 import com.ikverse.egxanalyzer.data.PortfolioCalculator
 import com.ikverse.egxanalyzer.data.IntradayRepository
+import com.ikverse.egxanalyzer.data.PriceHealth
+import com.ikverse.egxanalyzer.data.PriceHealthReport
 import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.UnorderedSession
 import com.ikverse.egxanalyzer.data.SettingsRepository
@@ -59,6 +61,9 @@ import com.ikverse.egxanalyzer.model.AnalysisRequest
 import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.ResponseTimeout
+import com.ikverse.egxanalyzer.model.CallAlerts
+import com.ikverse.egxanalyzer.model.CallChange
+import com.ikverse.egxanalyzer.model.CallOrder
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.ChatKind
 import com.ikverse.egxanalyzer.model.CloudConfiguration
@@ -203,6 +208,10 @@ class AppState(
      * manager being anywhere near it.
      */
     private val tradesChanged: (changes: List<TradeChange>) -> Unit = {},
+    /**
+     * Says a stock has traded into the buy zone of a call nobody has taken; supplied like the rest.
+     */
+    private val callsChanged: (changes: List<CallChange>) -> Unit = {},
     /**
      * Books or cancels this phone's schedule alarm; supplied by the app so this class stays testable.
      */
@@ -644,6 +653,17 @@ class AppState(
 
     /** How every saved call turned out, recomputed whenever the analyses or the prices change. */
     var performance by mutableStateOf(PerformanceReport())
+        private set
+
+    /**
+     * Which stocks the price feed has gone quiet about, and what it is costing the record.
+     *
+     * Derived beside [performance] and from the same read, never cached: it is a reading of the
+     * prices on disk, exactly as an outcome is, so it is right after a restart without anything
+     * having been stored. Built from the **whole** record rather than a filtered view - a channel
+     * filter is a view of the calls, never a claim about which prices are broken.
+     */
+    var priceHealth by mutableStateOf(PriceHealthReport())
         private set
     var pricesRefreshing by mutableStateOf(false)
         private set
@@ -1163,6 +1183,10 @@ class AppState(
         }
         portfolio = rebuilt
         reviewTrades(rebuilt, announceChanges)
+        // After the trades, and off the same recompute. Every path that announces recomputes the
+        // performance first, so the calls this reads are the ones the prices were just scored
+        // against - and the holdings it excludes are the ones set two lines above.
+        reviewCalls(performance, announceChanges)
     }
 
     /**
@@ -1180,6 +1204,32 @@ class AppState(
             }
         }
         if (announceChanges && appPreferences.tradeAlertsEnabled) tradesChanged(alerts.changes)
+    }
+
+    /**
+     * The same question about the calls the user is **not** in: has one just become takeable?
+     *
+     * Run beside [reviewTrades] and off the same recompute, because the two are one sweep of one
+     * record from two sides - the trades the Portfolio is watching, and everything else. Held calls
+     * are handed over so a stock the user already owns is spoken about once, by the feature that
+     * knows what they paid for it.
+     *
+     * The sweep runs whether or not anyone will be told, exactly as the trade one does, and for the
+     * identical reason: switching the notification on then reports what happens **next** rather
+     * than announcing every band the price happens to be sitting in this morning.
+     */
+    private suspend fun reviewCalls(report: PerformanceReport, announceChanges: Boolean) {
+        val alerts = withContext(Dispatchers.IO) {
+            CallAlerts.sweep(
+                previous = localDataStore.callAlertSeen(),
+                calls = report.sessions.flatMap(ScoredSession::calls),
+                latestFor = { ticker -> report.latestPrices[ticker] },
+                held = portfolio.positions.mapTo(mutableSetOf()) { it.position.id },
+            ).also {
+                localDataStore.saveCallAlertSeen(it.record, it.forgotten)
+            }
+        }
+        if (announceChanges && appPreferences.callAlertsEnabled) callsChanged(alerts.changes)
     }
 
     /**
@@ -1783,6 +1833,18 @@ class AppState(
     }
 
     /**
+     * Whether the phone says a stock has traded into a buy zone nobody has acted on.
+     *
+     * Gates the notification and never the sweep, like every other switch here. It books no
+     * background work of its own: the sweep rides the price refresh, which is already happening
+     * for other reasons, so switching this on adds a notification and not a wake-up.
+     */
+    fun updateCallAlerts(enabled: Boolean) {
+        if (enabled == appPreferences.callAlertsEnabled) return
+        persistPreferences(appPreferences.copy(callAlertsEnabled = enabled))
+    }
+
+    /**
      * Whether the daily wake is worth booking at all.
      *
      * One run answers both questions off one reading of the record, so the work is wanted while
@@ -1990,6 +2052,17 @@ class AppState(
     }
 
     /**
+     * Remembers the order the calls inside a session card are being read in.
+     *
+     * Kept for the same reason, and it recomputes nothing: every option orders the same calls, so
+     * this only ever changes where a card sits on screen. No rate, ranking or verdict moves.
+     */
+    fun updateCallOrder(order: CallOrder) {
+        if (order == appPreferences.callOrder) return
+        persistPreferences(appPreferences.copy(callOrder = order))
+    }
+
+    /**
      * Changes what a new trade's window is offered as.
      *
      * Nothing already recorded moves. A trade carries the window it was taken under, and no call's
@@ -2110,6 +2183,11 @@ class AppState(
                     add("${refresh.suspect.size} changed scale")
                 }
                 if (refresh.stale.isNotEmpty()) add("${refresh.stale.size} stale")
+                // The app built sessions rather than reading them, which it says out loud
+                // everywhere else it does anything of the kind.
+                if (refresh.rebuilt.isNotEmpty()) {
+                    add("${refresh.rebuilt.size} rebuilt from hourly bars")
+                }
             }
             // Composed whether or not anyone is listening, because a scheduled run has to write
             // down what it did and there is no screen to read it off.
@@ -2170,7 +2248,7 @@ class AppState(
 
     private suspend fun recomputePerformance() {
         val analyses = savedResults
-        performance = withContext(Dispatchers.IO) {
+        val computed = withContext(Dispatchers.IO) {
             val breaks = localDataStore.priceBreakDates()
             // Read once for the whole recompute. Only the sessions a call could not order on daily
             // figures have bars at all, so this is a short table however long the record grows.
@@ -2184,7 +2262,7 @@ class AppState(
                     provisional = !session.date.isBefore(today) || session.inconsistent,
                 )
             }
-            PerformanceCalculator.report(
+            val report = PerformanceCalculator.report(
                 analyses = analyses,
                 pricesFrom = localDataStore.earliestSessionDate(),
                 sessionsFor = localDataStore::sessionsFrom,
@@ -2193,7 +2271,18 @@ class AppState(
                 intradayFor = { ticker, date -> bars[ticker to date].orEmpty() },
                 latestPrices = latest,
             )
+            // On the same thread and from the same read: the breaks and the latest sessions are
+            // already in hand here, and asking for them again on the main thread would be a second
+            // trip to the database for figures this one has already paid for.
+            report to PriceHealth.assess(
+                calls = report.sessions.flatMap(ScoredSession::calls),
+                latestPrices = latest,
+                breaks = breaks,
+                today = today,
+            )
         }
+        performance = computed.first
+        priceHealth = computed.second
     }
 
     private fun saveAppPreferences(value: AppPreferences) {

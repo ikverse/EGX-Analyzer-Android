@@ -70,6 +70,20 @@ data class AppPreferences(
      */
     val tradeAlertsEnabled: Boolean = true,
     /**
+     * Whether the phone says a stock has traded into the buy zone of a call not yet taken.
+     *
+     * Its own switch beside [tradeAlertsEnabled] and its own notification channel, because the two
+     * are different questions: one reports what happened to money already committed, the other an
+     * opportunity nothing has been committed to. Somebody who wants the first and not the second
+     * has to be able to have exactly that.
+     *
+     * Default **off**. Every other notification in the app reports something that happened to a
+     * thing the user chose - a trade they took, a deadline they set. This one arrives unprompted
+     * about a call they only read, and a feature that starts buzzing about stocks on its own is one
+     * that gets the whole app silenced.
+     */
+    val callAlertsEnabled: Boolean = false,
+    /**
      * Whether a launch quietly asks GitHub whether a newer build exists.
      *
      * On by default and silent unless there is something new: the app is sideloaded, so a release
@@ -86,6 +100,14 @@ data class AppPreferences(
      * someone concludes their trades have gone missing.
      */
     val portfolioOrder: PortfolioOrder = PortfolioOrder.URGENT,
+    /**
+     * The order the calls inside a session card on Insights are read in.
+     *
+     * Kept for the same reason [portfolioOrder] is, and safe to keep for a stronger one: every
+     * option orders the identical set of calls, so an order found still set weeks later cannot have
+     * hidden anything. [CallOrder.TICKER] is the default because it is the record's own order.
+     */
+    val callOrder: CallOrder = CallOrder.TICKER,
 )
 
 data class PromptSnapshot(
