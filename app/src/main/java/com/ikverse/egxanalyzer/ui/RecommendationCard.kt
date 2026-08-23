@@ -302,15 +302,18 @@ private fun TimingChip(point: RecommendationDataPoint) {
 }
 
 /**
- * Entry, targets and stop as labelled figures, each with its percentage where the source gave one,
- * followed by the two market levels the call was drawn against.
+ * Entry beside its stop, then the two targets, as labelled figures, each with its percentage where
+ * the source gave one, followed by the two market levels the call was drawn against.
  *
  * Six fixed slots in two columns, not a flow. A tile is as wide as its number happens to print, so
  * flowing them put the same figure in a different place on every card - support trailing the stop
  * on one, alone on a line of its own on the next - and a column of cards read as six loose numbers
  * rather than one shape repeated. Fixed slots mean a card can be read down as well as across, and
- * the market levels always land last. Left to right then down, which is the order the table, the
- * occurrence sheet and the export all print these in.
+ * the market levels always land last. Each row pairs the levels that are read against one another
+ * - the entry with the stop it risks, then the two targets it is aiming at - which is how the
+ * portfolio card already sets a held position out. The table, the occurrence sheet and the export
+ * still print left to right in their own order; a card is looked at one at a time, and this is the
+ * pairing that reads there.
  *
  * Every slot is drawn whether or not the source filled it: a card whose rows move depending on what
  * the channel happened to publish is the thing this layout exists to stop, and a dash says "no
@@ -325,11 +328,11 @@ private fun LevelGrid(point: RecommendationDataPoint) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
         LevelPair(
             { Level("Entry", entryText(point), PriceRole.entry, it) },
-            { Level("Target 1", figure(point.target1, returnPct(point, point.target1, point.returnTp1Pct)), PriceRole.target, it) },
+            { Level("Stop loss", figure(point.stopLoss, point.riskPct), PriceRole.stop, it) },
         )
         LevelPair(
+            { Level("Target 1", figure(point.target1, returnPct(point, point.target1, point.returnTp1Pct)), PriceRole.target, it) },
             { Level("Target 2", figure(point.target2, returnPct(point, point.target2, point.returnTp2Pct)), PriceRole.target, it) },
-            { Level("Stop loss", figure(point.stopLoss, point.riskPct), PriceRole.stop, it) },
         )
         // Plain, with no percentage beside them. The other four are distances from the entry, which
         // is what a percentage measures here; a support is simply a price the stock has held at.
