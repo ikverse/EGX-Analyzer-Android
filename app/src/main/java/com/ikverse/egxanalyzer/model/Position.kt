@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.model
 
 import java.time.Instant
 import java.time.LocalDate
+import kotlin.math.abs
 
 /**
  * A trade the user actually took, recorded against the recommendation that suggested it.
@@ -105,6 +106,15 @@ enum class PositionStatus(val label: String) {
 }
 
 /**
+ * The last price the feed has for a stock, and the session it closed on.
+ *
+ * The two travel together because a price without its date cannot be read: a feed that has not
+ * refreshed for a week reports a week-old close, and a card printing it bare says today. Only the
+ * portfolio asks for both, which is why this is a pair rather than a column added to every reader.
+ */
+data class Quote(val price: Double, val on: LocalDate)
+
+/**
  * One position with everything the market has since said about it.
  *
  * Every percentage here is measured from the user's own prices. The recommendation's entry band is
@@ -125,6 +135,8 @@ data class PositionView(
     val open: Boolean,
     /** Latest stored close for the stock, which is as current as the daily feed gets. */
     val currentPrice: Double?,
+    /** The session [currentPrice] closed on, so a stale feed cannot be read as today's price. */
+    val currentPriceOn: LocalDate? = null,
     /** The price the return is measured to, whether the user's own or the app's estimate. */
     val exitPrice: Double?,
     /** True when [exitPrice] is the user's own selling price rather than an estimate. */
@@ -133,12 +145,36 @@ data class PositionView(
     val returnPct: Double?,
     /** Sessions of the recommendation's window that have traded so far. */
     val sessionsElapsed: Int,
+    /**
+     * Of those, the ones the user was actually in the trade for.
+     *
+     * The same difference [peakSinceEntry] exists for: a call bought three sessions late has been
+     * running for longer than it has been held, and the deadline is counted in the first while the
+     * trade is lived in the second. Equal to [sessionsElapsed] on a trade bought on the day.
+     */
+    val sessionsHeld: Int = 0,
     /** Sessions left before the deadline, or zero once it has passed. */
     val sessionsRemaining: Int,
     /** The last session of the window, known only once it has actually traded. */
     val deadlineDate: LocalDate?,
     /** The session a target or the stop was reached on. */
     val settledOn: LocalDate?,
+    /**
+     * The extremes of the part of the window the user actually held, and the sessions that set them.
+     *
+     * Since the entry rather than since the call, which is the whole difference between this and
+     * the peak Insights prints: a stock that ran to its target before the user bought did not do
+     * that for them. The scorer has always worked these out over exactly the held sessions - they
+     * were simply dropped on the floor, so the one question a card could not answer was how far up
+     * a trade had been before it came back.
+     *
+     * Null where the prices changed scale under the trade, exactly as [exitPrice] is: a high set in
+     * the old money is not comparable with an entry paid in it either side of a split.
+     */
+    val peakSinceEntry: Double? = null,
+    val peakOn: LocalDate? = null,
+    val troughSinceEntry: Double? = null,
+    val troughOn: LocalDate? = null,
     /**
      * The deadline passed and the trade ended at no level of its own - no target 2, no stop.
      *
@@ -198,6 +234,36 @@ data class PositionView(
      * already closed would be instructing the user to do something they have done.
      */
     val keptOpen: Boolean get() = position.keepOpen && open
+
+    /**
+     * Reward against risk, measured from the price this trade actually opened at.
+     *
+     * Insights works the same figure out from the entry band the channel printed, because that is
+     * what it is judging. Here the entry is a fact, so this is the only place the ratio describes
+     * the trade the user is actually in - buy above the band and the same call carries a worse one.
+     *
+     * The nearer target, for the reason Insights uses it: the first target is the one a holder can
+     * realistically take, and a ratio quoted off the far one flatters every call ever made.
+     */
+    val riskReward: Double?
+        get() {
+            val stop = position.stopLoss ?: return null
+            val target = position.target1 ?: position.target2 ?: return null
+            val risk = abs(position.entryPrice - stop)
+            if (risk <= 0.0) return null
+            return abs(target - position.entryPrice) / risk
+        }
+
+    /**
+     * How far a level sits from what was paid, in percent.
+     *
+     * A price on its own says nothing across stocks: 59.80 is a wide stop on one share and a tight
+     * one on another, and the distance is the half that compares.
+     */
+    fun fromEntry(price: Double?): Double? {
+        if (price == null || position.entryPrice == 0.0) return null
+        return (price - position.entryPrice) / position.entryPrice * 100
+    }
 }
 
 /**

@@ -42,6 +42,8 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 /**
  * Anything that floats over a page rather than sitting in it.
@@ -472,3 +474,70 @@ fun AdaptiveInline(
     }
 }
 
+/**
+ * Every date pattern the app prints, in one place.
+ *
+ * They were declared beside the screens that used them and had drifted into five near-copies of
+ * three ideas: two files spelling "d MMM" separately, three spelling the run stamp. A pattern that
+ * lives next to one screen is a pattern the next screen writes again slightly differently, and a
+ * reader moving between tabs is the one who notices.
+ */
+object AppDates {
+    /** "14 Aug" - a session in the current year, which is nearly every one a screen shows. */
+    val DayMonth: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM")
+
+    /** "14 Aug 25", the same date two characters wider, for one set in another year. */
+    val DayMonthShortYear: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yy")
+
+    /** "14 Aug 2026", where the year is worth spelling out in full. */
+    val DayMonthYear: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy")
+
+    /** "14 Aug · 09:30" - a Telegram message, which is dated by the minute rather than the day. */
+    val DayMonthTime: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM · HH:mm")
+
+    /** "14 Aug 2026 · 09:30" - when a run happened, on the three screens that say so. */
+    val Stamp: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm")
+
+    /** "Fri 14 Aug 2026". The weekday is the point: a run is aimed at a trading session. */
+    val WeekdaySession: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM yyyy")
+
+    /**
+     * "14 Aug 2026, 09:30" - [Stamp] in all but the separator, which Results has always used.
+     *
+     * Kept apart rather than folded into [Stamp]: the two are one comma from being the same
+     * pattern, and merging them would silently restyle a line on a screen nobody asked about.
+     * Worth doing on purpose one day; not worth doing by accident.
+     */
+    val CompletedStamp: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm")
+}
+
+/**
+ * A date short enough to sit among figures, with the year back only where it has to be.
+ *
+ * "2026-08-14" was the longest thing on any row that carried one, and on a narrow card it was what
+ * pushed the row into an ellipsis. "14 Aug" is the same date in six characters. The year returns
+ * for a date in another one, which is the only time its absence can be read wrong; every date in a
+ * normal season stays at the short form.
+ */
+fun shortDate(date: LocalDate, today: LocalDate = LocalDate.now()): String =
+    if (date.year == today.year) {
+        AppDates.DayMonth.format(date)
+    } else {
+        AppDates.DayMonthShortYear.format(date)
+    }
+
+/**
+ * A risk-to-reward ratio, always written against a risk of one.
+ *
+ * "1 : 2.4" rather than a bare 2.4, which on a card of prices reads as one - and which way round
+ * it goes is the whole meaning of the figure.
+ */
+internal fun Double?.asRatio(): String =
+    if (this == null || isNaN()) Dash else "1 : ${formatPrice(this)}"
+
+/**
+ * A distance, named as one.
+ *
+ * A bare percentage under a price is read as the day's move, which is the one thing it is not.
+ */
+internal fun Double?.distance(): String? = this?.let { "${formatPercent(it)} from entry" }

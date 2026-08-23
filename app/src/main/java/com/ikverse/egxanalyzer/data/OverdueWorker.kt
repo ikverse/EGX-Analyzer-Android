@@ -39,7 +39,7 @@ class OverdueWorker(
         val portfolio = PortfolioCalculator.build(
             positions = store.positions(),
             sessionsFor = store::sessionsFrom,
-            latestCloseFor = store::latestClose,
+            latestQuoteFor = store::latestQuote,
             // The exchange's calendar, matching what the Portfolio tab counts with, so a
             // notification never disagrees with the screen it is pointing at.
             today = LocalDate.now(ZoneId.of(EGX_ZONE)),

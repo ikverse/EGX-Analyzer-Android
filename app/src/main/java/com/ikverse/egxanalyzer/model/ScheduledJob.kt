@@ -82,6 +82,27 @@ sealed interface JobTrigger {
 
     /** The same clock time on each of the chosen days, week after week. */
     data class Repeat(val days: Set<DayOfWeek>, val at: LocalTime) : JobTrigger
+
+    /**
+     * Over and over inside a window, on each of the chosen days.
+     *
+     * The window is the whole point and is not an optional refinement of [Repeat]. A job that
+     * simply fired every 15 minutes would fire through the night, the weekend and every holiday,
+     * for a feed that has nothing new to say outside a session - and the thing being asked for is
+     * "keep up with the market while it is trading", which is a window by definition. Bounding it
+     * here rather than checking the clock inside the work means the schedule is honest on screen:
+     * the next fire it promises is one that will actually happen.
+     *
+     * Fires at [from], then every [everyMinutes], up to and including [until]. Both ends are
+     * inclusive, so a 10:00-14:45 window at 15 minutes has a fire at each end of the session
+     * rather than stopping one step short of the close.
+     */
+    data class Interval(
+        val days: Set<DayOfWeek>,
+        val everyMinutes: Int,
+        val from: LocalTime,
+        val until: LocalTime,
+    ) : JobTrigger
 }
 
 /** What a job actually does. */

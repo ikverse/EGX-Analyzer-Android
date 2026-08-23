@@ -26,6 +26,7 @@ import com.ikverse.egxanalyzer.model.JobOutcome
 import com.ikverse.egxanalyzer.model.JobTrigger
 import com.ikverse.egxanalyzer.model.JobWork
 import com.ikverse.egxanalyzer.model.Position
+import com.ikverse.egxanalyzer.model.Quote
 import com.ikverse.egxanalyzer.model.ScheduledJob
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.ExcludedSource
@@ -98,6 +99,7 @@ class LocalDataStore(context: Context) :
         db.createPromptVersions()
         db.createPositions()
         db.createScheduledJobs()
+        db.addScheduleIntervalColumns()
         db.addPositionRevisionColumns()
         db.addPositionWindowColumns()
         db.addOpenColumn()
@@ -368,22 +370,32 @@ class LocalDataStore(context: Context) :
         getColumnIndexOrThrow(column).let { if (isNull(it)) null else getString(it) }
 
     /**
-     * The most recent close stored for a stock, which is what the app can call its current price.
+     * The most recent close stored for a stock, with the session it closed on.
      *
      * The daily feed is the only thing that writes prices here, so "current" means the last session
      * that has settled rather than a live quote. A position's return moves once a day, deliberately:
      * a figure that changed while nothing had traded would be invented.
+     *
+     * The date comes back with the price rather than from [latestSessionDate], which answers a
+     * different question: that one is the newest row stored, this one is the newest row that
+     * actually carries a close. A session the feed knows about but could not price would put the
+     * wrong date under the figure.
      */
-    fun latestClose(ticker: String): Double? = readableDatabase.query(
+    fun latestQuote(ticker: String): Quote? = readableDatabase.query(
         "daily_prices",
-        arrayOf("close"),
+        arrayOf("close", "session_date"),
         "ticker = ? AND close IS NOT NULL AND close > 0",
         arrayOf(ticker),
         null,
         null,
         "session_date DESC",
         "1",
-    ).use { cursor -> if (cursor.moveToFirst()) cursor.nullableDouble(0) else null }
+    ).use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+        val close = cursor.nullableDouble(0) ?: return@use null
+        val on = runCatching { LocalDate.parse(cursor.getString(1)) }.getOrNull() ?: return@use null
+        Quote(close, on)
+    }
 
     /**
      * The newest session stored for one stock, which is where a fetch has to start from.
@@ -1580,6 +1592,30 @@ class LocalDataStore(context: Context) :
     }
 
     /**
+     * Brings a schedule table written before a job could repeat inside a window up to date.
+     *
+     * One column at a time and guarded by what is actually there, in the same shape as
+     * [addOpinionDetailColumns] and for the same reason: a build that shipped one of the two
+     * leaves phones holding one, and a single guard over the first would decide the second had
+     * arrived with it. The defaults are what every schedule written before this existed meant -
+     * no interval, no window - which is exactly a `ONCE` or `REPEAT` row.
+     */
+    private fun SQLiteDatabase.addScheduleIntervalColumns() {
+        val columns = rawQuery("PRAGMA table_info(scheduled_jobs)", null).use { cursor ->
+            generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }.toSet()
+        }
+        if ("trigger_every_minutes" !in columns) {
+            execSQL(
+                "ALTER TABLE scheduled_jobs ADD COLUMN trigger_every_minutes INTEGER NOT NULL " +
+                    "DEFAULT 0",
+            )
+        }
+        if ("trigger_until" !in columns) {
+            execSQL("ALTER TABLE scheduled_jobs ADD COLUMN trigger_until TEXT NOT NULL DEFAULT ''")
+        }
+    }
+
+    /**
      * The jobs this phone runs on its own.
      *
      * Local to the device and never published, unlike positions or wording rules: a schedule
@@ -1598,6 +1634,8 @@ class LocalDataStore(context: Context) :
             trigger_kind TEXT NOT NULL,
             trigger_at TEXT NOT NULL,
             trigger_days TEXT NOT NULL DEFAULT '',
+            trigger_every_minutes INTEGER NOT NULL DEFAULT 0,
+            trigger_until TEXT NOT NULL DEFAULT '',
             work_kind TEXT NOT NULL,
             work_config TEXT NOT NULL DEFAULT '{}',
             grace_minutes INTEGER NOT NULL,
@@ -1646,6 +1684,16 @@ class LocalDataStore(context: Context) :
                         put("trigger_kind", "REPEAT")
                         put("trigger_at", trigger.at.toString())
                         put("trigger_days", trigger.days.joinToString(",", transform = DayOfWeek::name))
+                    }
+
+                    is JobTrigger.Interval -> {
+                        put("trigger_kind", "INTERVAL")
+                        // The window start, so `trigger_at` means the same thing for all three
+                        // kinds: the first fire of a day.
+                        put("trigger_at", trigger.from.toString())
+                        put("trigger_days", trigger.days.joinToString(",", transform = DayOfWeek::name))
+                        put("trigger_every_minutes", trigger.everyMinutes)
+                        put("trigger_until", trigger.until.toString())
                     }
                 }
                 put("work_kind", job.work.storedKind())
@@ -1726,16 +1774,26 @@ class LocalDataStore(context: Context) :
         is JobWork.Unsupported -> kind
     }
 
+    private fun Cursor.triggerDays(): Set<DayOfWeek> =
+        getString(getColumnIndexOrThrow("trigger_days"))
+            .split(",")
+            .filter(String::isNotBlank)
+            .mapTo(mutableSetOf(), DayOfWeek::valueOf)
+
     private fun Cursor.toScheduledJob(): ScheduledJob {
         val at = getString(getColumnIndexOrThrow("trigger_at"))
         val trigger = when (getString(getColumnIndexOrThrow("trigger_kind"))) {
             "ONCE" -> JobTrigger.Once(LocalDateTime.parse(at))
             "REPEAT" -> JobTrigger.Repeat(
-                days = getString(getColumnIndexOrThrow("trigger_days"))
-                    .split(",")
-                    .filter(String::isNotBlank)
-                    .mapTo(mutableSetOf(), DayOfWeek::valueOf),
+                days = triggerDays(),
                 at = LocalTime.parse(at),
+            )
+
+            "INTERVAL" -> JobTrigger.Interval(
+                days = triggerDays(),
+                everyMinutes = getInt(getColumnIndexOrThrow("trigger_every_minutes")),
+                from = LocalTime.parse(at),
+                until = LocalTime.parse(getString(getColumnIndexOrThrow("trigger_until"))),
             )
 
             else -> error("Unknown trigger")
@@ -1771,7 +1829,9 @@ class LocalDataStore(context: Context) :
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
         /**
-         * 16 for the findings an opinion carries - the news it found, what is scheduled ahead, and
+         * 17 for a schedule that repeats inside a window - `trigger_every_minutes` and
+         * `trigger_until` on `scheduled_jobs`, which is what lets one job fetch prices through a
+         * session rather than once after it. 16 was the findings an opinion carries - the news it found, what is scheduled ahead, and
          * what it thinks goes wrong - which are columns on `stock_opinions` rather than a table of
          * their own. 15 was `stock_opinions` itself, what Ask AI said about a call. 14 was
          * `scheduled_jobs`, the work
@@ -1783,6 +1843,6 @@ class LocalDataStore(context: Context) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 16
+        const val DATABASE_VERSION = 17
     }
 }

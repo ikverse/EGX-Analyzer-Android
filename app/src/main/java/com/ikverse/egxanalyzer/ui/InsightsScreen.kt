@@ -10,7 +10,6 @@ import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -39,7 +37,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.minimumInteractiveComponentSize
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -86,7 +83,6 @@ import com.ikverse.egxanalyzer.ui.theme.extraColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /**
  * How every saved recommendation actually turned out.
@@ -310,18 +306,12 @@ private fun OutcomeLabel(call: ScoredCall) {
     // Every label explains itself, not just the puzzling one: a chip that is sometimes tappable
     // teaches nobody that it can be tapped.
     var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
-    Surface(
-        color = call.outcome.container(),
-        shape = CircleShape,
+    OutlinePill(
+        call.outcome.label,
+        outline = call.outcome.outlineTone(),
+        textColor = call.outcome.onContainer(),
         onClick = { showing = true },
-    ) {
-        Text(
-            call.outcome.label,
-            style = MaterialTheme.typography.labelMedium,
-            color = call.outcome.onContainer(),
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-        )
-    }
+    )
     if (showing) {
         AlertDialog(
             onDismissRequest = { showing = false },
@@ -341,14 +331,14 @@ private fun OutcomeLabel(call: ScoredCall) {
  * "reached target 1 on 3 Aug" answer different questions, and the second is the one being asked.
  */
 private fun ScoredCall.reason(): String {
-    val on = settledOn?.format(OUTCOME_DATE)
+    val on = settledOn?.format(AppDates.DayMonth)
     return when (outcome) {
         Outcome.FULL_HIT -> "Reached target 2 on $on."
         Outcome.PARTIAL_HIT -> when {
             // Two dates, because they are two sessions. This used to name the target's date as the
             // day the stop broke, for want of any other date to name - the call is scored on the
             // session it reached the target, and the stop that undid it came later.
-            stoppedAfterPartial -> when (val stop = stoppedOn?.format(OUTCOME_DATE)) {
+            stoppedAfterPartial -> when (val stop = stoppedOn?.format(AppDates.DayMonth)) {
                 // Scored before the stop's own date was recorded, so only the fact survives.
                 null -> "Reached target 1 on $on, then fell back to the stop."
                 on -> "Reached target 1 and fell back to the stop on $on."
@@ -392,18 +382,6 @@ private fun ScoredCall.reason(): String {
         }
     }
 }
-
-private val OUTCOME_DATE = DateTimeFormatter.ofPattern("d MMM")
-
-/**
- * The same date carrying its year, for the line that dates the call itself.
- *
- * A caption under a figure is read against the card it sits on and can drop the year; the line that
- * says when a call was made is the one place a reader is placing it in time, and a record going back
- * more than a year has two 3 Augusts in it. This line used to print the raw ISO date, which was the
- * only date on the card not in this app's own format.
- */
-private val CALL_DATE = DateTimeFormatter.ofPattern("d MMM yyyy")
 
 /**
  * The source with the best record, and what that record is actually made of.
@@ -696,7 +674,7 @@ private fun SessionCard(
     modifier: Modifier = Modifier,
 ) {
     val ranAt = remember(run.lastRunAt) {
-        DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm")
+        AppDates.Stamp
             .withZone(ZoneId.systemDefault())
             .format(run.lastRunAt)
     }
@@ -878,11 +856,11 @@ private fun ScoredCallRow(
                 OutcomeLabel(call)
             }
             Text(
-                "${call.channel} · called ${call.openedOn.format(CALL_DATE)}" +
-                    (call.settledOn?.let { " · settled ${it.format(CALL_DATE)}" } ?: "") +
+                "${call.channel} · called ${call.openedOn.format(AppDates.DayMonthYear)}" +
+                    (call.settledOn?.let { " · settled ${it.format(AppDates.DayMonthYear)}" } ?: "") +
                     // The channel did post it that day, so the card stays; it is the same bet as
                     // the call it repeats, so no rate counts it twice.
-                    (call.repeatOf?.let { " · repeat of ${it.format(CALL_DATE)}, counted once" } ?: ""),
+                    (call.repeatOf?.let { " · repeat of ${it.format(AppDates.DayMonthYear)}, counted once" } ?: ""),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -928,7 +906,7 @@ private fun ScoredCallRow(
                 target1 = call.target1,
                 target2 = call.target2,
                 // The extreme inside the judged window, which is what the figure below it says too.
-                peak = call.peakHigh,
+                reached = call.peakHigh,
             )
             // Two groups rather than eight loose figures: what the channel asked for, and what the
             // market did about it. Colour says which is which without reading the labels.
@@ -1045,7 +1023,7 @@ private fun ScoredCallRow(
                             tone = PriceRole.market,
                             caption = latest?.let { price ->
                                 listOfNotNull(
-                                    price.session.date.format(OUTCOME_DATE),
+                                    price.session.date.format(AppDates.DayMonth),
                                     call.fromEntry(price.session.close).distance(),
                                     // Named as what it is rather than as a warning: the session has
                                     // not closed, so the figure beside it is going to move.
@@ -1207,58 +1185,6 @@ private fun SessionRow(
     }
 }
 
-/**
- * Figures that belong together, laid out two-up when the width cannot take four.
- *
- * The cover screen has plenty of height and little width, so wrapping beats shrinking: four
- * columns at 443dp truncates every price it is supposed to show.
- *
- * Four was once the whole story and is now only the cap - "What happened" carries five, and a group
- * whose last row is short spreads that row across the width rather than padding it out to the
- * column count.
- */
-@Composable
-private fun FigureGroup(title: String, figures: List<@Composable RowScope.() -> Unit>) {
-    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-        Text(
-            title.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        BoxWithConstraints {
-            // Taken as a list rather than a row of slots, because wrapping means splitting them -
-            // and a lambda that draws four figures cannot be cut in half.
-            //
-            // Capped rather than "all of them on a wide screen": the threshold below was measured
-            // for four prices, and a group of five would put all five on one row at a width that
-            // was only ever proved to hold four.
-            val perRow = if (maxWidth >= FourFiguresMinWidth) {
-                minOf(figures.size, MaxFiguresPerRow)
-            } else {
-                2
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                figures.chunked(perRow).forEach { row ->
-                    // A short last row spreads across the width rather than being padded out to the
-                    // column count. Every figure here already carries `weight(1f)`, so dropping the
-                    // spacers is what lets the odd one out have the room: "Latest close" was left
-                    // on half a row with its caption broken over three lines and the other half
-                    // of the row empty.
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                        row.forEach { figure -> figure() }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** Four prices need this much before the digits start truncating. */
-private val FourFiguresMinWidth = 420.dp
-
-/** What [FourFiguresMinWidth] was measured against, so a longer group wraps rather than shrinks. */
-private const val MaxFiguresPerRow = 4
-
 /*
  * Column thresholds, set against the narrowest screen meant to show two of something.
  *
@@ -1270,42 +1196,6 @@ private val ChannelCardMinWidth = 280.dp
 private val SessionCardMinWidth = 290.dp
 private val CallCardMinWidth = 280.dp
 
-@Composable
-private fun Figure(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    tone: Color = MaterialTheme.colorScheme.onSurface,
-    /** The session a high or low was set on: a price without its date says half of it. */
-    on: java.time.LocalDate? = null,
-    /** Takes the place of [on] where the line under a figure has more to say than a date. */
-    caption: String? = null,
-) {
-    Column(modifier) {
-        Text(
-            label.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        // Every figure this draws is a number, and this screen's whole job is comparing them down a
-        // column. Proportional digits put the same price at a different width on every card.
-        Text(
-            value,
-            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
-            color = tone,
-            textAlign = TextAlign.Start,
-        )
-        val note = caption ?: on?.format(OUTCOME_DATE)
-        if (note != null) {
-            Text(
-                note,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
 /**
  * Expired takes the amber the palette gained for exactly this, not the purple it used to.
  *
@@ -1315,11 +1205,12 @@ private fun Figure(
  * disagreeing about the colour of one outcome is the reader's problem, not the palette's.
  */
 @Composable
-private fun Outcome.container(): Color = when (this) {
-    Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> MaterialTheme.colorScheme.tertiaryContainer
-    Outcome.STOPPED -> MaterialTheme.colorScheme.errorContainer
-    Outcome.EXPIRED -> extraColors.expiredContainer
-    else -> MaterialTheme.colorScheme.surfaceContainerHighest
+private fun Outcome.outlineTone(): Color = when (this) {
+    Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> MaterialTheme.colorScheme.tertiary
+    Outcome.STOPPED -> MaterialTheme.colorScheme.error
+    Outcome.EXPIRED -> extraColors.expired
+    // The unjudged outcomes say nothing about the channel, so their ring says nothing either.
+    else -> MaterialTheme.colorScheme.outline
 }
 
 @Composable
@@ -1401,13 +1292,6 @@ private fun ScoredCall.fromEntry(price: Double?): Double? {
     return (price - entry) / entry * 100
 }
 
-/**
- * A distance, named as one.
- *
- * A bare percentage under a price is read as the day's move, which is the one thing it is not.
- */
-private fun Double?.distance(): String? = this?.let { "${formatPercent(it)} from entry" }
-
 /** The midpoint, where the zone is a range. A single price is its own middle and says so already. */
 private fun ScoredCall.entryMidCaption(): String? =
     entryMid()
@@ -1422,15 +1306,6 @@ private fun ScoredCall.entryRange(): String = when {
 }
 
 private fun Double?.signedPercent(): String = formatPercent(this)
-
-/**
- * A risk-to-reward ratio, always written against a risk of one.
- *
- * "1 : 2.4" rather than a bare 2.4, which on a card of prices reads as one - and which way round
- * it goes is the whole meaning of the figure.
- */
-private fun Double?.asRatio(): String =
-    if (this == null || isNaN()) Dash else "1 : ${formatPrice(this)}"
 
 private fun Double?.orDash(): String = formatPrice(this)
 

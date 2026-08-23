@@ -2,14 +2,12 @@ package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -17,26 +15,16 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.HourglassEmpty
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -59,8 +47,6 @@ import com.ikverse.egxanalyzer.model.callIds
 import com.ikverse.egxanalyzer.ui.theme.extraColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 
 /**
  * What the user actually bought, and what it has done since.
@@ -224,7 +210,7 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
         withStyle(SpanStyle(color = MaterialTheme.colorScheme.error)) {
             append("${view.overdueDays}d")
         }
-        append(" · ${shortEntryDate(view.position.entryDate)} · ")
+        append(" · ${shortDate(view.position.entryDate)} · ")
         withStyle(SpanStyle(color = returnColor)) {
             append(formatPercent(view.returnPct))
         }
@@ -646,375 +632,6 @@ private fun ColumnScope.PositionGrid(
 }
 
 /**
- * A position card answers three questions in order: what did I buy, where is it now, and how long
- * is left. The status outline says the third at a glance before any of it is read.
- */
-@Composable
-private fun PositionCard(
-    view: PositionView,
-    /** Opens the call this trade was taken on, in Insights. Absent once its analysis is gone. */
-    onOpenCall: (() -> Unit)?,
-    highlighted: Boolean,
-    onHighlightShown: () -> Unit,
-    onSell: (Double, LocalDate) -> Unit,
-    onEditTrade: (Double, LocalDate, Int?) -> Unit,
-    onKeepOpen: (keep: Boolean, note: String?) -> Unit,
-    onRemove: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val position = view.position
-    var menuOpen by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf(false) }
-    var confirmRemove by remember { mutableStateOf(false) }
-
-    val colors = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-    )
-    // The arrival flash takes the edge for as long as it runs, then the status outline has it back.
-    val border = arrivalFlash(highlighted, onHighlightShown) ?: heldBorder(view)
-    val body: @Composable ColumnScope.() -> Unit = {
-        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            // A fixed two lines for the name, so a company whose name wraps does not make its card
-            // taller than the one beside it.
-            Row(Modifier.heightIn(min = PositionHeaderHeight), verticalAlignment = Alignment.Top) {
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        StockLogo(position.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
-                        Text(position.ticker, style = MaterialTheme.typography.titleSmall)
-                    }
-                    listOfNotNull(position.companyArabic, position.companyEnglish)
-                        .filter(String::isNotBlank)
-                        .distinct()
-                        .takeIf(List<String>::isNotEmpty)
-                        ?.let {
-                            Text(
-                                it.joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                }
-                PositionStatusChip(view)
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = "More actions")
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Edit trade") },
-                            leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
-                            onClick = { menuOpen = false; editing = true },
-                        )
-                        // Undoing Keep Open lives here rather than beside Sold. The pill already
-                        // says the trade is being kept open, and a button repeating it took the
-                        // place where the user looks for the one action that ends a position. It
-                        // has to stay reachable somewhere, though: without it a mistaken press
-                        // could only be undone by deleting the trade and recording it again.
-                        if (view.keptOpen) {
-                            DropdownMenuItem(
-                                text = { Text("Follow the deadline again") },
-                                leadingIcon = {
-                                    Icon(Icons.Outlined.HourglassEmpty, contentDescription = null)
-                                },
-                                onClick = { menuOpen = false; onKeepOpen(false, null) },
-                            )
-                        }
-                        DropdownMenuItem(
-                            text = { Text("Remove") },
-                            leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
-                            onClick = { menuOpen = false; confirmRemove = true },
-                        )
-                    }
-                }
-            }
-
-            // The line that names the call, which is exactly what a press on this card opens.
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    listOfNotNull(
-                        position.channel?.takeIf(String::isNotBlank),
-                        "called ${position.recommendationDate}",
-                    ).joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    // fill = false so the arrow sits against the end of the line rather than out at
-                    // the card's edge, where it would read as unrelated to it.
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                // The one hint that the card leads somewhere: a whole card being pressable is
-                // invisible otherwise.
-                if (onOpenCall != null) {
-                    Icon(
-                        Icons.AutoMirrored.Outlined.ArrowForward,
-                        // The press is described where it is declared; a reader announcing the
-                        // glyph as well would say it twice.
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(IconSize.Inline),
-                    )
-                }
-            }
-
-            // Its own row rather than the header, which is held to a fixed height so cards beside
-            // each other start level. Drawn only when there is something to say, so an ordinary
-            // position is exactly as tall as it was.
-            if (view.overdue || view.keptOpen) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(Space.s),
-                    verticalArrangement = Arrangement.spacedBy(Space.xs),
-                ) {
-                    if (view.overdue) OverdueChip(view.overdueDays)
-                    // One chip, not two saying the same thing: a trade can only be overdue by being
-                    // kept open now, so Overdue already carries the state and adds how late it is.
-                    // The instruction the chip also held is not lost - the Sell button below is on
-                    // the card for as long as no sale has been recorded.
-                    if (view.keptOpen && !view.overdue) KeptOpenChip()
-                    if (view.priceScaleChanged) PriceScaleChip()
-                }
-                position.keepOpenNote?.takeIf(String::isNotBlank)?.let { why ->
-                    Text(
-                        why,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-
-            FigureRow(
-                listOf(
-                    Cell("Entry", formatPrice(position.entryPrice), PriceRole.entry),
-                    Cell("Entry date", position.entryDate.toString(), PriceRole.muted),
-                    Cell("Market", formatPrice(view.currentPrice), PriceRole.market),
-                    Cell(
-                        if (view.realized) "Return" else "Return so far",
-                        formatPercent(view.returnPct),
-                        PriceRole.forReturn(view.returnPct),
-                    ),
-                ),
-            )
-            FigureRow(
-                listOf(
-                    Cell("Target 1", formatPrice(position.target1), PriceRole.target),
-                    Cell("Target 2", formatPrice(position.target2), PriceRole.target),
-                    Cell("Stop loss", formatPrice(position.stopLoss), PriceRole.stop),
-                    Cell("Deadline", view.deadline(), PriceRole.muted, tabular = false),
-                ),
-            )
-
-            HorizontalDivider()
-
-            Text(
-                view.profitLine(),
-                style = MaterialTheme.typography.bodySmall,
-                color = PriceRole.forReturn(view.returnPct),
-            )
-            // Selling early is the point of the button, so it stays available for as long as no
-            // sale has been recorded - including on a trade that reached target 2, where recording
-            // what the user actually got out at turns an estimate into a fact, and on one the
-            // deadline closed while they were still holding it.
-            if (view.awaitingSale) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(Space.s),
-                    verticalArrangement = Arrangement.spacedBy(Space.xs),
-                    modifier = Modifier.padding(top = Space.xs),
-                ) {
-                    // The estimate rather than today's close. While the trade is open the two are
-                    // the same thing; once the deadline has closed it, today's price is the least
-                    // likely figure the user sold at, and the estimate is already marked at the
-                    // stop, the target, or the last close of the window.
-                    SellButton(
-                        suggestedExit = view.exitPrice ?: view.currentPrice,
-                        onSell = onSell,
-                    )
-                    // Not on a trade already being kept open - the pill says that, and the menu
-                    // undoes it - and not on one that reached target 2, which is the single ending
-                    // Keep Open cannot argue with.
-                    if (!view.keptOpen && !view.finished) KeepOpenButton(onKeepOpen = onKeepOpen)
-                }
-            }
-        }
-    }
-
-    // Two overloads over one body rather than a clickable wrapped round the card: Material's own
-    // pressable card is what keeps the ripple inside the corners, and a trade whose call is gone
-    // must not answer a press at all. The menu, Sold and Keep Open take their own taps as before.
-    if (onOpenCall == null) {
-        Card(
-            modifier.fillMaxWidth(),
-            colors = colors,
-            border = border,
-            shape = MaterialTheme.shapes.medium,
-            content = body,
-        )
-    } else {
-        Card(
-            onClick = onOpenCall,
-            // A pressable card announces itself as "activate" and nothing more, which says nothing
-            // about where the press goes. The action itself is Material's; only its name is ours.
-            modifier = modifier.fillMaxWidth()
-                .semantics { onClick(label = "Open this call in Insights", action = null) },
-            colors = colors,
-            border = border,
-            shape = MaterialTheme.shapes.medium,
-            content = body,
-        )
-    }
-
-    if (editing) {
-        TradeDialog(
-            title = "Edit the trade",
-            explanation = "Corrects what this trade was recorded at, and how long it runs. " +
-                "Everything the position reports is measured from the entry; changing the window " +
-                "moves the deadline, so it can close a running trade or reopen a finished one.",
-            priceLabel = "Entry price",
-            dateLabel = "Entry date",
-            confirmLabel = "Save",
-            initialPrice = position.entryPrice,
-            initialWindow = position.windowSessions,
-            windowHelp = "Trading sessions from ${position.recommendationDate}, the session this " +
-                "call was made for.",
-            onDismiss = { editing = false },
-            onConfirm = { price, date, window ->
-                editing = false
-                onEditTrade(price, date, window)
-            },
-        )
-    }
-    if (confirmRemove) {
-        AlertDialog(
-            onDismissRequest = { confirmRemove = false },
-            title = { Text("Remove this position?") },
-            text = {
-                Text(
-                    "It stops being counted in your portfolio. The analysis it came from is not " +
-                        "touched, so the recommendation itself stays where it is.",
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmRemove = false
-                        onRemove()
-                    },
-                ) { Text("Remove") }
-            },
-            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Keep") } },
-        )
-    }
-}
-
-/**
- * How long the recommendation has left, counted in the sessions it is judged in.
- *
- * Trading sessions rather than days, and counted from the session the call was made for: a stock
- * does not move at the weekend, and the user's entry date never enters into it. A window the user
- * set themselves says so here rather than in a chip of its own - the figure it qualifies is this
- * one, and a reader wondering why a trade has fifteen sessions is already looking at it.
- */
-private fun PositionView.deadline(): String {
-    val left = deadlineDate?.let { "passed $it" }
-        ?: "$sessionsRemaining of ${position.windowSessions} left"
-    return if (position.windowCustom) "$left · custom" else left
-}
-
-/**
- * Says why a trade is still running, on the trades where Overdue is not already saying it.
- *
- * Only up before the deadline passes: after it, Overdue means kept open and this would be the same
- * fact twice on one row. The instruction in it is the point while it is up: the way to end a trade
- * being kept open is to sell it, and the card's menu holds the way to hand it back to its deadline
- * instead.
- */
-@Composable
-private fun KeptOpenChip() {
-    OutlinePill(
-        "Keep open · sell to close",
-        outline = MaterialTheme.colorScheme.tertiary,
-        textColor = MaterialTheme.colorScheme.onTertiaryContainer,
-    )
-}
-
-/**
- * The one line that says what the position is worth, and how much of that is a fact.
- *
- * A closed position the user reported selling is realized; everything else is an estimate, and
- * saying which is which matters more than the figure itself.
- */
-private fun PositionView.profitLine(): String {
-    val amount = formatPercent(returnPct)
-    val at = formatPrice(exitPrice)
-    return when {
-        realized -> "Realized $amount · sold at $at" +
-            (position.exitDate?.let { " on $it" } ?: "")
-        open -> "Estimated $amount · marked at $at"
-        status == PositionStatus.STOPPED_OUT -> "Estimated $amount · stopped at $at"
-        status == PositionStatus.FULL_TARGET_HIT -> "Estimated $amount · target reached at $at"
-        else -> "Estimated $amount · expired at $at"
-    } + if (marketStatus != status) " · the call itself: ${marketStatus.label.lowercase()}" else ""
-}
-
-/**
- * One labelled figure, matching how Insights lays a call's numbers out.
- *
- * [tabular] is off only where the value is a sentence rather than a figure - the deadline reads
- * "3 of 10 left · custom", and monospacing prose sets it apart from the prices for no reason.
- */
-private data class Cell(
-    val label: String,
-    val value: String,
-    val tone: Color,
-    val tabular: Boolean = true,
-)
-
-/**
- * Four figures across, or two when the width cannot take four.
- *
- * The same rule the Insights cards use: a cover screen has height and no width, so wrapping beats
- * shrinking - four columns at 443dp truncates every price they are supposed to show.
- */
-@Composable
-private fun FigureRow(cells: List<Cell>) {
-    BoxWithConstraints {
-        val perRow = if (maxWidth >= FourFiguresWidth) cells.size else 2
-        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            cells.chunked(perRow).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                    row.forEach { cell ->
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                cell.label.uppercase(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                cell.value,
-                                style = MaterialTheme.typography.bodyMedium.let {
-                                    if (cell.tabular) it.copy(fontFamily = TabularFigures) else it
-                                },
-                                color = cell.tone,
-                            )
-                        }
-                    }
-                    repeat(perRow - row.size) { Box(Modifier.weight(1f)) }
-                }
-            }
-        }
-    }
-}
-
-private val FourFiguresWidth = 420.dp
-
-/** Ticker plus two lines of company name, so every position card starts the same height. */
-private val PositionHeaderHeight = 52.dp
-
-/**
  * What a position needs before two share a row.
  *
  * Set against the 750dp an unfolded Fold actually reports, not the 851dp an emulator claims: after
@@ -1030,24 +647,3 @@ private val PositionCardMinWidth = 300.dp
  * 165dp there - the same width they take on the Fold, where four fit across instead of two.
  */
 private val OverdueTileMinWidth = 150.dp
-
-/**
- * The entry date on an overdue tile, short enough to sit beside the two facts either side of it.
- *
- * `2026-08-14` was the longest thing on a row that already carries the day count and the state
- * word, and on a cover-screen tile it was what pushed that row into an ellipsis. `14 Aug` is the
- * same date in six characters, and the same shape Insights dates an outcome in.
- *
- * The year comes back only for a trade bought in another one, which is the only time its absence
- * can be read wrong. Every tile in a normal season stays at the short form.
- */
-private fun shortEntryDate(date: LocalDate): String =
-    if (date.year == LocalDate.now().year) {
-        ShortDate.format(date)
-    } else {
-        ShortDateWithYear.format(date)
-    }
-
-private val ShortDate: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM")
-
-private val ShortDateWithYear: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yy")

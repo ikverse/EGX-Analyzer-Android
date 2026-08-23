@@ -9,6 +9,7 @@ import com.ikverse.egxanalyzer.model.PortfolioStats
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.Quote
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.round
 import java.time.LocalDate
@@ -29,18 +30,26 @@ object PortfolioCalculator {
         positions: List<Position>,
         /** Sessions for one stock from a date onward, oldest first. */
         sessionsFor: (ticker: String, from: LocalDate) -> List<DailySession>,
-        /** The latest close the feed has for a stock, which is as current as a daily feed gets. */
-        latestCloseFor: (ticker: String) -> Double?,
+        /**
+         * The latest close the feed has for a stock, with the session it closed on.
+         *
+         * The date rides along rather than being fetched beside it: the price and the day it was
+         * set are one fact, and a card that showed the figure without the day was reporting a
+         * fortnight-old close as today's.
+         */
+        latestQuoteFor: (ticker: String) -> Quote?,
         /** Passed in rather than read here, so how overdue a trade is can be tested at all. */
         today: LocalDate = LocalDate.now(),
         /** The sessions on which each stock's prices changed scale - a split, a bonus issue. */
         priceBreaksFor: (ticker: String) -> Set<LocalDate> = { emptySet() },
     ): Portfolio {
         val views = positions.map { position ->
+            val quote = latestQuoteFor(position.ticker)
             evaluate(
                 position = position,
                 sessions = sessionsFor(position.ticker, position.recommendationDate),
-                currentPrice = latestCloseFor(position.ticker),
+                currentPrice = quote?.price,
+                currentPriceOn = quote?.on,
                 today = today,
                 priceBreaks = priceBreaksFor(position.ticker),
             )
@@ -59,6 +68,8 @@ object PortfolioCalculator {
         position: Position,
         sessions: List<DailySession>,
         currentPrice: Double?,
+        /** Defaulted rather than required: a caller with no feed date still has a price to score. */
+        currentPriceOn: LocalDate? = null,
         today: LocalDate = LocalDate.now(),
         priceBreaks: Set<LocalDate> = emptySet(),
     ): PositionView {
@@ -149,13 +160,24 @@ object PortfolioCalculator {
             marketStatus = marketStatus,
             open = open,
             currentPrice = currentPrice,
+            currentPriceOn = currentPriceOn,
             exitPrice = exit,
             realized = soldByHand,
             returnPct = returnPct(position.entryPrice, exit),
             sessionsElapsed = elapsed,
+            sessionsHeld = held.size,
             sessionsRemaining = remaining,
             deadlineDate = deadlineDate,
             settledOn = scored.settledOn,
+            // Read off the held sessions rather than the whole window, because that is what the
+            // scorer was handed: a high set before the user bought belongs to the call, not to
+            // them. Dropped entirely across a change of scale, for the reason [exit] is - a high
+            // quoted in the old money against an entry paid in it is a percentage of two different
+            // things, and the card says so rather than printing one.
+            peakSinceEntry = scored.peakHigh.takeUnless { priceScaleChanged },
+            peakOn = scored.peakOn.takeUnless { priceScaleChanged },
+            troughSinceEntry = scored.troughLow.takeUnless { priceScaleChanged },
+            troughOn = scored.troughOn.takeUnless { priceScaleChanged },
             ranOutOfTime = ranOutOfTime,
             overdueDays = overdueDays(ranOutOfTime && keptOpen, deadlineDate, today),
             priceScaleChanged = priceScaleChanged,

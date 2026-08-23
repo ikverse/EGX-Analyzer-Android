@@ -21,10 +21,28 @@ import com.ikverse.egxanalyzer.data.UpdateRepository
 import com.ikverse.egxanalyzer.ui.AppState
 
 class EgxApplication : Application() {
+
+    /**
+     * Whether the thing that started this process was the clock rather than its owner.
+     *
+     * Set by [ScheduledJobWorker] before it first touches [appState], which is what decides how
+     * much of the app comes up with it - see `AppState.enterForeground`. A field on the
+     * application rather than an argument because the state is built lazily by whoever asks for
+     * it first, and the worker cannot pass anything to a getter.
+     *
+     * Read once, when the state is built. A process that starts headless and is then opened is
+     * put right by the activity rather than by this flag.
+     */
+    @Volatile
+    var startedForSchedule: Boolean = false
+
     val appState: AppState by lazy {
         val credentialStore = AndroidKeystoreCredentialStore(this)
         val settingsRepository = SettingsRepository(this, credentialStore)
-        val telegramRepository = TelegramRepository(this, credentialStore)
+        // Not built here: constructing it starts TDLib, and a wake that only has prices to fetch
+        // has no use for a Telegram session. AppState holds this behind a lazy and calls it the
+        // first time anything actually needs Telegram.
+        val telegramProvider = { TelegramRepository(this, credentialStore) }
         lateinit var state: AppState
         // One instance: the composer reads the same shipped text the repository falls back to, and
         // two readers of one asset that could disagree is a bug waiting for an app update.
@@ -50,7 +68,7 @@ class EgxApplication : Application() {
             settingsRepository = settingsRepository,
             analysisRepository = analysisRepository,
             localDataStore = localDataStore,
-            telegramRepository = telegramRepository,
+            telegramProvider = telegramProvider,
             priceRepository = PriceRepository(localDataStore, symbols),
             intradayRepository = IntradayRepository(localDataStore, symbols),
             promptStore = promptStore,
@@ -79,6 +97,7 @@ class EgxApplication : Application() {
             overdueRemindersChanged = { enabled ->
                 if (enabled) OverdueWorker.schedule(this) else OverdueWorker.cancel(this)
             },
+            headless = startedForSchedule,
         ).also { state = it }
         // Booked on every launch rather than only when the switch is touched, so an install that
         // has never opened Settings still gets the check, and one whose work was dropped by the

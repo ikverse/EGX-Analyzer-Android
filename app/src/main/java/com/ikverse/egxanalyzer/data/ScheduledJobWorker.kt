@@ -38,7 +38,15 @@ class ScheduledJobWorker(
     override suspend fun doWork(): Result = runCatching {
         val application = applicationContext as? EgxApplication
             ?: return@runCatching Result.success()
-        if (paidWorkIsDue()) goForeground()
+        val paid = paidWorkIsDue()
+        // Said before the state is first touched, because that is when it is read and the state is
+        // built by whoever asks for it first. Free work - which is every price refresh - brings up
+        // no Telegram session, no sync and no update check; an analysis needs all three, so a wake
+        // that owes one starts the app in full exactly as it always did. Asked of the same
+        // question that decides the foreground notification, so the two can never disagree about
+        // what this wake is for.
+        if (!paid) application.startedForSchedule = true
+        if (paid) goForeground()
         // AppState is Compose state driven from the main thread; the run itself suspends onto IO
         // inside the repositories, exactly as it does when a screen starts it.
         withContext(Dispatchers.Main) { application.appState.runDueScheduledJobs() }

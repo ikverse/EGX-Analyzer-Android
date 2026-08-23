@@ -6,13 +6,11 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -319,60 +317,48 @@ private fun OpinionSection(
  */
 @Composable
 private fun VerdictChip(verdict: StockOpinion.Verdict) {
-    val container = when (verdict) {
-        StockOpinion.Verdict.BUY_NOW -> MaterialTheme.colorScheme.tertiaryContainer
-        StockOpinion.Verdict.WAIT -> extraColors.expiredContainer
-        StockOpinion.Verdict.AVOID -> MaterialTheme.colorScheme.errorContainer
+    val outline = when (verdict) {
+        StockOpinion.Verdict.BUY_NOW -> MaterialTheme.colorScheme.tertiary
+        StockOpinion.Verdict.WAIT -> extraColors.expired
+        StockOpinion.Verdict.AVOID -> MaterialTheme.colorScheme.error
     }
-    val onContainer = when (verdict) {
+    val ink = when (verdict) {
         StockOpinion.Verdict.BUY_NOW -> MaterialTheme.colorScheme.onTertiaryContainer
         StockOpinion.Verdict.WAIT -> extraColors.onExpiredContainer
         StockOpinion.Verdict.AVOID -> MaterialTheme.colorScheme.onErrorContainer
     }
-    Chip(verdict.arabic, container, onContainer)
+    OutlinePill(verdict.arabic, outline = outline, textColor = ink)
 }
 
 @Composable
 private fun StanceChip(stance: StockOpinion.Stance) {
-    val container = when (stance) {
-        StockOpinion.Stance.SOUND -> MaterialTheme.colorScheme.tertiaryContainer
-        StockOpinion.Stance.RISKY, StockOpinion.Stance.OVERTAKEN -> extraColors.expiredContainer
-        StockOpinion.Stance.UNSOUND -> MaterialTheme.colorScheme.errorContainer
+    val outline = when (stance) {
+        StockOpinion.Stance.SOUND -> MaterialTheme.colorScheme.tertiary
+        StockOpinion.Stance.RISKY, StockOpinion.Stance.OVERTAKEN -> extraColors.expired
+        StockOpinion.Stance.UNSOUND -> MaterialTheme.colorScheme.error
     }
-    val onContainer = when (stance) {
+    val ink = when (stance) {
         StockOpinion.Stance.SOUND -> MaterialTheme.colorScheme.onTertiaryContainer
         StockOpinion.Stance.RISKY, StockOpinion.Stance.OVERTAKEN -> extraColors.onExpiredContainer
         StockOpinion.Stance.UNSOUND -> MaterialTheme.colorScheme.onErrorContainer
     }
-    Chip(stance.arabic, container, onContainer)
+    OutlinePill(stance.arabic, outline = outline, textColor = ink)
 }
 
 /** What one item means for the price, in the same three colours the rest of the sheet uses. */
 @Composable
 private fun ToneChip(tone: StockOpinion.Tone) {
-    val container = when (tone) {
-        StockOpinion.Tone.BULLISH -> MaterialTheme.colorScheme.tertiaryContainer
-        StockOpinion.Tone.BEARISH -> MaterialTheme.colorScheme.errorContainer
-        StockOpinion.Tone.NEUTRAL -> MaterialTheme.colorScheme.surfaceVariant
+    val outline = when (tone) {
+        StockOpinion.Tone.BULLISH -> MaterialTheme.colorScheme.tertiary
+        StockOpinion.Tone.BEARISH -> MaterialTheme.colorScheme.error
+        StockOpinion.Tone.NEUTRAL -> MaterialTheme.colorScheme.outline
     }
-    val onContainer = when (tone) {
+    val ink = when (tone) {
         StockOpinion.Tone.BULLISH -> MaterialTheme.colorScheme.onTertiaryContainer
         StockOpinion.Tone.BEARISH -> MaterialTheme.colorScheme.onErrorContainer
         StockOpinion.Tone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    Chip(tone.arabic, container, onContainer)
-}
-
-@Composable
-private fun Chip(text: String, container: Color, onContainer: Color) {
-    Surface(color = container, shape = CircleShape) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelMedium,
-            color = onContainer,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-        )
-    }
+    OutlinePill(tone.arabic, outline = outline, textColor = ink)
 }
 
 /**

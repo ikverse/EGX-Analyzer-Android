@@ -62,18 +62,18 @@ internal fun OccurrenceSheet(
                 }
             }
 
-            PriceLadder(point, peak = peak)
+            PriceLadder(point, reached = peak)
 
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(Space.xl),
                 verticalArrangement = Arrangement.spacedBy(Space.m),
             ) {
-                Figure("Entry", entryText(point), PriceRole.entry)
-                point.target1?.let { Figure("Target 1", withPercent(it, point.returnTp1Pct), PriceRole.target) }
-                point.target2?.let { Figure("Target 2", withPercent(it, point.returnTp2Pct), PriceRole.target) }
-                point.stopLoss?.let { Figure("Stop loss", withPercent(it, point.riskPct), PriceRole.stop) }
-                point.support?.let { Figure("Support", plain(it), PriceRole.market) }
-                point.resistance?.let { Figure("Resistance", plain(it), PriceRole.market) }
+                SheetFigure("Entry", entryText(point), PriceRole.entry)
+                point.target1?.let { SheetFigure("Target 1", withPercent(it, point.returnTp1Pct), PriceRole.target) }
+                point.target2?.let { SheetFigure("Target 2", withPercent(it, point.returnTp2Pct), PriceRole.target) }
+                point.stopLoss?.let { SheetFigure("Stop loss", withPercent(it, point.riskPct), PriceRole.stop) }
+                point.support?.let { SheetFigure("Support", plain(it), PriceRole.market) }
+                point.resistance?.let { SheetFigure("Resistance", plain(it), PriceRole.market) }
             }
 
             point.riskRewardRatio()?.let {
@@ -140,17 +140,21 @@ internal fun OccurrenceSheet(
     }
 }
 
+/**
+ * The sheet's own weight on the shared figure.
+ *
+ * Larger than a card's, and the one place the digits are not monospaced: this sheet is about a
+ * single call, so nothing here is being compared down a column - the reason the tabular figures
+ * exist everywhere else.
+ */
 @Composable
-private fun Figure(label: String, value: String, tone: androidx.compose.ui.graphics.Color) {
-    Column {
-        Text(
-            label.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(value, style = MaterialTheme.typography.titleMedium, color = tone)
-    }
-}
+private fun SheetFigure(label: String, value: String, tone: androidx.compose.ui.graphics.Color) =
+    Figure(
+        label,
+        value,
+        tone = tone,
+        valueStyle = MaterialTheme.typography.titleMedium,
+    )
 
 private fun plain(value: Double): String =
     formatPrice(value)

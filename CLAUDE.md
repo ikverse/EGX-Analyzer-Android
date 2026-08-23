@@ -88,8 +88,10 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/ReportSync.kt` + `data/RuleSync.kt` + `data/PositionSync.kt` — what travels between devices.
 - `data/XlsxWriter.kt` + `ui/ReportExport.kt` — a report as a spreadsheet, saved to Downloads or
   sent onward from the ⋮ menu on its card. See below.
-- `ui/PortfolioScreen.kt` + `ui/TradeControls.kt` — the Portfolio tab, and the Bought button and
-  closing controls that sit on a recommendation card.
+- `ui/PortfolioScreen.kt` + `ui/PositionCard.kt` + `ui/TradeControls.kt` — the Portfolio tab, one
+  trade's card, and the Bought button and closing controls that sit on a recommendation card.
+- `ui/CommonUi.kt` holds `Figure` and `FigureGroup`, and `ui/DesignSystem.kt` holds `AppDates` —
+  the one figure layout and the one set of date patterns, for every screen that draws either.
 - `model/ScheduleClock.kt` + `model/ScheduledJob.kt` — when a scheduled job fires, and what one is.
 - `model/AnalysisPlan.kt` — what a run covers, said explicitly, so the screen and the scheduler
   build the same request. See **Schedules** below.
@@ -254,6 +256,27 @@ trade is then managed, in whatever state it has reached.
 - **Every percentage is measured from the user's own prices.** Closed by hand it is realized, from
   the price they gave; otherwise it is an estimate, marked at the stop, the target, or the last
   close, and labelled as an estimate.
+- **The card draws the levels before it lists them.** `PriceLadder`, the same drawing Results and
+  Insights use, with one difference that is the whole point of this tab: the entry mark is the
+  price actually paid rather than the band the channel printed, and the arrow is where the trade
+  stands now rather than the call's high-water mark. Nothing is plotted across a `priceScaleChanged`
+  break - the levels are old money and the price is new, so the arrow would point at a place on the
+  axis that does not exist. Under it, two named groups rather than eight loose figures: **Your
+  trade**, carrying the risk-to-reward worked out from the paid entry, with each level captioned by
+  its distance from that entry; and **Where it stands**, carrying the return, the last close **with
+  the session it closed on**, the peak and trough **since the entry**, and the deadline. The return
+  is printed once - it used to be a figure and again a percentage in the line below, and one number
+  in two places on one card is a number the reader checks against itself.
+- **`peakSinceEntry` and `troughSinceEntry` are the scorer's own, over the held sessions.** They
+  were computed on every recompute and dropped, so the one question the card could not answer was
+  how far up a trade had been before it came back. Since the *entry*, not the call, for the reason
+  the verdict is: a stock that ran to its target before the user bought did not do it for them.
+  Null across a split, exactly as the return is. `sessionsHeld` is the same distinction counted -
+  `sessionsElapsed` runs from the call, and on a trade bought late the two differ.
+- **A price and the session it was set on travel together.** `latestQuote` returns both, so a feed
+  several sessions behind cannot print a stale close as though it were today's. `PortfolioCalculator`
+  takes `latestQuoteFor` for that reason; `evaluate` still takes the price and the date loose,
+  because everything it scores needs only the price.
 - **Channel hit rates are deliberately not affected.** Insights judges the source on the levels it
   printed, not on what the user did about them — the two answer different questions, and a channel's
   record must not move because someone bought late or sold early. A card the user is in gets an

@@ -6,6 +6,7 @@ import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.Quote
 import com.ikverse.egxanalyzer.model.Scoring
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -186,7 +187,7 @@ class PortfolioCalculatorTest {
                 position(ticker = "SWDY", entryPrice = 10.0),
             ),
             sessionsFor = { _, _ -> flat(10.5) },
-            latestCloseFor = { 10.5 },
+            latestQuoteFor = { quote(10.5) },
         )
 
         val stats = portfolio.stats
@@ -216,7 +217,7 @@ class PortfolioCalculatorTest {
                 position(ticker = "SWDY", recommendationDate = called.plusDays(1)),
             ),
             sessionsFor = { _, _ -> emptyList() },
-            latestCloseFor = { null },
+            latestQuoteFor = { null },
         )
 
         assertEquals(listOf(called.plusDays(1), called), portfolio.groups.map { it.recommendationDate })
@@ -228,7 +229,7 @@ class PortfolioCalculatorTest {
         val portfolio = PortfolioCalculator.build(
             positions = listOf(position(ticker = "AMOC")),
             sessionsFor = { _, _ -> emptyList() },
-            latestCloseFor = { null },
+            latestQuoteFor = { null },
         )
 
         // The suffix the sources sometimes print is not a different stock.
@@ -473,7 +474,7 @@ class PortfolioCalculatorTest {
                 position(ticker = "DDDD", windowSessions = 20, target1 = 20.0, target2 = 22.0, stopLoss = 1.0),
             ),
             sessionsFor = { _, _ -> sessions },
-            latestCloseFor = { 10.0 },
+            latestQuoteFor = { quote(10.0) },
             today = called.plusDays(8),
         )
 
@@ -601,7 +602,7 @@ class PortfolioCalculatorTest {
                 ),
             ),
             sessionsFor = { _, from -> traded(from, if (from == old) 5 else 1) },
-            latestCloseFor = { 10.0 },
+            latestQuoteFor = { quote(10.0) },
             today = recent.plusDays(5),
         )
 
@@ -621,7 +622,7 @@ class PortfolioCalculatorTest {
                 position(ticker = "ZZZZ", windowSessions = 3, keepOpen = true),
             ),
             sessionsFor = { _, _ -> sessions },
-            latestCloseFor = { 10.0 },
+            latestQuoteFor = { quote(10.0) },
             today = called.plusDays(10),
         )
 
@@ -659,7 +660,7 @@ class PortfolioCalculatorTest {
             sessionsFor = { _, from ->
                 (0 until 5).map { session(from.plusDays(it.toLong()), high = 10.2, low = 9.8) }
             },
-            latestCloseFor = { 10.0 },
+            latestQuoteFor = { quote(10.0) },
             today = recent.plusDays(10),
         )
 
@@ -697,7 +698,7 @@ class PortfolioCalculatorTest {
             sessionsFor = { _, from ->
                 (0 until 5).map { session(from.plusDays(it.toLong()), high = 10.2, low = 9.8) }
             },
-            latestCloseFor = { 10.0 },
+            latestQuoteFor = { quote(10.0) },
             today = recent.plusDays(30),
         )
 
@@ -819,6 +820,83 @@ class PortfolioCalculatorTest {
         assertEquals(2, view.sessionsElapsed)
         assertEquals(0, view.sessionsRemaining)
         assertEquals(called.plusDays(1), view.deadlineDate)
+    }
+
+    /** A close and the session it was set on. Only the price matters to anything scored here. */
+    private fun quote(price: Double, on: LocalDate = called) = Quote(price, on)
+
+    @Test
+    fun `the extremes are read from the sessions held, not from the whole window`() {
+        // The stock spiked on the session the call was made for and slumped on the one after, both
+        // before the user bought on the third. What they have actually lived through is the last
+        // two sessions, so those are the only two the peak and the trough may come from - the same
+        // rule that already keeps a target reached before the entry out of the verdict.
+        val sessions = listOf(
+            session(called, high = 14.0, low = 9.8),
+            session(called.plusDays(1), high = 10.0, low = 7.0),
+            session(called.plusDays(2), high = 10.6, low = 9.9),
+            session(called.plusDays(3), high = 11.4, low = 10.1),
+        )
+
+        val view = PortfolioCalculator.evaluate(
+            position = position(
+                entryPrice = 10.0,
+                entryDate = called.plusDays(2),
+                windowSessions = 10,
+                target1 = 20.0,
+                target2 = 22.0,
+                stopLoss = 1.0,
+            ),
+            sessions = sessions,
+            currentPrice = 11.0,
+        )
+
+        assertEquals(11.4, view.peakSinceEntry!!, 0.001)
+        assertEquals(called.plusDays(3), view.peakOn)
+        assertEquals(9.9, view.troughSinceEntry!!, 0.001)
+        assertEquals(called.plusDays(2), view.troughOn)
+        // Four sessions of the call have traded and the user was in the trade for two of them.
+        assertEquals(4, view.sessionsElapsed)
+        assertEquals(2, view.sessionsHeld)
+    }
+
+    @Test
+    fun `a split leaves the extremes unsaid rather than measured across it`() {
+        // The prices changed scale under the trade, so the entry was paid in the old money and
+        // every high since is quoted in the new. The return is already withheld for this; a peak
+        // is the same percentage of two different things and goes the same way.
+        val sessions = (0 until 4).map { day ->
+            session(called.plusDays(day.toLong()), high = 10.5, low = 9.5)
+        }
+
+        val view = PortfolioCalculator.evaluate(
+            position = position(windowSessions = 10, target1 = 20.0, target2 = 22.0, stopLoss = 1.0),
+            sessions = sessions,
+            currentPrice = 10.0,
+            priceBreaks = setOf(called.plusDays(2)),
+        )
+
+        assertTrue(view.priceScaleChanged)
+        assertNull(view.peakSinceEntry)
+        assertNull(view.peakOn)
+        assertNull(view.troughSinceEntry)
+        assertNull(view.troughOn)
+    }
+
+    @Test
+    fun `the quote carries the session its price closed on`() {
+        // The feed settles once a day and a phone can be a week behind it. The date travels with
+        // the price so a card cannot print a stale close as though it were today's.
+        val portfolio = PortfolioCalculator.build(
+            positions = listOf(position(entryPrice = 10.0)),
+            sessionsFor = { _, _ -> flat(10.5) },
+            latestQuoteFor = { quote(10.5, called.plusDays(9)) },
+            today = called.plusDays(12),
+        )
+
+        val view = portfolio.positions.single()
+        assertEquals(10.5, view.currentPrice!!, 0.001)
+        assertEquals(called.plusDays(9), view.currentPriceOn)
     }
 
     private fun flat(price: Double) = listOf(session(called, high = price, low = price))

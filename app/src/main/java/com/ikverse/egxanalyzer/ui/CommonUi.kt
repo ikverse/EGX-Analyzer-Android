@@ -63,7 +63,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
+import java.time.LocalDate
 
 /**
  * Standard page frame: a large title that scrolls away with the content.
@@ -462,25 +468,87 @@ internal enum class StatusTone { GOOD, BAD, NEUTRAL }
 /** Short status line, coloured by whether it reports something good, bad, or neutral. */
 @Composable
 internal fun StatusPill(text: String, tone: StatusTone = StatusTone.NEUTRAL) {
-    val container = when (tone) {
-        StatusTone.GOOD -> MaterialTheme.colorScheme.tertiaryContainer
-        StatusTone.BAD -> MaterialTheme.colorScheme.errorContainer
-        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceContainerHighest
+    val outline = when (tone) {
+        StatusTone.GOOD -> MaterialTheme.colorScheme.tertiary
+        StatusTone.BAD -> MaterialTheme.colorScheme.error
+        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.outline
     }
-    val onContainer = when (tone) {
+    val ink = when (tone) {
         StatusTone.GOOD -> MaterialTheme.colorScheme.onTertiaryContainer
         StatusTone.BAD -> MaterialTheme.colorScheme.onErrorContainer
         StatusTone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    Surface(color = container, shape = CircleShape) {
+    OutlinePill(text, outline = outline, textColor = ink)
+}
+
+/**
+ * Every pill in the app, and the only place the shape is described.
+ *
+ * A ring rather than a block of colour. A card can carry three of these at once - what the position
+ * did, how late it is, why it is still open - and three filled pills stacked beside the name were
+ * competing with the figures they are supposed to annotate. The outline says the same thing in the
+ * same colour without spending a colour's worth of area on it.
+ *
+ * [outline] is the hue the state means and [textColor] is the ink the filled pill already used, so
+ * the wording keeps the weight it reads at while the colour moves to the edge. [onClick] is for the
+ * one pill that explains itself when pressed; the rest are labels and take no press.
+ */
+@Composable
+internal fun OutlinePill(
+    text: String,
+    outline: Color,
+    textColor: Color,
+    onClick: (() -> Unit)? = null,
+) {
+    val label: @Composable () -> Unit = {
         Text(
             text,
-            style = MaterialTheme.typography.labelMedium,
-            color = onContainer,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            // A step under `labelMedium`, set as a copy of it rather than as `labelSmall`: that
+            // style is tracked out for uppercase keys over figures, and a pill is a sentence.
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = PillText,
+                lineHeight = PillLine,
+            ),
+            modifier = Modifier.padding(horizontal = PillPaddingH, vertical = PillPaddingV),
+        )
+    }
+    val ring = BorderStroke(PillOutline, outline)
+    if (onClick == null) {
+        Surface(
+            color = Color.Transparent,
+            contentColor = textColor,
+            shape = CircleShape,
+            border = ring,
+            content = label,
+        )
+    } else {
+        Surface(
+            onClick = onClick,
+            color = Color.Transparent,
+            contentColor = textColor,
+            shape = CircleShape,
+            border = ring,
+            content = label,
         )
     }
 }
+
+// 20dp of pill: an 11sp line with 3dp of air over and under it, inside a hairline.
+private val PillText = 11.sp
+private val PillLine = 14.sp
+private val PillPaddingH = 6.dp
+private val PillPaddingV = 3.dp
+
+/** A hairline. A card's own held outline is twice it, so a pill never competes with the edge. */
+private val PillOutline = 1.dp
+
+/**
+ * The gap in a stack of pills, which is tighter than [Space.xs].
+ *
+ * Rings need less air between them than blocks of colour did: at 4dp the stack read as three
+ * separate marks rather than one column saying three things about the same trade.
+ */
+internal val PillStackGap: Dp = 3.dp
 
 /**
  * What an action reports, and whether it worked.
@@ -605,3 +673,99 @@ internal fun EmptyState(icon: ImageVector, title: String, detail: String) {
     }
 }
 
+/**
+ * Figures that belong together, laid out four across or two when the width cannot take four.
+ *
+ * The cover screen has plenty of height and little width, so wrapping beats shrinking: four
+ * columns at 443dp truncates every price it is supposed to show.
+ *
+ * Four was once the whole story and is now only the cap - a group can carry five - and a group
+ * whose last row is short spreads that row across the width rather than padding it out to the
+ * column count.
+ *
+ * One implementation, for the three screens that draw the same thing. Insights, the Portfolio and
+ * the occurrence sheet each grew their own, and two of them declared the same 420dp threshold
+ * under different names: the wrap point of a price row is a fact about the device, not about the
+ * screen that happens to be asking.
+ */
+@Composable
+internal fun FigureGroup(title: String, figures: List<@Composable RowScope.() -> Unit>) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        Text(
+            title.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        BoxWithConstraints {
+            // Taken as a list rather than a row of slots, because wrapping means splitting them -
+            // and a lambda that draws four figures cannot be cut in half.
+            //
+            // Capped rather than "all of them on a wide screen": the threshold below was measured
+            // for four prices, and a group of five would put all five on one row at a width that
+            // was only ever proved to hold four.
+            val perRow = if (maxWidth >= FourFiguresMinWidth) {
+                minOf(figures.size, MaxFiguresPerRow)
+            } else {
+                2
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                figures.chunked(perRow).forEach { row ->
+                    // A short last row spreads across the width rather than being padded out to
+                    // the column count. Every figure here already carries `weight(1f)`, so dropping
+                    // the spacers is what lets the odd one out have the room.
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                        row.forEach { figure -> figure() }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Four prices need this much before the digits start truncating. */
+internal val FourFiguresMinWidth = 420.dp
+
+/** What [FourFiguresMinWidth] was measured against, so a longer group wraps rather than shrinks. */
+private const val MaxFiguresPerRow = 4
+
+/**
+ * One labelled figure, with room under it for the one thing that makes it mean something.
+ *
+ * [on] is the session a high or a low was set on - a price without its date says half of it - and
+ * [caption] takes its place wherever the line has more to say than a date.
+ */
+@Composable
+internal fun Figure(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    tone: Color = MaterialTheme.colorScheme.onSurface,
+    on: LocalDate? = null,
+    caption: String? = null,
+    /**
+     * Overridden only where the value is not a price.
+     *
+     * The default monospaces the digits, because a column of figures is read down as well as
+     * across and proportional digits put the same price at a different width on every card. A
+     * deadline reads "3 of 10 left", and monospacing prose sets it apart from the prices for no
+     * reason; the occurrence sheet sets its figures larger, being a sheet about one call.
+     */
+    valueStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
+) {
+    Column(modifier) {
+        Text(
+            label.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(value, style = valueStyle, color = tone, textAlign = TextAlign.Start)
+        val note = caption ?: on?.let(AppDates.DayMonth::format)
+        if (note != null) {
+            Text(
+                note,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}

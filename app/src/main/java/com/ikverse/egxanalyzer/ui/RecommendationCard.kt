@@ -40,7 +40,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
-import java.time.LocalDate
 
 /**
  * Every occurrence of one stock, one card each, swiped through sideways.
@@ -55,8 +54,6 @@ internal fun RecommendationCards(
     stock: ConsolidatedRecommendation,
     /** The channel behind an occurrence, looked up by the message the model cited. */
     channelFor: (String?) -> String?,
-    /** Highest the stock has traded since a given call date, drawn as the ladder's arrow. */
-    peakFor: (String, LocalDate?) -> Double?,
     /** The stored photo behind an occurrence, looked up by the reference the model cited. */
     imagePathFor: (Int?) -> String?,
     /** Records what the user did about a call. Absent, the cards are read-only. */
@@ -92,7 +89,6 @@ internal fun RecommendationCards(
                 stock = stock,
                 point = point,
                 channel = channelFor(point.sourceMessageId),
-                peak = peakFor(stock.stockCode, point.date),
                 imagePath = imagePathFor(point.sourceImageRef),
                 trades = trades,
                 page = page,
@@ -142,7 +138,6 @@ private fun RecommendationCard(
     stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     channel: String?,
-    peak: Double?,
     imagePath: String?,
     trades: TradeBook?,
     page: Int,
@@ -167,24 +162,17 @@ private fun RecommendationCard(
         Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
             StockHeader(stock, point, channel, page, pageCount)
 
-            PriceLadder(point, peak = peak)
+            // No ladder here, deliberately. This card is a row of the report that would not fit as
+            // a row: what it owes the reader is the call's figures, and a drawing of the same five
+            // numbers doubled the card's height to say what LevelRow says underneath it. The
+            // occurrence sheet and the Portfolio card still draw it, where a single call is the
+            // whole subject rather than one of a dozen being scanned.
             LevelRow(point)
             point.riskRewardRatio()?.let { ratio ->
                 Text(
                     "Risk / reward  1 : ${"%.1f".format(ratio)}",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            // This occurrence's own note where it has one; the stock's summary is the fallback,
-            // not the default, or three cards would repeat the same paragraph.
-            (point.notesArabic ?: stock.notesSummary)?.let { notes ->
-                Text(
-                    notes,
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.fillMaxWidth(),
                 )
             }
 
@@ -200,6 +188,11 @@ private fun RecommendationCard(
                         trades.buy(stock, point, channel, price, date, window)
                     },
                     onSell = { price, date -> held?.let { trades.sell(it, price, date) } },
+                    // Recording a purchase belongs on the card the call was read off; closing a
+                    // position does not. A sale is the end of a trade, and it is made where the
+                    // trade lives - Portfolio, or the occurrence sheet - not off a card being
+                    // scanned for what to buy next. The held and overdue chips still show here.
+                    canSell = false,
                 )
             }
 
@@ -212,7 +205,7 @@ private fun RecommendationCard(
             AnimatedVisibility(expanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                     HorizontalDivider()
-                    OccurrenceDetail(point, imagePath) { viewingImage = true }
+                    OccurrenceDetail(stock, point, imagePath) { viewingImage = true }
                 }
             }
         }
@@ -310,7 +303,14 @@ private fun TimingChip(point: RecommendationDataPoint) {
     )
 }
 
-/** Entry, targets and stop as labelled figures, each with its percentage where the source gave one. */
+/**
+ * Entry, targets and stop as labelled figures, each with its percentage where the source gave one,
+ * followed by the two market levels the call was drawn against.
+ *
+ * Support and resistance belong here rather than under the source trace: they are figures the call
+ * was made on, not evidence for where it came from. A stop sitting a hair under support is the
+ * reason that stop is where it is, and that only reads when the two are on the same line.
+ */
 @Composable
 private fun LevelRow(point: RecommendationDataPoint) {
     FlowRow(
@@ -325,6 +325,10 @@ private fun LevelRow(point: RecommendationDataPoint) {
             Level("Target 2", figure(it, point.returnTp2Pct ?: impliedReturn(point, it)), PriceRole.target)
         }
         point.stopLoss?.let { Level("Stop loss", figure(it, point.riskPct), PriceRole.stop) }
+        // Plain, with no percentage beside them. The other four are distances from the entry, which
+        // is what a percentage measures here; a support is simply a price the stock has held at.
+        point.support?.let { Level("Support", formatPrice(it), PriceRole.market) }
+        point.resistance?.let { Level("Resistance", formatPrice(it), PriceRole.market) }
     }
 }
 
@@ -342,6 +346,7 @@ private fun Level(label: String, value: String, tone: androidx.compose.ui.graphi
 
 @Composable
 private fun OccurrenceDetail(
+    stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     imagePath: String?,
     onOpenImage: () -> Unit,
@@ -370,15 +375,11 @@ private fun OccurrenceDetail(
         point.timingEvidence?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.l)) {
-            point.support?.let {
-                Text("Support ${formatPrice(it)}", style = MaterialTheme.typography.labelMedium, color = PriceRole.market)
-            }
-            point.resistance?.let {
-                Text("Resistance ${formatPrice(it)}", style = MaterialTheme.typography.labelMedium, color = PriceRole.market)
-            }
-        }
-        point.notesArabic?.let {
+        // This occurrence's own note, or the stock's summary where the extraction pass wrote none.
+        // The card face no longer prints it, so this panel is where it survives, and the fallback
+        // has to come with it - otherwise a call whose source said nothing of its own loses the
+        // stock's paragraph altogether. Last in the panel, under the evidence it was written from.
+        (point.notesArabic ?: stock.notesSummary)?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End, modifier = Modifier.fillMaxWidth())
         }
     }

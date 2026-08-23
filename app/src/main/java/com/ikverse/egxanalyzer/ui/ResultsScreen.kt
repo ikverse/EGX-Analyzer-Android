@@ -905,7 +905,6 @@ private fun ResultDetail(
                             RecommendationCards(
                                 stock = stock,
                                 channelFor = { messageId -> channelNames[messageId] },
-                                peakFor = peakFor,
                                 imagePathFor = { ref -> saved.result.imagePathFor(ref) },
                                 trades = trades,
                             )

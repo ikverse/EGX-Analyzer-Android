@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.model
 
 import java.time.DayOfWeek
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
@@ -49,6 +50,28 @@ object ScheduleClock {
         DayOfWeek.THURSDAY,
     )
 
+    /** The bell, Cairo time. */
+    val sessionStart: LocalTime = LocalTime.of(10, 0)
+
+    /**
+     * A quarter of an hour after the close, not the close itself.
+     *
+     * The exchange stops at 14:30 and the day's figures settle over the minutes after it, so a
+     * window ending on the bell stores a session that is very nearly but not quite final. One more
+     * fire past it costs a single fetch and leaves the day's row correct until the next session
+     * opens, which is the whole promise of a schedule that only runs while the market is trading.
+     */
+    val sessionEnd: LocalTime = LocalTime.of(14, 45)
+
+    /**
+     * How rarely a repeating fire can be asked for before the system stops honouring it.
+     *
+     * Android holds `setExactAndAllowWhileIdle` to roughly one alarm every ten minutes while the
+     * phone is dozing. A shorter gap than this is not refused, it is quietly stretched - so the
+     * form says so rather than letting a schedule promise a frequency it cannot keep.
+     */
+    const val RELIABLE_INTERVAL_MINUTES = 15
+
     /**
      * The first fire strictly after [after], or null where the job has none left.
      *
@@ -75,6 +98,21 @@ object ScheduleClock {
                         .firstOrNull { it.isAfter(after) }
                 }
             }
+
+            is JobTrigger.Interval -> {
+                if (trigger.days.isEmpty()) {
+                    null
+                } else {
+                    val times = slotTimes(trigger)
+                    val from = after.atZone(zone).toLocalDate()
+                    (0..7).asSequence()
+                        .map { from.plusDays(it.toLong()) }
+                        .filter { it.dayOfWeek in trigger.days }
+                        .flatMap { date -> times.asSequence().map { date.atTime(it) } }
+                        .map { it.atZone(zone).toInstant() }
+                        .firstOrNull { it.isAfter(after) }
+                }
+            }
         }
 
     /** The most recent fire at or before [at], whether or not it was served. */
@@ -90,6 +128,24 @@ object ScheduleClock {
                         .map { from.minusDays(it.toLong()) }
                         .filter { it.dayOfWeek in trigger.days }
                         .map { it.atTime(trigger.at).atZone(zone).toInstant() }
+                        .firstOrNull { !it.isAfter(at) }
+                }
+            }
+
+            is JobTrigger.Interval -> {
+                if (trigger.days.isEmpty()) {
+                    null
+                } else {
+                    // Days backwards and, inside each one, slots backwards: the first candidate
+                    // that is not in the future is the most recent fire, which is the only one a
+                    // catch-up ever serves.
+                    val times = slotTimes(trigger).asReversed()
+                    val from = at.atZone(zone).toLocalDate()
+                    (0..7).asSequence()
+                        .map { from.minusDays(it.toLong()) }
+                        .filter { it.dayOfWeek in trigger.days }
+                        .flatMap { date -> times.asSequence().map { date.atTime(it) } }
+                        .map { it.atZone(zone).toInstant() }
                         .firstOrNull { !it.isAfter(at) }
                 }
             }
@@ -145,6 +201,36 @@ object ScheduleClock {
     fun describe(trigger: JobTrigger): String = when (trigger) {
         is JobTrigger.Once -> "Once, ${trigger.at.toLocalDate()} at ${clock(trigger.at.toLocalTime())}"
         is JobTrigger.Repeat -> "${describeDays(trigger.days)} ${clock(trigger.at)}"
+        is JobTrigger.Interval ->
+            "${describeDays(trigger.days)}, every ${describeEvery(trigger.everyMinutes)} " +
+                "${clock(trigger.from)}-${clock(trigger.until)}"
+    }
+
+    /** "15 min", "2 h", "1 h 30 min" - the same words the dropdown that set it uses. */
+    fun describeEvery(minutes: Int): String = when {
+        minutes < 60 -> "$minutes min"
+        minutes % 60 == 0 -> "${minutes / 60} h"
+        else -> "${minutes / 60} h ${minutes % 60} min"
+    }
+
+    /**
+     * Every fire an interval makes in one day, earliest first.
+     *
+     * Counted in whole minutes from midnight rather than by adding to a [LocalTime], because
+     * [LocalTime.plusMinutes] wraps silently at midnight: a window whose end sits near the end of
+     * the day would step past it, come back round as an earlier time, and satisfy the stop
+     * condition forever. An [IntProgression] cannot wrap.
+     *
+     * A window with its end before its start is refused by the form; here it yields the single
+     * fire at [JobTrigger.Interval.from], because a stored row that somehow holds one must produce
+     * a finite answer rather than none at all.
+     */
+    internal fun slotTimes(trigger: JobTrigger.Interval): List<LocalTime> {
+        val start = trigger.from.toSecondOfDay() / 60
+        val end = trigger.until.toSecondOfDay() / 60
+        if (end < start) return listOf(trigger.from)
+        val step = trigger.everyMinutes.coerceAtLeast(1)
+        return (start..end step step).map { LocalTime.ofSecondOfDay(it * 60L) }
     }
 
     fun describeDays(days: Set<DayOfWeek>): String {
@@ -162,7 +248,7 @@ object ScheduleClock {
     }
 
     /** 24-hour, because 18:00 cannot be read as the morning and "6:00 PM" is three characters longer. */
-    fun clock(time: java.time.LocalTime): String = "%02d:%02d".format(time.hour, time.minute)
+    fun clock(time: LocalTime): String = "%02d:%02d".format(time.hour, time.minute)
 
     private fun short(day: DayOfWeek): String =
         day.getDisplayName(TextStyle.SHORT, Locale.ENGLISH)

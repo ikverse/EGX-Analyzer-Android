@@ -151,7 +151,15 @@ class AppState(
     private val settingsRepository: SettingsRepository,
     private val analysisRepository: AnalysisRepository,
     private val localDataStore: LocalDataStore,
-    private val telegramRepository: TelegramRepository,
+    /**
+     * How to reach Telegram, rather than a Telegram already reached.
+     *
+     * A function because constructing [TelegramRepository] starts TDLib there and then - it opens
+     * its database and connects - and a process the alarm woke to fetch prices has no use for a
+     * Telegram session. Behind the lazy below, so every one of the twenty-odd places that reads
+     * `telegramRepository` is unchanged and the first of them to run is what starts it.
+     */
+    private val telegramProvider: () -> TelegramRepository,
     private val priceRepository: PriceRepository,
     private val intradayRepository: IntradayRepository,
     /** The shipped prompt, which every generated version is composed from. */
@@ -183,8 +191,19 @@ class AppState(
      * Books or cancels this phone's schedule alarm; supplied by the app so this class stays testable.
      */
     private val schedulesChanged: (jobs: List<ScheduledJob>, enabled: Boolean) -> Unit = { _, _ -> },
+    /**
+     * Whether this process was started by the clock rather than by its owner.
+     *
+     * Headless leaves [enterForeground] unrun, so nothing here connects to Telegram, syncs, or asks
+     * GitHub about a newer build. See that function for why. False everywhere but the scheduled
+     * worker, including in tests, so the ordinary start is exactly what it always was.
+     */
+    private val headless: Boolean = false,
 ) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** Started by whichever path first needs Telegram, and never by merely existing. */
+    private val telegramRepository: TelegramRepository by lazy { telegramProvider() }
     var destination by mutableStateOf(AppDestination.ANALYZE)
         private set
 
@@ -1110,7 +1129,7 @@ class AppState(
             PortfolioCalculator.build(
                 positions = held,
                 sessionsFor = localDataStore::sessionsFrom,
-                latestCloseFor = localDataStore::latestClose,
+                latestQuoteFor = localDataStore::latestQuote,
                 today = today,
                 priceBreaksFor = { ticker -> breaks[ticker].orEmpty() },
             )
@@ -1133,6 +1152,15 @@ class AppState(
             ?.peakHigh
     }
 
+    /**
+     * Whether [enterForeground] has already run, so that it runs once however it is reached.
+     *
+     * Declared above `init` on purpose: a property initialiser placed below it runs *after* the
+     * init block and would reset this to false, leaving a second call free to start every
+     * collector a second time.
+     */
+    private var foregroundStarted = false
+
     init {
         adoptLegacyPhrases()
         // Before the first sync, or this device's own settings would look like an empty install's
@@ -1153,6 +1181,31 @@ class AppState(
             // Only when nothing has been downloaded yet, so a launch never waits on the network.
             if (stored.isEmpty()) refreshEgxCatalog()
         }
+        if (!headless) enterForeground()
+    }
+
+    /**
+     * Brings up the parts of the app that exist only for someone looking at it.
+     *
+     * Telegram, the sync it carries and the update check are the expensive half of a start, and a
+     * process the alarm woke to fetch prices needs none of them: that work reads a public price
+     * feed and writes to this phone's own database. Leaving them out turns a wake that connected
+     * to Telegram, caught up on four kinds of synced document and asked GitHub about a new build
+     * into one that fetches prices - which is the difference between a schedule that can honestly
+     * run every fifteen minutes through a session and one that cannot.
+     *
+     * Idempotent, and called from two places for two reasons: from `init` on an ordinary start,
+     * and from the activity when a process the clock woke turns out to have a reader after all. A
+     * schedule that wakes the phone and is then opened by its owner must not be an app with no
+     * chats in it.
+     *
+     * Nothing here is load-bearing for a scheduled run. A job that does need Telegram - an
+     * analysis - reaches it through the lazy above and starts it then, so a headless start that
+     * guessed wrong is slower rather than broken.
+     */
+    fun enterForeground() {
+        if (foregroundStarted) return
+        foregroundStarted = true
         appScope.launch {
             // The chat list is the first thing a run depends on, and it used to load in silence:
             // an empty list looked identical whether it was still fetching or had failed.

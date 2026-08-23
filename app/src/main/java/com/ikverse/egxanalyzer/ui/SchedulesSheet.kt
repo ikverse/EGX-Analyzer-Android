@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -19,7 +20,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -225,12 +229,33 @@ private fun ScheduleEditor(appState: AppState, job: ScheduledJob, onDone: () -> 
     var name by remember(job.id) { mutableStateOf(job.name) }
     var repeating by remember(job.id) { mutableStateOf(job.trigger !is JobTrigger.Once) }
     var days by remember(job.id) {
-        mutableStateOf((job.trigger as? JobTrigger.Repeat)?.days ?: ScheduleClock.tradingDays)
+        mutableStateOf(
+            when (val trigger = job.trigger) {
+                is JobTrigger.Repeat -> trigger.days
+                is JobTrigger.Interval -> trigger.days
+                is JobTrigger.Once -> ScheduleClock.tradingDays
+            },
+        )
+    }
+    /** Whether a repeating job fires once a day or over and over inside a window. */
+    var periodic by remember(job.id) { mutableStateOf(job.trigger is JobTrigger.Interval) }
+    var everyMinutes by remember(job.id) {
+        mutableStateOf(
+            (job.trigger as? JobTrigger.Interval)?.everyMinutes
+                ?: ScheduleClock.RELIABLE_INTERVAL_MINUTES,
+        )
+    }
+    var windowStart by remember(job.id) {
+        mutableStateOf((job.trigger as? JobTrigger.Interval)?.from ?: ScheduleClock.sessionStart)
+    }
+    var windowEnd by remember(job.id) {
+        mutableStateOf((job.trigger as? JobTrigger.Interval)?.until ?: ScheduleClock.sessionEnd)
     }
     var time by remember(job.id) {
         mutableStateOf(
             when (val trigger = job.trigger) {
                 is JobTrigger.Repeat -> trigger.at
+                is JobTrigger.Interval -> trigger.from
                 is JobTrigger.Once -> trigger.at.toLocalTime()
             },
         )
@@ -281,13 +306,57 @@ private fun ScheduleEditor(appState: AppState, job: ScheduledJob, onDone: () -> 
             }
         }
         TextButton(onClick = { days = ScheduleClock.tradingDays }) { Text("Trading days") }
+        // Under the days rather than beside "Repeating", because both shapes run on the same set
+        // of them: what is chosen here is how often within a day, not which days.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(selected = !periodic, onClick = { periodic = false })
+            Text("At a set time", Modifier.padding(end = Space.l))
+            RadioButton(selected = periodic, onClick = { periodic = true })
+            Text("Every so often")
+        }
     } else {
         OutlinedButton(onClick = { pickDate(context, date) { date = it } }) {
             Text("Date: $date")
         }
     }
-    OutlinedButton(onClick = { pickTime(context, time) { time = it } }) {
-        Text("Time: ${ScheduleClock.clock(time)} Cairo")
+    if (repeating && periodic) {
+        EveryPicker(everyMinutes) { everyMinutes = it }
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            OutlinedButton(onClick = { pickTime(context, windowStart) { windowStart = it } }) {
+                Text("From ${ScheduleClock.clock(windowStart)}")
+            }
+            OutlinedButton(onClick = { pickTime(context, windowEnd) { windowEnd = it } }) {
+                Text("To ${ScheduleClock.clock(windowEnd)}")
+            }
+        }
+        TextButton(
+            onClick = {
+                days = ScheduleClock.tradingDays
+                windowStart = ScheduleClock.sessionStart
+                windowEnd = ScheduleClock.sessionEnd
+            },
+        ) { Text("Trading session") }
+        Text(
+            "Nothing fires outside the window or off those days, so while the market is shut the " +
+                "record keeps whatever the last session left it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // Not a refusal: it saves, and it works while the phone is in use. Saying so is the
+        // difference between a schedule that under-delivers and one that lied about what it does.
+        if (everyMinutes < ScheduleClock.RELIABLE_INTERVAL_MINUTES) {
+            Text(
+                "Android will not wake a sleeping phone much more often than every 10 minutes, " +
+                    "so a gap under ${ScheduleClock.RELIABLE_INTERVAL_MINUTES} minutes is kept " +
+                    "only while the phone is awake.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    } else {
+        OutlinedButton(onClick = { pickTime(context, time) { time = it } }) {
+            Text("Time: ${ScheduleClock.clock(time)} Cairo")
+        }
     }
     Text(
         "Cairo time, always. A schedule belongs to the exchange rather than to wherever the " +
@@ -389,10 +458,10 @@ private fun ScheduleEditor(appState: AppState, job: ScheduledJob, onDone: () -> 
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 
-    val trigger = if (repeating) {
-        JobTrigger.Repeat(days, time)
-    } else {
-        JobTrigger.Once(LocalDateTime.of(date, time))
+    val trigger = when {
+        !repeating -> JobTrigger.Once(LocalDateTime.of(date, time))
+        periodic -> JobTrigger.Interval(days, everyMinutes, windowStart, windowEnd)
+        else -> JobTrigger.Repeat(days, time)
     }
     val problem = triggerProblem(trigger, name)
     problem?.let {
@@ -507,6 +576,81 @@ private fun ExactAlarmNotice(context: Context) {
     ) { Text("Allow exact alarms") }
 }
 
+/**
+ * How often a periodic job fires, as the two lists the user asked for.
+ *
+ * A number and a unit rather than one long list of durations, because the two questions are
+ * different sizes: the unit is the decision, and the number is a refinement of it. Both are
+ * bounded to values that mean something for a market that trades for four and three quarter
+ * hours - there is no "every 90 hours" to pick by accident.
+ */
+@Composable
+private fun EveryPicker(everyMinutes: Int, onChange: (Int) -> Unit) {
+    val inHours = everyMinutes >= 60 && everyMinutes % 60 == 0
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        Text("Every")
+        DropdownPicker(
+            shown = if (inHours) "${everyMinutes / 60}" else "$everyMinutes",
+            options = (if (inHours) hourChoices else minuteChoices).map { it to "$it" },
+            onPick = { onChange(if (inHours) it * 60 else it) },
+        )
+        DropdownPicker(
+            shown = if (inHours) "hours" else "minutes",
+            options = listOf(false to "minutes", true to "hours"),
+            // Straight to a sensible member of the other unit rather than carrying the number
+            // across: "every 45 hours" is not a thing anyone was reaching for. Picking the unit
+            // already in force changes nothing, so opening the list to close it again does not
+            // quietly throw away the number beside it.
+            onPick = { hours ->
+                if (hours != inHours) {
+                    onChange(if (hours) 60 else ScheduleClock.RELIABLE_INTERVAL_MINUTES)
+                }
+            },
+        )
+    }
+}
+
+/**
+ * One short list behind a button.
+ *
+ * The same shape the filters above the results use - a trigger with a caret and a [DropdownMenu] -
+ * rather than an exposed dropdown, so the sheet keeps one idea of what a menu looks like.
+ */
+@Composable
+private fun <T> DropdownPicker(shown: String, options: List<Pair<T, String>>, onPick: (T) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { open = true }) {
+            Text(shown)
+            Icon(
+                Icons.Outlined.ArrowDropDown,
+                contentDescription = null,
+                modifier = Modifier.size(IconSize.Inline),
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            options.forEach { (value, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        onPick(value)
+                        open = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** Short enough to keep up with a session; nothing finer than the alarm can honour by much. */
+private val minuteChoices = listOf(5, 10, 15, 20, 30, 45)
+
+/** Long enough to be a different kind of job: a few checkpoints through a day. */
+private val hourChoices = listOf(1, 2, 3, 4, 6, 8, 12)
+
 private val graceChoices = listOf(15 to "15 min", 120 to "2 hours", 720 to "12 hours")
 
 /** What stops this schedule being saved, or null when nothing does. */
@@ -517,6 +661,9 @@ internal fun triggerProblem(
 ): String? = when {
     name.isBlank() -> "Give the schedule a name."
     trigger is JobTrigger.Repeat && trigger.days.isEmpty() -> "Choose at least one day."
+    trigger is JobTrigger.Interval && trigger.days.isEmpty() -> "Choose at least one day."
+    trigger is JobTrigger.Interval && !trigger.until.isAfter(trigger.from) ->
+        "The window has to end after it starts."
     trigger is JobTrigger.Once && !trigger.at.isAfter(now) ->
         "That moment has passed. Choose a date and time still ahead."
 

@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AddShoppingCart
 import androidx.compose.material.icons.outlined.HourglassEmpty
@@ -18,7 +17,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -148,6 +146,14 @@ internal fun TradeAction(
     tPlusOne: Boolean = false,
     /** Prefills the sale dialog with the latest close, which is the likeliest sale price. */
     suggestedExit: Double? = null,
+    /**
+     * Whether this surface may close a position as well as open one.
+     *
+     * False on the Results call card, which is read to decide what to buy rather than to manage
+     * what is held: the chips still say where a trade stands, but the way out of it is on the tab
+     * the trade lives on. Everywhere a single position is the subject leaves this alone.
+     */
+    canSell: Boolean = true,
     onBuy: (price: Double, date: LocalDate, windowSessions: Int) -> Unit,
     onSell: (price: Double, date: LocalDate) -> Unit,
     modifier: Modifier = Modifier,
@@ -175,7 +181,7 @@ internal fun TradeAction(
             // is being looked at, not only on the tab the user has to remember to open.
             if (held.overdue) OverdueChip(held.overdueDays)
             if (held.priceScaleChanged) PriceScaleChip()
-            if (held.awaitingSale) {
+            if (canSell && held.awaitingSale) {
                 // The estimate before the live price: they are the same while the trade is open,
                 // and once the deadline has closed it the estimate is the better guess at what the
                 // user actually got out at.
@@ -482,36 +488,6 @@ internal fun PositionStatusChip(view: PositionView) {
         textColor = view.status.onContainer(),
     )
 }
-
-/**
- * The shape every pill on a card wears, and the only place it is described.
- *
- * A ring rather than a block of colour. A card can carry three of these at once - the status, how
- * late it is, and why it is still open - and three filled pills stacked over the prices were
- * competing with the figures they are supposed to annotate. The outline says the same thing in the
- * same colour without taking a colour's worth of space, and the pill lands at 24dp instead of 28dp.
- *
- * [outline] is the status hue and [textColor] is the one the filled pill already used, so the
- * wording keeps the weight it reads at while the colour moves to the edge.
- */
-@Composable
-internal fun OutlinePill(text: String, outline: Color, textColor: Color) {
-    Surface(
-        color = Color.Transparent,
-        contentColor = textColor,
-        shape = CircleShape,
-        border = BorderStroke(PillOutline, outline),
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(horizontal = Space.s, vertical = Space.xs),
-        )
-    }
-}
-
-/** A hairline. The card's own [HeldOutline] is twice it, so a pill never competes with the edge. */
-private val PillOutline = 1.dp
 
 /**
  * The outline that marks a card as one you are actually in.

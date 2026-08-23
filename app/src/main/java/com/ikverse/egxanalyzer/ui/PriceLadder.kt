@@ -29,15 +29,18 @@ import kotlin.math.min
  * recommendation is actually answering. Each level prints its own price beneath its mark, so the
  * shape and the figures are read in one place rather than against the row below.
  *
- * @param peak the highest the stock has traded since the call, when prices are known for it. The
- * axis is still scaled by the recommendation's own levels, so the risk-to-reward shape does not
- * change with the market; a peak beyond the levels is pinned to the end it passed and points out.
+ * @param reached how far the stock actually got, drawn as an arrow beside the axis. What that
+ * means depends on what is being drawn: on a call it is the peak inside the judged window, and on
+ * a trade in the Portfolio it is where the price stands now - one question, "where did this end up
+ * against the levels", asked of two things. The axis is still scaled by the levels themselves, so
+ * the risk-to-reward shape does not change with the market; a price beyond them is pinned to the
+ * end it passed and points out.
  */
 @Composable
 internal fun PriceLadder(
     point: RecommendationDataPoint,
     modifier: Modifier = Modifier,
-    peak: Double? = null,
+    reached: Double? = null,
 ) = PriceLadder(
     stopLoss = point.stopLoss,
     entryLow = point.buyPriceLow ?: point.buyPrice,
@@ -45,7 +48,7 @@ internal fun PriceLadder(
     target1 = point.target1,
     target2 = point.target2,
     modifier = modifier,
-    peak = peak,
+    reached = reached,
 )
 
 /**
@@ -64,7 +67,7 @@ internal fun PriceLadder(
     target1: Double?,
     target2: Double?,
     modifier: Modifier = Modifier,
-    peak: Double? = null,
+    reached: Double? = null,
 ) {
     val levels = listOfNotNull(stopLoss, entryLow, entryHigh, target1, target2)
     if (levels.size < 2) return
@@ -79,7 +82,7 @@ internal fun PriceLadder(
     val entryColor = MaterialTheme.colorScheme.onSurface
     val targetColor = MaterialTheme.colorScheme.tertiary
     val trackColor = MaterialTheme.colorScheme.surfaceVariant
-    val peakColor = PriceRole.market
+    val reachedColor = PriceRole.market
 
     // The group is what has to stay together when labels are pushed around: the two ends of the
     // entry band are one fact, and a range printed with its floor below the line and its ceiling
@@ -91,8 +94,8 @@ internal fun PriceLadder(
             ?.let { add(Mark(it, entryColor, ENTRY_GROUP, MarkSide.CENTRE)) }
         target1?.let { add(Mark(it, targetColor, TARGET1_GROUP, MarkSide.ABOVE)) }
         target2?.let { add(Mark(it, targetColor, TARGET2_GROUP, MarkSide.ABOVE)) }
-        // Drawn as an arrow rather than a tick, so its side is never read. See drawPeak.
-        peak?.let { add(Mark(it, peakColor, PEAK_GROUP, MarkSide.CENTRE)) }
+        // Drawn as an arrow rather than a tick, so its side is never read. See drawReached.
+        reached?.let { add(Mark(it, reachedColor, REACHED_GROUP, MarkSide.CENTRE)) }
     }
 
     val measurer = rememberTextMeasurer()
@@ -122,18 +125,18 @@ internal fun PriceLadder(
         val rowsAbove = slots.filter { it.above }.maxOfOrNull { it.row + 1 } ?: 0
         val rowsBelow = slots.filterNot { it.above }.maxOfOrNull { it.row + 1 } ?: 0
 
-        // The peak's arrow goes on the side its own price printed on, so the two are read together
+        // The arrow goes on the side its own price printed on, so the two are read together
         // rather than pointing at each other across the line.
-        val peakAbove = peak?.let { value ->
+        val reachedAbove = reached?.let { value ->
             slots.getOrNull(marks.indexOfFirst { it.value == value })?.above
         } ?: false
 
         val rowHeight = with(density) { LabelRowHeight.toPx() }
         val trackHeight = with(density) { TrackBand.toPx() }
-        val peakBand = with(density) { PeakBand.toPx() }
+        val reachedBand = with(density) { ReachedBand.toPx() }
 
-        val above = LabelRowHeight * rowsAbove + if (peak != null && peakAbove) PeakBand else 0.dp
-        val below = LabelRowHeight * rowsBelow + if (peak != null && !peakAbove) PeakBand else 0.dp
+        val above = LabelRowHeight * rowsAbove + if (reached != null && reachedAbove) ReachedBand else 0.dp
+        val below = LabelRowHeight * rowsBelow + if (reached != null && !reachedAbove) ReachedBand else 0.dp
 
         Canvas(
             Modifier
@@ -165,16 +168,16 @@ internal fun PriceLadder(
             // app actually runs at the clamp does nothing; it is what keeps a third from breaking.
             val markLength = min(MARKER_HEIGHT, trackHeight / 2f)
             marks.forEach { mark ->
-                if (mark.value == peak) return@forEach
+                if (mark.value == reached) return@forEach
                 drawMarker(axis(mark.value), y, mark.color, mark.side, markLength)
             }
 
-            peak?.let {
-                drawPeak(axis(it), top, trackHeight, peakBand, peakAbove, it > high, it < low, peakColor)
+            reached?.let {
+                drawReached(axis(it), top, trackHeight, reachedBand, reachedAbove, it > high, it < low, reachedColor)
             }
 
-            val belowTop = top + trackHeight + if (peak != null && !peakAbove) peakBand else 0f
-            val aboveBottom = top - if (peak != null && peakAbove) peakBand else 0f
+            val belowTop = top + trackHeight + if (reached != null && !reachedAbove) reachedBand else 0f
+            val aboveBottom = top - if (reached != null && reachedAbove) reachedBand else 0f
             labels.forEachIndexed { index, (layout, color) ->
                 val slot = slots[index]
                 val lineTop = if (slot.above) {
@@ -332,7 +335,7 @@ private fun DrawScope.drawMarker(x: Float, y: Float, color: Color, side: MarkSid
  * because an arrow pinned to the end cannot say "beyond this" - only "exactly here", which would be
  * a lie.
  */
-private fun DrawScope.drawPeak(
+private fun DrawScope.drawReached(
     x: Float,
     top: Float,
     trackHeight: Float,
@@ -386,8 +389,8 @@ internal fun RecommendationDataPoint.riskRewardRatio(): Double? {
 private val LadderInset = 8.dp
 private val TrackBand = 26.dp
 
-/** Just enough room beside the line for the peak arrow, without pushing the prices away. */
-private val PeakBand = 9.dp
+/** Just enough room beside the line for the arrow, without pushing the prices away. */
+private val ReachedBand = 9.dp
 private val LabelRowHeight = 15.dp
 private val LabelGap = 6.dp
 
@@ -401,4 +404,4 @@ private const val STOP_GROUP = 0
 private const val ENTRY_GROUP = 1
 private const val TARGET1_GROUP = 2
 private const val TARGET2_GROUP = 3
-private const val PEAK_GROUP = 4
+private const val REACHED_GROUP = 4

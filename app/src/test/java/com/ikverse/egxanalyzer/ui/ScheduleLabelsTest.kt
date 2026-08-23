@@ -289,4 +289,30 @@ class ScheduleLabelsTest {
             nextRunLine(paid, false, now, paidAllowed = false, hasCredential = false),
         )
     }
+
+    @Test
+    fun `a periodic job names its next slot rather than its window`() {
+        // Mid-morning on a Thursday, so the session is running and the next fire is minutes away.
+        // A card that read "10:00-14:45" would be describing the schedule; the reader wants to
+        // know whether it is about to do something.
+        val periodic = job(
+            name = "Session prices",
+            trigger = JobTrigger.Interval(
+                days = ScheduleClock.tradingDays,
+                everyMinutes = 15,
+                from = ScheduleClock.sessionStart,
+                until = ScheduleClock.sessionEnd,
+            ),
+        )
+        assertEquals(
+            "Next today 11:15",
+            nextRunLine(periodic, schedulesEnabled = true, now = at("2026-08-20", "11:07")),
+        )
+        // After the close it names the next session's open, three days out over the weekend, which
+        // is the line that shows the market being shut is a thing the schedule knows about.
+        assertEquals(
+            "Next Sun 10:00",
+            nextRunLine(periodic, schedulesEnabled = true, now = at("2026-08-20", "15:00")),
+        )
+    }
 }

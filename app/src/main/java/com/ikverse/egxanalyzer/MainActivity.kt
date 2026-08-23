@@ -17,6 +17,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Before anything is drawn, and idempotent. Almost always this is the call that built the
+        // state a line earlier and it does nothing; the case it exists for is a process the alarm
+        // woke to fetch prices, which came up without Telegram and would otherwise show an app
+        // with no chats in it. See `AppState.enterForeground`.
+        appState.enterForeground()
         enableEdgeToEdge()
         openRequestedResult(intent)
         setContent {
