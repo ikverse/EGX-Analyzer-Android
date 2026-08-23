@@ -188,10 +188,11 @@ class SettingsRepository(
         excludePhrases = preferences.getString(KEY_EXCLUDE_PHRASES, "").orEmpty(),
         correctionRetries = preferences.getInt(KEY_CORRECTION_RETRIES, 1).coerceIn(0, 2),
         catalogEnrichmentEnabled = preferences.getBoolean(KEY_CATALOG_ENRICHMENT, true),
-        scoringWindowSessions = Scoring.clampWindow(
+        defaultTradeWindowSessions = Scoring.clampWindow(
             preferences.getInt(KEY_SCORING_WINDOW, Scoring.DEFAULT_WINDOW_SESSIONS),
         ),
         overdueRemindersEnabled = preferences.getBoolean(KEY_OVERDUE_REMINDERS, true),
+        tradeAlertsEnabled = preferences.getBoolean(KEY_TRADE_ALERTS, true),
         updateChecksEnabled = preferences.getBoolean(KEY_UPDATE_CHECKS, true),
         portfolioOrder = enumPreference(KEY_PORTFOLIO_ORDER, PortfolioOrder.URGENT),
     )
@@ -213,8 +214,9 @@ class SettingsRepository(
             .putString(KEY_EXCLUDE_PHRASES, value.excludePhrases)
             .putInt(KEY_CORRECTION_RETRIES, value.correctionRetries.coerceIn(0, 2))
             .putBoolean(KEY_CATALOG_ENRICHMENT, value.catalogEnrichmentEnabled)
-            .putInt(KEY_SCORING_WINDOW, Scoring.clampWindow(value.scoringWindowSessions))
+            .putInt(KEY_SCORING_WINDOW, Scoring.clampWindow(value.defaultTradeWindowSessions))
             .putBoolean(KEY_OVERDUE_REMINDERS, value.overdueRemindersEnabled)
+            .putBoolean(KEY_TRADE_ALERTS, value.tradeAlertsEnabled)
             .putBoolean(KEY_UPDATE_CHECKS, value.updateChecksEnabled)
             // By name rather than by ordinal: reordering the options or dropping one would otherwise
             // silently reinterpret what every existing install had chosen.
@@ -440,8 +442,14 @@ class SettingsRepository(
         const val KEY_EXCLUDE_PHRASES = "analysis_exclude_phrases"
         const val KEY_CORRECTION_RETRIES = "correction_retries"
         const val KEY_CATALOG_ENRICHMENT = "catalog_enrichment"
+        /**
+         * `AppPreferences.defaultTradeWindowSessions`, under the name it was stored as when it
+         * still decided scoring. Renaming the key would read as absent on every device that has
+         * one and reset the value to the default, which is the whole cost of a cosmetic rename.
+         */
         const val KEY_SCORING_WINDOW = "scoring_window_sessions"
         const val KEY_OVERDUE_REMINDERS = "overdue_reminders_enabled"
+        const val KEY_TRADE_ALERTS = "trade_alerts_enabled"
         const val KEY_PORTFOLIO_ORDER = "portfolio_order"
         const val KEY_UPDATE_CHECKS = "update_checks_enabled"
         const val KEY_LAST_PRICE_REFRESH = "last_price_refresh_day"

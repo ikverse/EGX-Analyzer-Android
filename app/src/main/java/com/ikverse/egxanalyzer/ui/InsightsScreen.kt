@@ -71,7 +71,6 @@ import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.PositionView
-import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.StockOpinion
@@ -329,11 +328,15 @@ private fun OutcomeLabel(call: ScoredCall) {
  *
  * Names the session it settled on rather than speaking generally, because "reached target 1" and
  * "reached target 1 on 3 Aug" answer different questions, and the second is the one being asked.
+ * How long it took is said beside the date for the same reason: a source reaching its target is
+ * one fact and reaching it in three sessions rather than nineteen is another, and the record is
+ * being read to find out which kind of source this is.
  */
 private fun ScoredCall.reason(): String {
     val on = settledOn?.format(AppDates.DayMonth)
+    val took = "$sessionsElapsed ${sessionsElapsed.sessionWord()}"
     return when (outcome) {
-        Outcome.FULL_HIT -> "Reached target 2 on $on."
+        Outcome.FULL_HIT -> "Reached target 2 on $on, in $took."
         Outcome.PARTIAL_HIT -> when {
             // Two dates, because they are two sessions. This used to name the target's date as the
             // day the stop broke, for want of any other date to name - the call is scored on the
@@ -346,29 +349,39 @@ private fun ScoredCall.reason(): String {
             }
             // Not final yet: target 2 is still in reach, and a card that said only "reached
             // target 1" would read as the verdict.
-            !windowComplete ->
-                "Reached target 1 on $on; may still reach target 2 before the " +
-                    "$windowSessions-session window closes."
-            else -> "Reached target 1 on $on."
+            !windowComplete -> "Reached target 1 on $on, in $took. Target 2 is still in reach."
+            else -> "Reached target 1 on $on, in $took."
         }
-        Outcome.STOPPED -> "Broke the stop by more than 2% on $on."
-        Outcome.EXPIRED -> "The $windowSessions-session window closed with no target or stop reached."
+        Outcome.STOPPED -> "Broke the stop by more than 2% on $on, $took in."
+        // The horizon, named only here - on the one call it actually caught. It is a backstop and
+        // not a deadline anybody set, so putting it on the page would invite every other figure to
+        // be read against it. A T+1 card is the exception twice over: two sessions is short enough
+        // that expiring is ordinary, and it is the call's own deadline rather than the backstop.
+        Outcome.EXPIRED -> if (entrySessions < windowSessions) {
+            "The T+1 trade was over after $windowSessions sessions with neither a target nor the " +
+                "stop reached."
+        } else {
+            "Reached neither a target nor the stop in $windowSessions sessions, which is as long " +
+                "as a call is followed for."
+        }
         // A shortened entry is what marks a T+1 call, and this is the case it was shortened for:
         // the band was never offered on the one session the card said to buy on.
         Outcome.ENTRY_NOT_REACHED -> if (entrySessions < windowSessions) {
             "The buy zone never traded on the session this call was made for, so there was no " +
                 "T+1 trade to take. Not counted for or against."
         } else {
-            "The buy zone never traded in the window."
+            "The buy zone never traded."
         }
-        Outcome.OPEN -> "Still inside its window, nothing settled yet."
+        Outcome.OPEN -> "Nothing settled yet: $took so far, and neither a target nor the stop " +
+            "has been reached."
         Outcome.UNPRICED -> "No stored prices for this stock yet."
         // Named as the company's doing rather than the feed's, because that is what it usually is,
         // and because a line blaming the data would read as the app apologising for itself when the
         // stock has simply split.
         Outcome.PRICE_BREAK ->
-            "The share price changed scale inside the window - a split or a bonus issue - so the " +
-                "levels and the prices are in different money. Not counted for or against."
+            "The share price changed scale while this call was running - a split or a bonus " +
+                "issue - so the levels and the prices are in different money. Not counted for or " +
+                "against."
         Outcome.AMBIGUOUS -> when (ambiguity) {
             Ambiguity.ENTRY_AND_TARGET ->
                 "Opened above the buy zone, target hit that day. Five-minute bars would settle it, " +
@@ -401,15 +414,6 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
     // beside its own card that greys the figure as too thin to rank - is the screen contradicting
     // itself in two places at once.
     val best = ranked.firstOrNull { it.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK }
-    val window = "${report.windowSessions}-${report.windowSessions.sessionWord().removeSuffix("s")} window"
-    // A T+1 call is judged over its own two sessions, so the setting no longer describes every call
-    // on the page. Said only where the record actually holds one, rather than qualifying a figure
-    // that nothing on screen contradicts.
-    val holdsTPlusOne = remember(report.sessions) {
-        report.sessions.any { session ->
-            session.calls.any { it.windowSessions != report.windowSessions }
-        }
-    }
 
     Column(
         Modifier.padding(start = PageTextInset, end = Space.xs),
@@ -456,27 +460,35 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
                     color = best.anyTargetRate.rateTone(),
                 )
                 Text(
-                    "reached target 1 / target 2 · " +
+                    listOfNotNull(
+                        "reached target 1 / target 2",
                         "${best.averageReturn.signedPercent()} per call",
+                        // How long being right takes this source. A rate says whether to follow a
+                        // channel and this says what following it costs in patience - and it is
+                        // only sayable now that a call runs to its settlement rather than to a
+                        // deadline that cut every slow winner off at ten sessions.
+                        best.medianSessionsToHit?.let {
+                            val word = if (it == 1.0) "session" else "sessions"
+                            "typically ${formatPrice(it)} $word to target 1"
+                        },
+                    ).joinToString(" · "),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = HeroLabelBaseline),
                 )
             }
         }
-        // What the figures above rest on, and where the window that produced them is changed. This
-        // is the line the page used to open with, which said the window and nothing else.
+        // What the figures above rest on. It used to end with the scoring window and where to
+        // change it; there is no window to change now - a call is followed until it resolves - so
+        // the line says what was counted and how current it is, and nothing about a deadline.
         Text(
             listOfNotNull(
                 "${report.tracked} scored",
                 ranked.size.takeIf { it > 0 }?.let { "$it ${if (it == 1) "source" else "sources"}" },
-                window,
-                "T+1 calls ${Scoring.T_PLUS_ONE_WINDOW_SESSIONS}".takeIf { holdsTPlusOne },
                 // How current every price on this page is, in one place rather than repeated on
                 // each card. Read off the prices themselves, so a refresh that ran and came back
                 // with nothing cannot make the page look fresher than it is.
                 report.pricesTo?.let { "prices to $it" },
-                "change it in Settings",
             ).joinToString(" · "),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -613,10 +625,26 @@ private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
                             caption = "target 1 against the stop",
                         )
                     },
+                    // How long the source takes to be right, beside how long it takes to be
+                    // wrong. The pair is the point and neither half is worth much alone: stops in
+                    // two sessions against targets in fifteen is a source asking the reader to sit
+                    // through every loss quickly and every gain slowly, and no rate on this card
+                    // says so. Both were capped at the scoring window until a call was allowed to
+                    // run to its own settlement, which is what made them worth printing.
                     {
                         Figure(
                             "Sessions to a target", formatPrice(channel.medianSessionsToHit),
-                            Modifier.weight(1f),
+                            Modifier.weight(1f), tone = PriceRole.target,
+                            caption = "median, to target 1",
+                        )
+                    },
+                    {
+                        Figure(
+                            "Sessions to a stop", formatPrice(channel.medianSessionsToStop),
+                            Modifier.weight(1f), tone = PriceRole.stop,
+                            // The calls a target rescued are in the figure beside this one, not in
+                            // this one, or a call would be describing both halves at once.
+                            caption = "median, stopped out",
                         )
                     },
                     {
@@ -955,18 +983,21 @@ private fun ScoredCallRow(
             FigureGroup(
                 "What happened",
                 listOf(
-                    // "In window" rather than "since call": the scorer stops at the session a call
-                    // settles on, so on a call that settled three weeks ago these are the extremes
-                    // up to that day and not up to today. The label used to promise today.
+                    // Bare, with the session that set each underneath. Neither "in window" nor
+                    // "since call" is true any more: there is no window to be in, and the scorer
+                    // stops at the session a call settles on, so on a call settled three weeks ago
+                    // these are the extremes up to that day and not up to today - while a partial
+                    // hit goes on collecting them after its own settlement. One label cannot say
+                    // all three, and the date under the figure says the only part that matters.
                     {
                         Figure(
-                            "Peak in window", formatPrice(call.peakHigh), Modifier.weight(1f),
+                            "Peak", formatPrice(call.peakHigh), Modifier.weight(1f),
                             tone = PriceRole.market, on = call.peakOn,
                         )
                     },
                     {
                         Figure(
-                            "Trough in window", formatPrice(call.troughLow), Modifier.weight(1f),
+                            "Trough", formatPrice(call.troughLow), Modifier.weight(1f),
                             tone = PriceRole.market, on = call.troughOn,
                         )
                     },
@@ -976,14 +1007,18 @@ private fun ScoredCallRow(
                             // that settled, sessions so far on one still running. Said, rather than
                             // left to the reader to infer from the outcome chip.
                             if (call.settledOn != null) "Sessions to settle" else "Sessions elapsed",
-                            // The denominator is the point. Twelve sessions against a twenty-session
-                            // window is a call with room left; twelve of twelve is a call out of it,
-                            // and the bare count read the same either way.
-                            "${call.sessionsElapsed} of ${call.windowSessions}",
+                            // The bare count, where it used to be read against a denominator. There
+                            // is no deadline to be twelve-of-twelve against any more: a call runs
+                            // until the market settles it, so how long that took is the whole of
+                            // the figure and the fraction only invited it to be read as progress
+                            // toward expiring.
+                            call.sessionsElapsed.toString(),
                             Modifier.weight(1f),
-                            // The one call whose window is its own rather than the setting's, so
-                            // the figure above is not read against the window named on the page.
-                            caption = "T+1 call".takeIf { call.entrySessions < call.windowSessions },
+                            // The one call that does have a deadline, printed by the channel on the
+                            // card itself. Without it a T+1 call reading "2" looks like a fast
+                            // settlement rather than the only two sessions it was ever given.
+                            caption = "T+1 call, ${call.windowSessions} in all"
+                                .takeIf { call.entrySessions < call.windowSessions },
                         )
                     },
                     {
@@ -1001,9 +1036,9 @@ private fun ScoredCallRow(
                                 PriceRole.forReturn(call.returnPct)
                             },
                             // A call that ran out of time reached no level it named, so its return
-                            // is measured to wherever the window left it. Said on the card, because
-                            // that is a different kind of figure from a return to a target the
-                            // market actually got to.
+                            // is measured to wherever the horizon left it. Said on the card,
+                            // because that is a different kind of figure from a return to a target
+                            // the market actually got to.
                             caption = when {
                                 call.stoppedAfterPartial -> "to target 1, then stopped"
                                 call.outcome == Outcome.EXPIRED -> "to the last close"

@@ -13,20 +13,45 @@ import java.time.LocalDate
  */
 object Scoring {
     /**
-     * The window is expressed in trading sessions rather than calendar days: a stock does not move
-     * at the weekend, so counting those would shorten every window by two days in five.
+     * Bounds on the window a *trade* runs for, which is the user's own deadline and theirs to set.
+     *
+     * Expressed in trading sessions rather than calendar days: a stock does not move at the
+     * weekend, so counting those would shorten every window by two days in five.
      */
     const val MIN_WINDOW_SESSIONS = 1
     const val MAX_WINDOW_SESSIONS = 30
+
+    /** What the Bought dialog offers as a new trade's window, before the user changes it. */
     const val DEFAULT_WINDOW_SESSIONS = 10
 
     /**
-     * The window a T+1 call is judged over, whatever the scoring setting says.
+     * How long a call is judged for, which is not a setting and never was one worth being.
+     *
+     * A call runs until it reaches a target or breaks the stop; this is the outer bound on how long
+     * it may take about it. The point of the record is how long a source's calls take to resolve,
+     * and a window short enough to be a deadline is a window that answers that question by
+     * destroying it: judged over ten sessions, a call that reached its target on the fourteenth is
+     * filed as having reached nothing, and no figure anywhere could then say the source takes three
+     * weeks to be right. Judged over thirty, it is a hit that took fourteen sessions, and the
+     * channel card says so.
+     *
+     * A bound rather than no bound at all, because "still open" is not a verdict and a call left
+     * running forever is a call that never counts. A source whose recommendations drift sideways
+     * for six weeks has told the reader something, and an unbounded record would drop exactly those
+     * calls out of every rate while keeping the ones that resolved - which is the same channel
+     * flattered by its own failures. At thirty sessions that call expires carrying its return to
+     * the last close, exactly as it always did.
+     */
+    const val JUDGING_HORIZON_SESSIONS = 30
+
+    /**
+     * The window a T+1 call is judged over, whatever the horizon says.
      *
      * A T+1 card is not a call to hold for a fortnight and see: it is an instruction to buy on the
-     * session it names and sell on the next one. Judged over the setting's ten sessions it was
-     * being credited for a target reached a week after the trade was over, which is a rate about
-     * some other trade than the one the channel described.
+     * session it names and sell on the next one. Judged over the general horizon it would be
+     * credited for a target reached a month after the trade was over, which is a rate about some
+     * other trade than the one the channel described. This is the one call whose deadline the
+     * channel printed itself, so it is the one call that keeps a deadline.
      *
      * Two rather than one because the count is inclusive of the buy session: the window is the
      * session the call was made for and the session it is sold in.
@@ -157,7 +182,11 @@ object Scoring {
         priceBreaks: Set<LocalDate>,
         ordering: (DailySession) -> Ordering,
     ): Scored {
-        val window = clampWindow(windowSessions)
+        // Not [clampWindow]: its ceiling belongs to the trade window, which is a deadline a user
+        // sets by hand, and the judging horizon is under no obligation to sit inside it. Clamping
+        // here would quietly cut a horizon raised past thirty back to thirty, and every rate in the
+        // app would go on reading as though it had been raised.
+        val window = windowSessions.coerceAtLeast(MIN_WINDOW_SESSIONS)
         // A session in progress can arrive with a high or low of zero. Stored once, it stopped
         // every call on that stock - nothing trades below nothing - and reported a peak of zero
         // besides. A price that is not positive is not a price, whatever the feed says.
@@ -474,10 +503,14 @@ enum class Outcome(val label: String, val judged: Boolean) {
     STOPPED("Stopped out", judged = true),
 
     /**
-     * The window closed with neither a target nor the stop reached.
+     * [Scoring.JUDGING_HORIZON_SESSIONS] passed with neither a target nor the stop reached.
      *
-     * Judged, and carries a return: measured from the entry to the last close of the window, which
-     * is where a reader following the call still stood when it ran out of time.
+     * The backstop rather than a deadline anybody set. A call is given as long as it takes to
+     * resolve; this is what happens to one that never does, and it has to happen to something or a
+     * source's duds would sit outside its record for good.
+     *
+     * Judged, and carries a return: measured from the entry to the last close before the horizon
+     * ran out, which is where a reader following the call still stood.
      */
     EXPIRED("Expired", judged = true),
 

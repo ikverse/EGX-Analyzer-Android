@@ -38,10 +38,18 @@ data class AppPreferences(
     val correctionRetries: Int = 1,
     val catalogEnrichmentEnabled: Boolean = true,
     /**
-     * Trading sessions a recommendation stays open before it counts as expired rather than missed.
-     * Adjustable because it depends on how long the user actually holds a position.
+     * Trading sessions a **trade** is offered when it is recorded, which the user may type over.
+     *
+     * The user's own deadline and nothing else. It used to judge the channels as well, and the two
+     * jobs pulled in opposite directions: a reader who wants to be out inside a week would set five
+     * sessions, and every call a source made was then filed as having reached nothing unless it got
+     * there inside five - which answers "how long do this source's calls take?" by refusing to look.
+     * Scoring runs to [Scoring.JUDGING_HORIZON_SESSIONS] now and is not a setting at all.
+     *
+     * Stored and synced under its old name, `scoringWindowSessions`, because renaming a persisted
+     * key silently resets the value on every device that has one.
      */
-    val scoringWindowSessions: Int = Scoring.DEFAULT_WINDOW_SESSIONS,
+    val defaultTradeWindowSessions: Int = Scoring.DEFAULT_WINDOW_SESSIONS,
     /**
      * A daily notification when a trade has run past its deadline with no sale recorded.
      *
@@ -50,6 +58,17 @@ data class AppPreferences(
      * also the one thing with a switch of its own.
      */
     val overdueRemindersEnabled: Boolean = true,
+    /**
+     * A notification when the market changes what a trade is - a target reached, the stop taken,
+     * the deadline passed.
+     *
+     * On by default, and a separate switch from [overdueRemindersEnabled] rather than a second
+     * meaning for it. That one asks the user for a decision the app cannot make; this one reports
+     * something that has already happened, and someone can reasonably want either without the
+     * other. Costs nothing on its own: the statuses are re-derived on every recompute whether or
+     * not anyone is told, so this only decides whether the phone says so.
+     */
+    val tradeAlertsEnabled: Boolean = true,
     /**
      * Whether a launch quietly asks GitHub whether a newer build exists.
      *

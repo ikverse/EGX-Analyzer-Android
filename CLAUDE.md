@@ -83,6 +83,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/IntradayRepository.kt` — five-minute bars for the sessions daily figures cannot order.
 - `data/PerformanceCalculator.kt` — per-channel and per-session rollups, and the ranking.
 - `data/PortfolioCalculator.kt` + `model/Position.kt` — the trades the user actually took. See below.
+- `model/TradeAlerts.kt` + `data/TradeStatusNotifier.kt` — what has changed about a trade since the
+  user was last told, and how the phone says so. See below.
 - `data/AnalysisPolicy.kt` + `data/RuleSet.kt` + `data/BuiltInRules.kt` — the local wording filter.
 - `data/PromptComposer.kt` — generates the prompt sent to the model.
 - `data/ReportSync.kt` + `data/RuleSync.kt` + `data/PositionSync.kt` — what travels between devices.
@@ -106,8 +108,22 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 
 ## Scoring, and why each rule is there
 
-A call is replayed over the next N trading sessions (`Scoring.DEFAULT_WINDOW_SESSIONS` is 10,
-adjustable in Settings).
+A call is replayed from the session it was made for until it reaches a target or breaks its stop.
+**There is no scoring window and no setting behind one.** `Scoring.JUDGING_HORIZON_SESSIONS` (30) is
+the outer bound on how long it may take about it, not a deadline anyone chose — the point of the
+record is *how long* a source's calls take, and a ten-session window answered that by filing every
+slower winner as having reached nothing. A bound rather than none at all, because "still open" is
+not a verdict: a source whose calls drift sideways for six weeks has said something, and unbounded
+scoring would drop exactly those calls out of every rate while keeping the ones that resolved. The
+one exception is a **T+1 card**, judged over its own two sessions — the only call whose deadline the
+channel printed itself.
+
+`Scoring.DEFAULT_WINDOW_SESSIONS` (10) survives as something else entirely: what the Bought dialog
+offers as a **trade's** deadline. `judgingWindow()` and `offeredTradeWindow(setting)` in
+`model/CallDerivations.kt` are the two, deliberately separate — the reader who wants to be out
+inside a week must not turn every call a source made into a call that reached nothing in a week.
+`AppPreferences.defaultTradeWindowSessions` is that setting, still stored and synced under its old
+name `scoringWindowSessions` because renaming a persisted key resets it on every device.
 
 - **The record starts on `PerformanceCalculator.ANALYSIS_START`, 3 August 2026.** Everything before
   it came from testing the extraction rather than from reading the market, and a rate resting on it
@@ -131,11 +147,22 @@ adjustable in Settings).
 - **Judged** outcomes are full hit, partial hit, stopped, expired. Still open, entry never traded,
   ambiguous, not priced and **prices changed scale** say nothing about the channel and are excluded
   from every rate.
-- An **expired call carries a return**, measured from the entry to the last close of its window -
-  where a reader following it still stood when the time ran out. It reported none before, which kept
-  every expired call out of the average return while leaving it inside the rate that average is read
-  beside, so a channel whose calls fizzle out flat read exactly like one whose calls all resolved.
-  `settledOn` stays null: the market reached no level the call named.
+- An **expired call carries a return**, measured from the entry to the last close before the horizon
+  ran out - where a reader following it still stood when the time ran out. It reported none before,
+  which kept every expired call out of the average return while leaving it inside the rate that
+  average is read beside, so a channel whose calls fizzle out flat read exactly like one whose calls
+  all resolved. `settledOn` stays null: the market reached no level the call named. Expiry is rare
+  now by construction, and it is the only place the horizon is ever named on screen - on the one
+  call it actually caught, in that call's own outcome sentence.
+- **How long a call took is a figure, not a leftover.** `sessionsElapsed` is printed bare on the
+  call card - it used to read "6 of 10", a fraction of a deadline that no longer exists - and
+  `ChannelScore.medianSessionsToHit` and `medianSessionsToStop` roll it up per source, as **Sessions
+  to a target** and **Sessions to a stop** on the channel card, with the first also in the hero's
+  sub-line. The pair is the point: stops in two sessions against targets in fifteen is a source
+  asking a reader to take every loss quickly and every gain slowly, and no rate on the card says so.
+  Both were capped at the old window, which is why they were barely worth printing before. A partial
+  hit that fell back to the stop is counted only in the target figure - it settled on its target -
+  or one call would describe how fast the source is right and how fast it is wrong at once.
 - **A call re-posted on the next analysed session is the same call.** Channels print a standing
   recommendation every morning until it resolves, and one idea was collecting a judged call per
   posting - so a source running a daily table outweighed one that posts when it has something to
@@ -224,10 +251,13 @@ be answerable by fetching, `SAME_INTRADAY_BAR` never will be.
 
 ### Where the stock is now
 
-Every other figure on a call's card stops short of saying it: peak and trough are the extremes of
-the window, and the return is measured to wherever the call settled — so a card could report a
-target hit three weeks ago and give no clue what the price has done since. **Latest close** is that
-figure, with its session date and the move from the entry midpoint under it.
+Every other figure on a call's card stops short of saying it: peak and trough are the extremes over
+the sessions the call was replayed on, and the return is measured to wherever the call settled — so
+a card could report a target hit three weeks ago and give no clue what the price has done since.
+**Latest close** is that figure, with its session date and the move from the entry midpoint under
+it. The two are labelled plainly as **Peak** and **Trough** with the session that set each beneath:
+they stop at the settlement session on a full hit or a stop-out but go on past it on a partial hit,
+and no single label was true of all three - the date says the part that matters.
 
 - It comes from `PerformanceReport.latestPrices`, keyed by ticker and filled from
   `LocalDataStore.latestSessions()`. A property of the **stock**, not of any one call: taking it
@@ -294,13 +324,15 @@ trade is then managed, in whatever state it has reached.
   about to make back is one they have to set again. Two channels calling one stock on one session
   are two cards and one holding, so both flash and the first is scrolled to.
 - A trade **snapshots its levels and its window**. Deleting the report, re-running the session, or
-  changing the global scoring window afterwards must not rewrite a trade that already happened. The
+  changing the default trade window afterwards must not rewrite a trade that already happened. The
   window is editable **by hand and only by hand**, from Edit trade on the position's card — that is
   the user moving their own deadline on purpose, which is the opposite of a setting moving it
   silently. Moving it can close a running trade or reopen one the deadline had closed.
-- The buy dialog offers the global scoring window and lets it be overwritten. `windowCustom` records
-  that the user typed over what they were offered, rather than being recomputed by comparing against
-  the setting later: the setting moves, the choice did not.
+- The buy dialog offers `defaultTradeWindowSessions` and lets it be overwritten. `windowCustom`
+  records that the user typed over what they were offered, rather than being recomputed by comparing
+  against the setting later: the setting moves, the choice did not. **This is the only window left
+  that anybody sets**, and it decides when a trade expires and nothing else - the channel that made
+  the call is judged on how long the call took, never on how long this reader gave it.
 - **Keep Open defeats every automatic close but target 2** — target 1, a stop, and an expired window
   all stop ending the trade; only a recorded sale or a full target hit does. A full hit is the trade
   doing the thing it was bought to do, so there is nothing left to hold it open for, and the button
@@ -387,9 +419,15 @@ trade is then managed, in whatever state it has reached.
   what the user means by it: sold by hand, taken by the stop, or the targets reached.
 - `OverdueWorker` runs once a day while the app is closed: no network, no Telegram, and it must
   never start an analysis. It reads `LocalDataStore` directly rather than through `AppState`, which
-  would drag a Telegram session up with it. Off via a Settings checkbox, which cancels the work
-  rather than letting it wake up and find nothing to say. It is no longer the only thing that runs
-  while the app is closed — see **Schedules** below, which reverses that rule deliberately.
+  would drag a Telegram session up with it. It is no longer the only thing that runs
+  while the app is closed — see **Schedules** below, which reverses that rule deliberately. It now
+  answers **two** questions off the one portfolio it builds: what is overdue, and what the calendar
+  has quietly closed since yesterday — a window runs out because a date passed, and on a phone that
+  opened nothing and refreshed nothing there is no other moment at which anyone would notice. So it
+  is booked while **either** notification is on and cancelled only when both are off, which is why
+  `AppState`'s callback is `dailyCheckChanged` and not the old `overdueRemindersChanged`. Turning
+  the overdue reminder off used to cancel the work outright, and doing that now would take the
+  deadline notifications with it silently.
 - Positions **travel as revisions**, like wording rules and unlike reports. A position's id is
   derived from the call - `AMOC@2026-07-20` - so the same trade recorded on two devices is one
   holding rather than two that can never be reconciled. A delete is a revision too, so a later edit
@@ -397,6 +435,55 @@ trade is then managed, in whatever state it has reached.
 - `PortfolioCalculator` computes `PortfolioStats` (win rate, averages, best and worst) whether or
   not the screen draws them, so a new figure is a UI change. There are no trade sizes, so every
   total is an average of percentages; a money total would be invented.
+
+### Telling the user their trade moved
+
+The Portfolio has always known — it re-derives every status from the prices on disk — and that was
+exactly the gap, because it only knew it to someone who opened it. Prices now refresh through the
+session on their own (see **Schedules**), so a target reached at eleven in the morning was being
+answered correctly by a screen nobody was looking at.
+
+- **The one thing that had to be stored is what the user has already been told.** A status is a
+  reading of the prices and the calendar and goes on being derived every time; `position_status_seen`
+  is not a cache of it. "Tell me when this changes" is a question about the difference between two
+  readings, and nothing else on disk remembers the first one. Device-local and never synced, for the
+  reason `scheduled_jobs` is: a phone and a tablet holding one record would each announce the same
+  stop, and being told twice about one trade is how a channel gets switched off.
+- **A trade seen for the first time is recorded and never announced.** Without it the first run
+  after this shipped would have introduced itself by reporting a stop hit in June, and every new
+  purchase would announce whatever the market had already done to the call before the user bought.
+- **`TradeState` carries `open` beside the status, because the status alone cannot see one of the
+  endings.** A trade stopped out after taking target 1 keeps the label "Partial target hit" — the
+  label is about what the market did with the call, and it did reach target 1 — while the trade
+  itself closes. Watching the label would miss that ending entirely. `ranOutOfTime` then separates
+  the two ways a partial hit can close, so a deadline is never reported as a stop.
+- **Only what the market or the calendar did.** Recording a sale, closing a trade by hand, pressing
+  Keep Open: an app that buzzes about the button somebody just pressed is one whose notifications
+  get turned off. `recomputePortfolio` takes `announceChanges` for exactly this, true on the price
+  refresh, the first build of the record on a start, a foreground return and a sync, and false on
+  every path that is the user editing their own trade. The **sweep runs either way** — a user edit
+  updates the record silently, which is what stops the next price refresh announcing it.
+- **A trade thrown back open is recorded and not announced.** A split heals a stock's whole stored
+  series, the sessions behind a settled verdict are refetched, and the verdict can come undone.
+  "AMOC is open again" would be reporting a repair as though the market had done it.
+- **The switch decides whether the phone speaks, never what it remembers.** `tradeAlertsEnabled`
+  gates the notification and not the sweep, so switching it back on reports what happens next
+  instead of reciting a month of settled history. Its own Settings checkbox and its own notification
+  channel beside the overdue one — the two are different questions, one reporting something that
+  happened and the other asking for a decision the app cannot make, and Android silences a whole
+  channel at a time.
+- **One notification per trade, under a group summary.** Each of these leads somewhere different, so
+  a single digest could carry only one of them to the card it belongs to; the group is what keeps a
+  bad morning from becoming four separate buzzes. The id is derived from the position id rather than
+  counted off, so a trade that changes twice replaces its own notification instead of landing on a
+  different one each time. A tap goes through **`AppState.openPosition`** — the same entrance a call
+  in Insights and a tile on the Overdue card use — so a notification cannot become a second, quieter
+  way of finding a trade.
+- **`TradeAlerts` is pure and has no Android in it**, like `ScheduleClock`: what counts as a change
+  is a rule about trading, and `TradeAlertsTest` drives it through every ending by running
+  `PortfolioCalculator` over real sessions. A hand-built `PositionView` would let the test assert
+  whatever it liked about a state the scorer might never produce, which is the one way a test about
+  status changes passes while the app stays silent.
 
 ## Ask AI
 
@@ -619,7 +706,7 @@ Everything travels through a private Telegram channel titled `EGX Analyzer sync`
   rules and trades, in `SettingsSync.kt`. This is what makes a reinstall survivable: an install that
   has never saved a setting has a stamp of zero, so it defends nothing and takes everything.
   Published on change through `AppState.publishSettings`, coalesced by three seconds because the
-  scoring window is a slider and would otherwise upload every value it is dragged across. Two things
+  trade window is a slider and would otherwise upload every value it is dragged across. Two things
   are deliberately excluded: the **provider API key**, because syncing it would put a live cloud
   credential in a chat to save typing one field once, and **`lastPriceRefreshDay`**, because on an
   install with no prices at all it claims they were fetched today and leaves the phone unpriced
@@ -865,15 +952,16 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 16.
+  `onUpgrade`. Currently 18.
 - **Migrations are tested** — `LocalDataStoreMigrationTest` runs under Robolectric, which supplies
   enough of Android for a real SQLite database in a plain unit test. It writes the version-9 table
   by hand and upgrades it, deliberately: a test that builds its "old" schema from today's code
   tests nothing, because both sides move together. Add a case there for every version bump —
   version 14 has its own in `ScheduledJobStoreTest`, which writes the version-13 `positions` table
   and checks that gaining `scheduled_jobs` did not cost the trades already on the phone, and
-  version 15 has the same case in `StockOpinionStoreTest` for `stock_opinions`, and version 16
-  has one beside it for the findings columns — added by `ALTER`, one guard per column, so the risk
+  version 15 has the same case in `StockOpinionStoreTest` for `stock_opinions`, version 16
+  has one beside it for the findings columns, and version 18 has one in `TradeStatusStoreTest` for
+  `position_status_seen` — added by `ALTER`, one guard per column, so the risk
   is not that the upgrade fails but that it takes the answers already on the phone with it. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it
   went in. **Robolectric needs Java 21** to stand up a sandbox for SDK 36 — it refuses on 17 with

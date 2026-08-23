@@ -6,11 +6,12 @@ import org.junit.Test
 import java.time.LocalDate
 
 /**
- * The deadline a call carries, which the scorer and the buy dialog both read from here.
+ * The two windows a call carries, and the fact that they are two.
  *
- * One definition rather than one each: a trade running to a date the rate judging it had never
- * heard of is the failure this exists to prevent, and it would not show up as a crash - only as two
- * screens quietly disagreeing about the same call.
+ * The scorer reads [judgingWindow] and the buy dialog reads [offeredTradeWindow], and they answer
+ * different questions on purpose: how long a source is followed for before its call is called a
+ * dud, against how long this reader means to hold. They agree about exactly one thing, the T+1
+ * card, because that is the one call whose deadline the channel printed itself.
  */
 class TradeWindowTest {
 
@@ -39,17 +40,18 @@ class TradeWindowTest {
     )
 
     @Test
-    fun `a T plus one call carries its own deadline whatever the setting says`() {
-        // Buy on the session it names, sell on the next. The scoring setting is about how long to
-        // give a call that did not say - this one said.
+    fun `a T plus one call carries its own deadline, judged or traded`() {
+        // Buy on the session it names, sell on the next. The horizon is about how long to follow a
+        // call that did not say - this one said, so neither side overrides it.
         val expected = TradeWindow(
             sessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
             entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
         )
 
-        assertEquals(expected, point("t_plus_1").tradeWindow(10))
-        assertEquals(expected, point("t_plus_1").tradeWindow(30))
-        assertEquals(expected, point("t_plus_1").tradeWindow(1))
+        assertEquals(expected, point("t_plus_1").judgingWindow())
+        assertEquals(expected, point("t_plus_1").offeredTradeWindow(10))
+        assertEquals(expected, point("t_plus_1").offeredTradeWindow(30))
+        assertEquals(expected, point("t_plus_1").offeredTradeWindow(1))
     }
 
     @Test
@@ -63,10 +65,10 @@ class TradeWindowTest {
     }
 
     @Test
-    fun `every other call takes the scoring setting, entry included`() {
-        assertEquals(TradeWindow(10, 10), point("explicit_date").tradeWindow(10))
-        assertEquals(TradeWindow(15, 15), point("watching").tradeWindow(15))
-        assertEquals(TradeWindow(10, 10), point(null).tradeWindow(10))
+    fun `every other call is offered the setting, entry included`() {
+        assertEquals(TradeWindow(10, 10), point("explicit_date").offeredTradeWindow(10))
+        assertEquals(TradeWindow(15, 15), point("watching").offeredTradeWindow(15))
+        assertEquals(TradeWindow(10, 10), point(null).offeredTradeWindow(10))
     }
 
     @Test
@@ -74,7 +76,23 @@ class TradeWindowTest {
         val ceiling = Scoring.MAX_WINDOW_SESSIONS
         val floor = Scoring.MIN_WINDOW_SESSIONS
 
-        assertEquals(TradeWindow(ceiling, ceiling), point("explicit_date").tradeWindow(500))
-        assertEquals(TradeWindow(floor, floor), point("explicit_date").tradeWindow(0))
+        assertEquals(TradeWindow(ceiling, ceiling), point("explicit_date").offeredTradeWindow(500))
+        assertEquals(TradeWindow(floor, floor), point("explicit_date").offeredTradeWindow(0))
+    }
+
+    @Test
+    fun `an ordinary call is judged over the horizon, whatever the trade setting is`() {
+        // The setting is the reader's own deadline and reaches nothing here. A reader who wants to
+        // be out in five sessions must not turn every call a source made into a call that reached
+        // nothing in five - which is what one number doing both jobs did.
+        val horizon = TradeWindow(
+            Scoring.JUDGING_HORIZON_SESSIONS,
+            Scoring.JUDGING_HORIZON_SESSIONS,
+        )
+
+        assertEquals(horizon, point("explicit_date").judgingWindow())
+        assertEquals(horizon, point("watching").judgingWindow())
+        assertEquals(horizon, point(null).judgingWindow())
+        assertTrue(Scoring.JUDGING_HORIZON_SESSIONS > Scoring.DEFAULT_WINDOW_SESSIONS)
     }
 }

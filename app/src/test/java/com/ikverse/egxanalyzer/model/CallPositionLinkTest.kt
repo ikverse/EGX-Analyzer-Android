@@ -85,7 +85,7 @@ class CallPositionLinkTest {
     fun `sessionFor finds the card holding the call`() {
         val wanted = scoredSession(session, call("AMOC"), call("COMI"))
         val other = scoredSession(LocalDate.of(2026, 8, 3), call("SWDY"))
-        val report = PerformanceReport(windowSessions = 10, sessions = listOf(other, wanted))
+        val report = PerformanceReport(sessions = listOf(other, wanted))
 
         assertSame(wanted, report.sessionFor("AMOC@2026-07-20"))
     }
@@ -93,7 +93,6 @@ class CallPositionLinkTest {
     @Test
     fun `sessionFor says nothing about a trade whose analysis has been deleted`() {
         val report = PerformanceReport(
-            windowSessions = 10,
             sessions = listOf(scoredSession(session, call("COMI"))),
         )
         assertNull(report.sessionFor("AMOC@2026-07-20"))
@@ -104,7 +103,7 @@ class CallPositionLinkTest {
         // The scorer dates such a call from the message itself, and a trade recorded off that card
         // is filed under the same date - so the link has to hold without a target date to lean on.
         val undated = scoredSession(null, call("AMOC", openedOn = session))
-        val report = PerformanceReport(windowSessions = 10, sessions = listOf(undated))
+        val report = PerformanceReport(sessions = listOf(undated))
 
         assertSame(undated, report.sessionFor("AMOC@2026-07-20"))
     }
@@ -112,7 +111,6 @@ class CallPositionLinkTest {
     @Test
     fun `callIds holds every call in the report, once each`() {
         val report = PerformanceReport(
-            windowSessions = 10,
             sessions = listOf(
                 scoredSession(session, call("AMOC", channel = "one"), call("AMOC", channel = "two")),
                 scoredSession(LocalDate.of(2026, 8, 3), call("COMI", openedOn = LocalDate.of(2026, 8, 3))),

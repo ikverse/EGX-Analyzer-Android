@@ -46,7 +46,7 @@ internal fun NextBuySheet(appState: AppState, page: NextPageState) {
     var price by remember(wanted) { mutableStateOf(suggested?.let(::plainPrice).orEmpty()) }
     var date by remember(wanted) { mutableStateOf(LocalDate.now()) }
     var window by remember(wanted) {
-        mutableStateOf(appState.appPreferences.scoringWindowSessions)
+        mutableStateOf(appState.appPreferences.defaultTradeWindowSessions)
     }
     var pickingDate by remember(wanted) { mutableStateOf(false) }
 

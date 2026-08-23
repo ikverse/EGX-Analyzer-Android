@@ -25,10 +25,9 @@ fun returnFrom(point: RecommendationDataPoint, target: Double?): Double? {
 /**
  * How long a call is given, and how much of that the entry is still takeable in.
  *
- * One pair rather than two loose numbers: the scorer, the Insights card and the buy dialog all have
- * to agree about a call's deadline, and a second place deciding it would drift from this one the
- * first time either was adjusted - after which a trade would run to a date the rate judging it had
- * never heard of.
+ * One pair rather than two loose numbers: whoever is deciding - the scorer or the buy dialog - has
+ * to hand the same shape to the same scoring code, and a second place assembling it would drift
+ * from this one the first time either was adjusted.
  */
 data class TradeWindow(
     /** Sessions the call is judged over, counted inclusively from the session it was made for. */
@@ -38,12 +37,29 @@ data class TradeWindow(
 )
 
 /**
- * The window this occurrence is judged over, given the user's scoring setting.
+ * How long this occurrence is judged for on the Insights tab.
  *
- * A T+1 card names its own deadline and the setting does not apply to it: buy on the session it is
- * for, sell on the next. Everything else takes the setting, which is what the user set it for.
+ * Nothing the user chose. A call runs until it resolves, out to
+ * [Scoring.JUDGING_HORIZON_SESSIONS] - the record is meant to say how long a source's calls take,
+ * and a short deadline answers that by deleting the slow ones. The one exception is a T+1 card,
+ * which named its own deadline: buy on the session it is for, sell on the next.
  */
-fun RecommendationDataPoint.tradeWindow(setting: Int): TradeWindow = if (isTPlusOne) {
+fun RecommendationDataPoint.judgingWindow(): TradeWindow = if (isTPlusOne) {
+    TradeWindow(Scoring.T_PLUS_ONE_WINDOW_SESSIONS, Scoring.T_PLUS_ONE_ENTRY_SESSIONS)
+} else {
+    TradeWindow(Scoring.JUDGING_HORIZON_SESSIONS, Scoring.JUDGING_HORIZON_SESSIONS)
+}
+
+/**
+ * What the Bought dialog offers as this trade's deadline, given the user's setting.
+ *
+ * The user's own clock and the only window left that anybody sets. Deliberately not
+ * [judgingWindow]: a channel's record is not a trade, and the reader who wants to be out in five
+ * sessions is not asking for the source to be judged on five. A T+1 card still overrides it, since
+ * a trade taken on one is over the next session by construction - the dialog lets that be typed
+ * over like any other.
+ */
+fun RecommendationDataPoint.offeredTradeWindow(setting: Int): TradeWindow = if (isTPlusOne) {
     TradeWindow(Scoring.T_PLUS_ONE_WINDOW_SESSIONS, Scoring.T_PLUS_ONE_ENTRY_SESSIONS)
 } else {
     val window = Scoring.clampWindow(setting)

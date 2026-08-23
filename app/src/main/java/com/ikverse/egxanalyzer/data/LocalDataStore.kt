@@ -26,7 +26,9 @@ import com.ikverse.egxanalyzer.model.JobOutcome
 import com.ikverse.egxanalyzer.model.JobTrigger
 import com.ikverse.egxanalyzer.model.JobWork
 import com.ikverse.egxanalyzer.model.Position
+import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.Quote
+import com.ikverse.egxanalyzer.model.TradeState
 import com.ikverse.egxanalyzer.model.ScheduledJob
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.ExcludedSource
@@ -79,6 +81,7 @@ class LocalDataStore(context: Context) :
         db.createPromptVersions()
         db.createPositions()
         db.createScheduledJobs()
+        db.createPositionStatusSeen()
         db.createStockOpinions()
     }
 
@@ -99,6 +102,7 @@ class LocalDataStore(context: Context) :
         db.createPromptVersions()
         db.createPositions()
         db.createScheduledJobs()
+        db.createPositionStatusSeen()
         db.addScheduleIntervalColumns()
         db.addPositionRevisionColumns()
         db.addPositionWindowColumns()
@@ -1714,6 +1718,87 @@ class LocalDataStore(context: Context) :
     }
 
     /**
+     * What the user has already been told about each trade.
+     *
+     * Device-local and never published, for the reason `scheduled_jobs` is: a phone and a tablet
+     * holding one record would each announce the same stop, and being told twice about one trade
+     * is how a notification channel gets switched off. Being told once per device is the honest
+     * behaviour - each phone speaks for itself about what it has said.
+     *
+     * Not a cache of the status, which is derived on every recompute and must go on being derived:
+     * this is a record of what was *said*, which is a different fact and the only one that cannot
+     * be worked out from the prices.
+     */
+    private fun SQLiteDatabase.createPositionStatusSeen() = execSQL(
+        """CREATE TABLE IF NOT EXISTS position_status_seen (
+            position_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            open INTEGER NOT NULL,
+            at INTEGER NOT NULL
+        )""",
+    )
+
+    /**
+     * The whole table, which is one row per trade and read in full on every sweep.
+     *
+     * A status this build no longer knows the name of is dropped rather than crashing the read, and
+     * the trade it belongs to is then seen as new - which announces nothing and records where it
+     * now stands. Silence is the right answer to a row this version cannot interpret.
+     */
+    fun positionStatusSeen(): Map<String, TradeState> = readableDatabase
+        .query("position_status_seen", null, null, null, null, null, null)
+        .use { cursor ->
+            buildMap {
+                while (cursor.moveToNext()) {
+                    val stored = cursor.getString(cursor.getColumnIndexOrThrow("status"))
+                    val status = runCatching { PositionStatus.valueOf(stored) }.getOrNull()
+                        ?: continue
+                    put(
+                        cursor.getString(cursor.getColumnIndexOrThrow("position_id")),
+                        TradeState(
+                            status = status,
+                            open = cursor.getInt(cursor.getColumnIndexOrThrow("open")) == 1,
+                        ),
+                    )
+                }
+            }
+        }
+
+    /**
+     * Writes down what has just been said, and forgets the trades that have gone.
+     *
+     * One transaction, because the two halves are one fact about one sweep. Only what moved is
+     * written: a portfolio of fifty trades has a handful change on a busy day, and rewriting the
+     * other forty-five would be forty-five writes to say nothing happened.
+     */
+    fun savePositionStatusSeen(seen: Map<String, TradeState>, forgotten: Set<String> = emptySet()) {
+        if (seen.isEmpty() && forgotten.isEmpty()) return
+        val now = System.currentTimeMillis()
+        writableDatabase.beginTransaction()
+        try {
+            seen.forEach { (id, state) ->
+                writableDatabase.insertWithOnConflict(
+                    "position_status_seen",
+                    null,
+                    ContentValues().apply {
+                        put("position_id", id)
+                        put("status", state.status.name)
+                        put("open", if (state.open) 1 else 0)
+                        put("at", now)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            }
+            forgotten.forEach {
+                writableDatabase.delete("position_status_seen", "position_id = ?", arrayOf(it))
+            }
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    /**
      * The settings a work kind carries, as JSON in one column.
      *
      * A column per field would mean migrating the table for every job type ever added; this way a
@@ -1829,6 +1914,8 @@ class LocalDataStore(context: Context) :
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
         /**
+         * 18 is `position_status_seen`, what the user has already been told about each trade -
+         * the one thing a notification about a *change* needs and the prices cannot supply.
          * 17 for a schedule that repeats inside a window - `trigger_every_minutes` and
          * `trigger_until` on `scheduled_jobs`, which is what lets one job fetch prices through a
          * session rather than once after it. 16 was the findings an opinion carries - the news it found, what is scheduled ahead, and
@@ -1843,6 +1930,6 @@ class LocalDataStore(context: Context) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 17
+        const val DATABASE_VERSION = 18
     }
 }

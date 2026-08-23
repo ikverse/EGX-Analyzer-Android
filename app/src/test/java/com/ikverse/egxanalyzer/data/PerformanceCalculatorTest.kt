@@ -28,7 +28,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = analyses,
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -49,7 +48,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = listOf(first, second),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -70,7 +68,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = listOf(broad, narrow),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -86,7 +83,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1, withSparseDuplicate = true)),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -108,7 +104,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = postings,
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -132,7 +127,6 @@ class PerformanceCalculatorTest {
                 analysis(id = 2, targetDate = called.plusDays(1), stopLoss = 8.5),
             ),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -151,7 +145,6 @@ class PerformanceCalculatorTest {
                 analysis(id = 3, targetDate = called.plusDays(2)),
             ),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -167,7 +160,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = postings,
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -182,7 +174,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1, secondChannel = "Second channel")),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -197,7 +188,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1)),
             pricesFrom = called.plusDays(5),
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -209,13 +199,11 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1)),
             pricesFrom = null,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
         assertEquals(0, report.tracked)
         assertNull(report.scoringSince)
-        assertEquals(10, report.windowSessions)
     }
 
     @Test
@@ -223,7 +211,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1)),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> emptyList() },
         )
 
@@ -241,7 +228,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1)),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -256,7 +242,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 7)),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -272,7 +257,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1)),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.869998931884766) },
         )
 
@@ -288,7 +272,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1, targetDate = old)),
             pricesFrom = old.minusMonths(6),
-            windowSessions = 10,
             sessionsFor = { _, _ -> listOf(sessions(12.5).single().copy(date = old)) },
         )
 
@@ -303,7 +286,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = emptyList(),
             pricesFrom = PerformanceCalculator.ANALYSIS_START.minusMonths(6),
-            windowSessions = 10,
             sessionsFor = { _, _ -> emptyList() },
         )
 
@@ -317,7 +299,6 @@ class PerformanceCalculatorTest {
         val report = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1)),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> sessions(12.5) },
         )
 
@@ -328,7 +309,7 @@ class PerformanceCalculatorTest {
     }
 
     @Test
-    fun `a T plus one call is judged over its own two sessions, not the setting`() {
+    fun `a T plus one call is judged over its own two sessions, not the horizon`() {
         // Three sessions: the one the call was made for, the one it said to sell on, and a third on
         // which the target finally arrives. The trade the card described was over before that third
         // session opened, so crediting it would credit some other trade than the one it called.
@@ -341,14 +322,12 @@ class PerformanceCalculatorTest {
         val tPlusOne = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1, basis = "t_plus_1")),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> prices },
         )
-        // The same prices, the same setting, the same everything but the basis printed on the card.
+        // The same prices, the same everything but the basis printed on the card.
         val ordinary = PerformanceCalculator.report(
             analyses = listOf(analysis(id = 1)),
             pricesFrom = called,
-            windowSessions = 10,
             sessionsFor = { _, _ -> prices },
         )
 
@@ -358,15 +337,60 @@ class PerformanceCalculatorTest {
         assertEquals(Scoring.T_PLUS_ONE_ENTRY_SESSIONS, judged.entrySessions)
         // Two of the three sessions were ever looked at.
         assertEquals(2, judged.sessions.size)
-        assertEquals(Outcome.PARTIAL_HIT, ordinary.sessions.single().calls.single().outcome)
-        // The report still reports the setting: it describes what the user chose, not one call.
-        assertEquals(10, tPlusOne.windowSessions)
+        // The ordinary call is still running on the same prices: it has reached target 1 and has
+        // the rest of the horizon to reach target 2, where the T+1 card was finished on session
+        // two. That difference is the whole of what the T+1 rule buys.
+        val open = ordinary.sessions.single().calls.single()
+        assertEquals(Outcome.PARTIAL_HIT, open.outcome)
+        assertEquals(Scoring.JUDGING_HORIZON_SESSIONS, open.windowSessions)
+    }
+
+    @Test
+    fun `a call that takes longer than a trade window is a hit rather than an expiry`() {
+        // Twelve sessions with the target on the twelfth. Judged over the old ten-session setting
+        // this was an expiry, and the record could not then say the source takes a fortnight to be
+        // right - the one question the timings on a channel card exist to answer.
+        val prices = (0..11).map { day ->
+            session(called.plusDays(day.toLong()), high = if (day == 11) 12.5 else 10.2)
+        }
+
+        val report = PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1)),
+            pricesFrom = called,
+            sessionsFor = { _, _ -> prices },
+        )
+
+        val call = report.sessions.single().calls.single()
+        assertEquals(Outcome.PARTIAL_HIT, call.outcome)
+        assertEquals(12, call.sessionsElapsed)
+        assertEquals(12.0, report.channels.single().medianSessionsToHit!!, 0.001)
+    }
+
+    @Test
+    fun `sessions to a stop counts only the calls the stop took out`() {
+        // A partial hit that fell back settled on its target and is counted in the timing above;
+        // counting it here as well would let one call say how fast the source is right and how
+        // fast it is wrong at once.
+        val stopped = (0..3).map { day ->
+            session(called.plusDays(day.toLong()), high = 10.0, low = if (day == 3) 8.0 else 9.9)
+        }
+
+        val report = PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1)),
+            pricesFrom = called,
+            sessionsFor = { _, _ -> stopped },
+        )
+
+        val channel = report.channels.single()
+        assertEquals(Outcome.STOPPED, report.sessions.single().calls.single().outcome)
+        assertEquals(4.0, channel.medianSessionsToStop!!, 0.001)
+        assertNull(channel.medianSessionsToHit)
     }
 
     private fun sessions(high: Double) = listOf(session(called, high))
 
-    private fun session(date: LocalDate, high: Double) =
-        DailySession("AMOC", date, high = high, low = 9.9, close = high, volume = 1000.0, open = 9.9)
+    private fun session(date: LocalDate, high: Double, low: Double = 9.9) =
+        DailySession("AMOC", date, high = high, low = low, close = high, volume = 1000.0, open = low)
 
     private fun analysis(
         id: Long,

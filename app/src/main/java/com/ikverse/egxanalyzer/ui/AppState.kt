@@ -79,6 +79,8 @@ import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.TelegramAuthState
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import com.ikverse.egxanalyzer.model.ThemeMode
+import com.ikverse.egxanalyzer.model.TradeAlerts
+import com.ikverse.egxanalyzer.model.TradeChange
 import com.ikverse.egxanalyzer.model.egxTargetSession
 import com.ikverse.egxanalyzer.model.resolveAnalysisWindow
 import kotlinx.coroutines.CancellationException
@@ -185,8 +187,22 @@ class AppState(
     private val analysisFinished: (resultId: Long?, recommendations: Int) -> Unit = { _, _ -> },
     /** Withdraws the running announcement, with a reason when it failed. */
     private val analysisStopped: (reason: String?) -> Unit = {},
-    /** Books or cancels the daily overdue check; supplied by the app so this class stays testable. */
-    private val overdueRemindersChanged: (enabled: Boolean) -> Unit = {},
+    /**
+     * Books or cancels the daily look at the record; supplied by the app so this class stays
+     * testable.
+     *
+     * Named for the work rather than for the overdue reminder that used to be its only reason to
+     * exist. Two things now ride on that one daily wake - the overdue reminder and the trade
+     * status notifications, which need it for the endings the calendar brings about rather than
+     * the market - so it is wanted while *either* is on and cancelled only when both are off.
+     */
+    private val dailyCheckChanged: (wanted: Boolean) -> Unit = {},
+    /**
+     * Says what the market has just done to a trade; supplied by the app, like every other
+     * announcement here, so a test can watch what would have been said without a notification
+     * manager being anywhere near it.
+     */
+    private val tradesChanged: (changes: List<TradeChange>) -> Unit = {},
     /**
      * Books or cancels this phone's schedule alarm; supplied by the app so this class stays testable.
      */
@@ -626,10 +642,8 @@ class AppState(
         analysisJob = appScope.launch { analyze() }
     }
 
-    /** How every saved call turned out, recomputed whenever the analyses or the window change. */
-    var performance by mutableStateOf(
-        PerformanceReport(windowSessions = appPreferences.scoringWindowSessions),
-    )
+    /** How every saved call turned out, recomputed whenever the analyses or the prices change. */
+    var performance by mutableStateOf(PerformanceReport())
         private set
     var pricesRefreshing by mutableStateOf(false)
         private set
@@ -869,15 +883,15 @@ class AppState(
         target2: Double?,
         stopLoss: Double?,
         /** What the dialog offered, or whatever the user typed over it. */
-        windowSessions: Int = appPreferences.scoringWindowSessions,
+        windowSessions: Int = appPreferences.defaultTradeWindowSessions,
         /**
-         * What the dialog put in front of them, which is no longer always the scoring setting.
+         * What the dialog put in front of them, which is not always the setting.
          *
          * A T+1 call is offered its own two sessions, and comparing that against the setting would
          * file every accepted T+1 trade as a window the user set by hand - a card claiming a
          * decision nobody made.
          */
-        offeredWindow: Int = appPreferences.scoringWindowSessions,
+        offeredWindow: Int = appPreferences.defaultTradeWindowSessions,
     ) {
         val normalized = Scoring.normalizeTicker(ticker)
         val existing = positions.firstOrNull {
@@ -897,9 +911,11 @@ class AppState(
             target1 = target1,
             target2 = target2,
             stopLoss = stopLoss,
-            // The window becomes this trade's deadline and stays with it: changing the global
-            // setting later must not silently move a deadline a trade was taken under. Only an
-            // edit of this trade can move it, which is the user doing it on purpose.
+            // The window becomes this trade's deadline and stays with it: changing the default
+            // later must not silently move a deadline a trade was taken under. Only an edit of
+            // this trade can move it, which is the user doing it on purpose. It is the user's own
+            // clock and nothing else - the channel that made the call is judged on how long the
+            // call took, not on how long this reader gave it.
             windowSessions = window,
             // Custom means the user typed over what they were offered. Recorded rather than
             // recomputed later: what was offered moves, the choice did not.
@@ -1099,7 +1115,7 @@ class AppState(
 
         if (changed) {
             positions = localDataStore.positions()
-            recomputePortfolio()
+            recomputePortfolio(announceChanges = true)
         }
         return changed
     }
@@ -1114,15 +1130,26 @@ class AppState(
      * costs a database read and no requests.
      */
     fun refreshOverdue() {
-        appScope.launch { recomputePortfolio() }
+        appScope.launch { recomputePortfolio(announceChanges = true) }
     }
 
-    private suspend fun recomputePortfolio() {
+    /**
+     * Rebuilds the portfolio, and decides whether the phone says anything about what changed.
+     *
+     * [announceChanges] is about who moved the trade, not about who is watching. The market
+     * reaching a target and the user editing a window can both change a status, and only one of
+     * them is news:
+     * an app that buzzes about the button somebody just pressed is one whose notifications get
+     * switched off. So every path records where each trade now stands - which is what stops a later
+     * refresh announcing a change the user made themselves - and only the paths where the market or
+     * the calendar moved are allowed to speak.
+     */
+    private suspend fun recomputePortfolio(announceChanges: Boolean = false) {
         val held = positions
         // The exchange's own calendar, not the phone's: a user abroad must not see a trade fall
         // a day further behind simply for having crossed a time zone.
         val today = LocalDate.now(ZoneId.of(EGX_ZONE))
-        portfolio = withContext(Dispatchers.IO) {
+        val rebuilt = withContext(Dispatchers.IO) {
             // Read once for the whole rebuild rather than per position: it is one small table, and
             // a trade must be judged on the same reading of the feed as the call it came from.
             val breaks = localDataStore.priceBreakDates()
@@ -1134,6 +1161,25 @@ class AppState(
                 priceBreaksFor = { ticker -> breaks[ticker].orEmpty() },
             )
         }
+        portfolio = rebuilt
+        reviewTrades(rebuilt, announceChanges)
+    }
+
+    /**
+     * Writes down where every trade stands, and announces the ones the market moved.
+     *
+     * The sweep runs whether or not anyone will be told, and that is the point of it. A user who
+     * has the notifications switched off still has their trades recorded as they change, so
+     * switching them on tells them what happens *next* rather than reciting a month of settled
+     * history at them. The switch decides whether the phone speaks, never what it remembers.
+     */
+    private suspend fun reviewTrades(rebuilt: Portfolio, announceChanges: Boolean) {
+        val alerts = withContext(Dispatchers.IO) {
+            TradeAlerts.sweep(localDataStore.positionStatusSeen(), rebuilt.positions).also {
+                localDataStore.savePositionStatusSeen(it.record, it.forgotten)
+            }
+        }
+        if (announceChanges && appPreferences.tradeAlertsEnabled) tradesChanged(alerts.changes)
     }
 
     /**
@@ -1171,7 +1217,7 @@ class AppState(
         regeneratePrompt("First run")
         appScope.launch {
             recomputePerformance()
-            recomputePortfolio()
+            recomputePortfolio(announceChanges = true)
             refreshPricesIfStale()
         }
         appScope.launch {
@@ -1707,12 +1753,6 @@ class AppState(
     }
 
     /**
-     * Changes how long a call stays open before it counts as expired.
-     *
-     * Takes effect on everything already scored, not only future analyses: the outcome of a past
-     * call under a shorter window is a fact about that call, so re-scoring is the honest answer.
-     */
-    /**
      * Turns the daily overdue reminder on or off.
      *
      * The scheduling follows the preference rather than being booked once at startup: a user who
@@ -1722,8 +1762,36 @@ class AppState(
     fun updateOverdueReminders(enabled: Boolean) {
         if (enabled == appPreferences.overdueRemindersEnabled) return
         persistPreferences(appPreferences.copy(overdueRemindersEnabled = enabled))
-        overdueRemindersChanged(enabled)
+        dailyCheckChanged(dailyCheckWanted)
     }
+
+    /**
+     * Turns the trade status notifications on or off.
+     *
+     * Most of what these report rides on work the app was doing anyway - a price refresh re-scores
+     * every trade whether or not anyone is told - so this mostly decides whether the phone speaks.
+     * The daily wake is the exception and is why [dailyCheckWanted] is re-asked here: a window
+     * running out has no prices behind it, and that ending is only ever noticed by the once-a-day
+     * look at the record. The sweep that records where each trade stands goes on running either
+     * way, so switching this back on reports what happens next rather than reciting everything
+     * that happened while it was off.
+     */
+    fun updateTradeAlerts(enabled: Boolean) {
+        if (enabled == appPreferences.tradeAlertsEnabled) return
+        persistPreferences(appPreferences.copy(tradeAlertsEnabled = enabled))
+        dailyCheckChanged(dailyCheckWanted)
+    }
+
+    /**
+     * Whether the daily wake is worth booking at all.
+     *
+     * One run answers both questions off one reading of the record, so the work is wanted while
+     * either notification is on. Turning the overdue reminder off used to be enough to cancel it;
+     * doing that now would take the deadline notifications with it silently, which is the shape of
+     * bug that only shows up as "it stopped telling me" weeks later.
+     */
+    private val dailyCheckWanted: Boolean
+        get() = appPreferences.overdueRemindersEnabled || appPreferences.tradeAlertsEnabled
 
     /**
      * The jobs this phone runs on its own.
@@ -1921,11 +1989,17 @@ class AppState(
         persistPreferences(appPreferences.copy(portfolioOrder = order))
     }
 
-    fun updateScoringWindow(sessions: Int) {
+    /**
+     * Changes what a new trade's window is offered as.
+     *
+     * Nothing already recorded moves. A trade carries the window it was taken under, and no call's
+     * outcome depends on this at all - it used to re-score the whole record, back when the same
+     * number was also the deadline every channel was judged against.
+     */
+    fun updateDefaultTradeWindow(sessions: Int) {
         val clamped = Scoring.clampWindow(sessions)
-        if (clamped == appPreferences.scoringWindowSessions) return
-        persistPreferences(appPreferences.copy(scoringWindowSessions = clamped))
-        appScope.launch { recomputePerformance() }
+        if (clamped == appPreferences.defaultTradeWindowSessions) return
+        persistPreferences(appPreferences.copy(defaultTradeWindowSessions = clamped))
     }
 
     /**
@@ -1991,7 +2065,7 @@ class AppState(
         if (unpriced.isEmpty()) return
         runCatching { priceRepository.refresh(unpriced) }
         recomputePerformance()
-        recomputePortfolio()
+        recomputePortfolio(announceChanges = true)
     }
 
     suspend fun refreshPrices(announce: Boolean = true): PriceRefreshOutcome {
@@ -2022,7 +2096,7 @@ class AppState(
                 LocalDate.now(ZoneId.of(EGX_ZONE)).toString(),
             )
             recomputePerformance()
-            recomputePortfolio()
+            recomputePortfolio(announceChanges = true)
             // Only now, because which sessions need bars is something only a scored record knows.
             // A second recompute is cheap and happens only when bars actually arrived.
             if (resolveUnorderedSessions()) recomputePerformance()
@@ -2096,7 +2170,6 @@ class AppState(
 
     private suspend fun recomputePerformance() {
         val analyses = savedResults
-        val window = appPreferences.scoringWindowSessions
         performance = withContext(Dispatchers.IO) {
             val breaks = localDataStore.priceBreakDates()
             // Read once for the whole recompute. Only the sessions a call could not order on daily
@@ -2114,7 +2187,6 @@ class AppState(
             PerformanceCalculator.report(
                 analyses = analyses,
                 pricesFrom = localDataStore.earliestSessionDate(),
-                windowSessions = window,
                 sessionsFor = localDataStore::sessionsFrom,
                 pricedTickers = localDataStore.pricedTickers(),
                 priceBreaksFor = { ticker -> breaks[ticker].orEmpty() },
@@ -2187,7 +2259,7 @@ class AppState(
     }
 
     private fun adoptSettings(snapshot: SettingsSnapshot) {
-        val remindersWere = appPreferences.overdueRemindersEnabled
+        val dailyCheckWas = dailyCheckWanted
         settingsRepository.adopt(snapshot)
         appPreferences = settingsRepository.loadPreferences()
         // The Analyze screen seeds its content types from the preference at launch, which on a
@@ -2200,9 +2272,7 @@ class AppState(
         promptHistory = settingsRepository.promptHistory()
         // The daily check is booked with the system, not with this class: a device that adopts
         // "off" has to have the work cancelled, or it goes on waking up to say nothing.
-        if (appPreferences.overdueRemindersEnabled != remindersWere) {
-            overdueRemindersChanged(appPreferences.overdueRemindersEnabled)
-        }
+        if (dailyCheckWanted != dailyCheckWas) dailyCheckChanged(dailyCheckWanted)
         regeneratePrompt("Settings arrived from another device")
     }
 
@@ -2336,7 +2406,7 @@ class AppState(
             // A scoring window that arrived from another device re-judges every call already here,
             // whether or not a single report moved.
             recomputePerformance()
-            recomputePortfolio()
+            recomputePortfolio(announceChanges = true)
         }
         return SyncOutcome(uploaded, downloaded, local.size - toUpload.size)
     }

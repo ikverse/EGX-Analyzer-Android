@@ -576,15 +576,19 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
+        // "Trades" rather than "Scoring": every control in here is about the user's own trades
+        // now. The window stopped judging the channels - a call is followed until it reaches a
+        // target or the stop, and nothing on this page moves that - so what is left is a deadline
+        // for a position and two notifications about positions.
         ExpandableSection(
-            "Scoring",
+            "Trades",
             icon = Icons.Outlined.Timeline,
-            summary = "${appState.appPreferences.scoringWindowSessions} trading sessions",
+            summary = "${appState.appPreferences.defaultTradeWindowSessions} trading sessions",
             contentMaxWidth = FormWidth,
         ) {
-            val window = appState.appPreferences.scoringWindowSessions
+            val window = appState.appPreferences.defaultTradeWindowSessions
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Scoring window", modifier = Modifier.weight(1f))
+                Text("Default trade window", modifier = Modifier.weight(1f))
                 Text(
                     "$window ${if (window == 1) "session" else "sessions"}",
                     style = MaterialTheme.typography.titleMedium,
@@ -593,15 +597,17 @@ internal fun SettingsScreen(appState: AppState) {
             }
             Slider(
                 value = window.toFloat(),
-                onValueChange = { appState.updateScoringWindow(it.roundToInt()) },
+                onValueChange = { appState.updateDefaultTradeWindow(it.roundToInt()) },
                 valueRange = Scoring.MIN_WINDOW_SESSIONS.toFloat()..
                     Scoring.MAX_WINDOW_SESSIONS.toFloat(),
                 steps = Scoring.MAX_WINDOW_SESSIONS - Scoring.MIN_WINDOW_SESSIONS - 1,
             )
             Text(
-                "Trading sessions a recommendation has to reach its target. Re-scores everything. " +
-                    "It is also what a new trade's window is offered as, which you can change on " +
-                    "the trade itself.",
+                "What a new trade's deadline is offered as when you press Bought, counted from " +
+                    "the session the call was made for. You can type over it there, or later from " +
+                    "Edit trade. It changes nothing already recorded, and it does not affect how " +
+                    "the sources are scored - a call is followed until it reaches a target or the " +
+                    "stop, which is what Insights reports the timings of.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -615,6 +621,20 @@ internal fun SettingsScreen(appState: AppState) {
             Text(
                 "Once a day, and only when something is actually overdue - a trade whose deadline " +
                     "has passed with no sale recorded. Nothing is analyzed and nothing is fetched.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = appState.appPreferences.tradeAlertsEnabled,
+                    onCheckedChange = appState::updateTradeAlerts,
+                )
+                Text("Tell me when the market changes a trade")
+            }
+            Text(
+                "A target reached, the stop taken, the deadline passed - whenever a price refresh " +
+                    "or the calendar moves one of your trades. Not for anything you do yourself: " +
+                    "recording a sale or closing a trade says nothing back to you.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

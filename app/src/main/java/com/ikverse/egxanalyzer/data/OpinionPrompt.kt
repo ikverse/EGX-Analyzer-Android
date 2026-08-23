@@ -3,6 +3,7 @@ package com.ikverse.egxanalyzer.data
 import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.LatestPrice
+import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.ScoredCall
 import java.time.LocalDate
@@ -89,11 +90,11 @@ object OpinionPrompt {
         call.riskReward()?.let {
             appendLine("  Risk to reward ${ratio(it)} to 1, to target 1 from the middle of the band")
         }
-        // Said out loud because the model is asked whether the targets are reachable in the window,
+        // Said out loud because the model is asked whether the targets are reachable from here,
         // and a re-post is the same bet as the call it repeats rather than a fresh one.
         call.repeatOf?.let { appendLine("  Re-posted from a call first made on $it. One bet, not two.") }
         appendLine()
-        appendLine("Scored by this app over a ${call.windowSessions}-session window:")
+        appendLine("Scored by this app against real prices:")
         appendLine("  Outcome        ${call.outcomeLine()}")
         appendLine("  Peak since     ${price(call.peakHigh)}${call.peakOn.on()}")
         appendLine("  Trough since   ${price(call.troughLow)}${call.troughOn.on()}")
@@ -290,10 +291,20 @@ object OpinionPrompt {
         return if (risk <= 0 || reward <= 0) null else reward / risk
     }
 
+    /**
+     * What became of the call, and how long it took about it.
+     *
+     * The elapsed count is bare rather than a fraction of a window. A call is followed until it
+     * settles, so "6 of 10" was describing a deadline the app no longer keeps - and read to a model
+     * being asked whether a target is still reachable, a denominator is an invitation to answer
+     * about the time left rather than about the stock.
+     */
     private fun ScoredCall.outcomeLine(): String = buildString {
         append(outcome.label.lowercase())
-        append(", $sessionsElapsed of $windowSessions sessions elapsed")
-        if (!windowComplete) append(", window still running")
+        append(", $sessionsElapsed ${if (sessionsElapsed == 1) "session" else "sessions"} elapsed")
+        // Only a partial hit can still improve, and `windowComplete` is only ever set on one - so
+        // testing it alone put "still running" onto full hits and stop-outs, which had settled.
+        if (outcome == Outcome.PARTIAL_HIT && !windowComplete) append(", target 2 still in reach")
         settledOn?.let { append(", settled $it") }
     }
 

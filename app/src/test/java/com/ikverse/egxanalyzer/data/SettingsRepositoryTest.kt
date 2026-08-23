@@ -65,7 +65,7 @@ class SettingsRepositoryTest {
 
     @Test
     fun `an install that has configured something claims what it holds`() {
-        repository().let { it.savePreferences(it.loadPreferences().copy(scoringWindowSessions = 7)) }
+        repository().let { it.savePreferences(it.loadPreferences().copy(defaultTradeWindowSessions = 7)) }
 
         repository().claimSettingsIfUnstamped("phone")
 

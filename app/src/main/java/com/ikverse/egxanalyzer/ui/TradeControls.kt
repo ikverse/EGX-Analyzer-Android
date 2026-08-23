@@ -37,7 +37,7 @@ import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.callDate
-import com.ikverse.egxanalyzer.model.tradeWindow
+import com.ikverse.egxanalyzer.model.offeredTradeWindow
 import com.ikverse.egxanalyzer.ui.theme.extraColors
 import java.time.LocalDate
 
@@ -61,14 +61,15 @@ internal class TradeBook(
         appState.heldFor(stock.stockCode, dateOf(point))
 
     /**
-     * What a new trade's window is offered as, which is this call's own deadline.
+     * What a new trade's window is offered as, which becomes this trade's own deadline.
      *
-     * The scoring setting for an ordinary call; a T+1 call names its own and the setting does not
-     * apply to it. Read at the moment the dialog opens rather than captured earlier: a user who has
-     * just changed the setting means the new one.
+     * The setting for an ordinary call; a T+1 call names its own and the setting does not apply to
+     * it. Read at the moment the dialog opens rather than captured earlier: a user who has just
+     * changed the setting means the new one. This is the only window anybody sets - what the
+     * channel that made the call is judged over is fixed, and is no business of this trade's.
      */
     fun windowFor(point: RecommendationDataPoint): Int =
-        point.tradeWindow(appState.appPreferences.scoringWindowSessions).sessions
+        point.offeredTradeWindow(appState.appPreferences.defaultTradeWindowSessions).sessions
 
     fun buy(
         stock: ConsolidatedRecommendation,
@@ -206,7 +207,8 @@ internal fun TradeAction(
                 "This call is T+1: the session it was made for, and the next one. Change it to " +
                     "give this trade longer."
             } else {
-                "From your scoring setting. Change it to give this trade its own deadline."
+                "Your default, from Settings. Change it to give this trade its own deadline - " +
+                    "it decides when this trade expires and nothing else."
             },
             onDismiss = { buying = false },
             onConfirm = { price, date, window ->

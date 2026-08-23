@@ -158,15 +158,16 @@ internal fun NextSettingsScreen(
 
         item {
             Section(
-                title = "Scoring",
-                summary = "${appState.appPreferences.scoringWindowSessions} " +
-                    "${appState.appPreferences.scoringWindowSessions.sessionWord()} per call",
+                title = "Trades",
+                summary = "${appState.appPreferences.defaultTradeWindowSessions} " +
+                    "${appState.appPreferences.defaultTradeWindowSessions.sessionWord()} per trade",
                 page = page,
             ) {
                 NextText(
-                    "How many trading sessions a call is replayed over. Moving this re-judges the " +
-                        "whole record — every channel rate on Insights moves with it. Trades you " +
-                        "have already taken keep the window they were recorded with.",
+                    "What a new trade's deadline is offered as when you press Bought, counted " +
+                        "from the session the call was made for. Trades already taken keep the " +
+                        "window they were recorded with, and no channel rate on Insights moves " +
+                        "with it — a call is followed until it reaches a target or the stop.",
                     NextType.name,
                     colors.ink2,
                 )
@@ -177,14 +178,14 @@ internal fun NextSettingsScreen(
                     listOf(5, 10, 15, 20, 30).forEach { sessions ->
                         NextButton(
                             label = "$sessions",
-                            onClick = { appState.updateScoringWindow(sessions) },
-                            tone = if (appState.appPreferences.scoringWindowSessions == sessions) {
+                            onClick = { appState.updateDefaultTradeWindow(sessions) },
+                            tone = if (appState.appPreferences.defaultTradeWindowSessions == sessions) {
                                 colors.market
                             } else {
                                 colors.rule
                             },
                             labelColor = if (
-                                appState.appPreferences.scoringWindowSessions == sessions
+                                appState.appPreferences.defaultTradeWindowSessions == sessions
                             ) {
                                 colors.market
                             } else {

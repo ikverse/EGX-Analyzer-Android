@@ -79,8 +79,12 @@ data class SettingsSnapshot(
             .put("excludePhrases", preferences.excludePhrases)
             .put("correctionRetries", preferences.correctionRetries)
             .put("catalogEnrichmentEnabled", preferences.catalogEnrichmentEnabled)
-            .put("scoringWindowSessions", preferences.scoringWindowSessions)
+            // The trade window, under the name it travelled as when it also decided scoring. A
+            // renamed field reads as absent to every device on an older build, which would hand
+            // them the default and sync it back as though the user had chosen it.
+            .put("scoringWindowSessions", preferences.defaultTradeWindowSessions)
             .put("overdueRemindersEnabled", preferences.overdueRemindersEnabled)
+            .put("tradeAlertsEnabled", preferences.tradeAlertsEnabled)
             .put("portfolioOrder", preferences.portfolioOrder.name)
             .put("updateChecksEnabled", preferences.updateChecksEnabled)
             .put("useDefaultPromptOnly", useDefaultPromptOnly)
@@ -155,12 +159,16 @@ data class SettingsSnapshot(
                         "catalogEnrichmentEnabled",
                         defaults.catalogEnrichmentEnabled,
                     ),
-                    scoringWindowSessions = Scoring.clampWindow(
-                        json.optInt("scoringWindowSessions", defaults.scoringWindowSessions),
+                    defaultTradeWindowSessions = Scoring.clampWindow(
+                        json.optInt("scoringWindowSessions", defaults.defaultTradeWindowSessions),
                     ),
                     overdueRemindersEnabled = json.optBoolean(
                         "overdueRemindersEnabled",
                         defaults.overdueRemindersEnabled,
+                    ),
+                    tradeAlertsEnabled = json.optBoolean(
+                        "tradeAlertsEnabled",
+                        defaults.tradeAlertsEnabled,
                     ),
                     portfolioOrder = json.enumOr("portfolioOrder", defaults.portfolioOrder),
                     updateChecksEnabled = json.optBoolean(
@@ -230,7 +238,8 @@ data class SettingsSnapshot(
             "updatedAt", "updatedBy", "themeMode", "analysisLanguage", "responseTimeoutSeconds",
             "defaultContentTypes", "customSystemPrompt", "includePhrases", "excludePhrases",
             "correctionRetries", "catalogEnrichmentEnabled", "scoringWindowSessions",
-            "overdueRemindersEnabled", "portfolioOrder", "updateChecksEnabled",
+            "overdueRemindersEnabled", "tradeAlertsEnabled", "portfolioOrder",
+            "updateChecksEnabled",
             "useDefaultPromptOnly", "provider", "providers", "promptHistory",
         )
 

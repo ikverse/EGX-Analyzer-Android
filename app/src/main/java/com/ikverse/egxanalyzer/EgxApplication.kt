@@ -17,6 +17,7 @@ import com.ikverse.egxanalyzer.data.ScheduledJobWorker
 import com.ikverse.egxanalyzer.data.SymbolMap
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.TelegramRepository
+import com.ikverse.egxanalyzer.data.TradeStatusNotifier
 import com.ikverse.egxanalyzer.data.UpdateRepository
 import com.ikverse.egxanalyzer.ui.AppState
 
@@ -94,15 +95,25 @@ class EgxApplication : Application() {
                 if (reason == null) notifier.cancelled() else notifier.failed(reason)
             },
             schedulesChanged = { jobs, enabled -> JobScheduler(this).rebook(jobs, enabled) },
-            overdueRemindersChanged = { enabled ->
-                if (enabled) OverdueWorker.schedule(this) else OverdueWorker.cancel(this)
+            dailyCheckChanged = { wanted ->
+                if (wanted) OverdueWorker.schedule(this) else OverdueWorker.cancel(this)
+            },
+            // Wrapped for the reason the analysis announcements are: the trades have already been
+            // re-scored and written down by the time this is called, and losing that to an
+            // exception about a notification would trade the record for the announcement of it.
+            tradesChanged = { changes ->
+                runCatching { TradeStatusNotifier(this).announce(changes) }
             },
             headless = startedForSchedule,
         ).also { state = it }
         // Booked on every launch rather than only when the switch is touched, so an install that
         // has never opened Settings still gets the check, and one whose work was dropped by the
         // system gets it back.
-        if (state.appPreferences.overdueRemindersEnabled) OverdueWorker.schedule(this)
+        if (state.appPreferences.overdueRemindersEnabled ||
+            state.appPreferences.tradeAlertsEnabled
+        ) {
+            OverdueWorker.schedule(this)
+        }
         // Re-booked on every launch, for the reason the overdue check is: an alarm does not
         // survive a reboot or an app update, and one the system dropped leaves a schedule that
         // has silently stopped keeping time. The sweep answers a fire that came due while the

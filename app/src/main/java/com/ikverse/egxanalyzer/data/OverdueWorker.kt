@@ -8,20 +8,28 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.TradeAlerts
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 
 /**
- * The once-a-day look at whether anything has run past its deadline.
+ * The once-a-day look at the record: what has run past its deadline, and what the calendar has
+ * quietly closed.
  *
- * Deliberately the only thing in this app that runs while it is closed, and deliberately the
- * cheapest possible version of it: no network, no analysis, no Telegram. How overdue a trade is
- * comes from a date already on disk and today's date, so this is a database read and an arithmetic
- * comparison. An analysis costs the owner cloud credits and must never be started from here.
+ * Deliberately the cheapest possible version of it: no network, no analysis, no Telegram. How
+ * overdue a trade is comes from a date already on disk and today's date, so this is a database read
+ * and an arithmetic comparison. An analysis costs the owner cloud credits and must never be started
+ * from here.
  *
  * It reads the store directly rather than going through `AppState`, which exists to serve a screen
  * and drags a Telegram session up with it. Nothing on screen needs to change for this to be right.
+ *
+ * **Two questions, one wake.** The trade status notifications are mostly raised by a price refresh,
+ * which is where the market moves a trade - but one ending has no prices behind it at all. A window
+ * runs out because a date passed, and on a phone that opened nothing and refreshed nothing there is
+ * no other moment at which anyone would notice. Sweeping here costs the portfolio this worker had
+ * already built.
  */
 class OverdueWorker(
     context: Context,
@@ -33,7 +41,11 @@ class OverdueWorker(
             applicationContext,
             AndroidKeystoreCredentialStore(applicationContext),
         )
-        if (!settings.loadPreferences().overdueRemindersEnabled) return@runCatching Result.success()
+        val preferences = settings.loadPreferences()
+        // Booked while either is on, so it has to check both before deciding it has nothing to do.
+        if (!preferences.overdueRemindersEnabled && !preferences.tradeAlertsEnabled) {
+            return@runCatching Result.success()
+        }
 
         val store = LocalDataStore(applicationContext)
         val portfolio = PortfolioCalculator.build(
@@ -46,11 +58,21 @@ class OverdueWorker(
         )
 
         val overdue = portfolio.positions.filter(PositionView::overdue)
-        if (overdue.isNotEmpty()) {
+        if (preferences.overdueRemindersEnabled && overdue.isNotEmpty()) {
             OverdueNotifier(applicationContext).overdue(
                 count = overdue.size,
                 longestDays = overdue.maxOf(PositionView::overdueDays),
             )
+        }
+
+        // Recorded whether or not it is announced, exactly as the app does it: the switch decides
+        // whether the phone speaks, never what it remembers. The app may be running and sweeping
+        // the same record at this moment - a notification id is derived from the trade, so the
+        // worst that costs is one notification replacing its own twin rather than a second buzz.
+        val alerts = TradeAlerts.sweep(store.positionStatusSeen(), portfolio.positions)
+        store.savePositionStatusSeen(alerts.record, alerts.forgotten)
+        if (preferences.tradeAlertsEnabled) {
+            TradeStatusNotifier(applicationContext).announce(alerts.changes)
         }
         Result.success()
         // Retrying would mean asking again in a few minutes about something that changes once a

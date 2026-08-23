@@ -13,8 +13,8 @@ import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.callDate
+import com.ikverse.egxanalyzer.model.judgingWindow
 import com.ikverse.egxanalyzer.model.riskReward
-import com.ikverse.egxanalyzer.model.tradeWindow
 import com.ikverse.egxanalyzer.model.round
 import java.time.Instant
 import java.time.LocalDate
@@ -44,7 +44,6 @@ object PerformanceCalculator {
     fun report(
         analyses: List<SavedAnalysis>,
         pricesFrom: LocalDate?,
-        windowSessions: Int,
         sessionsFor: (ticker: String, from: LocalDate) -> List<DailySession>,
         pricedTickers: Set<String> = emptySet(),
         /**
@@ -65,19 +64,18 @@ object PerformanceCalculator {
         /** Where each stock stands as of the last refresh, for the card to show alongside the call. */
         latestPrices: Map<String, LatestPrice> = emptyMap(),
     ): PerformanceReport {
-        val window = Scoring.clampWindow(windowSessions)
-        if (pricesFrom == null) return PerformanceReport(windowSessions = window)
+        if (pricesFrom == null) return PerformanceReport()
         // Whichever starting line is later. Prices reaching further back than [ANALYSIS_START] are
         // still fetched and still stored - they are what a split check compares against - but no
         // call is judged on them.
         val since = maxOf(pricesFrom, ANALYSIS_START)
 
-        val scoredRuns = markRepeats(runs(analyses, since, window)).map { run ->
+        val scoredRuns = markRepeats(runs(analyses, since)).map { run ->
             run.copy(
                 calls = run.calls.map { call ->
-                    // The call's own window rather than the report's. They are no longer all the
-                    // same: a T+1 card described a trade held over one night and is judged over
-                    // exactly that, while everything beside it takes the scoring setting.
+                    // The call's own horizon: a T+1 card described a trade held over one night and
+                    // is judged over exactly that, while everything beside it runs to the general
+                    // horizon and settles whenever the market settles it.
                     val sessions = sessionsFor(call.ticker, call.openedOn).take(call.windowSessions)
                     val scored = Scoring.score(
                         sessions = sessions,
@@ -120,7 +118,6 @@ object PerformanceCalculator {
         val full = counted.count { it.outcome.isFullHit }
         val any = counted.count { it.outcome.reachedATarget }
         return PerformanceReport(
-            windowSessions = window,
             // The starting line itself, not the earliest call behind it. Derived from the calls it
             // was unreachable: it was null exactly when there were no calls, which is the one case
             // the screen wanted it for - so the empty state could never say what it was waiting on.
@@ -224,14 +221,12 @@ object PerformanceCalculator {
     private fun runs(
         analyses: List<SavedAnalysis>,
         since: LocalDate,
-        /** The scoring setting, which every call that does not name its own deadline takes. */
-        window: Int,
     ): List<RunCalls> = analyses
         .groupBy { it.result.recommendationTargetDate }
         .mapNotNull { (targetDate, forSession) ->
             val reads = forSession
                 .sortedByDescending { it.result.completedAt }
-                .map { saved -> saved to callsByChannel(saved, targetDate, since, window) }
+                .map { saved -> saved to callsByChannel(saved, targetDate, since) }
 
             val claimed = mutableSetOf<Long?>()
             val chosen = linkedMapOf<SavedAnalysis, List<ScoredCall>>()
@@ -350,7 +345,6 @@ object PerformanceCalculator {
         saved: SavedAnalysis,
         targetDate: LocalDate?,
         since: LocalDate,
-        window: Int,
     ): Map<Long?, List<ScoredCall>> {
         val traces = saved.result.sources.filter { it.messageId != null }
         val channelNames = traces.associate { it.messageId.toString() to it.channelName }
@@ -360,7 +354,7 @@ object PerformanceCalculator {
         saved.result.consolidated.forEach { stock ->
             stock.dataPoints.forEach { point ->
                 val call = point.toCall(
-                    stock, channelNames, channelIds, targetDate, window, saved.result.requestId,
+                    stock, channelNames, channelIds, targetDate, saved.result.requestId,
                 )
                     ?: return@forEach
                 if (call.openedOn < since) return@forEach
@@ -380,7 +374,6 @@ object PerformanceCalculator {
         channelNames: Map<String, String>,
         channelIds: Map<String, Long?>,
         targetDate: LocalDate?,
-        window: Int,
         /** The report this was read out of, so an opinion stored against it can be deleted with it. */
         requestId: String,
     ): ScoredCall? {
@@ -393,7 +386,7 @@ object PerformanceCalculator {
         if (ticker.isBlank()) return null
         // Decided here, where the extraction is still in hand: the basis that makes a call T+1 is a
         // property of the card it was read off, and nothing downstream of this point ever sees it.
-        val deadline = tradeWindow(window)
+        val deadline = judgingWindow()
         return ScoredCall(
             ticker = ticker,
             companyEnglish = stock.stockNameEnglish,
@@ -462,7 +455,20 @@ object PerformanceCalculator {
                     .takeIf { it > 0 }
                     ?.let { (any.size.toDouble() / it * 100).round(1) },
                 averageReturn = returns.takeIf(List<Double>::isNotEmpty)?.average()?.round(2),
+                // How long the source takes to be right, and how long it takes to be wrong. Worth
+                // having only now that a call runs to a settlement rather than to a deadline: under
+                // a ten-session window every one of these figures was capped at ten, and a source
+                // that reliably comes good in a fortnight was indistinguishable from one whose
+                // calls never come good at all.
                 medianSessionsToHit = median(any.map(ScoredCall::sessionsElapsed)),
+                // Only the calls the stop took out on their own. A partial hit that fell back to
+                // the stop settled on its target and is counted in the figure above; putting it in
+                // both would let one call describe how fast the source is right and how fast it is
+                // wrong at once, and its `sessionsElapsed` counts to the target either way.
+                medianSessionsToStop = median(
+                    judged.filter { it.outcome == Outcome.STOPPED }
+                        .map(ScoredCall::sessionsElapsed),
+                ),
                 discountedReturn = discountedReturn(returns),
                 anyTargetRateFloor = wilsonLowerBound(any.size, judged.size),
                 averageRiskReward = riskRewards.takeIf(List<Double>::isNotEmpty)

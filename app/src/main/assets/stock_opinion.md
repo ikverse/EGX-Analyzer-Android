@@ -62,7 +62,7 @@ Judge the levels as printed, in three or four sentences.
 - What it asks a reader to risk against what it offers.
 - Whether the stop sits under something in the session data, or just under the entry so the call
   looks tight.
-- Whether the targets are reachable in the window the call was made for.
+- Whether the targets are reachable from here, and roughly how long that would take.
 - Whether the price has left the levels behind, which makes the call history whatever it was worth
   when published.
 

@@ -37,8 +37,11 @@ class SettingsSyncTest {
             customSystemPrompt = "Read the levels as printed.",
             correctionRetries = 2,
             catalogEnrichmentEnabled = false,
-            scoringWindowSessions = window,
+            defaultTradeWindowSessions = window,
             overdueRemindersEnabled = false,
+            // Both off, so the round trip actually proves the key travels: left at its default a
+            // reader that never looked at it would still come back with the right answer.
+            tradeAlertsEnabled = false,
             updateChecksEnabled = false,
             portfolioOrder = PortfolioOrder.OLDEST,
         ),
@@ -91,7 +94,7 @@ class SettingsSyncTest {
             listOf(snapshot(at = 1_000, window = 5), snapshot(at = 2_000, window = 9)),
         )
 
-        assertEquals(9, merged?.preferences?.scoringWindowSessions)
+        assertEquals(9, merged?.preferences?.defaultTradeWindowSessions)
     }
 
     /** Two devices saving in the same millisecond still have to reach the same answer. */
@@ -100,7 +103,7 @@ class SettingsSyncTest {
         val both = listOf(snapshot(by = "phone", window = 5), snapshot(by = "tablet", window = 9))
 
         assertEquals(mergeSettings(both), mergeSettings(both.reversed()))
-        assertEquals(9, mergeSettings(both)?.preferences?.scoringWindowSessions)
+        assertEquals(9, mergeSettings(both)?.preferences?.defaultTradeWindowSessions)
     }
 
     /**
@@ -162,7 +165,7 @@ class SettingsSyncTest {
         assertEquals(ThemeMode.SYSTEM, parsed.preferences.themeMode)
         assertEquals(PortfolioOrder.URGENT, parsed.preferences.portfolioOrder)
         // Everything readable is still read.
-        assertEquals(7, parsed.preferences.scoringWindowSessions)
+        assertEquals(7, parsed.preferences.defaultTradeWindowSessions)
         assertEquals(AnalysisLanguage.ARABIC, parsed.preferences.analysisLanguage)
     }
 

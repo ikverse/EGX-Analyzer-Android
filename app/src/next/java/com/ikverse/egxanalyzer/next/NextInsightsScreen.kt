@@ -109,7 +109,7 @@ internal fun NextInsightsScreen(
                 NextScreenHeader(
                     title = "Insights",
                     holding = "${report.judged} settled · ${channels.size} channels",
-                    trailing = "Window ${report.windowSessions} ${report.windowSessions.sessionWord()}",
+                    trailing = "${report.tracked} scored",
                 )
             }
 
@@ -776,7 +776,7 @@ private fun CallBlock(
                 {
                     NextFigureCell(
                         "Sessions",
-                        "${call.sessionsElapsed}/${appState.performance.windowSessions}",
+                        call.sessionsElapsed.toString(),
                         colors.figMuted,
                     )
                 },

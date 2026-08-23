@@ -32,14 +32,14 @@ data class ScoredCall(
     val returnPct: Double?,
     val sessionsElapsed: Int,
     /**
-     * The window this call was actually judged over.
+     * The horizon this call was judged against.
      *
-     * On the call rather than only on the report, because they are no longer all the same: a T+1
-     * card is judged over its own two sessions while everything beside it takes the scoring
-     * setting. A screen reading the report's figure would name the wrong deadline on exactly the
-     * calls whose deadline is the point.
+     * [Scoring.JUDGING_HORIZON_SESSIONS] for everything but a T+1 card, which is judged over its
+     * own two sessions. Kept on the call rather than only on the report because those two numbers
+     * differ, and a screen reading one figure for the whole page would describe every T+1 call
+     * wrongly - on exactly the calls whose deadline is the point.
      */
-    val windowSessions: Int = Scoring.DEFAULT_WINDOW_SESSIONS,
+    val windowSessions: Int = Scoring.JUDGING_HORIZON_SESSIONS,
     /**
      * Leading sessions of that window the entry could first trade in.
      *
@@ -155,7 +155,24 @@ data class ChannelScore(
      * nothing on its own about whether following it pays.
      */
     val averageReturn: Double?,
+    /**
+     * How long the calls that worked took about it, in trading sessions.
+     *
+     * The median rather than the mean: one call that took twenty-eight sessions to come good would
+     * drag an average away from what the source typically does, and the typical is the question.
+     * Counted to the first target reached, since that is the point at which the reader was in
+     * profit and could act.
+     */
     val medianSessionsToHit: Double?,
+    /**
+     * How long the calls that failed took to fail, in trading sessions.
+     *
+     * The other half of the same question, and not a figure that reads well alone: a source whose
+     * stops come in two sessions while its targets take fifteen is asking the reader to carry a
+     * loss quickly and a gain slowly, which no hit rate on the card would show. Null where nothing
+     * has been stopped out.
+     */
+    val medianSessionsToStop: Double? = null,
     /**
      * [averageReturn] pulled toward zero by how little is behind it, which is what the list is
      * ordered on.
@@ -191,7 +208,6 @@ data class ChannelScore(
 )
 
 data class PerformanceReport(
-    val windowSessions: Int,
     /**
      * The session scoring starts from: the later of the first stored price and the analysis floor.
      *

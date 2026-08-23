@@ -8,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import com.ikverse.egxanalyzer.data.OverdueNotifier
+import com.ikverse.egxanalyzer.data.TradeStatusNotifier
 import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppRoot
 
@@ -59,5 +60,12 @@ class MainActivity : ComponentActivity() {
             appState.navigate(AppDestination.PORTFOLIO)
             appState.refreshOverdue()
         }
+        // A trade status notification names one trade, so it opens that trade rather than the tab
+        // it lives on. `openPosition` is the same entrance a call in Insights uses - it unfolds the
+        // session card, scrolls to the trade and flashes its edge - and going through it is what
+        // keeps a notification from becoming a second, quieter way of finding a position.
+        intent?.getStringExtra(TradeStatusNotifier.EXTRA_POSITION_ID)
+            ?.takeIf(String::isNotBlank)
+            ?.let(appState::openPosition)
     }
 }
