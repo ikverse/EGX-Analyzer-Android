@@ -28,8 +28,11 @@ import androidx.compose.material3.SnackbarVisuals
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -116,16 +119,8 @@ internal fun Screen(
     }
     // The bar floats over the page, so the page has to hold its own content out from under it.
     // Beside a rail there is no bar over anything and nothing to hold clear of.
-    val barClearance =
-        if (LocalWindowWidth.current == WindowWidth.COMPACT) NavBarFootprint else 0.dp
-    // The floating button travels with the bar, so the two never drift apart on screen. Only the
-    // button: the content's padding is deliberately fixed at the full clearance, because animating
-    // that would move the scroll range under a reader mid-scroll, which is exactly what used to
-    // flicker the bar on and off at the foot of a page.
-    val floatingActionClearance by animateDpAsState(
-        if (navBarVisible.value) barClearance else 0.dp,
-        label = "floating action clearance",
-    )
+    val compact = LocalWindowWidth.current == WindowWidth.COMPACT
+    val barClearance = if (compact) NavBarFootprint else 0.dp
     val page = @Composable {
         Column(
             Modifier
@@ -155,14 +150,40 @@ internal fun Screen(
             PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh) { page() }
         }
         floatingAction?.let {
-            // Further in from the corner on a big screen, where the edge is a long way from the
-            // content and a button hard against it reads as stuck to the frame.
-            val inset = if (LocalWindowWidth.current == WindowWidth.COMPACT) Space.l else Space.xl + Space.s
-            Box(
-                Modifier.align(Alignment.BottomEnd)
-                    .padding(inset)
-                    .padding(bottom = floatingActionClearance),
-            ) { it() }
+            if (compact) {
+                // The action is a second storey on the bar rather than a button floating near it:
+                // the bar's own side margins, its corner, its alpha, and it leaves and returns on
+                // the same scroll. Pinned rather than merely tracking - it used to slide down into
+                // the room the bar vacated and stay there, which meant two pieces of chrome moving
+                // opposite ways on one gesture.
+                //
+                // The cost is that the action cannot be reached while the page is scrolled down.
+                // Any upward scroll brings it back, and the alternative was leaving the one control
+                // that spends money hanging over a page the navigation has already left.
+                val drop = with(LocalDensity.current) { (NavBarFootprint + PillBottomMargin).roundToPx() }
+                AnimatedVisibility(
+                    visible = navBarVisible.value,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                        .padding(
+                            start = PillSideMargin,
+                            end = PillSideMargin,
+                            // Clear of the bar, then the same gap again above it, so the two read as
+                            // one stack rather than as a button resting on a bar.
+                            bottom = NavBarFootprint + PillBottomMargin,
+                        ),
+                    // Its own height would only carry it as far as the bar's top edge, where it
+                    // would fade out still on screen. [drop] is the rest of the way down.
+                    enter = fadeIn() + slideInVertically { it + drop },
+                    exit = slideOutVertically { it + drop } + fadeOut(),
+                ) { it() }
+            } else {
+                // Further in from the corner on a big screen, where the edge is a long way from the
+                // content and a button hard against it reads as stuck to the frame. Not stretched
+                // and not pinned: beside a rail the navigation is a column at the side, so there is
+                // no bar at the foot to match, nothing to travel with, and a full-width action here
+                // would be an 88dp slab the width of an unfolded Fold.
+                Box(Modifier.align(Alignment.BottomEnd).padding(Space.xl + Space.s)) { it() }
+            }
         }
     }
     }

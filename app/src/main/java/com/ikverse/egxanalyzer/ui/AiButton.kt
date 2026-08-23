@@ -178,12 +178,12 @@ private fun Pill(
  * without a layer of its own the blend would find the whole card underneath.
  */
 @Composable
-internal fun Spark(gold: List<Color>, size: Dp = SparkSize) {
+internal fun Spark(gold: List<Color>, size: Dp = SparkSize, modifier: Modifier = Modifier) {
     Icon(
         Icons.Filled.AutoAwesome,
         contentDescription = null,
         tint = Color.Unspecified,
-        modifier = Modifier
+        modifier = modifier
             .size(size)
             .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
             .drawWithContent {
@@ -200,8 +200,9 @@ internal fun Spark(gold: List<Color>, size: Dp = SparkSize) {
  * read in a composable body they recompose their caller sixty times a second, on every card in a
  * list. Every method here is meant to be called from a draw lambda for that reason.
  *
- * @param stops the fill's colours. The pill passes `aiFill`'s three; the Analyze action passes
- *   `aiAction`'s two, because the third stop only reads as a shimmer at a pill's width.
+ * @param stops the fill's colours - `aiFill`'s three. The pill is the only caller: the screen's
+ *   action stopped wearing this treatment when the violet came off it, and reads [ActionMotion]
+ *   instead.
  * @param phaseKey seeds where in the breath this one starts. A screen can show twenty of these, and
  *   twenty haloes swelling on one beat is a Christmas tree rather than a list. Pass something stable
  *   per card - the ticker - so the cycle does not restart on every recomposition.
@@ -292,6 +293,130 @@ internal fun DrawScope.drawAiHalo(color: Color, cornerPx: Float, breath: Float) 
         )
     }
 }
+
+/**
+ * The motion the screen's action is made of: one breath, three drifting lights, and a turning mark.
+ *
+ * Deliberately not [rememberAiMotion]. That one carries a sweep this control never draws, and this
+ * one carries drifts and a rotation the pill never draws - and a screen can hold twenty pills, where
+ * building animations only to leave them unread keeps the frame clock awake for every one of them.
+ * There is only ever one action on screen, so nothing here is seeded off a key the way the pill's
+ * breath is; there is nothing to stagger it against.
+ *
+ * Everything is handed back as state so the caller reads it inside a draw or a `graphicsLayer`
+ * lambda. Read in a composable body these recompose the whole screen sixty times a second.
+ */
+@Composable
+internal fun rememberActionMotion(): ActionMotion {
+    val pulse = rememberInfiniteTransition(label = "action")
+
+    val glow = pulse.animateFloat(
+        initialValue = 1f,
+        targetValue = GlowPeak,
+        animationSpec = infiniteRepeatable(tween(BreathHalfMs), RepeatMode.Reverse),
+        label = "glow",
+    )
+    // Three periods that do not divide into one another, so what the lights make together does not
+    // come back round on any cycle short enough to be noticed. On equal periods they would move as
+    // one shape and the fill would read as a gradient sliding, which is what this replaced.
+    val drifts = DriftMs.mapIndexed { index, period ->
+        pulse.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(period), RepeatMode.Reverse),
+            label = "drift$index",
+        )
+    }
+    val spin = pulse.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(SpinMs, easing = LinearEasing)),
+        label = "spin",
+    )
+    return remember(glow, drifts, spin) { ActionMotion(glow, drifts, spin) }
+}
+
+/** What [rememberActionMotion] hands back. Not built directly. */
+@Stable
+internal class ActionMotion(
+    private val glow: State<Float>,
+    private val drifts: List<State<Float>>,
+    private val spin: State<Float>,
+) {
+    /**
+     * What to scale the halo by this frame.
+     *
+     * Only ever read at rest. While a run is going the aurora is what says the control is alive, and
+     * a halo breathing under a fill that is already moving is two clocks disagreeing.
+     */
+    fun breath(): Float = glow.value
+
+    /** The mark's angle. Slow enough to read as alive rather than as a spinner counting something. */
+    val angle: Float get() = spin.value
+
+    /**
+     * Where the three lights sit this frame, on a control [width] by [height] pixels.
+     *
+     * The paths are placed by hand rather than derived. Each crosses the button on a different
+     * diagonal so no two ever stack up, and each starts or ends outside the bounds so a light is
+     * always arriving or leaving - one parked in the middle reads as a smudge on the fill rather
+     * than as light passing through it.
+     */
+    fun lights(width: Float, height: Float): List<Offset> = listOf(
+        Offset(mix(-0.10f, 0.55f, drifts[0].value) * width, mix(-0.35f, 0.55f, drifts[0].value) * height),
+        Offset(mix(0.75f, 0.20f, drifts[1].value) * width, mix(0.15f, -0.25f, drifts[1].value) * height),
+        Offset(mix(1.05f, 0.40f, drifts[2].value) * width, mix(0.35f, 0.85f, drifts[2].value) * height),
+    )
+}
+
+private fun mix(from: Float, to: Float, t: Float): Float = from + (to - from) * t
+
+/**
+ * The action's fill while a run is going: a ground with soft lights drifting over it.
+ *
+ * Circles with a radial brush rather than `Modifier.blur`, for the same reason [drawAiHalo] stacks
+ * round rects instead of blurring: a blur puts the control in a layer of its own and re-renders it
+ * on every frame the lights move. A radial gradient ending at zero alpha is already a soft edge and
+ * costs one draw call.
+ *
+ * No corner radius here, unlike [drawAiHalo]. This draws inside the surface rather than outside it,
+ * and `FloatingSurface` clips to its own shape - so the lights are cut to the button's corners
+ * without this having to be told what they are.
+ *
+ * @param base carries alpha 0.94 in the colour itself, which is the bar's figure. The lights are low
+ *   enough over it that where they overlap the fill still reads at the bar's strength rather than
+ *   above it.
+ */
+internal fun DrawScope.drawActionAurora(base: Color, lights: List<Color>, at: List<Offset>) {
+    drawRect(base)
+    val radius = size.height * LightRadius
+    lights.forEachIndexed { index, colour ->
+        val centre = at[index]
+        drawCircle(
+            brush = Brush.radialGradient(
+                listOf(colour, colour.copy(alpha = 0f)),
+                center = centre,
+                radius = radius,
+            ),
+            radius = radius,
+            center = centre,
+        )
+    }
+}
+
+/**
+ * How wide one light is, as a multiple of the control's height.
+ *
+ * Wider than the button is tall on purpose: at anything under about 1.2 the circles read as three
+ * discs sliding around, and what is wanted is one field of light that happens to move unevenly.
+ */
+private const val LightRadius = 1.6f
+
+/** The three drift periods. See [rememberActionMotion] for why they are not equal. */
+private val DriftMs = listOf(9_000, 11_000, 13_000)
+
+/** One turn of the mark. */
+private const val SpinMs = 3_400
 
 private val AiPadding: Dp = 12.dp
 private val AiGap: Dp = 6.dp

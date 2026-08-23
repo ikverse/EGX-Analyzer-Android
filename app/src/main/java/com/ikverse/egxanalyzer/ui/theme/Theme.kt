@@ -136,16 +136,54 @@ data class ExtraColors(
     val aiOnFill: Color,
 
     /**
-     * The same violet drawn a whole button wide rather than a pill wide, and two stops instead of
-     * three.
+     * The screen's own action, which is not the model speaking and no longer dressed as if it were.
      *
-     * The magenta is the one dropped. Across 32dp of pill the run from indigo to magenta reads as a
-     * shimmer; across the 56dp screen action - 88dp on an unfolded Fold - it reads as two colours
-     * meeting in the middle, and the label's contrast drifts along its length. One hue in two
-     * shades holds still at any width. Kept beside [aiFill] rather than replacing it, because the
-     * pill is the size the three stops were chosen for.
+     * The violet went here first, on the argument that pressing this asks a model. What that missed
+     * is size: on a call card the Ask AI pill is an accent 32dp tall, while this is 56dp of fill
+     * across the whole width of the phone - the largest single field of colour in the app, and the
+     * only object in that hue on a screen of cyan and slate. A hue reserved for one meaning still
+     * has to survive being enlarged, and this one did not.
+     *
+     * So the action takes the app's own teal, and violet stays where it reads as an accent. At rest
+     * this button is the app offering its action; the model has not been asked anything yet. Two
+     * shades of one hue rather than a run between two, for the reason the violet was cut to two
+     * stops: across a whole width, two colours meeting in the middle drift the label's contrast
+     * along their length.
+     *
+     * Every stop here carries alpha 0.94 in the colour itself, which is the navigation bar's own
+     * figure - see [ExtraColors] users below and `FloatingSurface`. Baked in rather than passed to
+     * the draw call so the fill cannot be painted at full strength by a caller that forgets.
      */
-    val aiAction: List<Color>,
+    val actionFill: List<Color>,
+
+    /** The label and the mark on [actionFill]. Pale cyan rather than white: it is a teal ground. */
+    val onAction: Color,
+
+    /** The halo under the action at rest. Cyan, because the action is the app's voice. */
+    val actionGlow: Color,
+
+    /**
+     * The action while a model is working: a ground with light drifting through it.
+     *
+     * Also teal, and deliberately so. The first attempt at this made the running state violet on the
+     * argument that a model genuinely is working by then - but that put back at slab size exactly
+     * the hue that had just been taken off the button, and a state change is not worth importing a
+     * colour the app does not otherwise own. So idle and running are one hue, and what separates
+     * them is light moving through it, which the red hairline, the "Cancel analysis" label and the
+     * elapsed clock all say again in words.
+     *
+     * [actionAurora] is drawn as three soft circles over [actionAuroraBase] on cycles that do not
+     * divide into one another, so the movement never visibly repeats. Their alphas are low on
+     * purpose: they land over a ground already at 0.94, and anything stronger would make the busy
+     * parts of the sweep read as more solid than the bar beneath it.
+     *
+     * The middle stop is the blue that means a price the market reached. Borrowed knowingly: that
+     * rule governs a hue labelling a figure, and a light moving inside a button labels nothing. It
+     * is here because two adjacent hues read as one aurora, where a single hue reads as the resting
+     * button with a gradient on it.
+     */
+    val actionAuroraBase: Color,
+    val actionAurora: List<Color>,
 
     /**
      * The hairline the action wears while a run is going, in place of the neutral outline.
@@ -191,7 +229,11 @@ private val DarkExtras = ExtraColors(
     market = Color(0xFF4C9DF0),
     aiFill = listOf(Color(0xFF4A3FBE), Color(0xFF7548AE), Color(0xFF9C4478)),
     aiOnFill = Color.White,
-    aiAction = listOf(Color(0xFF4A3FBE), Color(0xFF7548AE)),
+    actionFill = listOf(Color(0xF0004E5A), Color(0xF00B6D7F)),
+    onAction = Color(0xFFCFF3FA),
+    actionGlow = Color(0xFF5DD4E8),
+    actionAuroraBase = Color(0xF0072A3E),
+    actionAurora = listOf(Color(0x6B5DD4E8), Color(0x5C4C9DF0), Color(0x9E0B6D7F)),
     aiStop = Color(0xFFFF8A80),
     aiLine = listOf(Color(0xFF9E8AF0), Color(0xFFB98ADD), Color(0xFFDE86B4)),
     aiText = Color(0xFFB9A3F2),
@@ -212,7 +254,16 @@ private val LightExtras = ExtraColors(
     // A shade under the dark theme's, because these sit on a pale card rather than a black page.
     aiFill = listOf(Color(0xFF3E349E), Color(0xFF653B96), Color(0xFF883A66)),
     aiOnFill = Color.White,
-    aiAction = listOf(Color(0xFF3E349E), Color(0xFF653B96)),
+    // A shade under the dark theme's, the same way the pill's fill is: these sit on a pale page, and
+    // the teal still has to run dark enough to carry [onAction] on top of it.
+    actionFill = listOf(Color(0xF000414C), Color(0xF00A5C6C)),
+    onAction = Color(0xFFE8FAFF),
+    // Not the dark theme's #5DD4E8: a glow that pale on a near-white page is not a glow.
+    actionGlow = Color(0xFF00697A),
+    actionAuroraBase = Color(0xF005303F),
+    // The light theme's market blue in the middle stop, for the reason the dark theme's is its own:
+    // #4C9DF0 was picked to read on black.
+    actionAurora = listOf(Color(0x6B3FB4CE), Color(0x5C1668C7), Color(0x9E0A5C6C)),
     aiStop = Color(0xFFFF8A80),
     // The fill's own stops, unlike the dark theme: here the line has to be darker than the card,
     // which is the same direction the fill goes.

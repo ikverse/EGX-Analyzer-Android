@@ -194,10 +194,10 @@ private val NavigationIconSize = 28.dp
 private val NavigationBarHeight = 74.dp
 
 /** How far the pill is held in from the sides of the window, which is what makes it read as a pill. */
-private val PillSideMargin = 12.dp
+internal val PillSideMargin = 12.dp
 
 /** Room under the pill, above whatever the gesture strip claims, so it floats rather than sits. */
-private val PillBottomMargin = 10.dp
+internal val PillBottomMargin = 10.dp
 
 /**
  * The bottom of a page the pill is covering.

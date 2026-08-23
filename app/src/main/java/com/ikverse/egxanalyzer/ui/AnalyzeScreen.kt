@@ -57,7 +57,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -120,37 +122,59 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
             val actionModifier = Modifier.height(if (big) BigActionHeight else ActionHeight)
             val ai = extraColors
             val running = appState.analysisStatus == AnalysisStatus.RUNNING
-            // One instance across both branches, so the sweep picks up from the breath rather than
-            // restarting from nothing at the moment a run begins. The phase key is fixed because
-            // there is only ever one of these on screen - nothing to stagger it against.
-            val motion = rememberAiMotion(ai.aiAction, phaseKey = "analyze")
+            // One instance across both branches, so the mark keeps turning through the moment a run
+            // starts rather than restarting from nothing there.
+            val motion = rememberActionMotion()
             // The halo falls outside the surface, so it goes on the modifier the surface is given
             // rather than inside the shape's clip. The fill goes inside, where the flat tint was.
             val haloed = actionModifier.drawBehind {
-                drawAiHalo(ai.aiGlow, ActionCorner.toPx(), motion.breath(running))
+                drawAiHalo(ai.actionGlow, ActionCorner.toPx(), motion.breath())
             }
-            val violet = Modifier.drawBehind { drawRect(motion.fill(size.width, running)) }
+            val teal = remember(ai.actionFill) { Brush.horizontalGradient(ai.actionFill) }
+            // Read in the draw lambda rather than the composable body: read at composition the
+            // drifts would recompose this screen sixty times a second, where here a frame costs a
+            // repaint and nothing else.
+            val fill = Modifier.drawBehind {
+                if (running) {
+                    drawActionAurora(
+                        ai.actionAuroraBase,
+                        ai.actionAurora,
+                        motion.lights(size.width, size.height),
+                    )
+                } else {
+                    drawRect(teal)
+                }
+            }
             if (running) {
                 AnalyzeAction(
                     onClick = { scope.launch { appState.cancelAnalysis() } },
                     container = Color.Transparent,
-                    content = ai.aiOnFill,
-                    modifier = haloed,
-                    painted = violet,
-                    // The one red left on the button, and a hairline of it. The violet says a model
-                    // is working, which is not the same as saying what pressing this does - and
-                    // with the spinner gone the label was carrying that on its own.
+                    content = ai.onAction,
+                    // No halo here. The aurora is what says the control is alive, and a glow around
+                    // a button this wide lights the whole foot of the screen.
+                    modifier = actionModifier,
+                    painted = fill,
+                    stretch = !big,
+                    // The one red left on the button, and a hairline of it. The moving fill says a
+                    // model is working, which is not the same as saying what pressing this does -
+                    // and with the spinner gone the label was carrying that on its own.
                     outline = ai.aiStop,
-                    // The mark rather than a spinner: the fill sweeping under it is what reports
-                    // the run is alive, the same way it does on the pill while an answer is out. A
-                    // spinner on top of a sweep is one control saying "waiting" twice.
-                    icon = { Spark(ai.aiSpark, if (big) BigActionIcon else ActionIcon) },
+                    // The mark rather than a spinner, turning once every few seconds: the fill
+                    // moving under it is what reports the run is alive. A spinner on top of that is
+                    // one control saying "waiting" twice.
+                    icon = {
+                        Spark(
+                            ai.aiSpark,
+                            if (big) BigActionIcon else ActionIcon,
+                            Modifier.graphicsLayer { rotationZ = motion.angle },
+                        )
+                    },
                     label = { RunningLabel(appState.analysisStartedAt, big) },
                 )
             } else {
-                // Only the state that can actually spend money wears the treatment. A blocked
-                // button in violet would be the loudest thing on the screen and do nothing when
-                // pressed, which is the one thing the colour must not be able to mean.
+                // Only the state that can actually spend money wears the fill. A blocked button in
+                // the action colour would be the loudest thing on the screen and do nothing when
+                // pressed, which is the one thing it must not be able to mean.
                 val ready = blocker == null
                 AnalyzeAction(
                     onClick = {
@@ -175,9 +199,10 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                         // substantial of the three.
                         MaterialTheme.colorScheme.surfaceContainerHigh
                     },
-                    content = if (ready) ai.aiOnFill else MaterialTheme.colorScheme.onSurfaceVariant,
+                    content = if (ready) ai.onAction else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = if (ready) haloed else actionModifier,
-                    painted = violet.takeIf { ready },
+                    painted = fill.takeIf { ready },
+                    stretch = !big,
                     icon = {
                         if (ready) {
                             Spark(ai.aiSpark, if (big) BigActionIcon else ActionIcon)
@@ -730,6 +755,12 @@ private fun AnalyzeAction(
     modifier: Modifier = Modifier,
     painted: Modifier? = null,
     outline: Color? = null,
+    /**
+     * Whether the button runs the full width of the page, which it does wherever the navigation bar
+     * does - see `Screen`. Centred there rather than left-aligned: the icon and its label take about
+     * a third of a phone's width, and held to the start they leave the rest of the button empty.
+     */
+    stretch: Boolean = false,
 ) {
     FloatingSurface(
         shape = MaterialTheme.shapes.large,
@@ -741,8 +772,14 @@ private fun AnalyzeAction(
     ) {
         CompositionLocalProvider(LocalContentColor provides content) {
             Row(
-                Modifier.padding(horizontal = ActionPadding),
-                horizontalArrangement = Arrangement.spacedBy(Space.m),
+                Modifier
+                    .then(if (stretch) Modifier.fillMaxWidth() else Modifier)
+                    .padding(horizontal = ActionPadding),
+                horizontalArrangement = if (stretch) {
+                    Arrangement.spacedBy(Space.m, Alignment.CenterHorizontally)
+                } else {
+                    Arrangement.spacedBy(Space.m)
+                },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 icon()
