@@ -123,6 +123,11 @@ class PriceRepository(
                 localDataStore.deleteSessions(result.ticker)
                 localDataStore.clearPriceBreaks(result.ticker)
                 localDataStore.clearIntraday(result.ticker)
+                // The verdicts too. A settled call is frozen against the sessions it was judged on,
+                // and this has just replaced every one of them - so the frozen answer describes a
+                // history that is no longer on disk. Dropped rather than kept: re-scoring is what
+                // the heal was for.
+                localDataStore.clearSettledCalls(result.ticker)
             }
             // Written under the source they actually came from, and the derived rows first. The
             // table is keyed on (ticker, session_date) and replaces on conflict, so writing them

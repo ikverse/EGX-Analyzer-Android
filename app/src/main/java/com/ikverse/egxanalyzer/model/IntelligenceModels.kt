@@ -121,7 +121,18 @@ data class ScoredCall(
      * working it out from a different set of inputs.
      */
     val signals: Set<CallSignal> = emptySet(),
-)
+) {
+    /**
+     * The channel printed this as a T+1 trade: buy on this session, out on the next.
+     *
+     * Read off the two windows rather than carried as a flag of its own, because that is what makes
+     * one: a T+1 card is the only call whose entry may trade in fewer sessions than it is judged
+     * over. It was already the test three places on the Insights screen made by hand, spelled out
+     * as `entrySessions < windowSessions`, which is the same question asked in a way that has to be
+     * decoded before it can be read.
+     */
+    val isTPlusOne: Boolean get() = entrySessions < windowSessions
+}
 
 /**
  * A cheap local reason a call might be worth a closer look.

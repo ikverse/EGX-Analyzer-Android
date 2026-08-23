@@ -300,6 +300,15 @@ internal fun SectionCard(
 internal fun ExpandableSection(
     title: String,
     icon: ImageVector? = null,
+    /**
+     * Colour for [icon], where the card's own state is what it should be saying.
+     *
+     * `primary` everywhere else, and that is the right default: on a page of settings the icon is a
+     * bullet, and colouring each one would be a page of noise. A session on Insights is different -
+     * how that session went is the card's whole subject, and the icon is where it can be said
+     * before a word is read.
+     */
+    iconTone: Color? = null,
     modifier: Modifier = Modifier,
     initiallyExpanded: Boolean = false,
     /** One line under the title saying what is inside, so a closed card still informs. */
@@ -343,7 +352,7 @@ internal fun ExpandableSection(
                     Icon(
                         icon,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = iconTone ?: MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(IconSize.Inline),
                     )
                     Spacer(Modifier.width(Space.s))

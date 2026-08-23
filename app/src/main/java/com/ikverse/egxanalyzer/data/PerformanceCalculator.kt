@@ -16,6 +16,9 @@ import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
+import com.ikverse.egxanalyzer.model.SettledCall
+import com.ikverse.egxanalyzer.model.isFinal
+import com.ikverse.egxanalyzer.model.settledKey
 import com.ikverse.egxanalyzer.model.StockScore
 import com.ikverse.egxanalyzer.model.callDate
 import com.ikverse.egxanalyzer.model.judgingWindow
@@ -68,6 +71,22 @@ object PerformanceCalculator {
         intradayFor: (ticker: String, date: LocalDate) -> List<IntradayBar> = { _, _ -> emptyList() },
         /** Where each stock stands as of the last refresh, for the card to show alongside the call. */
         latestPrices: Map<String, LatestPrice> = emptyMap(),
+        /**
+         * The calls the market has already finished with, by [settledKey].
+         *
+         * A map read once for the whole recompute rather than a lookup per call, like the breaks
+         * and the bars: a settled call is looked up on every recompute, and a query each would be
+         * the cost this exists to remove.
+         */
+        settled: Map<String, SettledCall> = emptyMap(),
+        /**
+         * Handed the calls that have just settled for the first time, so they can be written down.
+         *
+         * A callback rather than a return value on the report: settling is a side effect of scoring
+         * and nothing on screen reads it, and threading it through `PerformanceReport` would put a
+         * write instruction inside the thing every screen draws from.
+         */
+        onSettled: (List<SettledCall>) -> Unit = {},
     ): PerformanceReport {
         if (pricesFrom == null) return PerformanceReport()
         // Whichever starting line is later. Prices reaching further back than [ANALYSIS_START] are
@@ -75,9 +94,19 @@ object PerformanceCalculator {
         // call is judged on them.
         val since = maxOf(pricesFrom, ANALYSIS_START)
 
+        // Filled while the runs are scored and handed over once. A call reaching a final verdict is
+        // a rare event on any one recompute - most closed calls were already closed last time.
+        val justSettled = mutableListOf<SettledCall>()
+
         val scoredRuns = markRepeats(runs(analyses, since)).map { run ->
             run.copy(
                 calls = run.calls.map { call ->
+                    // Already finished with. The market cannot take back a second target, a broken
+                    // stop, or a first target given back to the stop, so replaying thirty sessions
+                    // of prices here is work with one possible answer - and the query for those
+                    // sessions is the expensive half of it. The sessions come back with the verdict
+                    // rather than from the price table, so the card draws exactly what was judged.
+                    settled[call.settledKey()]?.let { return@map call.restoredFrom(it) }
                     // The call's own horizon: a T+1 card described a trade held over one night and
                     // is judged over exactly that, while everything beside it runs to the general
                     // horizon and settles whenever the market settles it.
@@ -119,10 +148,19 @@ object PerformanceCalculator {
                             stopLoss = call.stopLoss,
                             session = sessions.firstOrNull(),
                         ),
-                    )
+                    ).also { judged ->
+                        // Written down the first time and only the first time. The faults, the
+                        // crowding and the shortlist signals are deliberately not part of it: they
+                        // describe this call against the calls around it, and those change as the
+                        // record grows. What is frozen is what the market did.
+                        if (judged.outcome.isFinal(judged.stoppedAfterPartial)) {
+                            justSettled += judged.asSettled()
+                        }
+                    }
                 },
             )
         }
+        onSettled(justSettled)
         // Built once from the scored calls, then handed to the second pass that needs them - the
         // signals on a card read the same records the ranking below is built from, or a card would
         // call a source strong that the list beneath it declines to rank.
@@ -738,6 +776,59 @@ object PerformanceCalculator {
             (ordered[middle - 1] + ordered[middle]) / 2.0
         }
     }
+
+    /**
+     * A call wearing a verdict that was reached once and will not be reached again.
+     *
+     * Everything about *what the market did* comes from the frozen row; everything about how this
+     * call sits among the calls around it is left to [enrich], which runs over settled and running
+     * calls alike. `ambiguity` is null by construction - an unordered session is not a settlement,
+     * so it is never one of the verdicts frozen here.
+     */
+    private fun ScoredCall.restoredFrom(settled: SettledCall): ScoredCall = copy(
+        outcome = settled.outcome,
+        settledOn = settled.settledOn,
+        peakHigh = settled.peakHigh,
+        peakOn = settled.peakOn,
+        troughLow = settled.troughLow,
+        troughOn = settled.troughOn,
+        returnPct = settled.returnPct,
+        sessionsElapsed = settled.sessionsElapsed,
+        ambiguity = null,
+        stoppedAfterPartial = settled.stoppedAfterPartial,
+        stoppedOn = settled.stoppedOn,
+        windowComplete = settled.windowComplete,
+        sessions = settled.sessions,
+        // Re-derived rather than frozen: a fault is a reading of the levels against the call's own
+        // first session, both of which are in hand here, and it captions the card without moving a
+        // figure. Storing it would freeze a heuristic beside a measurement.
+        faults = CallSanity.faults(
+            entryLow = entryLow,
+            entryHigh = entryHigh,
+            target1 = target1,
+            target2 = target2,
+            stopLoss = stopLoss,
+            session = settled.sessions.firstOrNull(),
+        ),
+    )
+
+    /** The same call as the row that will be written for it. */
+    private fun ScoredCall.asSettled(): SettledCall = SettledCall(
+        key = settledKey(),
+        ticker = ticker,
+        outcome = outcome,
+        settledOn = settledOn,
+        stoppedOn = stoppedOn,
+        stoppedAfterPartial = stoppedAfterPartial,
+        windowComplete = windowComplete,
+        peakHigh = peakHigh,
+        peakOn = peakOn,
+        troughLow = troughLow,
+        troughOn = troughOn,
+        returnPct = returnPct,
+        sessionsElapsed = sessionsElapsed,
+        sessions = sessions,
+    )
 
     private const val UNKNOWN = "Unknown"
 }

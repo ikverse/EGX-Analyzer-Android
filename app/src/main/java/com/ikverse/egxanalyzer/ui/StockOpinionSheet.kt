@@ -365,9 +365,17 @@ private fun ToneChip(tone: StockOpinion.Tone) {
  * What pressing Ask AI costs, before it is spent.
  *
  * Every other paid thing in this app is confirmed before it runs, and this is no different: one
- * press, one billed request. It names the model, whether a search is attached and how far back that
- * search reaches, because those are the three things that change what is charged and what comes
- * back.
+ * press, one billed request.
+ *
+ * **Two sentences and a footnote**, where it used to be a paragraph. What the reader has to decide
+ * is whether to spend one request, and the old text spent most of its length on things that do not
+ * change that answer - what a live search can pick up, what the model works from without one, which
+ * of this call's figures travel with the question. A confirmation nobody finishes reading is a
+ * confirmation that has stopped confirming anything.
+ *
+ * The model and the search window survive, in grey underneath. They are what the bill and the
+ * answer actually depend on, and they are facts rather than explanation - which is exactly what a
+ * footnote is for.
  */
 @Composable
 internal fun AskAiDialog(
@@ -383,22 +391,20 @@ internal fun AskAiDialog(
         onDismissRequest = onDismiss,
         title = { Text("Ask about ${call.ticker}?") },
         text = {
-            Text(
-                "This sends one paid request to $model, asking what it makes of the stock at " +
-                    "today's price and what it makes of ${call.channel}'s levels. " +
-                    (
-                        if (searching) {
-                            "It searches the web for news about this company from the last " +
-                                "$newsWindowDays days, and reports what it found with dates and " +
-                                "sources. That costs more than asking without a search, and it " +
-                                "can pick up anything that is on the web, verified or not. "
-                        } else {
-                            "No live search, so it works from this call's own figures and " +
-                                "whatever it learned before it was trained. "
-                        }
-                        ) +
-                    "The answer is saved on this card, so opening it again is free.",
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                Text(
+                    "One paid question about this stock and what ${call.channel} said about it. " +
+                        "The answer is kept on this card, so opening it again later is free.",
+                )
+                Text(
+                    listOfNotNull(
+                        model,
+                        if (searching) "checks news from the last $newsWindowDays days" else null,
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         },
         // The gradient rather than a plain Button: this is the press that actually spends the
         // money, and it should look like the one that opened the dialog.

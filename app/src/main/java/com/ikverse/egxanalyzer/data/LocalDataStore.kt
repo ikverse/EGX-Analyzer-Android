@@ -34,6 +34,8 @@ import com.ikverse.egxanalyzer.model.ScheduledJob
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.ExcludedSource
 import com.ikverse.egxanalyzer.model.SavedAnalysis
+import com.ikverse.egxanalyzer.model.SettledCall
+import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.SourceTrace
 import org.json.JSONArray
 import org.json.JSONObject
@@ -85,6 +87,7 @@ class LocalDataStore(context: Context) :
         db.createPositionStatusSeen()
         db.createStockOpinions()
         db.createCallAlertSeen()
+        db.createSettledCalls()
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -112,6 +115,7 @@ class LocalDataStore(context: Context) :
         db.createStockOpinions()
         db.addOpinionDetailColumns()
         db.createCallAlertSeen()
+        db.createSettledCalls()
     }
 
     /**
@@ -525,9 +529,25 @@ class LocalDataStore(context: Context) :
         )""",
     )
 
-    /** Records a change of scale, replacing any earlier reading of the same session. */
+    /**
+     * Records a change of scale, replacing any earlier reading of the same session.
+     *
+     * A break the table did not already hold re-opens every call settled on that stock. Scoring
+     * consults the breaks, so a call frozen before one was found was judged on prices now known to
+     * be in two different currencies - and the verdict it reached is exactly the phantom stop-out
+     * the break exists to prevent. Only a **new** break does it: this is called with whatever the
+     * last fetch found, so re-recording one already on disk says nothing has changed and must not
+     * throw the record open every refresh.
+     */
     fun savePriceBreaks(breaks: List<PriceBreak>) {
         if (breaks.isEmpty()) return
+        val known = priceBreakDates()
+        breaks.map(PriceBreak::ticker)
+            .distinct()
+            .filter { ticker ->
+                breaks.any { it.ticker == ticker && it.date !in known[ticker].orEmpty() }
+            }
+            .forEach(::clearSettledCalls)
         writableDatabase.beginTransaction()
         try {
             breaks.forEach { event ->
@@ -894,6 +914,22 @@ class LocalDataStore(context: Context) :
 
     private fun Cursor.nullableDouble(index: Int): Double? =
         if (isNull(index)) null else getDouble(index)
+
+    /**
+     * The same by column name, for a row read a field at a time rather than by position.
+     *
+     * The price columns are read by index because those rows are read in their thousands and the
+     * lookup is worth avoiding; a settled verdict is read once per closed call, where naming the
+     * column is worth more than the lookup costs.
+     */
+    private fun Cursor.nullableDouble(column: String): Double? =
+        getColumnIndexOrThrow(column).let { if (isNull(it)) null else getDouble(it) }
+
+    /** A stored date, absent where the column is null or holds something that is not one. */
+    private fun Cursor.nullableDate(column: String): LocalDate? =
+        getColumnIndexOrThrow(column)
+            .let { if (isNull(it)) null else getString(it) }
+            ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 
     /**
      * Whether a stored session was built here rather than reported by a daily feed.
@@ -1407,6 +1443,10 @@ class LocalDataStore(context: Context) :
 
     fun deleteAllResults() {
         writableDatabase.delete("stock_opinions", null, null)
+        // Every frozen verdict belongs to a call in one of those reports. A row left behind would
+        // be harmless - its key names a call nothing asks about any more - but "delete everything"
+        // has to mean it.
+        writableDatabase.delete("settled_calls", null, null)
         writableDatabase.delete("analyses", null, null)
     }
 
@@ -1824,6 +1864,166 @@ class LocalDataStore(context: Context) :
     }
 
     /**
+     * The verdicts the market can no longer change, so they are never scored again.
+     *
+     * Keyed on `settledKey`, which carries the levels and the window as well as the call - a
+     * re-extraction that reads a different stop asks under a different key and is scored from
+     * scratch, rather than inheriting a verdict reached about other numbers.
+     *
+     * The sessions the call was judged on travel with it, as JSON in one column. They are evidence
+     * rather than a second copy of the price table: the card draws them, and a frozen verdict beside
+     * a table read from somewhere else could disagree with itself. JSON rather than a second table
+     * for the reason `scheduled_jobs` keeps its settings that way - the shape belongs to the row,
+     * and nothing else ever queries into it.
+     *
+     * Local and never synced, exactly like `price_events`: every device fetches the same public
+     * feed and settles a call the same way, so shipping one phone's conclusion into another's
+     * evidence would put an opinion where a measurement belongs.
+     */
+    private fun SQLiteDatabase.createSettledCalls() = execSQL(
+        """CREATE TABLE IF NOT EXISTS settled_calls (
+            call_key TEXT PRIMARY KEY,
+            ticker TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            settled_on TEXT,
+            stopped_on TEXT,
+            stopped_after_partial INTEGER NOT NULL,
+            window_complete INTEGER NOT NULL,
+            peak_high REAL,
+            peak_on TEXT,
+            trough_low REAL,
+            trough_on TEXT,
+            return_pct REAL,
+            sessions_elapsed INTEGER NOT NULL,
+            sessions TEXT NOT NULL,
+            settled_at INTEGER NOT NULL
+        )""",
+    )
+
+    /**
+     * Every frozen verdict, read once for a whole recompute.
+     *
+     * A row this build cannot interpret - an outcome name it does not know, sessions that will not
+     * parse - is **dropped rather than defaulted**, and the call it belongs to is simply scored
+     * again. Deriving the answer is always available; guessing at a stored one is not.
+     */
+    fun settledCalls(): Map<String, SettledCall> = readableDatabase
+        .query("settled_calls", null, null, null, null, null, null)
+        .use { cursor ->
+            buildMap {
+                while (cursor.moveToNext()) {
+                    val row = runCatching { cursor.toSettledCall() }.getOrNull() ?: continue
+                    put(row.key, row)
+                }
+            }
+        }
+
+    private fun Cursor.toSettledCall(): SettledCall {
+        val ticker = getString(getColumnIndexOrThrow("ticker"))
+        return SettledCall(
+            key = getString(getColumnIndexOrThrow("call_key")),
+            ticker = ticker,
+            outcome = Outcome.valueOf(getString(getColumnIndexOrThrow("outcome"))),
+            settledOn = nullableDate("settled_on"),
+            stoppedOn = nullableDate("stopped_on"),
+            stoppedAfterPartial = getInt(getColumnIndexOrThrow("stopped_after_partial")) == 1,
+            windowComplete = getInt(getColumnIndexOrThrow("window_complete")) == 1,
+            peakHigh = nullableDouble("peak_high"),
+            peakOn = nullableDate("peak_on"),
+            troughLow = nullableDouble("trough_low"),
+            troughOn = nullableDate("trough_on"),
+            returnPct = nullableDouble("return_pct"),
+            sessionsElapsed = getInt(getColumnIndexOrThrow("sessions_elapsed")),
+            sessions = judgedSessions(ticker, getString(getColumnIndexOrThrow("sessions"))),
+        )
+    }
+
+    /** Writes down the calls that have just settled. Only the newly settled ones ever reach here. */
+    fun saveSettledCalls(settled: List<SettledCall>) {
+        if (settled.isEmpty()) return
+        val now = System.currentTimeMillis()
+        writableDatabase.beginTransaction()
+        try {
+            settled.forEach { call ->
+                writableDatabase.insertWithOnConflict(
+                    "settled_calls",
+                    null,
+                    ContentValues().apply {
+                        put("call_key", call.key)
+                        put("ticker", call.ticker)
+                        put("outcome", call.outcome.name)
+                        put("settled_on", call.settledOn?.toString())
+                        put("stopped_on", call.stoppedOn?.toString())
+                        put("stopped_after_partial", if (call.stoppedAfterPartial) 1 else 0)
+                        put("window_complete", if (call.windowComplete) 1 else 0)
+                        put("peak_high", call.peakHigh)
+                        put("peak_on", call.peakOn?.toString())
+                        put("trough_low", call.troughLow)
+                        put("trough_on", call.troughOn?.toString())
+                        put("return_pct", call.returnPct)
+                        put("sessions_elapsed", call.sessionsElapsed)
+                        put("sessions", call.sessions.toStoredJson())
+                        put("settled_at", now)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            }
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    /**
+     * Re-opens every call settled on one stock's prices.
+     *
+     * The two events that rewrite those prices underneath a verdict: a heal, which replaces the
+     * whole stored series, and a newly recorded change of scale, which says the levels and the
+     * prices were never in the same money. Either leaves a frozen verdict describing a history that
+     * no longer exists, so it goes and the call is scored again from what is on disk now.
+     */
+    fun clearSettledCalls(ticker: String) {
+        writableDatabase.delete("settled_calls", "ticker = ?", arrayOf(ticker))
+    }
+
+    /** The sessions a frozen verdict was reached on, as they went in. */
+    private fun List<DailySession>.toStoredJson(): String = JSONArray().apply {
+        this@toStoredJson.forEach { session ->
+            put(
+                JSONObject().apply {
+                    put("d", session.date.toString())
+                    putNullable("o", session.open)
+                    putNullable("h", session.high)
+                    putNullable("l", session.low)
+                    putNullable("c", session.close)
+                    putNullable("v", session.volume)
+                    // Absent rather than false on the ordinary row, which is nearly every row.
+                    if (session.derived) put("built", true)
+                },
+            )
+        }
+    }.toString()
+
+    private fun judgedSessions(ticker: String, stored: String): List<DailySession> {
+        val array = JSONArray(stored)
+        return (0 until array.length()).mapNotNull { index ->
+            val row = array.optJSONObject(index) ?: return@mapNotNull null
+            val date = runCatching { LocalDate.parse(row.getString("d")) }.getOrNull()
+                ?: return@mapNotNull null
+            DailySession(
+                ticker = ticker,
+                date = date,
+                high = row.nullableDouble("h"),
+                low = row.nullableDouble("l"),
+                close = row.nullableDouble("c"),
+                volume = row.nullableDouble("v"),
+                open = row.nullableDouble("o"),
+                derived = row.optBoolean("built", false),
+            )
+        }
+    }
+
+    /**
      * The whole table, which is one row per trade and read in full on every sweep.
      *
      * A status this build no longer knows the name of is dropped rather than crashing the read, and
@@ -1999,6 +2199,11 @@ class LocalDataStore(context: Context) :
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
         /**
+         * 20 is `settled_calls`, the verdict of a call the market has finished with - the second
+         * target reached, the stop broken, or the first target banked and then given back. No
+         * session after any of those can change it, so it is written down once and the call is
+         * never replayed again. The only stored thing on this page that is otherwise derived, and
+         * it is dropped rather than trusted whenever the prices underneath it are rewritten.
          * 19 is `call_alert_seen`, where each *untaken* call stood against its buy zone when the
          * user was last told - the same fact `position_status_seen` holds for trades, and needed
          * for the same reason: an alert about a crossing is a question about two readings, and
@@ -2019,6 +2224,6 @@ class LocalDataStore(context: Context) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 19
+        const val DATABASE_VERSION = 20
     }
 }

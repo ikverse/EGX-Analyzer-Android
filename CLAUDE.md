@@ -87,7 +87,11 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `model/CallShortlist.kt` — which card is worth a paid question. See below.
 - `model/CallAlerts.kt` + `data/CallAlertNotifier.kt` — a stock reaching a buy zone nobody took.
 - `data/PerformanceCalculator.kt` — per-channel and per-session rollups, and the ranking.
-- `data/PriceHealth.kt` — which stocks the feed has gone quiet about, and what it costs. See below.
+- `model/SettledCall.kt` — the verdict of a call the market has finished with, frozen once and never
+  replayed. See below.
+- `ui/ChannelScoreSheet.kt` — how a source is scored, opened by pressing its card in the ranking.
+- `data/PriceHealth.kt` + `ui/PriceFeedSection.kt` — which stocks the feed has gone quiet about,
+  what it costs, and the Settings card that explains it in words. See below.
 - `data/PortfolioCalculator.kt` + `model/Position.kt` — the trades the user actually took. See below.
 - `model/TradeAlerts.kt` + `data/TradeStatusNotifier.kt` — what has changed about a trade since the
   user was last told, and how the phone says so. See below.
@@ -177,6 +181,13 @@ name `scoringWindowSessions` because renaming a persisted key resets it on every
   analysed rather than the calendar, so a session going by without the call starts a fresh one.
   `ScoredCall.repeatOf` is a **mark, not a deletion**: the card stays on its session, because that
   is the record of what the channel published that day, and every rate leaves it out.
+- **A T+1 call says so on its card**, as a chip beside the outcome that opens the rule behind it.
+  It is the one call with a deadline the channel printed itself, and that was the most consequential
+  thing about a card the card never said — it reached the screen only as a caption under a figure
+  and inside the outcome sentence behind another chip, so a two-session call and a thirty-session
+  one looked identical until one of them expired. `ScoredCall.isTPlusOne` is the test, spelled once:
+  a T+1 card is the only call whose entry may trade in fewer sessions than it is judged over, which
+  three places used to ask by hand as `entrySessions < windowSessions`.
 - A **split or bonus issue inside the window** makes the call unjudgeable rather than a loss. The
   levels were printed in the old money and every price after the split is quoted in the new, so a
   2-for-1 reads as a 50% collapse and files the call as a stop-out — silently, and against whichever
@@ -248,12 +259,64 @@ Being right often is not the same as being worth following, and the ranking used
   because an order that quietly dropped the one unmeasurable card would be strictly worse than the
   alphabet it replaced. Stored by **name** like `portfolioOrder`, travels with the other settings,
   and moves no figure on the page.
+- **A channel card is pressable, and it opens the method.** `ui/ChannelScoreSheet.kt`, a sheet from
+  the bottom in the shape of the Ask AI answer, because that is already what this app means by "the
+  longer version of the card you pressed". Every rule above was argued out and written down, and all
+  of it lived here and in the source — a reader deciding whether to follow a channel was shown a
+  verdict and no method. Bullets rather than prose, each keyed to a colour the outcome bars already
+  taught, revealed in sequence at a bullet every 45ms so the eye is led down the list once. It
+  states no verdict of its own and adds no figure the card does not carry: every line is either a
+  rule or one of that channel's own numbers put into a sentence.
+- **A session card says how its session went, in colour.** `SessionSummary` names every verdict and
+  counts it in the hue that outcome wears everywhere else — the same shape the Portfolio's session
+  cards have carried since they were built, and for the same reason: a folded card is most of what
+  this page shows. A partial hit and a full one share the target's green, exactly as they do on a
+  trade's chip, and the words beside them separate the two. Under the counts sits what one call from
+  that session was worth, and the card's icon takes `PriceRole.forReturn` of it — grey where nothing
+  has settled, which is what a session with nothing to say should look like. All of it comes from
+  one `PerformanceCalculator.tally`, so a session's line cannot count differently from the rates
+  above it. The title carries the **weekday**, because a run is aimed at a trading session and
+  Sunday is one here.
 - **`refine` re-runs the second pass, it does not carry it over.** Crowding, re-postings and the
   shortlist signals all describe a call against the calls *around* it, and a filter changes which
   calls those are — a card left reading "2 other sources" beside a page showing one of them would
   be the screen disagreeing with itself. `enrich` is one function called by both `report` and
   `refine` for the same reason every other figure is recomputed in both: the figures on screen
   describe the calls on screen.
+
+### A call the market has finished with
+
+Everything on the Insights tab is derived on every recompute and deliberately so — a figure worked
+out from the prices cannot drift from them. `settled_calls` is the one exception, and it is narrow:
+a call that reached target 2, broke its stop, or banked target 1 and gave it back to the stop is
+**closed**, and no session after any of those can change it. Replaying thirty sessions of prices to
+be told so again is work with one possible answer, and the query for those sessions is the expensive
+half of it. `model/SettledCall.kt` holds the row; `PerformanceCalculator.report` takes the map and a
+callback, so the calculator stays free of Android like every other input it has.
+
+- **Only the three that settle.** An expiry and an entry that never traded are settled in principle,
+  and are left live: both are rare, both cost nothing to derive, and freezing them would widen the
+  one stored thing on this page for no gain. A partial hit still standing is emphatically not
+  frozen — target 2 is still in reach, which is the whole reason a call runs to its settlement.
+- **The key carries the levels and the window**, not just the call. A report re-read by a newer
+  prompt can come back with a different stop on the same card, and a verdict reached about the old
+  one says nothing about the new one — so it asks under a different key, finds nothing, and is
+  scored from scratch.
+- **The sessions it was judged on are stored with the verdict.** They are the evidence: the card
+  draws them, and a frozen verdict beside a table read from somewhere else could disagree with
+  itself. A JSON column, the way `scheduled_jobs` keeps its settings — the shape belongs to the row
+  and nothing queries into it.
+- **Two events drop it**, and both rewrite the prices underneath a verdict: a **heal**, which
+  replaces a stock's whole stored series, and a **newly recorded change of scale**, which says the
+  levels and the prices were never in the same money. Only a *new* break — `savePriceBreaks` is
+  called with whatever the last fetch found, and treating a re-report as news would throw the record
+  open on every refresh forever, on every stock that has ever split.
+- **Local and never synced**, exactly like `price_events`. Every device fetches the same public feed
+  and settles a call the same way, so shipping one phone's conclusion into another's evidence would
+  put an opinion where a measurement belongs.
+- The faults, the crowding and the shortlist signals are **not** part of it. Those describe a call
+  against the calls around it, which change as the record grows, and `enrich` re-derives them for
+  settled and running calls alike.
 
 ### Ordering the two events inside one session
 
@@ -313,9 +376,13 @@ and no single label was true of all three - the date says the part that matters.
 
 `ChannelScore` says whether to read a source. `StockScore` says whether the market has ever done
 what anybody printed about **this stock**, across every source that named it — a different question,
-and one no rate on the page could answer. The app has held the only record of its kind in existence
-since the beginning and used it in exactly one place: a list inside the Ask AI prompt, which is to
-say a paid request nobody had made yet.
+and one no rate on the page could answer.
+
+It is measured and it is **not a section on Insights**. It had one, under the ranking, and it was
+the wrong question in the wrong place: which stock the market has been kind to is not which source
+is worth reading, and a second ranking under the first invited the two to be read as halves of one
+answer. The figures still reach the reader through the two places they decide something — a card's
+own shortlist signals, and the list inside the Ask AI prompt.
 
 - **One piece of arithmetic, two groupings.** `PerformanceCalculator.tally` returns every figure a
   group of calls yields, and both `channelScores` and `stockScores` are built from it. Two copies
@@ -492,7 +559,26 @@ that check, run on every recompute and stored nowhere.
 Three things can happen to a stock's prices, and all three end the same way: the app goes quiet
 about that stock rather than wrong about it, and every rate on the page quietly rests on fewer calls
 than the reader thinks. That is exactly why they need saying out loud. `PriceHealth.assess` is the
-one place that does, drawn by `PriceFeedHealth` on Insights.
+one place that does, drawn by `PriceFeedSettingsSection` — **in Settings, beside the other
+diagnostic**, and no longer on Insights.
+
+- **It explains a figure rather than being one**, which is why it moved. On Insights every reader of
+  the record scrolled past a fault report about four stocks to reach the record of every call, and
+  the thing it qualifies already says so where it matters: a call on a stock with no prices is
+  reported as unjudged on its own card. It is consulted when something looks wrong, and that is what
+  Settings is for.
+- **Present even when nothing is wrong**, which is the one deliberate difference from the Insights
+  version. There it was absent on a healthy day, because a section reading "0 problems" over a
+  record is a section that stops being read on the day it says something. Here it is a place to go
+  and look, and a diagnostic that vanishes when it is working leaves the reader unable to tell
+  "everything is fine" from "the app forgot to check".
+- **The wording is for someone who wants to know why a price is missing**, not for someone who knows
+  what a symbol migration is. `FeedFault.plainly` says what happened, what it costs in calls, and
+  whether fetching again can do anything about it — which for two of the three faults it cannot.
+  `FeedFault.detail` is the short form the record keeps, and stays as it was.
+- A **Fetch prices** button sits under it, offered whatever the state, because it is also how a
+  reader confirms nothing has changed. It reads the free public feed and sends nothing to the model,
+  and the card says so.
 
 - **It replaces nothing and it is not the toast.** The refresh still finishes with
   "Priced 40/42 · 2 unpriced · 1 stale"; that reports a **refresh**, and is gone from the screen a
@@ -518,10 +604,10 @@ one place that does, drawn by `PriceFeedHealth` on Insights.
   whole point is a count.
 - **Only stocks the record names.** The catalog holds every Cairo listing; reporting a frozen feed
   for a stock nobody was ever recommended is a page of noise hiding the four rows that matter.
-- **Absent whenever nothing is wrong**, like the Overdue card, and closed by default unlike the
-  ranking above it — this explains a figure rather than being one. Read off the **whole** record and
-  never the filtered view, for the reason `PortfolioCalculator` is not filtered: a channel filter is
-  a view of the calls, never a claim about which prices are broken.
+- Read off the **whole** record and never a filtered view, for the reason `PortfolioCalculator` is
+  not filtered: a channel filter is a view of the calls, never a claim about which prices are
+  broken. It is computed on every recompute whatever Insights is showing, which is what lets it sit
+  on a different screen from the record it describes.
 - No Android in it, like `PriceSanity`, and it borrows that file's `MAX_SESSION_AGE_DAYS` rather
   than choosing its own — two answers to "how old is too old" is one of them being wrong.
 
@@ -818,8 +904,10 @@ comes back in Arabic and is kept on the card.
   the connection handling, which drift apart the first time either is touched. Temperature is 0.4
   rather than the 0.0 an extraction pins: reading a price off a card has one right answer, a view on
   a stock does not, and at zero every question came back in the same cautious register.
-- **One press is one paid request, confirmed first.** The dialog names the model and whether a
-  search is attached, because those are what change the bill and the answer. Once answered the
+- **One press is one paid request, confirmed first.** The dialog is **two sentences and a grey
+  footnote** naming the model and the search window — it was a paragraph, and most of that length
+  went on things that do not change the one decision being made, which is whether to spend a
+  request. A confirmation nobody finishes reading has stopped confirming anything. Once answered the
   button reads `AI opinion · <verdict>` and reopens the saved answer for nothing; `Ask again` is the
   only way to pay twice, and a card whose request is already out cannot start a second.
 - **An opinion is keyed by ticker, session *and* channel** (`opinionId`), which is deliberately not
@@ -1205,7 +1293,7 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 19. Adding it to only one of the two is the mistake that gets made:
+  `onUpgrade`. Currently 20. Adding it to only one of the two is the mistake that gets made:
   `CallAlertStoreTest` caught exactly that on version 19 before it shipped.
 - **Migrations are tested** — `LocalDataStoreMigrationTest` runs under Robolectric, which supplies
   enough of Android for a real SQLite database in a plain unit test. It writes the version-9 table
@@ -1215,7 +1303,8 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   and checks that gaining `scheduled_jobs` did not cost the trades already on the phone, and
   version 15 has the same case in `StockOpinionStoreTest` for `stock_opinions`, version 16
   has one beside it for the findings columns, version 18 has one in `TradeStatusStoreTest` for
-  `position_status_seen`, and version 19 has one in `CallAlertStoreTest` for `call_alert_seen`
+  `position_status_seen`, version 19 has one in `CallAlertStoreTest` for `call_alert_seen`, and
+  version 20 has one in `SettledCallStoreTest` for `settled_calls`
   — added by `ALTER`, one guard per column, so the risk
   is not that the upgrade fails but that it takes the answers already on the phone with it. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it

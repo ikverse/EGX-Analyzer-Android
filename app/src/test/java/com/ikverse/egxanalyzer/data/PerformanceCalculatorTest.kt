@@ -9,9 +9,11 @@ import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.Scoring
+import com.ikverse.egxanalyzer.model.SettledCall
 import com.ikverse.egxanalyzer.model.SourceTrace
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 import java.time.LocalDate
@@ -385,6 +387,95 @@ class PerformanceCalculatorTest {
         assertEquals(Outcome.STOPPED, report.sessions.single().calls.single().outcome)
         assertEquals(4.0, channel.medianSessionsToStop!!, 0.001)
         assertNull(channel.medianSessionsToHit)
+    }
+
+    @Test
+    fun `a call the stop took out is written down once`() {
+        val settled = mutableListOf<SettledCall>()
+
+        val report = PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1)),
+            pricesFrom = called,
+            sessionsFor = { _, _ -> listOf(session(called, high = 10.0, low = 8.0)) },
+            onSettled = { settled += it },
+        )
+
+        assertEquals(Outcome.STOPPED, report.sessions.single().calls.single().outcome)
+        // The market cannot take this back, so it never needs scoring again.
+        assertEquals(1, settled.size)
+        assertEquals(Outcome.STOPPED, settled.single().outcome)
+        // The evidence travels with the verdict, or the card that draws it would have to go back
+        // to the price table and could disagree with the verdict beside it.
+        assertEquals(listOf(called), settled.single().sessions.map(DailySession::date))
+    }
+
+    @Test
+    fun `a partial hit with target 2 still in reach is not frozen`() {
+        val settled = mutableListOf<SettledCall>()
+
+        PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1)),
+            pricesFrom = called,
+            sessionsFor = { _, _ -> sessions(12.5) },
+            onSettled = { settled += it },
+        )
+
+        // Freezing this would be the app deciding a call cannot improve when it plainly can - the
+        // whole reason a call runs to its settlement rather than to a deadline.
+        assertTrue(settled.isEmpty())
+    }
+
+    @Test
+    fun `a frozen verdict is read back rather than scored again`() {
+        val frozen = mutableListOf<SettledCall>()
+        PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1)),
+            pricesFrom = called,
+            sessionsFor = { _, _ -> listOf(session(called, high = 10.0, low = 8.0)) },
+            onSettled = { frozen += it },
+        )
+        var asked = 0
+
+        val report = PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1)),
+            pricesFrom = called,
+            // Prices that would score a full hit, so reusing the verdict is visible rather than
+            // merely plausible.
+            sessionsFor = { _, _ -> asked++; sessions(14.5) },
+            settled = frozen.associateBy(SettledCall::key),
+        )
+
+        val call = report.sessions.single().calls.single()
+        assertEquals(Outcome.STOPPED, call.outcome)
+        // Not asked for at all: the query is the expensive half of scoring a settled call.
+        assertEquals(0, asked)
+        assertEquals(listOf(called), call.sessions.map(DailySession::date))
+    }
+
+    @Test
+    fun `a call re-read with different levels is scored from scratch`() {
+        val frozen = mutableListOf<SettledCall>()
+        PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1)),
+            pricesFrom = called,
+            sessionsFor = { _, _ -> listOf(session(called, high = 10.0, low = 8.0)) },
+            onSettled = { frozen += it },
+        )
+
+        // The same stock, the same session, the same channel - and a buy zone nowhere near the one
+        // that verdict was reached about. A newer prompt reading a card differently must not
+        // inherit an answer about other numbers.
+        val report = PerformanceCalculator.report(
+            analyses = listOf(analysis(id = 1, entryLow = 20.0, entryHigh = 21.0)),
+            pricesFrom = called,
+            sessionsFor = { _, _ -> listOf(session(called, high = 10.0, low = 8.0)) },
+            settled = frozen.associateBy(SettledCall::key),
+        )
+
+        assertEquals(
+            Outcome.ENTRY_NOT_REACHED,
+            report.sessions.single().calls.single().outcome,
+        )
     }
 
     private fun sessions(high: Double) = listOf(session(called, high))

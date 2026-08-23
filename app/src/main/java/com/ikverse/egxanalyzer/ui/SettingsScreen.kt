@@ -697,6 +697,11 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
+        // Beside the other diagnostic rather than on Insights, where it used to be: this explains
+        // why a figure is missing rather than being one, and it is consulted when something looks
+        // wrong. See PriceFeedSettingsSection.
+        PriceFeedSettingsSection(appState, FormWidth)
+
         ExpandableSection(
             "About",
             icon = Icons.Outlined.Info,

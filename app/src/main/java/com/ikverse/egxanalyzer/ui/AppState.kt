@@ -2262,6 +2262,10 @@ class AppState(
                     provisional = !session.date.isBefore(today) || session.inconsistent,
                 )
             }
+            // The calls the market has finished with, read in one go like the bars and the breaks.
+            // A settled verdict is not re-derived: it is looked up, and the sessions it was reached
+            // on come back with it, so a closed call costs neither a query nor a replay.
+            val settled = localDataStore.settledCalls()
             val report = PerformanceCalculator.report(
                 analyses = analyses,
                 pricesFrom = localDataStore.earliestSessionDate(),
@@ -2270,6 +2274,10 @@ class AppState(
                 priceBreaksFor = { ticker -> breaks[ticker].orEmpty() },
                 intradayFor = { ticker, date -> bars[ticker to date].orEmpty() },
                 latestPrices = latest,
+                settled = settled,
+                // On this thread and inside this recompute, because it is the same write the read
+                // above paid for the connection to.
+                onSettled = localDataStore::saveSettledCalls,
             )
             // On the same thread and from the same read: the breaks and the latest sessions are
             // already in hand here, and asking for them again on the main thread would be a second
