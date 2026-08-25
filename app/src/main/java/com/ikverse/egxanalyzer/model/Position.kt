@@ -160,6 +160,18 @@ data class PositionView(
     /** The session a target or the stop was reached on. */
     val settledOn: LocalDate?,
     /**
+     * The session the stop broke on, where the first target was banked before it.
+     *
+     * Beside [settledOn] rather than folded into it, exactly as `Scored` carries the pair: a
+     * partial hit settles on the session its target was reached and the stop breaks later, and the
+     * two are one date only when both happened inside one session. The scorer has always worked
+     * both out and the view dropped the second, which left the day a trade actually ended
+     * underivable from anything on it.
+     */
+    val stoppedOn: LocalDate? = null,
+    /** The first target was banked and the stop was reached afterwards. */
+    val stoppedAfterPartial: Boolean = false,
+    /**
      * The extremes of the part of the window the user actually held, and the sessions that set them.
      *
      * Since the entry rather than since the call, which is the whole difference between this and

@@ -35,6 +35,9 @@ import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.ExcludedSource
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.SettledCall
+import com.ikverse.egxanalyzer.model.DayEvent
+import com.ikverse.egxanalyzer.model.DayEventKind
+import com.ikverse.egxanalyzer.model.SessionDigest
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.SourceTrace
 import org.json.JSONArray
@@ -88,6 +91,7 @@ class LocalDataStore(context: Context) :
         db.createStockOpinions()
         db.createCallAlertSeen()
         db.createSettledCalls()
+        db.createSessionEvents()
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -116,6 +120,7 @@ class LocalDataStore(context: Context) :
         db.addOpinionDetailColumns()
         db.createCallAlertSeen()
         db.createSettledCalls()
+        db.createSessionEvents()
     }
 
     /**
@@ -2024,6 +2029,136 @@ class LocalDataStore(context: Context) :
     }
 
     /**
+     * What the market did to this record, one row per event, dated by the session that caused it.
+     *
+     * The one thing on the "what happened" card that is written down, and the reason it is written
+     * down is that nothing else records it. A verdict is on disk - `settled_calls` holds the frozen
+     * ones and the rest are re-derived from prices - but *what changed on the session of the 24th*
+     * is a difference between two readings, and a difference is exactly what a table of readings
+     * does not hold. Kept so the question can be asked later of a record that no longer has the
+     * prices to answer it: how often a source's calls move on the session after they are printed,
+     * how a month of stops was distributed, what a bad week actually looked like.
+     *
+     * **Derived data, stored anyway, and never read back for the screen.** The card is built from
+     * the same recompute that builds the portfolio, so it cannot drift from the tabs around it;
+     * this is an archive beside that, and if the two ever disagreed the derivation is right. That
+     * is why the writer replaces a session wholesale rather than accumulating into it - a price
+     * heal rewrites a stock's whole history, and rows written against the old prices have to go
+     * with them rather than sit alongside their replacements.
+     *
+     * Device-local and never synced, for the reason `position_status_seen` and `price_events` are:
+     * every phone fetches the same public feed and derives the same events from it, so shipping one
+     * device's copy into another's would be duplicating a measurement rather than sharing a fact.
+     */
+    private fun SQLiteDatabase.createSessionEvents() = execSQL(
+        """CREATE TABLE IF NOT EXISTS session_events (
+            session_date TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            channel TEXT,
+            position_id TEXT NOT NULL,
+            opened_on TEXT NOT NULL,
+            return_pct REAL,
+            price REAL,
+            recorded_at INTEGER NOT NULL,
+            PRIMARY KEY (session_date, event_id)
+        )""",
+    )
+
+    /**
+     * Replaces the stored digest of every session handed over, in one transaction.
+     *
+     * Whole sessions rather than individual rows, and that is the point of it. An event can stop
+     * being true - a heal replaces a stock's series, a re-run reads a different stop off the same
+     * card, a trade is deleted - and a writer that only ever inserted would leave the retraction
+     * unrecorded. Deleting the session and writing what is true now cannot: whatever the derivation
+     * no longer produces is gone.
+     *
+     * A session that yielded nothing is still cleared, which is how an event that has been undone
+     * actually leaves. It is not written back as an empty row - absence is the record of a quiet
+     * session, and the digest is derived rather than read from here.
+     */
+    fun saveSessionDigests(digests: List<SessionDigest>) {
+        if (digests.isEmpty()) return
+        val now = System.currentTimeMillis()
+        writableDatabase.beginTransaction()
+        try {
+            digests.forEach { digest ->
+                writableDatabase.delete(
+                    "session_events",
+                    "session_date = ?",
+                    arrayOf(digest.date.toString()),
+                )
+                digest.events.forEach { event ->
+                    writableDatabase.insertWithOnConflict(
+                        "session_events",
+                        null,
+                        ContentValues().apply {
+                            put("session_date", digest.date.toString())
+                            put("event_id", event.id)
+                            put("kind", event.kind.name)
+                            put("ticker", event.ticker)
+                            put("channel", event.channel)
+                            put("position_id", event.positionId)
+                            put("opened_on", event.openedOn.toString())
+                            put("return_pct", event.returnPct)
+                            put("price", event.price)
+                            put("recorded_at", now)
+                        },
+                        SQLiteDatabase.CONFLICT_REPLACE,
+                    )
+                }
+            }
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    /**
+     * The stored events over a range of sessions, newest session first.
+     *
+     * Nothing on screen reads this - the card derives its own - so it exists for the question the
+     * table was kept for. A row whose kind this build does not know is **dropped rather than
+     * defaulted**, exactly as an unreadable `settled_calls` row is: a downgrade that cannot name an
+     * event must not quietly file it as some other one.
+     *
+     * [newCalls] is absent from everything read back, because it was never written: the calls
+     * themselves are the record of what was published, and a count beside them would be a second
+     * copy free to disagree.
+     */
+    fun sessionEvents(from: LocalDate, to: LocalDate): List<SessionDigest> = readableDatabase
+        .query(
+            "session_events",
+            null,
+            "session_date >= ? AND session_date <= ?",
+            arrayOf(from.toString(), to.toString()),
+            null,
+            null,
+            "session_date DESC",
+        )
+        .use { cursor ->
+            val byDate = linkedMapOf<LocalDate, MutableList<DayEvent>>()
+            while (cursor.moveToNext()) {
+                val date = cursor.nullableDate("session_date") ?: continue
+                val kind = DayEventKind.from(cursor.getString(cursor.getColumnIndexOrThrow("kind")))
+                    ?: continue
+                val openedOn = cursor.nullableDate("opened_on") ?: continue
+                byDate.getOrPut(date) { mutableListOf() } += DayEvent(
+                    kind = kind,
+                    ticker = cursor.getString(cursor.getColumnIndexOrThrow("ticker")),
+                    channel = cursor.nullableString("channel"),
+                    positionId = cursor.getString(cursor.getColumnIndexOrThrow("position_id")),
+                    openedOn = openedOn,
+                    returnPct = cursor.nullableDouble("return_pct"),
+                    price = cursor.nullableDouble("price"),
+                )
+            }
+            byDate.map { (date, events) -> SessionDigest(date = date, events = events) }
+        }
+
+    /**
      * The whole table, which is one row per trade and read in full on every sweep.
      *
      * A status this build no longer knows the name of is dropped rather than crashing the read, and
@@ -2199,6 +2334,11 @@ class LocalDataStore(context: Context) :
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
         /**
+         * 21 is `session_events`, what the market did to this record on each trading session. The
+         * only thing behind the "what happened" card that is kept, and kept because it is the only
+         * part of it nothing else on disk holds: the prices say where a stock stands, and a
+         * *change* is a difference between two of those readings. Derived like everything else on
+         * that card, written down for the questions that can only be asked of a history.
          * 20 is `settled_calls`, the verdict of a call the market has finished with - the second
          * target reached, the stop broken, or the first target banked and then given back. No
          * session after any of those can change it, so it is written down once and the call is
@@ -2224,6 +2364,6 @@ class LocalDataStore(context: Context) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 20
+        const val DATABASE_VERSION = 21
     }
 }

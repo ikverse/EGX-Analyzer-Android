@@ -169,6 +169,8 @@ object PortfolioCalculator {
             sessionsRemaining = remaining,
             deadlineDate = deadlineDate,
             settledOn = scored.settledOn,
+            stoppedOn = scored.stoppedOn,
+            stoppedAfterPartial = scored.stoppedAfterPartial,
             // Read off the held sessions rather than the whole window, because that is what the
             // scorer was handed: a high set before the user bought belongs to the call, not to
             // them. Dropped entirely across a change of scale, for the reason [exit] is - a high

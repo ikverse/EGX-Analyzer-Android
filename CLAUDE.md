@@ -95,6 +95,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/PortfolioCalculator.kt` + `model/Position.kt` — the trades the user actually took. See below.
 - `model/TradeAlerts.kt` + `data/TradeStatusNotifier.kt` — what has changed about a trade since the
   user was last told, and how the phone says so. See below.
+- `model/SessionDigest.kt` + `ui/TodayCard.kt` — what the market did on one trading session, and
+  the card that says so on Portfolio and Insights. See below.
 - `data/AnalysisPolicy.kt` + `data/RuleSet.kt` + `data/BuiltInRules.kt` — the local wording filter.
 - `data/PromptComposer.kt` — generates the prompt sent to the model.
 - `data/ReportSync.kt` + `data/RuleSync.kt` + `data/PositionSync.kt` — what travels between devices.
@@ -824,6 +826,84 @@ answered correctly by a screen nobody was looking at.
   whatever it liked about a state the scorer might never produce, which is the one way a test about
   status changes passes while the app stays silent.
 
+## What happened this session
+
+The app has always known every fact on this card and has never had a place to say it. A target
+reached at eleven on Tuesday morning reached the reader as a status, on a card, inside a folded
+section, on a tab they had to choose — so *what happened today*, the one question with a daily
+rhythm to it, was the question no screen answered. `SessionDigest` is that answer, drawn by
+`TodayCard` **under Overdue on the Portfolio and above the hero on Insights**: one card, two tabs,
+one digest, so the two can never report a session differently.
+
+- **A session, never a day, and the session comes from the prices.** The card reports on
+  `PerformanceReport.pricesTo` — the newest session any stock has a row for — which is the same
+  figure the page's "prices to \<date\>" comes from and for the same reason. That is what makes the
+  list hold still: it is a function of one session's prices, and a closed session's prices do not
+  move, so the list a reader saw at noon is the list they see at six. It turns over when a refresh
+  first brings back a row for the next session, which is the exchange's own answer to when the next
+  session started. A **wall-clock rule was the obvious alternative and is wrong** — on an EGX
+  holiday it would claim a session that never traded and report an empty one as fact, where reading
+  it off the feed correctly turns over not at all.
+- **Derived on every recompute, like the portfolio and unlike `position_status_seen`.** This is the
+  sharpest difference from `TradeAlerts`, and the two questions are genuinely different.
+  `TradeAlerts` asks *what should I say out loud, once*, which is a question about what the user has
+  already been told, so it needs a memory and is allowed to notice a week-old stop today. A digest
+  asks *what happened on that session*, which has one right answer forever — so a phone switched off
+  for a week comes back with each of those sessions filled in correctly, rather than with seven days
+  of news piled onto the day it was turned on. Every event is dated by `settledOn`, `stoppedOn`,
+  `deadlineDate` or the close that crossed a band, never by when the app noticed.
+- **A trade recorded long after the fact still reports what the market did to it**, which is the
+  rule `TradeAlerts` must not have: first sight is silent there, because announcing a stop from June
+  would be the app introducing itself with old news. Here it is a record, and the market did what it
+  did. It costs nothing, because the scorer only ever replays the sessions actually held — a target
+  reached before the user bought was never theirs and never enters the digest.
+- **Trades speak for the calls they were taken on.** A held call is reported once, as the trade,
+  carrying the user's own return; the channel's version of the same event is dropped. The same rule
+  `CallAlerts` follows, for the same reason — two entries for one stock is one event reported twice,
+  and the trade is the one carrying money. Re-postings are out of it entirely, everywhere.
+- **New calls are counted and deliberately not stored.** Every one of them is already on disk in
+  full, in the analysis it came from, and a row per call in a second table would be a copy of the
+  record free to fall out of step with it. What the market *did* has no such home, which is exactly
+  why the rest of it is written down.
+- **`session_events` is the archive and is never read back for the screen** (schema 21). The card
+  builds its own from the same recompute that builds the portfolio, so it cannot drift from the tabs
+  around it; the table exists for the questions only a history can answer — how often a source's
+  calls move on the session after they are printed, what a bad week actually looked like.
+  `STORED_SESSIONS` (30) sessions are derived and written per recompute, and each is written
+  **whole**: delete the session, insert what is true now. A heal rewrites a stock's prices, and rows
+  derived from the old ones have to go with them rather than sit beside their replacements — which
+  is also why a session that yields nothing is cleared rather than left as it was. Device-local and
+  never synced, like `position_status_seen` and `price_events`.
+- **The heading is the card**, because it is what a folded card informs with. It names the session
+  and then counts what happened, each part in the colour that fact already wears everywhere else —
+  green a target, red a stop, amber a window that ran out, blue a price the market reached. Zeros
+  are omitted. **A stop outranks a target in the one colour the icon gets**, deliberately: a green
+  heading over a session that also took a stop is the card burying the news the reader most needs.
+- **Expanded by default, alone among the cards in this app.** Everything else folds because a screen
+  of open cards is unreadable; this one is read once and scrolled past, and a card that must be
+  opened before it says anything is a card nobody opens. `PageState.todayExpanded` is shared by both
+  tabs — folding it away on the Portfolio only to find it open on Insights would read as two cards
+  that happen to agree — and it is session-only, so "expanded by default" is true of every launch.
+- **A quiet session says so rather than vanishing**, which is the one place this card parts company
+  with Overdue. "Nothing is late" is the state the app is normally in and a permanent card
+  announcing it would be furniture; "nothing moved on this session" is a genuine answer to the
+  question being asked, and its absence would read as the app not having looked. The card is absent
+  only when there is no session at all — a fresh install with no prices.
+- **Tiles, through the Overdue card's own grid**, two across at 411dp and four on the Fold and the
+  tablet. A press goes to `AppState.openPosition` for a trade and `AppState.openCall` for a call —
+  the two entrances every other cross-tab press already uses, so the same tile leads to the same
+  place from either tab. Not narrowed by any filter on either screen, for the reason Overdue is not.
+- **A call expiring is not an event here, where a trade's window running out is.** A trade's
+  deadline is the user's own and arriving is news to them; a call expiring is
+  `JUDGING_HORIZON_SESSIONS` running out, which is the app's backstop rather than anything the
+  market did. `PRICE_BREAK` silences both — the app refuses to value across a split, and a card
+  announcing a stop it has just admitted it cannot read would be the one place that refusal failed.
+- **`SessionDigest` is pure and has no Android in it**, like `TradeAlerts` and `ScheduleClock`.
+  `SessionDigestTest` builds every trade through `PortfolioCalculator` and every verdict through
+  `Scoring`, because a hand-built view would let it assert whatever it liked about a state the
+  scorer might never produce — the one way a test about what the market did passes while the card
+  stays empty.
+
 ## Ask AI
 
 A button on a call card in Insights sends one paid request and asks two questions: what the model
@@ -1293,7 +1373,9 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 20. Adding it to only one of the two is the mistake that gets made:
+  `onUpgrade`. Currently 21. **Bumping the constant is half of it**: `session_events` was added to
+  both hooks and left at 20, so a fresh install had the table and every upgrade silently did not —
+  which fails at the first write and nowhere earlier. `SessionEventStoreTest` caught it. Adding it to only one of the two is the mistake that gets made:
   `CallAlertStoreTest` caught exactly that on version 19 before it shipped.
 - **Migrations are tested** — `LocalDataStoreMigrationTest` runs under Robolectric, which supplies
   enough of Android for a real SQLite database in a plain unit test. It writes the version-9 table
@@ -1303,8 +1385,9 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   and checks that gaining `scheduled_jobs` did not cost the trades already on the phone, and
   version 15 has the same case in `StockOpinionStoreTest` for `stock_opinions`, version 16
   has one beside it for the findings columns, version 18 has one in `TradeStatusStoreTest` for
-  `position_status_seen`, version 19 has one in `CallAlertStoreTest` for `call_alert_seen`, and
-  version 20 has one in `SettledCallStoreTest` for `settled_calls`
+  `position_status_seen`, version 19 has one in `CallAlertStoreTest` for `call_alert_seen`,
+  version 20 has one in `SettledCallStoreTest` for `settled_calls`, and version 21 has one in
+  `SessionEventStoreTest` for `session_events`
   — added by `ALTER`, one guard per column, so the risk
   is not that the upgrade fails but that it takes the answers already on the phone with it. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it

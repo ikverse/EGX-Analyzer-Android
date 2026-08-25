@@ -86,6 +86,13 @@ internal fun PortfolioScreen(appState: AppState) {
             onOpen = appState::openPosition,
         )
 
+        // Under Overdue and above the record, which is where it belongs in the order those two
+        // already establish: Overdue is the one thing here asking to be acted on, this is what
+        // happened since the reader last looked, and the record underneath is reference. Built off
+        // the whole portfolio like Overdue, so a date chosen in the filter below cannot hide an
+        // event - a date picked on screen is a view of the trades, not a claim about the session.
+        TodayCard(appState)
+
         PortfolioSummary(portfolio.stats)
 
         PositionSection(groups = portfolio.groups, appState = appState)

@@ -38,6 +38,22 @@ import java.time.LocalDate
  */
 internal class PageState {
 
+    // ── Shared by Portfolio and Insights ─────────────────────────────────────────────────────
+
+    /**
+     * Whether the "what happened" card is open, for both tabs at once.
+     *
+     * One entry rather than one per tab, because it is one card: it reports one session's events
+     * and draws the same tiles on both screens, and folding it away on the Portfolio only to find
+     * it open again on Insights would read as two cards that happen to agree. Starts **open** -
+     * every other card in this app starts folded, and this is the one whose whole purpose is to
+     * have been read before anyone went looking for it.
+     *
+     * Session-only like everything else here, which is what makes "expanded by default" true of
+     * every launch rather than only of the first one.
+     */
+    val todayExpanded: MutableState<Boolean> = mutableStateOf(true)
+
     // ── Results ──────────────────────────────────────────────────────────────────────────────
 
     /** The run whose table is open, which needs the whole row and so cannot be held by a card. */

@@ -71,6 +71,7 @@ import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
+import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.Portfolio
 import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.JobWork
@@ -113,6 +114,7 @@ import com.ikverse.egxanalyzer.data.OpinionRequest
 import com.ikverse.egxanalyzer.data.OpinionSearchBrief
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
+import com.ikverse.egxanalyzer.model.SessionDigest
 import com.ikverse.egxanalyzer.model.StockOpinion
 import com.ikverse.egxanalyzer.model.opinionId
 
@@ -678,6 +680,23 @@ class AppState(
     var portfolio by mutableStateOf(Portfolio())
         private set
 
+    /**
+     * What the market did on the most recent session the price feed actually has.
+     *
+     * The card on the Portfolio and Insights tabs reads this and nothing else, so both are drawing
+     * one answer. Null until the first recompute, and on an install with no prices at all - there
+     * is no session to report on, which is different from a session on which nothing happened.
+     *
+     * The session is taken from the **prices**, never from a clock. That is what makes the list
+     * hold still: it is a function of one session's prices, and a closed session's prices do not
+     * move, so the card a reader saw at noon is the card they see at six. It turns over when a
+     * refresh first brings back a row for the next session, which is the exchange's own answer to
+     * when the next session started - and on a holiday it correctly turns over not at all, where a
+     * calendar rule would have claimed a session that never traded.
+     */
+    var sessionDigest by mutableStateOf<SessionDigest?>(null)
+        private set
+
     private var positions = localDataStore.positions()
 
     /**
@@ -1187,6 +1206,48 @@ class AppState(
         // performance first, so the calls this reads are the ones the prices were just scored
         // against - and the holdings it excludes are the ones set two lines above.
         reviewCalls(performance, announceChanges)
+        reviewSessions(rebuilt, performance)
+    }
+
+    /**
+     * Rebuilds what happened on each of the recent sessions, and writes the history down.
+     *
+     * Third in the same recompute and off the same two objects the sweeps used, which is what stops
+     * the card disagreeing with the tabs it sits on: one portfolio, one report, three readings of
+     * them. Unlike the sweeps it announces nothing and gates on no preference - it is a screen, not
+     * a notification, and there is nothing here for a switch to silence.
+     *
+     * [SessionDigest.STORED_SESSIONS] sessions are derived where one is drawn, because the table
+     * behind this wants a history and deriving thirty costs a pass over lists already in memory.
+     * Each is written whole, so a heal that rewrote a stock's prices takes the events derived from
+     * the old ones with it rather than leaving them beside their replacements.
+     */
+    private suspend fun reviewSessions(rebuilt: Portfolio, report: PerformanceReport) {
+        val calls = report.sessions.flatMap(ScoredSession::calls)
+        // The sessions the record actually knows about, which is the exchange's own calendar as
+        // this phone has it - a weekend and a public holiday are simply absent. Both sources are
+        // needed: a call's window stops at its settlement, so a record with nothing running would
+        // otherwise report on a session several days behind the prices on disk.
+        val sessions = (
+            calls.asSequence().flatMap { call -> call.sessions.asSequence().map(DailySession::date) } +
+                report.latestPrices.values.asSequence().map { it.session.date }
+            )
+            .distinct()
+            .sortedDescending()
+            .take(SessionDigest.STORED_SESSIONS)
+            .toList()
+        if (sessions.isEmpty()) {
+            sessionDigest = null
+            return
+        }
+        val digests = withContext(Dispatchers.IO) {
+            SessionDigest.build(
+                sessions = sessions,
+                positions = rebuilt.positions,
+                calls = calls,
+            ).also(localDataStore::saveSessionDigests)
+        }
+        sessionDigest = digests.firstOrNull()
     }
 
     /**

@@ -160,6 +160,13 @@ internal fun InsightsScreen(appState: AppState) {
             }
         }
 
+        // Above the hero, and above the filters that narrow everything below it. The record is what
+        // this tab is for and the hero is its answer, but both are reference: they are read when
+        // the reader has come to ask a question. What happened on the last session is news, it is
+        // true of the whole record whatever the filters say, and it stops being worth reading the
+        // moment the next session opens. Absent entirely until a session has prices.
+        TodayCard(appState)
+
         // The answer leads, and the controls that narrow it come after. This tab exists to settle
         // one argument - which source is worth reading - and it used to open on a filter row.
         if (report.tracked > 0) InsightsHero(report)
