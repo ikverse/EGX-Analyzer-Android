@@ -186,7 +186,7 @@ internal fun InsightsScreen(appState: AppState) {
             },
             // Never folded away: it is the control someone arrives at this tab already knowing
             // they want, which is the same reason it leads on Results and the Portfolio.
-            search = { StockFilterField(value = stock, onValueChange = { stock = it }) },
+            search = { m -> StockFilterField(stock, { stock = it }, modifier = m) },
         ) {
             MultiSelectFilter(
                 label = "channels",

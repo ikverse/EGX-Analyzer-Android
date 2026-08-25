@@ -123,8 +123,8 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                 // Never folded away, for the reason it leads inside a report too: it is the control
                 // someone arrives at the screen already knowing they want, and the only one that
                 // can empty the list on a single keystroke.
-                search = {
-                    StockFilterField(value = stockFilter, onValueChange = { stockFilter = it })
+                search = { m ->
+                    StockFilterField(stockFilter, { stockFilter = it }, modifier = m)
                 },
             ) {
                 MultiSelectFilter(

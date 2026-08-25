@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,7 +21,6 @@ import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -321,18 +321,20 @@ internal fun <T> SortFilter(
  * on rather than as another card of content competing with the record - the same reason it carries
  * no title: the chips name themselves.
  *
- * **Two layouts, switched on [LocalWindowWidth].** The shell's published answer to "is this window
- * wide", already used by `Screen` and `TodayCard`, rather than a fourth threshold of this file's
- * own. Wide: everything on one line, the controls in a weighted [FlowRow] so an overflow wraps
- * *inside* the shelf, and Clear pinned hard right where it cannot move. Compact: [search] stays out
- * and the rest fold behind a chip.
+ * **One layout at every width, and the filters are always folded.** It began as two - everything on
+ * one line on a wide screen, folded on a narrow one - and the wide form was the wrong answer even
+ * where it fitted: a shelf carrying four controls and a button is a toolbar the reader has to read
+ * before they can ignore it, on a page whose subject is underneath it. Two controls is a line that
+ * is scanned rather than read, and it is the same line on both panels, so the tab does not
+ * rearrange itself when the phone opens.
  *
  * **[search] never folds**, and that is not an aesthetic choice - Results and the Portfolio both
  * carry the same comment about it, that it is "the control someone arrives at the screen already
  * knowing they want". Burying it would contradict the reason it leads.
  *
  * The fold is the pattern Results' in-report toolbar already uses, chip label included, so this is
- * that rule reused rather than a second one invented. The chip reads **"Filters on"** whenever one
+ * that rule reused rather than a second one invented - it simply applies at every width here rather
+ * than only on a cover screen. The chip reads **"Filters on"** whenever one
  * of the folded controls is narrowing the list, so a filtered list never looks unfiltered on the
  * screen where most of the controls are out of sight.
  */
@@ -344,17 +346,27 @@ internal fun FilterBar(
     /**
      * One of the **folded** controls is narrowing it, which is what lights the chip.
      *
-     * Separate from [active] because on a compact screen the search box is still on show: a chip
-     * reading "Filters on" because of a box the reader is looking at would be reporting something
-     * they can already see, and would go on reporting it once they had cleared everything else.
+     * Separate from [active] because the search box is always on show: a chip reading "Filters on"
+     * because of a box the reader is looking at would be reporting something they can already see,
+     * and would go on reporting it once they had cleared everything else.
      */
     folded: Boolean = active,
-    /** Drawn first and never folded away. */
-    search: (@Composable () -> Unit)? = null,
-    content: @Composable FlowRowScope.() -> Unit,
+    /**
+     * Drawn first and never folded away.
+     *
+     * Receives the modifier that makes it fill the line, the way `ResponsiveRows` hands one to its
+     * items: the bar owns how wide this is, and a caller that quietly kept its own width would sit
+     * at 150dp on a 606dp line with the rest spent on nothing.
+     */
+    search: (@Composable (Modifier) -> Unit)? = null,
+    /**
+     * Receives a [RowScope], not a `FlowRowScope`: these sit on one scrolling line rather than
+     * wrapping onto a second. `FilterRow` keeps the flow, because the in-report toolbar it draws
+     * shares its row with a Hide button and is a different shape.
+     */
+    content: @Composable RowScope.() -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
-    val compact = LocalWindowWidth.current == WindowWidth.COMPACT
     Surface(
         shape = MaterialTheme.shapes.large,
         // Transparent, and that is the second attempt. It was `surfaceContainerLow` on the argument
@@ -372,74 +384,50 @@ internal fun FilterBar(
             Modifier.padding(horizontal = Space.m, vertical = Space.s),
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
-            if (compact) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(Space.s),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // Weighted, so the search box takes whatever the chip beside it leaves rather
-                    // than its fixed width - on 411dp those two are the whole line.
-                    if (search != null) Box(Modifier.weight(1f)) { search() }
-                    FilterChip(
-                        selected = folded,
-                        onClick = { open = !open },
-                        label = { Text(if (folded) "Filters on" else "Filters", maxLines = 1) },
-                        trailingIcon = {
-                            Icon(
-                                if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                                contentDescription = null,
-                                modifier = Modifier.size(IconSize.Inline),
-                            )
-                        },
-                    )
-                }
-                AnimatedVisibility(open) {
-                    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(Space.s),
-                            verticalArrangement = Arrangement.spacedBy(Space.s),
-                            itemVerticalAlignment = Alignment.CenterVertically,
-                            content = content,
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Weighted, and [StockFilterField] now lets the weight through - it takes whatever
+                // the chip beside it leaves, at every width. A box fixed at 150dp on a 606dp bar
+                // spent the rest of the line on nothing.
+                if (search != null) Box(Modifier.weight(1f)) { search(Modifier.fillMaxWidth()) }
+                FilterChip(
+                    selected = folded,
+                    onClick = { open = !open },
+                    label = { Text(if (folded) "Filters on" else "Filters", maxLines = 1) },
+                    trailingIcon = {
+                        Icon(
+                            if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                            contentDescription = null,
+                            modifier = Modifier.size(IconSize.Inline),
                         )
-                        // On its own line and hard right, for the reason it is pinned right on a
-                        // wide screen: in the flow it moves whenever a chip's label changes.
-                        if (active) {
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                            ) {
-                                TextButton(onClick = onClearAll) { Text("Clear filters") }
-                            }
-                        }
-                    }
-                }
-            } else {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(Space.s),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // Says what the shelf is without spending a heading on it. Only here: on the
-                    // cover screen the width it would cost is width the controls need.
-                    Icon(
-                        Icons.Outlined.FilterList,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(IconSize.Inline),
-                    )
-                    // Weighted, so an overflow wraps inside the shelf instead of pushing Clear off
-                    // the end of it. Results needs this: its sort chip reads "Run date, newest",
-                    // nearly twice the width of the others, and four controls do not fit 638dp.
-                    FlowRow(
-                        Modifier.weight(1f),
+                    },
+                )
+            }
+            AnimatedVisibility(open) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    // One line that scrolls, not a row that wraps. Three chips fit a cover screen
+                    // only while their labels are short: the panel has 355dp inside it on Insights
+                    // and Results and 323 on the Portfolio, where the Positions card costs it
+                    // another 32 - and "Source record, best first" alone takes Insights past 385.
+                    // Wrapping made the panel two lines tall for one long label; scrolling keeps it
+                    // one at every width, and `fadingScrollbar` draws nothing at all when there is
+                    // nothing to scroll, so the short case is indistinguishable from a plain row.
+                    Row(
+                        Modifier.scrollableRow(),
                         horizontalArrangement = Arrangement.spacedBy(Space.s),
-                        verticalArrangement = Arrangement.spacedBy(Space.s),
-                        itemVerticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        search?.invoke()
-                        content()
-                    }
+                        verticalAlignment = Alignment.CenterVertically,
+                        content = content,
+                    )
+                    // Inside the panel rather than on the line above, which is the cost of holding
+                    // that line to two controls: with the panel shut and a filter on, clearing means
+                    // opening it first. The chip says "Filters on" so it is never a surprise, and
+                    // the search box keeps its own cross for the case that comes up most.
                     if (active) {
-                        TextButton(onClick = onClearAll) { Text("Clear filters") }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton(onClick = onClearAll) { Text("Clear filters") }
+                        }
                     }
                 }
             }
@@ -483,7 +471,14 @@ internal fun StockFilterField(
         shape = MaterialTheme.shapes.small,
         color = Color.Transparent,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-        modifier = modifier.height(FilterControlHeight).width(StockFieldWidth),
+        // Its own height and width **first**, then the caller's. The other way round the 150dp
+        // won whatever was passed in, which is why a `weight(1f)` around this box used to do
+        // nothing at all. [StockFieldWidth] is still the right default for a box sharing a row
+        // with other controls; on a bar where it is one of two, `fillMaxWidth` overrides it.
+        modifier = Modifier
+            .height(FilterControlHeight)
+            .width(StockFieldWidth)
+            .then(modifier),
     ) {
         Row(
             Modifier.padding(horizontal = Space.m),

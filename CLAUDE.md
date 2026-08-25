@@ -1729,14 +1729,36 @@ at the foot of the screen until 2026-08-25.
   third. **Clear filters sat inside that flow**, so it landed wherever the wrap put it and moved
   every time a chip's label changed — `All channels` becoming `2 channels` is enough to shift it.
   Pinned hard right now, where its appearing and disappearing costs the layout nothing.
-- **Two layouts, on `LocalWindowWidth`**, which is the shell's published answer rather than a fourth
-  threshold. Wide: one line, a leading `FilterList` glyph, the controls in a **weighted** `FlowRow`
-  so an overflow wraps *inside* the shelf instead of pushing Clear off the end — Results needs that,
-  its sort chip reads `Run date, newest`, nearly twice the width of the others, and four controls do
-  not fit 638dp. Compact: the search box stays out and the rest fold behind a chip, which is the
-  pattern Results' in-report toolbar already used, label included. **The search never folds** —
-  Results and the Portfolio both carry the same comment, that it is "the control someone arrives at
-  the screen already knowing they want", and burying it would contradict the reason it leads.
+- **One layout at every width: the search box, then a Filters chip, and nothing else on the line.**
+  It shipped as two — everything on one line when it fitted, folded when it did not — and the wide
+  form was the wrong answer even where it fitted: a shelf carrying four controls and a button is a
+  toolbar the reader has to read before they can ignore it, on a page whose subject is underneath
+  it. Two controls is a line that gets scanned rather than read, and it is the same line on both
+  panels, so the tab does not rearrange itself when the phone opens. The controls open onto a line
+  of their own — **one line that scrolls sideways, not a row that wraps**. Three chips fit a cover
+  screen only while their labels are short: the panel has 355dp inside it on Insights and Results and
+  323 on the Portfolio, where the Positions card costs it another 32, and `Source record, best first`
+  alone takes Insights past 385. Wrapping made the panel two lines tall for one long label;
+  `scrollableRow` keeps it one at every width, and `fadingScrollbar` draws nothing when there is
+  nothing to scroll, so the short case is indistinguishable from a plain row and the 606dp panel
+  never scrolls at all. `FilterBar`'s content takes a `RowScope` for that reason where `FilterRow`
+  keeps its `FlowRow` — the in-report toolbar shares its row with a Hide button and is a different
+  shape. The fold is the pattern that toolbar already used, chip label included, applied at every
+  width here rather than only on a cover screen. **The search never folds**: Results
+  and the Portfolio both carry the same comment, that it is "the control someone arrives at the
+  screen already knowing they want".
+- **The search box is elastic and it took a fix to `StockFilterField` to become so.** That composable
+  ended its chain with `.width(StockFieldWidth)`, which beat anything a caller passed — so the
+  `weight(1f)` around it did nothing and it sat at 150dp on a 606dp line with the rest spent on
+  nothing. Its own height and width are applied **first** now, then the caller's, so 150dp stays the
+  default for the in-report toolbar that shares a row with other controls, and `FilterBar` overrides
+  it. The bar hands the modifier down (`search: (Modifier) -> Unit`) the way `ResponsiveRows` hands
+  one to its items, rather than trusting each call site to remember: the bar owns how wide that box
+  is. It comes out at roughly 245dp on the cover screen, 504 on the unfolded Fold, 572 on the tablet.
+- **`Clear filters` lives in the panel, not on the line**, which is the price of holding that line to
+  two controls: with the panel shut and a filter on, clearing means opening it first. The chip reads
+  "Filters on" so it is never a surprise, and the search box keeps its own cross for the case that
+  comes up most.
 - **`folded` is separate from `active`, and that is the whole of why the chip is honest.** `active`
   offers Clear filters; `folded` lights the chip and counts only the controls actually hidden. A
   chip reading "Filters on" because of the search box beside it would be reporting something the

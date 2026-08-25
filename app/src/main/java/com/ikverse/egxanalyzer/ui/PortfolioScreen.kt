@@ -350,7 +350,7 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
             },
             // Never folded away: it is the control someone arrives at the screen already knowing they
             // want, and the only one that can empty the list on a keystroke.
-            search = { StockFilterField(value = stockFilter, onValueChange = { stockFilter = it }) },
+            search = { m -> StockFilterField(stockFilter, { stockFilter = it }, modifier = m) },
         ) {
             SingleSelectFilter(
                 label = "dates",
