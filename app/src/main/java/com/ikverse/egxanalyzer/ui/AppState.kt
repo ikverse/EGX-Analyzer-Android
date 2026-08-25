@@ -20,6 +20,12 @@ import com.ikverse.egxanalyzer.data.ComposedPrompt
 import com.ikverse.egxanalyzer.data.PromptComposer
 import com.ikverse.egxanalyzer.data.PromptStore
 import com.ikverse.egxanalyzer.model.PromptVersion
+import com.ikverse.egxanalyzer.data.BackupRecord
+import com.ikverse.egxanalyzer.data.promptVersionsToRestore
+import com.ikverse.egxanalyzer.data.positionsToRestore
+import com.ikverse.egxanalyzer.data.rulesToRestore
+import com.ikverse.egxanalyzer.data.runsToRestore
+import com.ikverse.egxanalyzer.data.RestoreOutcome
 import com.ikverse.egxanalyzer.data.AvailableUpdate
 import com.ikverse.egxanalyzer.data.DownloadedApk
 import com.ikverse.egxanalyzer.data.SettingsSnapshot
@@ -2167,6 +2173,48 @@ class AppState(
 
     fun checkpointDatabase() = localDataStore.checkpoint()
 
+    /**
+     * The folder backups are written to, as the tree URI string the user granted.
+     *
+     * A string rather than a `Uri` because `Uri` is stubbed in unit tests, and this class is meant
+     * to stay drivable without Android - the same reason `AnalysisPlan` carries chat ids and not
+     * chats. The screen parses it; nothing here needs to.
+     */
+    var backupFolder by mutableStateOf(settingsRepository.backupFolder())
+        private set
+
+    fun saveBackupFolder(uri: String?) {
+        settingsRepository.saveBackupFolder(uri)
+        backupFolder = uri
+    }
+
+    /**
+     * The settings as they would travel, for the copy that goes inside a backup.
+     *
+     * The same document `SettingsSync` publishes, so a backup and the sync channel carry settings in
+     * one format and one reader serves both. Writing a second shape for the file would be a second
+     * thing to keep in step with `AppPreferences`, and the one that drifted would be the one only
+     * read on the day somebody had lost their phone.
+     */
+    fun settingsDocument(): String = settingsRepository.snapshot().toDocument()
+
+    /** What to write in a backup's metadata as its author. */
+    fun backupDevice(): String = deviceName
+
+    /**
+     * Whether today's backup still has to be written.
+     *
+     * A day, not a launch: the automatic backup rides the same moment the launch sync does, and a
+     * phone opened six times before lunch would otherwise write six copies of an unchanged record
+     * and push five real days out of the seven a folder keeps.
+     */
+    fun backupDue(): Boolean =
+        settingsRepository.lastBackupDay() != LocalDate.now(ZoneId.of(EGX_ZONE)).toString()
+
+    fun recordBackupDay() {
+        settingsRepository.recordBackupDay(LocalDate.now(ZoneId.of(EGX_ZONE)).toString())
+    }
+
     /** Every stock worth a request: the ones analyses name, plus the ones actually held. */
     private fun pricedStocks(): Set<String> =
         savedResults.recommendedTickers() + positions.map(Position::ticker)
@@ -2576,6 +2624,90 @@ class AppState(
         completedAt = result.completedAt.toString(),
         payload = localDataStore.storedJsonOf(result),
     )
+
+    /**
+     * Takes a backup back in, which is what the file was written for.
+     *
+     * The order is `performSync`'s order and for its reasons: settings first, because the record
+     * that follows is read against the window they carry; rules before reports, because a report
+     * arriving without the rules it was judged under explains nothing; trades before reports, since
+     * a trade carries its own levels and stands alone where the reverse shows a recommendation
+     * nobody appears to have acted on.
+     *
+     * **It only ever adds.** Every comparison below is the same `(updatedAt, device)` rule the sync
+     * merge uses, with one deliberate difference: a revision the backup has marked deleted is
+     * skipped rather than adopted. A merge between two live devices should carry a delete - that is
+     * what makes a delete stick - but a file is one moment preserved, and letting last week's moment
+     * remove a trade recorded yesterday would make this dangerous to reach for. Somebody restores
+     * because something is missing. Deletes go on travelling through the channel, where both sides
+     * are live and a merge belongs.
+     *
+     * Nothing is uploaded from here. Whatever this brings back is missing from the sync channel too
+     * if it was ever lost there, and the next sync's own diff carries it up - which is one place
+     * rather than two for the rule about what gets published.
+     */
+    suspend fun restoreFrom(record: BackupRecord): RestoreOutcome {
+        var settingsAdopted = false
+        record.settings?.let { theirs ->
+            // The same stamp comparison the channel gets. A reinstall's stamp is zero and so takes
+            // everything; a device that has configured itself since the backup keeps what it has.
+            if (theirs.stamp > settingsRepository.snapshot().stamp) {
+                adoptSettings(theirs)
+                settingsAdopted = true
+            }
+        }
+
+        // Every decision below is a pure function in `BackupRestore.kt`, tested there, exactly as
+        // the sync's own `syncActions` and `rulesToUpload` are. What is left here is applying them.
+        val adoptedRules = rulesToRestore(
+            mine = localDataStore.wordingRuleRevisions().map { (rule, deleted) -> SyncedRule(rule, deleted) },
+            backup = record.rules,
+        )
+        adoptedRules.forEach { localDataStore.adoptWordingRule(it.rule, deleted = false) }
+
+        val adoptedPositions = positionsToRestore(
+            mine = localDataStore.positionRevisions().map { SyncedPosition(it.position, it.deleted, it.unknown) },
+            backup = record.positions,
+        )
+        adoptedPositions.forEach { localDataStore.adoptPosition(it.position, deleted = false, unknown = it.unknown) }
+
+        val adoptedPrompts = promptVersionsToRestore(
+            mine = promptVersions.map { SyncedPromptVersion.keyFor(it.id) }.toSet(),
+            backup = record.promptVersions,
+        )
+        adoptedPrompts.forEach { localDataStore.rememberPromptVersion(it) }
+
+        val adoptedRuns = runsToRestore(
+            held = localDataStore.savedRequestIds(),
+            buried = localDataStore.pendingDeletions(),
+            backup = record.runs,
+        )
+        adoptedRuns.forEach {
+            localDataStore.adoptResult(it.requestId, it.provider, it.model, it.completedAt, it.payload)
+        }
+
+        val rules = adoptedRules.size
+        val trades = adoptedPositions.size
+        val prompts = adoptedPrompts.size
+        val reports = adoptedRuns.size
+
+        if (rules > 0) regeneratePrompt("Rules arrived from a backup")
+        if (rules > 0) wordingRules = localDataStore.wordingRules()
+        if (prompts > 0) promptVersions = localDataStore.promptVersions()
+        if (trades > 0) {
+            positions = localDataStore.positions()
+            // Silent: every one of these changed because a file was read, not because the market
+            // did anything, and a restore that ends in a burst of notifications about trades the
+            // user already knew about is the app announcing its own bookkeeping.
+            recomputePortfolio(announceChanges = false)
+        }
+        if (reports > 0) {
+            savedResults = localDataStore.results()
+            unreadableResults = localDataStore.unreadableResults
+        }
+        if (reports > 0 || trades > 0 || settingsAdopted) recomputePerformance()
+        return RestoreOutcome(reports, rules, trades, prompts, settingsAdopted)
+    }
 
     suspend fun startTelegramQrSignIn() = runAction(
         label = "Preparing a Telegram sign-in code",

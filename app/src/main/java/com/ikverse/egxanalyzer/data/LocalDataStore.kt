@@ -50,8 +50,17 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import com.ikverse.egxanalyzer.model.StockOpinion
 
-class LocalDataStore(context: Context) :
-    SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+/**
+ * The record on this device, and - under another [name] - the record inside a backup.
+ *
+ * [name] exists so a backup is read by this class rather than by a second reader written beside it.
+ * A backup holds the schema of whatever version wrote it, and opening it here runs [onUpgrade] over
+ * it exactly as an app update would, so a restore from a months-old file reads through today's
+ * columns instead of failing on the ones it predates. A hand-written reader would have to carry its
+ * own copy of every migration, and would be wrong the first time one was added and not copied.
+ */
+class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
+    SQLiteOpenHelper(context, name, null, DATABASE_VERSION) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -121,6 +130,19 @@ class LocalDataStore(context: Context) :
         db.createCallAlertSeen()
         db.createSettledCalls()
         db.createSessionEvents()
+    }
+
+    /**
+     * Refuses a database written by a newer build, rather than crashing inside a query.
+     *
+     * Only a restore can reach this: the app's own database is never older than the app. A backup
+     * taken on a phone running a later version can be, and the default behaviour - an exception
+     * naming version numbers - reaches the user as a failure that reads like a corrupt file. The
+     * file is fine; this build is simply behind it, and saying so is the difference between someone
+     * updating the app and someone deleting the only copy of their record.
+     */
+    override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        throw BackupTooNewException(oldVersion, newVersion)
     }
 
     /**
@@ -1188,6 +1210,37 @@ class LocalDataStore(context: Context) :
     fun savedRequestIds(): Set<String> = readableDatabase
         .rawQuery("SELECT request_id FROM analyses", null)
         .use { cursor -> buildSet { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+
+    /**
+     * Every run as it was stored, without reading a single payload.
+     *
+     * For the restore, which copies runs out of a backup and into here. Deliberately not [results]:
+     * that parses each payload into a `SavedAnalysis` and counts the ones it cannot read, and a
+     * report a later build wrote in a shape this one does not understand would be dropped on the
+     * way through - lost by the very operation the user reached for to stop losing things. The
+     * bytes are what a run is; understanding them is this build's problem and not the record's.
+     */
+    fun storedRuns(): List<SyncedRun> = readableDatabase
+        .query(
+            "analyses",
+            arrayOf("request_id", "provider", "model", "completed_at", "payload"),
+            null, null, null, null, "completed_at ASC",
+        )
+        .use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        SyncedRun(
+                            requestId = cursor.getString(0),
+                            provider = cursor.getString(1),
+                            model = cursor.getString(2),
+                            completedAt = cursor.getString(3),
+                            payload = cursor.getString(4),
+                        ),
+                    )
+                }
+            }
+        }
 
     /**
      * Stores a run that arrived from another device.

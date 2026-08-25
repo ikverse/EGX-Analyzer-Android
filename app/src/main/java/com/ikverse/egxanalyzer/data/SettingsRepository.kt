@@ -253,6 +253,35 @@ class SettingsRepository(
     fun lastPriceRefreshAt(): Long = preferences.getLong(KEY_LAST_PRICE_REFRESH_AT, 0L)
 
     /**
+     * The folder the user picked for backups, as the tree URI they granted.
+     *
+     * Device-local and never published, for the reason [schedulesEnabled] is not in
+     * [AppPreferences]: a grant belongs to one Android install and means nothing on another phone.
+     * Synced, it would point a tablet at a folder it has no permission to write and leave it
+     * reporting a backup destination it can do nothing with.
+     */
+    fun backupFolder(): String? = preferences.getString(KEY_BACKUP_FOLDER, null)
+
+    fun saveBackupFolder(uri: String?) {
+        preferences.edit().apply {
+            if (uri == null) remove(KEY_BACKUP_FOLDER) else putString(KEY_BACKUP_FOLDER, uri)
+        }.apply()
+    }
+
+    /**
+     * The day this device last wrote a backup, so it writes one a day rather than one a sync.
+     *
+     * Device-local like the folder above, and excluded from the published settings for the second
+     * reason `lastPriceRefreshDay` is: carried to a phone that has never backed up, it would claim
+     * today was done and leave that phone with no backup at all until tomorrow.
+     */
+    fun lastBackupDay(): String? = preferences.getString(KEY_LAST_BACKUP_DAY, null)
+
+    fun recordBackupDay(day: String) {
+        preferences.edit().putString(KEY_LAST_BACKUP_DAY, day).apply()
+    }
+
+    /**
      * Whether this phone runs its schedules.
      *
      * Deliberately not in [AppPreferences]: everything in there is published to the other devices,
@@ -461,6 +490,8 @@ class SettingsRepository(
         const val KEY_UPDATE_CHECKS = "update_checks_enabled"
         const val KEY_LAST_PRICE_REFRESH = "last_price_refresh_day"
         const val KEY_LAST_PRICE_REFRESH_AT = "last_price_refresh_at"
+        const val KEY_BACKUP_FOLDER = "backup_folder"
+        const val KEY_LAST_BACKUP_DAY = "last_backup_day"
         const val KEY_SCHEDULES_ENABLED = "schedules_enabled"
         const val KEY_PAID_SCHEDULES = "paid_schedules_enabled"
         const val KEY_OPINION_SEARCH = "opinion_search_enabled"

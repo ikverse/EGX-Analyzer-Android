@@ -743,6 +743,11 @@ internal fun SettingsScreen(appState: AppState) {
                         "App backup is disabled and cloud requests use HTTPS.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Here rather than beside Save diagnostics in About, which is the other thing that
+                // writes the record to a file. That one is for whoever is chasing a bug; this is
+                // about the record itself, and it belongs with the section that says how much of it
+                // there is and offers to delete it.
+                BackupControls(appState)
                 OutlinedButton(
                     onClick = { confirmDeleteAll = true },
                     enabled = appState.savedResults.isNotEmpty(),

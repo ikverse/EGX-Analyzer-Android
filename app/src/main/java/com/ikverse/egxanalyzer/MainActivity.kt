@@ -1,17 +1,25 @@
 package com.ikverse.egxanalyzer
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import com.ikverse.egxanalyzer.data.OverdueNotifier
 import com.ikverse.egxanalyzer.data.CallAlertNotifier
 import com.ikverse.egxanalyzer.data.TradeStatusNotifier
+import com.ikverse.egxanalyzer.data.holdsBackupFolder
+import com.ikverse.egxanalyzer.data.writeBackupTo
 import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppRoot
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -31,14 +39,55 @@ class MainActivity : ComponentActivity() {
             // left on the Portfolio tab overnight would otherwise show yesterday's count until
             // something else happened to recompute. Outside the root on purpose: it is app
             // behaviour rather than UI, so both versions of the UI get it without either owning it.
+            val scope = rememberCoroutineScope()
             LifecycleResumeEffect(Unit) {
                 appState.refreshOverdue()
+                backUpIfDue(scope)
                 onPauseOrDispose { }
             }
             // Which UI this is depends on the build type, and this activity does not know. Two
             // files named AppRoot.kt - one in src/current, one in src/next - and exactly one of them
             // is compiled. See the sourceSets block in app/build.gradle.kts.
             AppRoot(activity = this, appState = appState)
+        }
+    }
+
+    /**
+     * Writes the day's backup into the folder the user picked, if one is due.
+     *
+     * On resume rather than on start, so a phone left open across midnight still gets that day's
+     * copy, and guarded by day rather than by launch - a phone opened six times before lunch would
+     * otherwise write six copies of an unchanged record and push five real days out of the seven a
+     * folder keeps. Outside the root like the overdue refresh above and for the same reason: it is
+     * app behaviour, so both versions of the UI get it without either owning it.
+     *
+     * **Only into a chosen folder, never into Downloads.** The manual button falls back there, and
+     * that is right for something somebody pressed; doing it daily would pile a file per day into
+     * Downloads forever, because MediaStore appends rather than replaces and nothing prunes it.
+     *
+     * The day is recorded **only on success**, so a write that failed - the phone asleep, the cloud
+     * app offline, the card removed - is tried again on the next resume rather than counted as
+     * done. Nothing is announced either way: a message about a backup nobody asked for, on top of
+     * an app that has just opened, is noise. What reveals a folder that has quietly stopped
+     * accepting writes is the line in Settings naming how many copies it holds and the newest one.
+     */
+    private fun backUpIfDue(scope: CoroutineScope) {
+        val folder = appState.backupFolder?.let(Uri::parse) ?: return
+        if (!holdsBackupFolder(this, folder)) return
+        if (!appState.backupDue()) return
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    writeBackupTo(
+                        context = this@MainActivity,
+                        folder = folder,
+                        database = appState.databaseFile(),
+                        settings = appState.settingsDocument(),
+                        device = appState.backupDevice(),
+                        checkpoint = appState::checkpointDatabase,
+                    )
+                }
+            }.onSuccess { appState.recordBackupDay() }
         }
     }
 

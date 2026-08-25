@@ -140,7 +140,7 @@ internal fun saveDatabaseToDownloads(
  * copy of the same name exists - MediaStore appends rather than overwrites, and a message naming
  * the requested file would point at the older one.
  */
-private fun writeToDownloads(
+internal fun writeToDownloads(
     context: Context,
     requested: String,
     mimeType: String,
@@ -170,7 +170,7 @@ private fun writeToDownloads(
     return savedName(resolver, uri) ?: requested
 }
 
-private const val DATABASE_MIME_TYPE = "application/octet-stream"
+internal const val DATABASE_MIME_TYPE = "application/octet-stream"
 
 /** What Downloads actually called the file, which is not always what was asked for. */
 private fun savedName(resolver: ContentResolver, uri: Uri): String? = runCatching {

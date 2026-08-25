@@ -102,6 +102,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/ReportSync.kt` + `data/RuleSync.kt` + `data/PositionSync.kt` — what travels between devices.
 - `data/XlsxWriter.kt` + `ui/ReportExport.kt` — a report as a spreadsheet, saved to Downloads or
   sent onward from the ⋮ menu on its card. See below.
+- `data/Backup.kt` + `data/BackupRestore.kt` + `ui/BackupSection.kt` — the whole record as one file,
+  the way back in from one, and the three buttons in Settings. See below.
 - `ui/PortfolioScreen.kt` + `ui/PositionCard.kt` + `ui/TradeControls.kt` — the Portfolio tab, one
   trade's card, and the Bought button and closing controls that sit on a recommendation card.
 - `ui/CommonUi.kt` holds `Figure` and `FigureGroup`, and `ui/DesignSystem.kt` holds `AppDates` —
@@ -889,8 +891,23 @@ one digest, so the two can never report a session differently.
   announcing it would be furniture; "nothing moved on this session" is a genuine answer to the
   question being asked, and its absence would read as the app not having looked. The card is absent
   only when there is no session at all — a fresh install with no prices.
-- **Tiles, through the Overdue card's own grid**, two across at 411dp and four on the Fold and the
-  tablet. A press goes to `AppState.openPosition` for a trade and `AppState.openCall` for a call —
+- **Tiles, through the Overdue card's helper but deliberately not its numbers.** 200dp across up to
+  **three** columns, against Overdue's 150dp up to four, and the difference is the whole reason the
+  first version of this was wrong. `responsiveColumns` spends surplus width on *more* columns, so
+  copying a grid tuned for "6d · 12 Aug · +3.4%" gave the 750dp unfolded panel four tiles of 187dp
+  while the 411dp cover screen got two of 205dp — **the big screen truncating harder than the small
+  one**, which is exactly backwards and is what the reader reported. Now the cover is unchanged at
+  two across, the Fold goes to three at 250dp and the tablet to three at 273dp. The shared helper
+  stays; what has to fit in a column is a property of that column's contents, not of a house grid.
+- **Three lines, and only the last one may be lost.** The ticker, then what happened on a line of
+  its own, then the figure that qualifies it — a trade's return in its own green or red, or on a
+  call the channel that printed it. The first two used to share one line joined by a separator,
+  which put "stopped out after target 1" into competition for width with the fact saying how it
+  landed. What happened is allowed to **wrap to two lines rather than ellipse**, because a column
+  width is a bet about the reader's font scale and wrapping is what actually keeps the phrase whole;
+  `ResponsiveRows` sizes every card in a row to the tallest, so it costs the alignment nothing. The
+  last line is held to one and is **absent rather than blank** where an event has neither figure.
+- A press goes to `AppState.openPosition` for a trade and `AppState.openCall` for a call —
   the two entrances every other cross-tab press already uses, so the same tile leads to the same
   place from either tab. Not narrowed by any filter on either screen, for the reason Overdue is not.
 - **A call expiring is not an event here, where a trade's window running out is.** A trade's
@@ -1071,6 +1088,87 @@ data means uninstalling this one and taking the record with it.
   over a record missing exactly the recent activity worth asking about.
 - **No credential travels in it.** Provider keys and the Telegram database key are encrypted by
   Android Keystore in their own preferences file and have never been in this database.
+
+## Backing up, and getting it back
+
+**Settings → Saved data and privacy** holds three buttons: *Back up now*, *Choose a folder*, and
+*Restore from a backup*. The gap they close is not which cloud the record sits in — the sync channel
+was already that, and it is the right answer for a multi-user app, because signing into Telegram is
+what makes this app work at all, so it is the one cloud account every user is certain to have. The
+gap is that **`Save diagnostics` had written the record out since the first release and nothing had
+ever read one back**. Someone who lost their phone, lost their Telegram account, or cleared the
+app's storage was holding a file nothing on earth could do anything with.
+
+- **A backup is a zip: `record.db`, `settings.json`, `backup.json`.** The database alone is not a
+  backup, which is why `Save diagnostics` stays exactly as it is and is not renamed into one —
+  settings live in preferences, so an install restored from a bare database comes back holding
+  everyone's reports and scoring them against a trade window nobody picked. `settings.json` is the
+  **same document `SettingsSync` publishes**, so one reader serves the file and the channel.
+- **Restore accepts either, told apart by the first bytes of the file and never by its name.** A
+  file that has been round a cloud folder, a chat and a downloads directory arrives labelled
+  anything at all, and refusing a good backup over its name is the sort of thing that happens on the
+  one day it matters. A bare `.db` is accepted because those files are already on people's phones
+  and computers and a format that could not read them would strand the only copy some users hold;
+  what it cannot bring back is settings, and `readBackup` reports that as `settings = null`.
+- **The backup is opened through `LocalDataStore` under a second database name**, which is why that
+  class now takes one. `onUpgrade` then runs over an old file exactly as an app update would and it
+  is read through today's columns. A reader written for the backup would have to carry its own copy
+  of every migration and would be wrong the first time one was added and not copied. `onDowngrade`
+  raises **`BackupTooNewException`** rather than failing inside a query: the file is fine and this
+  build is behind it, and that is the difference between someone updating the app and someone
+  deleting their only copy.
+- **A restore only ever adds.** Every comparison is the sync's own `(updatedAt, device)` rule, with
+  one deliberate difference: a revision the backup marks deleted is **skipped, not adopted**. Between
+  two live devices a tombstone has to travel or a delete does not stick; a file is one moment
+  preserved, and letting last week's moment remove a trade recorded yesterday would make this
+  dangerous to press. Somebody opens a backup because something is missing, and the one outcome they
+  must never get is more missing. Deletes go on travelling through the channel.
+- **A report this device buried but has not yet published is not restored either.** That delete is a
+  decision already taken and still in flight, and restoring over it would leave a tombstone about to
+  be published for a report sitting on disk again.
+- **The decisions are pure functions in `BackupRestore.kt`** — `rulesToRestore`,
+  `positionsToRestore`, `runsToRestore`, `promptVersionsToRestore` — exactly as `syncActions` and
+  `rulesToUpload` are, so they are tested as ordinary Kotlin. `AppState.restoreFrom` applies them and
+  nothing else. `BackupRoundTripTest` runs under Robolectric and covers the other half: every
+  decision is worthless if what comes out of the zip is not what went in, and a backup that reads
+  back empty looks exactly like a phone that had nothing on it.
+- **`storedRuns()` reads the analyses table without parsing a payload.** Not `results()`, which
+  counts what it cannot read: a report written by a later build in a shape this one does not
+  understand would be dropped on the way through — lost by the very operation reached for to stop
+  losing things.
+- **A folder, never an account, and that is the whole design.** `ACTION_OPEN_DOCUMENT_TREE` puts
+  OneDrive, Dropbox, Nextcloud, an SD card and a plain local folder in one list, so each user ends
+  up backed up to whatever cloud they already have while the app learns none of them, holds no
+  credential for any of them, and costs nothing per person as more people use it. The grant is
+  **persisted**, or it dies with the process and the daily backup silently stops.
+- **Written under `.part` and renamed once whole.** A chosen folder has no equivalent of MediaStore's
+  `IS_PENDING`, and a write that stops part way would leave a truncated zip under the name of a
+  finished one — which is the worst failure here: not an absent backup, which is obvious, but a
+  present one that turns out to be empty on the day it is needed.
+- **Daily, on resume, and only into a chosen folder.** `MainActivity.backUpIfDue` — beside the
+  overdue refresh and outside the root for the same reason, that it is app behaviour rather than UI.
+  Guarded by day, or a phone opened six times before lunch writes six copies of an unchanged record
+  and pushes five real days out of the seven kept. It **never** writes to Downloads automatically:
+  MediaStore appends rather than replaces and nothing prunes there, so a daily write would pile up a
+  file per day forever. The manual button still falls back to Downloads, which is right for
+  something somebody pressed.
+- **The day is recorded only on success**, so a failed write is retried on the next resume rather
+  than counted as done, and nothing is announced either way. What reveals a folder that has quietly
+  stopped accepting writes is the line in Settings naming how many copies it holds and the newest.
+- **Seven are kept, and only files this app named are ever considered.** The user picked a folder,
+  not a folder this app owns. Pruning sorts by name and calls that chronological, which holds only
+  because the name carries an ISO date and nothing else varies — reading the folder's own modified
+  times would be at the mercy of whichever cloud app syncs it, and several rewrite them on upload.
+  Pruning happens **after** the new backup is whole: the old copies are what stands between a failed
+  write and having nothing at all.
+- **The provider API key is not in a backup**, for the reason it is left out of settings sync: a live
+  cloud credential does not belong in a file about to be copied into a cloud folder. Neither is the
+  Telegram database key, which is sealed to the Keystore of the device that made it and would be
+  useless elsewhere. Prices, sessions and intraday bars do travel and nothing depends on them — they
+  are fetched again from the feed.
+- **Nothing is uploaded by a restore.** Whatever it brings back is missing from the channel too if it
+  was ever lost there, and the next sync's own diff carries it up — one place for the rule about
+  what gets published rather than two.
 
 ## Wording rules and the generated prompt
 
