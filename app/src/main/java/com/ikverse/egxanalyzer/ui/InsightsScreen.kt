@@ -174,13 +174,19 @@ internal fun InsightsScreen(appState: AppState) {
 
         // Above the empty state below on purpose: filters that vanish when they match nothing leave
         // the reader looking at "nothing matches" with no way to undo it.
-        FilterRow(
+        FilterBar(
             active = channels.isNotEmpty() || outcomes.isNotEmpty() || stock.isNotBlank(),
+            // Only the folded pair. The search box is on show even on a cover screen, so a chip
+            // lit by it would be reporting something the reader is already looking at.
+            folded = channels.isNotEmpty() || outcomes.isNotEmpty(),
             onClearAll = {
                 channels = emptySet()
                 outcomes = emptySet()
                 stock = ""
             },
+            // Never folded away: it is the control someone arrives at this tab already knowing
+            // they want, which is the same reason it leads on Results and the Portfolio.
+            search = { StockFilterField(value = stock, onValueChange = { stock = it }) },
         ) {
             MultiSelectFilter(
                 label = "channels",
@@ -200,7 +206,6 @@ internal fun InsightsScreen(appState: AppState) {
                 },
                 onClear = { outcomes = emptySet() },
             )
-            StockFilterField(value = stock, onValueChange = { stock = it })
             // Outside the clear-all, exactly as on Results and the Portfolio: an order is not
             // something a list can be cleared of, and resetting it would look like a filter had
             // silently gone missing.

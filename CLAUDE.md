@@ -743,6 +743,18 @@ trade is then managed, in whatever state it has reached.
   `LocalExtraColors` in `theme/Theme.kt`, provided by `EgxAnalyzerTheme` so it follows the app's own
   light/dark setting rather than the system's. The overdue pill keeps `errorContainer`: amber says
   out of time, red says and you are late.
+- **Positions is one card, holding its own filters and every session card inside it.** It was a
+  loose `titleLarge` heading, then the filter shelf, then a run of cards, all sitting directly on
+  the page — a section with no edge of its own to say where it began or ended, which is how the
+  shelf's fill came to read as continuous with the card beneath it. A `SectionCard` gives it one,
+  and the filters inside it are unambiguously *its* filters rather than something floating above
+  whatever comes next. The heading drops from `titleLarge` to the `titleMedium` every other card on
+  the tab uses, which is the point: Overdue, What happened and Your record are cards, and Positions
+  was the one section pretending to be a page. **The session cards inside take
+  `surfaceContainerHigh`** — a card within a card goes one step up or it is the same fill as its
+  parent with nothing but a hairline between them, the rule `OverdueTile` and `EventTile` already
+  follow. `ExpandableSection.containerColor` is named by the caller rather than assumed, because
+  only the caller knows what its card is sitting on.
 - **`PortfolioOrder` holds the sort rules, for the screen and the calculator both.** `URGENT` is the
   default and what `PortfolioCalculator` groups by, so anything reading the portfolio without a
   screen gets the order the screen opens on. It sorts overdue-first then newest — date order alone
@@ -1682,12 +1694,16 @@ at the foot of the screen until 2026-08-25.
   against is the page scrolling behind the button — dark on one theme, near-white on the other — so
   the stops invert between the two while the hue does not. The hues are the aurora's own, in the
   aurora's own order (cyan, blue, teal), rather than a fourth set invented for the edge.
-- **The edge is opaque where the ground is 0.84**, and that pair is the point rather than either
-  figure. A ground that lets the page through is what stops a permanent control reading as a slab; an
-  *edge* that let the page through would stop holding the shape against whatever passes under it,
-  which is the one job a hairline has. `ActionPaletteTest` pins both, along with the mistake that
-  produces an invisible edge — reaching for `actionFill` when adding the gradient, because it is
-  right there and already the right family.
+- **The edge is 0.74 against the ground's 0.84, and its hues run about a third under the aurora's.**
+  It shipped opaque and full-strength on the argument that an edge letting the page through stops
+  holding the shape — which was wrong on the device: it read as a bright cyan wire around the button,
+  the loudest thing on a dark page and competing with the label it was meant to frame. The shape
+  still holds, because what draws it is the contrast with the page rather than the weight of the
+  line. `ActionPaletteTest` pins the properties and not the figures — nothing the action is drawn
+  with is solid, every stop in a ramp shares one alpha (a ramp that fades along its length reads as
+  a mistake), and the edge shares no stop with the fill, which is the slip that produces an invisible
+  edge: reaching for `actionFill` when adding the gradient, because it is right there and already
+  the right family.
 - **Only the ready state wears it.** Running keeps the red `aiStop` hairline: that is the only state
   where pressing cancels, and no edge in the action's own colours could say so — the moving fill
   says a model is working, which is a different sentence. Blocked keeps the neutral outline every
@@ -1698,6 +1714,35 @@ at the foot of the screen until 2026-08-25.
   floating edge in the app, gradient or not — the bar sits directly under the action on a compact
   screen, and an edge thicker on one of them would read as the two not matching rather than as one
   of them being the control. The colour is what separates them.
+- **A page's filters sit on a shelf, not on the page.** `FilterBar` wraps them in a
+  `surfaceContainerLow` surface — deliberately a step *below* the `surfaceContainer` cards it
+  filters and above the `background` well they sit on, so it reads as a shelf the controls stand on
+  rather than as another card competing with the record. No title: the chips name themselves. It was
+  a bare `FlowRow` between two cards, which is the one loose element on pages otherwise built of
+  them, and on a 411dp cover screen four controls plus a text button wrapped into three ragged
+  lines. **The fill is transparent, and that is the second attempt** — it was `surfaceContainerLow`
+  on the sound-sounding reasoning that a shelf sits a step below the cards it filters, which is
+  wrong about this palette: the well is `#0B0F14`, that shelf was `#11161C`, a card is `#151A21`.
+  Six units apart, so a shelf immediately above a card read as one continuous background with a
+  hairline through it, which is exactly what got reported. No fill cannot make that mistake, and it
+  is also what lets the same shelf sit on the page ground on two tabs and inside a card on the
+  third. **Clear filters sat inside that flow**, so it landed wherever the wrap put it and moved
+  every time a chip's label changed — `All channels` becoming `2 channels` is enough to shift it.
+  Pinned hard right now, where its appearing and disappearing costs the layout nothing.
+- **Two layouts, on `LocalWindowWidth`**, which is the shell's published answer rather than a fourth
+  threshold. Wide: one line, a leading `FilterList` glyph, the controls in a **weighted** `FlowRow`
+  so an overflow wraps *inside* the shelf instead of pushing Clear off the end — Results needs that,
+  its sort chip reads `Run date, newest`, nearly twice the width of the others, and four controls do
+  not fit 638dp. Compact: the search box stays out and the rest fold behind a chip, which is the
+  pattern Results' in-report toolbar already used, label included. **The search never folds** —
+  Results and the Portfolio both carry the same comment, that it is "the control someone arrives at
+  the screen already knowing they want", and burying it would contradict the reason it leads.
+- **`folded` is separate from `active`, and that is the whole of why the chip is honest.** `active`
+  offers Clear filters; `folded` lights the chip and counts only the controls actually hidden. A
+  chip reading "Filters on" because of the search box beside it would be reporting something the
+  reader is already looking at — and would go on reporting it after they had cleared everything
+  else. **`FilterRow` survives** and is still what the in-report toolbar uses: that one lives inside
+  the report card and already solved this, and a shelf nested in a card is chrome inside chrome.
 - **`AdaptivePanes` is the only "side by side, or stacked when it will not fit" rule in the app**, and
   a second one would be a second threshold, a second fallback and a second gap to keep in step. A
   pair of equals is that helper with `mainWeight = 1f`, not a layout of its own — which is how

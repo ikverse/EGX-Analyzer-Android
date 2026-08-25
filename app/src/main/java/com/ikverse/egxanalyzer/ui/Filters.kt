@@ -1,11 +1,14 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -15,6 +18,9 @@ import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -296,6 +302,146 @@ internal fun <T> SortFilter(
                         open = false
                     },
                 )
+            }
+        }
+    }
+}
+
+/**
+ * The shelf a page's filters sit on.
+ *
+ * They used to sit on nothing. A bare [FilterRow] between two cards is the one loose element on
+ * pages otherwise built of them, and on a 411dp cover screen four controls plus a text button wrap
+ * into three ragged lines above the content - with **Clear filters inside the flow**, so it landed
+ * wherever the wrap put it and moved every time a chip changed width (`All channels` to
+ * `2 channels` is enough to shift it).
+ *
+ * The fill is `surfaceContainerLow`, deliberately a step **below** the `surfaceContainer` cards it
+ * filters and above the `background` well they sit on. It should read as a shelf the controls stand
+ * on rather than as another card of content competing with the record - the same reason it carries
+ * no title: the chips name themselves.
+ *
+ * **Two layouts, switched on [LocalWindowWidth].** The shell's published answer to "is this window
+ * wide", already used by `Screen` and `TodayCard`, rather than a fourth threshold of this file's
+ * own. Wide: everything on one line, the controls in a weighted [FlowRow] so an overflow wraps
+ * *inside* the shelf, and Clear pinned hard right where it cannot move. Compact: [search] stays out
+ * and the rest fold behind a chip.
+ *
+ * **[search] never folds**, and that is not an aesthetic choice - Results and the Portfolio both
+ * carry the same comment about it, that it is "the control someone arrives at the screen already
+ * knowing they want". Burying it would contradict the reason it leads.
+ *
+ * The fold is the pattern Results' in-report toolbar already uses, chip label included, so this is
+ * that rule reused rather than a second one invented. The chip reads **"Filters on"** whenever one
+ * of the folded controls is narrowing the list, so a filtered list never looks unfiltered on the
+ * screen where most of the controls are out of sight.
+ */
+@Composable
+internal fun FilterBar(
+    /** Anything at all is narrowing the list, which is when Clear filters is offered. */
+    active: Boolean,
+    onClearAll: () -> Unit,
+    /**
+     * One of the **folded** controls is narrowing it, which is what lights the chip.
+     *
+     * Separate from [active] because on a compact screen the search box is still on show: a chip
+     * reading "Filters on" because of a box the reader is looking at would be reporting something
+     * they can already see, and would go on reporting it once they had cleared everything else.
+     */
+    folded: Boolean = active,
+    /** Drawn first and never folded away. */
+    search: (@Composable () -> Unit)? = null,
+    content: @Composable FlowRowScope.() -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val compact = LocalWindowWidth.current == WindowWidth.COMPACT
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        // Transparent, and that is the second attempt. It was `surfaceContainerLow` on the argument
+        // that a shelf should sit a step below the cards it filters - which is sound reasoning about
+        // elevation and wrong about this palette: the well is #0B0F14, the shelf was #11161C and a
+        // card is #151A21, six units apart, so a shelf immediately above a card read as one
+        // continuous background with a hairline through it. No fill cannot make that mistake. It
+        // takes whatever is behind it and the outline says where it ends, which is also what lets
+        // it sit on the page on two tabs and inside the Positions card on the third.
+        color = Color.Transparent,
+        border = cardOutline,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier.padding(horizontal = Space.m, vertical = Space.s),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            if (compact) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Weighted, so the search box takes whatever the chip beside it leaves rather
+                    // than its fixed width - on 411dp those two are the whole line.
+                    if (search != null) Box(Modifier.weight(1f)) { search() }
+                    FilterChip(
+                        selected = folded,
+                        onClick = { open = !open },
+                        label = { Text(if (folded) "Filters on" else "Filters", maxLines = 1) },
+                        trailingIcon = {
+                            Icon(
+                                if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                                contentDescription = null,
+                                modifier = Modifier.size(IconSize.Inline),
+                            )
+                        },
+                    )
+                }
+                AnimatedVisibility(open) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(Space.s),
+                            verticalArrangement = Arrangement.spacedBy(Space.s),
+                            itemVerticalAlignment = Alignment.CenterVertically,
+                            content = content,
+                        )
+                        // On its own line and hard right, for the reason it is pinned right on a
+                        // wide screen: in the flow it moves whenever a chip's label changes.
+                        if (active) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                TextButton(onClick = onClearAll) { Text("Clear filters") }
+                            }
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Says what the shelf is without spending a heading on it. Only here: on the
+                    // cover screen the width it would cost is width the controls need.
+                    Icon(
+                        Icons.Outlined.FilterList,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(IconSize.Inline),
+                    )
+                    // Weighted, so an overflow wraps inside the shelf instead of pushing Clear off
+                    // the end of it. Results needs this: its sort chip reads "Run date, newest",
+                    // nearly twice the width of the others, and four controls do not fit 638dp.
+                    FlowRow(
+                        Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(Space.s),
+                        verticalArrangement = Arrangement.spacedBy(Space.s),
+                        itemVerticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        search?.invoke()
+                        content()
+                    }
+                    if (active) {
+                        TextButton(onClick = onClearAll) { Text("Clear filters") }
+                    }
+                }
             }
         }
     }

@@ -362,13 +362,24 @@ internal fun ExpandableSection(
     /** Hoisted when the layout around it needs to know: an open card claims the whole row. */
     expandedState: Boolean? = null,
     onExpandedChange: ((Boolean) -> Unit)? = null,
+    /**
+     * The card's own fill, for one drawn **inside** another card.
+     *
+     * `surfaceContainer` is right on the page, where the well behind it is darker. Nested in a card
+     * of the same fill it disappears into its parent, so a card within a card goes one step up -
+     * the rule `OverdueTile` and `EventTile` already follow with `surfaceContainerHigh`. Named
+     * rather than assumed, because only the caller knows what it is sitting on.
+     */
+    containerColor: Color? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var localExpanded by remember { mutableStateOf(initiallyExpanded) }
     val expanded = expandedState ?: localExpanded
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        colors = CardDefaults.cardColors(
+            containerColor = containerColor ?: MaterialTheme.colorScheme.surfaceContainer,
+        ),
         shape = MaterialTheme.shapes.large,
         border = cardOutline,
     ) {

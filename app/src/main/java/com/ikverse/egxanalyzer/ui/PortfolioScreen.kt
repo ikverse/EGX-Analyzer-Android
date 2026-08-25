@@ -320,169 +320,176 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
     // Asked once per report: a trade whose analysis was deleted has no call left to open.
     val scoredCalls = remember(appState.performance) { appState.performance.callIds }
 
-    // Set in like the page name above it: both are text on the page rather than in a card, and a
-    // heading that starts left of the one above it is what makes a page look unaligned.
-    Text(
-        "Positions",
-        Modifier.padding(start = PageTextInset),
-        style = MaterialTheme.typography.titleLarge,
-    )
-    if (groups.isEmpty()) {
-        Text(
-            "Nothing recorded yet.",
-            Modifier.padding(start = PageTextInset),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        return
-    }
-
-    val allDates = remember(groups) {
-        groups.map { it.recommendationDate.toString() }.distinct().sortedDescending()
-    }
-    FilterRow(
-        active = dateFilter != null || stockFilter.isNotBlank(),
-        onClearAll = {
-            dateFilter = null
-            stockFilter = ""
-        },
-    ) {
-        // Search leads, as it does in Results: it is the control someone arrives at the screen
-        // already knowing they want, and the only one that can empty the list on a keystroke.
-        StockFilterField(value = stockFilter, onValueChange = { stockFilter = it })
-        SingleSelectFilter(
-            label = "dates",
-            options = allDates,
-            selected = dateFilter,
-            onSelect = { dateFilter = it },
-        )
-        // Outside the clear-all, exactly as in Results: an order is not something a list can be
-        // cleared of, and resetting it would look like a filter had gone missing.
-        SortFilter(
-            options = PortfolioOrder.entries,
-            selected = order,
-            label = PortfolioOrder::label,
-            onSelect = appState::updatePortfolioOrder,
-        )
-    }
-
-    // Filtered here rather than in the calculator. The whole record has other readers - the overdue
-    // worker raises the daily reminder off it - and a date someone picked on this screen must not
-    // silence a notification about a trade they scrolled past.
-    val shown = remember(groups, dateFilter, stockFilter, order) {
-        // Normalized once for the whole record rather than once per trade, through the rule the
-        // other two tabs search by. See StockSearch.
-        val wanted = StockSearch.query(stockFilter)
-        groups
-            .filter { dateFilter == null || it.recommendationDate.toString() == dateFilter }
-            // A search narrows the trades inside a card and then empties the card itself, rather
-            // than leaving a session heading standing over nothing. The summary line is read off
-            // the positions, so it recounts itself around what is left and cannot end up
-            // describing trades the search has taken away.
-            .mapNotNull { group ->
-                val kept = group.positions.filter { it.matches(wanted) }
-                if (kept.isEmpty()) null else group.copy(positions = kept.sortedWith(order.positions))
-            }
-            .sortedWith(order.groups)
-    }
-
-    // Arriving from a call pressed on the Insights tab: open the session holding that trade and
-    // scroll to it. Either filter is cleared only when it is what hides the trade, for the reason
-    // Insights gives beside its own - a link that lands on an empty screen is a broken link, and a
-    // filter thrown away on a trip the reader is about to make back is a filter they have to set
-    // again.
-    val pendingPosition = appState.pendingPositionId
-    val reveal = remember { BringIntoViewRequester() }
-    LaunchedEffect(pendingPosition, groups, dateFilter, stockFilter) {
-        if (pendingPosition == null) return@LaunchedEffect
-        val target = groups.firstOrNull { group ->
-            group.positions.any { it.position.id == pendingPosition }
+    // One card holding the whole section - its heading, the filters at the top of it, and every
+    // session card inside. It was a loose heading, then a filter shelf, then a run of cards, all
+    // sitting directly on the page, and the shelf's fill was close enough to a card's that the two
+    // read as one background: the section had no edge of its own to say where it began or ended.
+    // A card gives it one, and the filters are unambiguously *its* filters rather than something
+    // floating above the next thing down.
+    SectionCard(title = "Positions", icon = Icons.Outlined.AccountBalanceWallet) {
+        if (groups.isEmpty()) {
+            Text(
+                "Nothing recorded yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@SectionCard
         }
-        if (target == null) {
-            // The trade was deleted - here or on another device - between the press and the
-            // arrival. Dropped rather than left waiting, or recording it again months later would
-            // flash a card for a press nobody remembers making.
-            appState.consumePendingPosition()
-            return@LaunchedEffect
-        }
-        if (dateFilter != null && dateFilter != target.recommendationDate.toString()) {
-            dateFilter = null
-            // The list is about to be rebuilt around the cleared filter; this effect restarts on it.
-            return@LaunchedEffect
-        }
-        // The search goes the same way as the date, and for the same reason: cleared when it is
-        // what hides the trade, kept when the trade answers to it anyway.
-        val held = target.positions.first { it.position.id == pendingPosition }
-        if (!held.matches(StockSearch.query(stockFilter))) {
-            stockFilter = ""
-            return@LaunchedEffect
-        }
-        openGroups = openGroups + target.recommendationDate
-        // The card is unfolding as this runs, and a scroll measured against a height it is about to
-        // leave behind stops short of the trade that was asked for.
-        delay(REVEAL_SETTLE_MS)
-        reveal.bringIntoView()
-    }
 
-    if (shown.isEmpty()) {
-        // The stock is named when it is what emptied the list, as it is in Results: "nothing called
-        // on that date" beside a box holding COMI reads as though the app had not noticed what was
-        // typed.
-        val searching = stockFilter.isNotBlank()
-        EmptyState(
-            icon = Icons.Outlined.AccountBalanceWallet,
-            title = if (searching) {
-                "No trades in ${stockFilter.trim()}"
-            } else {
-                "Nothing called on $dateFilter"
+        val allDates = remember(groups) {
+            groups.map { it.recommendationDate.toString() }.distinct().sortedDescending()
+        }
+        FilterBar(
+            active = dateFilter != null || stockFilter.isNotBlank(),
+            // The date alone. The search box is on show even on a cover screen, so a chip lit by it
+            // would be reporting something the reader is already looking at.
+            folded = dateFilter != null,
+            onClearAll = {
+                dateFilter = null
+                stockFilter = ""
             },
-            detail = if (searching) {
-                "Nothing you recorded is a holding in a stock by that code or name. Clear the " +
-                    "stock filter to see the rest of your positions."
-            } else {
-                "No trade you recorded belongs to that session. Clear the filter to see the " +
-                    "rest of your positions."
-            },
-        )
-        return
-    }
-
-    // Built once for the whole screen rather than per card. A fresh bundle each time would be a new
-    // argument to every section below it, which is a list of positions redrawn on every
-    // recomposition of the page around them.
-    val jump = remember(appState, scoredCalls, pendingPosition, reveal) {
-        PositionJump(
-            scoredCalls = scoredCalls,
-            onOpenCall = appState::openCall,
-            revealPosition = pendingPosition,
-            onRevealShown = appState::consumePendingPosition,
-            reveal = reveal,
-        )
-    }
-    shown.forEach { group ->
-        ExpandableSection(
-            title = group.recommendationDate.toString(),
-            icon = Icons.Outlined.AccountBalanceWallet,
-            summaryContent = { GroupSummary(group) },
-            // Every card starts folded, a session still running included. Once enough sessions
-            // have been traded, the ones that opened themselves were most of the screen, and the
-            // list of dates is what makes the record readable - the summary line says how each
-            // session went, so nothing is hidden that a fold does not offer back in one tap.
-            expandedState = group.recommendationDate in openGroups,
-            onExpandedChange = { open ->
-                openGroups = if (open) {
-                    openGroups + group.recommendationDate
-                } else {
-                    openGroups - group.recommendationDate
-                }
-            },
+            // Never folded away: it is the control someone arrives at the screen already knowing they
+            // want, and the only one that can empty the list on a keystroke.
+            search = { StockFilterField(value = stockFilter, onValueChange = { stockFilter = it }) },
         ) {
-            // Expired above closed: everything in it is a trade the app stopped tracking without
-            // being told how it ended, which is the only part of a session still asking for
-            // something. Closed is the record and goes last.
-            PositionSubSection("Open", group.open, OpenTone, appState, jump)
-            PositionSubSection("Expired", group.expired, ExpiredTone, appState, jump)
-            PositionSubSection("Closed", group.closed, ClosedTone, appState, jump)
+            SingleSelectFilter(
+                label = "dates",
+                options = allDates,
+                selected = dateFilter,
+                onSelect = { dateFilter = it },
+            )
+            // Outside the clear-all, exactly as in Results: an order is not something a list can be
+            // cleared of, and resetting it would look like a filter had gone missing.
+            SortFilter(
+                options = PortfolioOrder.entries,
+                selected = order,
+                label = PortfolioOrder::label,
+                onSelect = appState::updatePortfolioOrder,
+            )
+        }
+
+        // Filtered here rather than in the calculator. The whole record has other readers - the overdue
+        // worker raises the daily reminder off it - and a date someone picked on this screen must not
+        // silence a notification about a trade they scrolled past.
+        val shown = remember(groups, dateFilter, stockFilter, order) {
+            // Normalized once for the whole record rather than once per trade, through the rule the
+            // other two tabs search by. See StockSearch.
+            val wanted = StockSearch.query(stockFilter)
+            groups
+                .filter { dateFilter == null || it.recommendationDate.toString() == dateFilter }
+                // A search narrows the trades inside a card and then empties the card itself, rather
+                // than leaving a session heading standing over nothing. The summary line is read off
+                // the positions, so it recounts itself around what is left and cannot end up
+                // describing trades the search has taken away.
+                .mapNotNull { group ->
+                    val kept = group.positions.filter { it.matches(wanted) }
+                    if (kept.isEmpty()) null else group.copy(positions = kept.sortedWith(order.positions))
+                }
+                .sortedWith(order.groups)
+        }
+
+        // Arriving from a call pressed on the Insights tab: open the session holding that trade and
+        // scroll to it. Either filter is cleared only when it is what hides the trade, for the reason
+        // Insights gives beside its own - a link that lands on an empty screen is a broken link, and a
+        // filter thrown away on a trip the reader is about to make back is a filter they have to set
+        // again.
+        val pendingPosition = appState.pendingPositionId
+        val reveal = remember { BringIntoViewRequester() }
+        LaunchedEffect(pendingPosition, groups, dateFilter, stockFilter) {
+            if (pendingPosition == null) return@LaunchedEffect
+            val target = groups.firstOrNull { group ->
+                group.positions.any { it.position.id == pendingPosition }
+            }
+            if (target == null) {
+                // The trade was deleted - here or on another device - between the press and the
+                // arrival. Dropped rather than left waiting, or recording it again months later would
+                // flash a card for a press nobody remembers making.
+                appState.consumePendingPosition()
+                return@LaunchedEffect
+            }
+            if (dateFilter != null && dateFilter != target.recommendationDate.toString()) {
+                dateFilter = null
+                // The list is about to be rebuilt around the cleared filter; this effect restarts on it.
+                return@LaunchedEffect
+            }
+            // The search goes the same way as the date, and for the same reason: cleared when it is
+            // what hides the trade, kept when the trade answers to it anyway.
+            val held = target.positions.first { it.position.id == pendingPosition }
+            if (!held.matches(StockSearch.query(stockFilter))) {
+                stockFilter = ""
+                return@LaunchedEffect
+            }
+            openGroups = openGroups + target.recommendationDate
+            // The card is unfolding as this runs, and a scroll measured against a height it is about to
+            // leave behind stops short of the trade that was asked for.
+            delay(REVEAL_SETTLE_MS)
+            reveal.bringIntoView()
+        }
+
+        if (shown.isEmpty()) {
+            // The stock is named when it is what emptied the list, as it is in Results: "nothing called
+            // on that date" beside a box holding COMI reads as though the app had not noticed what was
+            // typed.
+            val searching = stockFilter.isNotBlank()
+            EmptyState(
+                icon = Icons.Outlined.AccountBalanceWallet,
+                title = if (searching) {
+                    "No trades in ${stockFilter.trim()}"
+                } else {
+                    "Nothing called on $dateFilter"
+                },
+                detail = if (searching) {
+                    "Nothing you recorded is a holding in a stock by that code or name. Clear the " +
+                        "stock filter to see the rest of your positions."
+                } else {
+                    "No trade you recorded belongs to that session. Clear the filter to see the " +
+                        "rest of your positions."
+                },
+            )
+            return@SectionCard
+        }
+
+        // Built once for the whole screen rather than per card. A fresh bundle each time would be a new
+        // argument to every section below it, which is a list of positions redrawn on every
+        // recomposition of the page around them.
+        val jump = remember(appState, scoredCalls, pendingPosition, reveal) {
+            PositionJump(
+                scoredCalls = scoredCalls,
+                onOpenCall = appState::openCall,
+                revealPosition = pendingPosition,
+                onRevealShown = appState::consumePendingPosition,
+                reveal = reveal,
+            )
+        }
+        shown.forEach { group ->
+            ExpandableSection(
+                title = group.recommendationDate.toString(),
+                icon = Icons.Outlined.AccountBalanceWallet,
+                summaryContent = { GroupSummary(group) },
+                // A card inside a card takes the step above its parent, exactly as the Overdue and
+                // session-event tiles do. At the page's own `surfaceContainer` it would be the same
+                // fill as the card holding it and would have no edge but its hairline.
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                // Every card starts folded, a session still running included. Once enough sessions
+                // have been traded, the ones that opened themselves were most of the screen, and the
+                // list of dates is what makes the record readable - the summary line says how each
+                // session went, so nothing is hidden that a fold does not offer back in one tap.
+                expandedState = group.recommendationDate in openGroups,
+                onExpandedChange = { open ->
+                    openGroups = if (open) {
+                        openGroups + group.recommendationDate
+                    } else {
+                        openGroups - group.recommendationDate
+                    }
+                },
+            ) {
+                // Expired above closed: everything in it is a trade the app stopped tracking without
+                // being told how it ended, which is the only part of a session still asking for
+                // something. Closed is the record and goes last.
+                PositionSubSection("Open", group.open, OpenTone, appState, jump)
+                PositionSubSection("Expired", group.expired, ExpiredTone, appState, jump)
+                PositionSubSection("Closed", group.closed, ClosedTone, appState, jump)
+            }
         }
     }
 }

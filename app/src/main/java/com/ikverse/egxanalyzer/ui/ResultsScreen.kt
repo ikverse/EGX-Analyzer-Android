@@ -110,18 +110,23 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                 .sortedDescending()
         }
         if (appState.savedResults.isNotEmpty()) {
-            FilterRow(
+            FilterBar(
                 active = channelFilter.isNotEmpty() || dateFilter != null || stockFilter.isNotBlank(),
+                // Only the folded pair. The search box is on show even on a cover screen, so a chip
+                // lit by it would be reporting something the reader is already looking at.
+                folded = channelFilter.isNotEmpty() || dateFilter != null,
                 onClearAll = {
                     channelFilter = emptySet()
                     dateFilter = null
                     stockFilter = ""
                 },
+                // Never folded away, for the reason it leads inside a report too: it is the control
+                // someone arrives at the screen already knowing they want, and the only one that
+                // can empty the list on a single keystroke.
+                search = {
+                    StockFilterField(value = stockFilter, onValueChange = { stockFilter = it })
+                },
             ) {
-                // Search leads here for the same reason it leads inside a report: it is the control
-                // someone arrives at the screen already knowing they want, and the only one that can
-                // empty the list on a single keystroke.
-                StockFilterField(value = stockFilter, onValueChange = { stockFilter = it })
                 MultiSelectFilter(
                     label = "channels",
                     options = allChannels,
