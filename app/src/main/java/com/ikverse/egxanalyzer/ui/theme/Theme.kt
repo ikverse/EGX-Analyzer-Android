@@ -150,9 +150,16 @@ data class ExtraColors(
      * stops: across a whole width, two colours meeting in the middle drift the label's contrast
      * along their length.
      *
-     * Every stop here carries alpha 0.94 in the colour itself, which is the navigation bar's own
-     * figure - see [ExtraColors] users below and `FloatingSurface`. Baked in rather than passed to
-     * the draw call so the fill cannot be painted at full strength by a caller that forgets.
+     * Every stop here carries alpha **0.84** in the colour itself, ten points under the navigation
+     * bar's own 0.94 - and the gap is deliberate now that the two behave differently. The bar tidies
+     * itself away while a page is read; the action does not, so it is a permanent object over a page
+     * still being scrolled, and at the bar's opacity it read as a slab parked on the page rather
+     * than as a control floating above it. Letting the page show faintly through is what a piece of
+     * chrome that never leaves has to do. [actionAuroraBase] carries the same figure, so the button
+     * does not change weight the moment a run starts.
+     *
+     * Baked into the colour rather than passed to the draw call, so the fill cannot be painted at
+     * full strength by a caller that forgets.
      */
     val actionFill: List<Color>,
 
@@ -177,13 +184,13 @@ data class ExtraColors(
      * purpose: they land over a ground at 0.84, and anything stronger would make the busy parts of
      * the sweep read as more solid than the bar beneath it.
      *
-     * **The ground is 0.84 and the resting fill is 0.94**, and the ten points between them are the
-     * running state's own. The action no longer hides when the navigation does, so while a run is
-     * going it is a permanent object over a page the reader is still scrolling - and a solid one
-     * reads as a slab parked on top of the page rather than as a control floating over it. Letting
-     * the page show faintly through is what keeps a button that never leaves from feeling like a
-     * hole in the screen. Only the ground moves: the circles are the light inside it, and thinning
-     * those would dim the one thing on the button that says a model is working.
+     * **The ground is 0.84, which is [actionFill]'s figure too**, and the two match on purpose: the
+     * action never hides now, so it is a permanent object over a page still being scrolled, and the
+     * transparency that stops it reading as a slab is a property of the button rather than of one
+     * of its states. A button that changed weight the moment a run started would report the run
+     * twice over, once in a way nobody could name. Only the ground carries it: the circles are the
+     * light inside the ground, and thinning those would dim the one thing on the button that says a
+     * model is working.
      *
      * The middle stop is the blue that means a price the market reached. Borrowed knowingly: that
      * rule governs a hue labelling a figure, and a light moving inside a button labels nothing. It
@@ -237,7 +244,7 @@ private val DarkExtras = ExtraColors(
     market = Color(0xFF4C9DF0),
     aiFill = listOf(Color(0xFF4A3FBE), Color(0xFF7548AE), Color(0xFF9C4478)),
     aiOnFill = Color.White,
-    actionFill = listOf(Color(0xF0004E5A), Color(0xF00B6D7F)),
+    actionFill = listOf(Color(0xD6004E5A), Color(0xD60B6D7F)),
     onAction = Color(0xFFCFF3FA),
     actionGlow = Color(0xFF5DD4E8),
     actionAuroraBase = Color(0xD6072A3E),
@@ -264,7 +271,7 @@ private val LightExtras = ExtraColors(
     aiOnFill = Color.White,
     // A shade under the dark theme's, the same way the pill's fill is: these sit on a pale page, and
     // the teal still has to run dark enough to carry [onAction] on top of it.
-    actionFill = listOf(Color(0xF000414C), Color(0xF00A5C6C)),
+    actionFill = listOf(Color(0xD600414C), Color(0xD60A5C6C)),
     onAction = Color(0xFFE8FAFF),
     // Not the dark theme's #5DD4E8: a glow that pale on a near-white page is not a glow.
     actionGlow = Color(0xFF00697A),
