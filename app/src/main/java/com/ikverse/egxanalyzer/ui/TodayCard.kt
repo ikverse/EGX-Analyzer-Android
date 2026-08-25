@@ -53,6 +53,15 @@ import com.ikverse.egxanalyzer.ui.theme.extraColors
  * [PageState.todayExpanded] for the same reason the digest is: two cards reporting one session that
  * could be folded apart would read as two different cards that happen to agree.
  *
+ * **The two scopes are different, and the arithmetic behind them is not.** [heldOnly] narrows the
+ * Portfolio's card to the user's own trades through `SessionDigest.heldOnly`, so both cards are
+ * still one pass over one set of rules and cannot count a session two ways - they simply count
+ * different things. It began as one card on both tabs, which was right about the arithmetic and
+ * wrong about the question: the Portfolio is the tab holding the reader's money, and a session
+ * where three channels' calls reached targets and the reader held none of them was reported there
+ * as though something of theirs had happened. On Insights the card is unchanged and still says
+ * everything, including those calls.
+ *
  * **Expanded by default**, alone among the cards in this app. Everything else here folds away
  * because a screen of open cards is unreadable; this one is read once and then scrolled past, and a
  * card that has to be opened before it says anything is a card nobody opens.
@@ -62,11 +71,14 @@ import com.ikverse.egxanalyzer.ui.theme.extraColors
  * did.
  */
 @Composable
-internal fun ColumnScope.TodayCard(appState: AppState) {
-    val digest = appState.sessionDigest ?: return
+internal fun ColumnScope.TodayCard(appState: AppState, heldOnly: Boolean = false) {
+    val digest = appState.sessionDigest?.let { if (heldOnly) it.heldOnly() else it } ?: return
     var expanded by appState.pages.todayExpanded
     ExpandableSection(
-        title = "What happened",
+        // Named for what it holds. The same title over two cards showing different things is the
+        // reading this split exists to prevent - a reader who has learnt what "What happened" means
+        // on Insights would carry that meaning to the Portfolio, where it is now narrower.
+        title = if (heldOnly) "What happened to your trades" else "What happened",
         icon = Icons.Outlined.Today,
         iconTone = digest.headline?.let { toneColor(it) },
         summaryContent = { Text(digest.headlineLine(), style = MaterialTheme.typography.bodySmall) },
@@ -79,8 +91,14 @@ internal fun ColumnScope.TodayCard(appState: AppState) {
             // it would be furniture; "nothing moved this session" is a genuine answer to the
             // question being asked, and its absence would read as the app not having looked.
             Text(
-                "Nothing moved on this session" +
-                    if (digest.newCalls > 0) ", beyond the new calls above." else ".",
+                when {
+                    // Narrower than "nothing moved", because on this tab it now is: the market can
+                    // have had a busy session that none of the reader's own trades were in, and
+                    // saying nothing moved would be the card overstating its own scope.
+                    heldOnly -> "None of your trades moved on this session"
+                    digest.newCalls > 0 -> "Nothing moved on this session, beyond the new calls above."
+                    else -> "Nothing moved on this session."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -843,12 +843,27 @@ The app has always known every fact on this card and has never had a place to sa
 reached at eleven on Tuesday morning reached the reader as a status, on a card, inside a folded
 section, on a tab they had to choose — so *what happened today*, the one question with a daily
 rhythm to it, was the question no screen answered. `SessionDigest` is that answer, drawn by
-`TodayCard` **second on both tabs — under Overdue on the Portfolio and under the hero on Insights**:
-one card, two tabs, one digest, so the two can never report a session differently. Second and not
-first, for one reason on both: each of those is the thing its page exists for — the trades asking to
-be acted on, the standing verdict on the sources — while this is what changed since the reader last
-looked. Perishable, so it goes above everything that takes scrolling to reach, and no higher.
+`TodayCard` **second on both tabs — under Overdue on the Portfolio and under the hero on Insights**.
+Second and not first, for one reason on both: each of those is the thing its page exists for — the
+trades asking to be acted on, the standing verdict on the sources — while this is what changed since
+the reader last looked. Perishable, so it goes above everything that takes scrolling to reach, and
+no higher. **The two tabs share the arithmetic and not the scope** — see the first bullet below.
 
+- **The Portfolio's card is the reader's own trades; Insights' is everything.** It began as one
+  card on both tabs, on the reasoning that one digest cannot then report a session two ways — which
+  was right about the arithmetic and wrong about the question. The Portfolio is the tab holding the
+  reader's money, and a session where three channels' calls reached targets and the reader held none
+  of them was reported there as though something of theirs had happened; they had to open the card
+  to find nothing of theirs in it. `SessionDigest.heldOnly()` is the narrowing, and it is a **filter
+  over the built digest rather than a second build**, so every figure on both cards still comes from
+  one pass and one set of rules — the scope decides what is counted, never how. `newCalls` goes with
+  the call events: what channels published is a fact about the sources, and on Insights it sits
+  under a page of those calls where it has something to refer to. Every derived figure follows for
+  free, the headline included — which matters most, because it colours the folded card, and a red
+  heading over a session whose only stop was somebody else's call would be the Portfolio reporting a
+  loss the reader never took. The titles diverge with the scope (**What happened to your trades** on
+  the Portfolio), since the same title over two cards showing different things is the exact reading
+  this split exists to prevent.
 - **A session, never a day, and the session comes from the prices.** The card reports on
   `PerformanceReport.pricesTo` — the newest session any stock has a row for — which is the same
   figure the page's "prices to \<date\>" comes from and for the same reason. That is what makes the
@@ -898,11 +913,16 @@ looked. Perishable, so it goes above everything that takes scrolling to reach, a
   opened before it says anything is a card nobody opens. `PageState.todayExpanded` is shared by both
   tabs — folding it away on the Portfolio only to find it open on Insights would read as two cards
   that happen to agree — and it is session-only, so "expanded by default" is true of every launch.
+  Still shared now that the two scopes differ: it is recognisably the same card asking the same
+  question of a narrower record, not a second card that happens to sit in the same place.
 - **A quiet session says so rather than vanishing**, which is the one place this card parts company
   with Overdue. "Nothing is late" is the state the app is normally in and a permanent card
   announcing it would be furniture; "nothing moved on this session" is a genuine answer to the
   question being asked, and its absence would read as the app not having looked. The card is absent
-  only when there is no session at all — a fresh install with no prices.
+  only when there is no session at all — a fresh install with no prices. On the Portfolio the wording
+  is narrower — **"None of your trades moved on this session"** — because there it now is: the market
+  can have had a busy session that none of the reader's trades were in, and "nothing moved" would be
+  the card overstating its own scope.
 - **Tiles, through the Overdue card's helper but deliberately not its numbers** — 170dp across up
   to **three** columns, against Overdue's 150dp up to four. Two separate mistakes were made getting
   to those, and both are worth keeping written down because both are easy to repeat. The first was
@@ -1653,6 +1673,50 @@ at the foot of the screen until 2026-08-25.
   twice, once in a way nobody could name. Only the grounds carry it — `onAction` stays opaque so the
   label survives whatever scrolls behind, and the `actionAurora` circles are the light *inside* the
   ground, so thinning those would dim the one thing saying a model is working.
+- **The action's edge is a gradient in its own colours, and the bar's beside it is not.** Both are
+  `FloatingSurface`, so they are the same material; they are deliberately not the same edge, because
+  two identically outlined slabs at the foot of the screen said nothing about which of them did
+  anything. `ExtraColors.actionLine` carries it, and it has **its own stops rather than
+  `actionFill`'s** for the reason `aiLine` has its own beside `aiFill`: the fill sits *inside* the
+  line, so a line in the fill's colours is a line against itself and disappears. What it has to read
+  against is the page scrolling behind the button — dark on one theme, near-white on the other — so
+  the stops invert between the two while the hue does not. The hues are the aurora's own, in the
+  aurora's own order (cyan, blue, teal), rather than a fourth set invented for the edge.
+- **The edge is opaque where the ground is 0.84**, and that pair is the point rather than either
+  figure. A ground that lets the page through is what stops a permanent control reading as a slab; an
+  *edge* that let the page through would stop holding the shape against whatever passes under it,
+  which is the one job a hairline has. `ActionPaletteTest` pins both, along with the mistake that
+  produces an invisible edge — reaching for `actionFill` when adding the gradient, because it is
+  right there and already the right family.
+- **Only the ready state wears it.** Running keeps the red `aiStop` hairline: that is the only state
+  where pressing cancels, and no edge in the action's own colours could say so — the moving fill
+  says a model is working, which is a different sentence. Blocked keeps the neutral outline every
+  other floating thing has, for the reason it does not wear the fill either: a blocked button with
+  the action's own edge round it would be inviting a press that does nothing.
+- **`FloatingSurface.outline` is a `Brush`, not a `Color`.** One parameter rather than two that can
+  both be set and disagree; a flat edge passes `SolidColor(…)`. The width stays 1dp for every
+  floating edge in the app, gradient or not — the bar sits directly under the action on a compact
+  screen, and an edge thicker on one of them would read as the two not matching rather than as one
+  of them being the control. The colour is what separates them.
+- **`AdaptivePanes` is the only "side by side, or stacked when it will not fit" rule in the app**, and
+  a second one would be a second threshold, a second fallback and a second gap to keep in step. A
+  pair of equals is that helper with `mainWeight = 1f`, not a layout of its own — which is how
+  Analyze's **Content types** and **Recommendation target date** now sit beside each other above
+  600dp of container: stacked on the 379dp cover screen, 313dp each on the 638dp unfolded Fold, 347
+  each on the tablet. Note the outer pane split is 720dp and **no real device here reaches it** on
+  that page (the emulator's 739 does), so those two cards get the page's full width to divide.
+  `alignHeights` stretches both columns to the taller through `IntrinsicSize.Max`; it is off by
+  default because it is wrong for the case the helper was built for — a tall main pane would drag a
+  short side column's last card down to meet it — and right for a pair, where two cards of equal
+  standing ending at two heights reads as one of them having failed to load.
+- **Both were hand-built copies of `SectionCard` and are not any more.** That is what let them drift:
+  same container and shape, and then one tinting its icon `primary` and the other leaving the
+  calendar untinted, each spelling its own header row and divider. Drawing the background twice is
+  how two cards meant to match stop matching. The **"Change date" button is gone** with them — the
+  "Specific date" row has always opened the picker itself, so the button was a second control doing
+  one job, and it was the reason that card changed height the instant the mode changed, which is the
+  one thing a card sitting beside another must not do. The affordance moved into the line already
+  there: the date, then `· tap to change`.
 - **The two shells are two call sites, so no page may hold its own state.** `EgxAnalyzerApp` branches
   on `rail` around one `AppContent` for the rail and another for the pill, and again around
   `AnimatedContent` versus `DestinationPager`. Folding the phone flips `rail`, Compose disposes one

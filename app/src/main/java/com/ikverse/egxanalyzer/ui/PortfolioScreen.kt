@@ -91,7 +91,11 @@ internal fun PortfolioScreen(appState: AppState) {
         // happened since the reader last looked, and the record underneath is reference. Built off
         // the whole portfolio like Overdue, so a date chosen in the filter below cannot hide an
         // event - a date picked on screen is a view of the trades, not a claim about the session.
-        TodayCard(appState)
+        //
+        // Held scope: on this tab the card reports the reader's own trades and nothing else. What
+        // the channels' calls did that session is a question for Insights, where the same card
+        // answers it in full.
+        TodayCard(appState, heldOnly = true)
 
         PortfolioSummary(portfolio.stats)
 

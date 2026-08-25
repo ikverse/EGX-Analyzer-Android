@@ -16,7 +16,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -31,7 +34,9 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
@@ -53,6 +58,12 @@ import java.time.format.DateTimeFormatter
  * their edge holds against whatever scrolls under it. Defined once here because two definitions of
  * "floating" drift apart the first time one of them is adjusted.
  *
+ * They are the same material and deliberately not the same edge. The bar wears the neutral hairline
+ * below; the action wears a gradient in its own colours while it is ready and a red one while a run
+ * is going. That is what makes the action read as the thing to press rather than as a second piece
+ * of furniture - two identically edged slabs at the foot of the screen said nothing about which of
+ * them did anything.
+ *
  * The shape is still the caller's, though both callers currently pass the page's own card radius.
  *
  * @param painted draws the surface itself, for a caller whose fill is not one colour. It is applied
@@ -61,6 +72,8 @@ import java.time.format.DateTimeFormatter
  *   here is as see-through as a tint here. [color] is ignored when it is passed; pass
  *   `Color.Transparent`.
  * @param outline overrides the neutral hairline for a caller that needs the edge to mean something.
+ *   A [Brush] rather than a colour, so a gradient edge and a flat one are one parameter and not two
+ *   that can both be set - pass `SolidColor(…)` for a flat one.
  */
 @Composable
 internal fun FloatingSurface(
@@ -69,7 +82,7 @@ internal fun FloatingSurface(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     painted: Modifier? = null,
-    outline: Color? = null,
+    outline: Brush? = null,
     content: @Composable () -> Unit,
 ) {
     // See-through enough that the page carries on behind it, opaque enough that it cannot be read
@@ -79,8 +92,8 @@ internal fun FloatingSurface(
     // The tint alone leaves the edge indistinct against a card of a similar colour; the hairline is
     // what draws the shape whatever is behind it.
     val hairline = BorderStroke(
-        1.dp,
-        outline ?: MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+        HairlineWidth,
+        outline ?: SolidColor(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
     )
     // Only wrapped when there is something to paint: an unconditional Box would put a layout node
     // under every floating surface in the app to serve the one that needs it.
@@ -102,6 +115,16 @@ internal fun FloatingSurface(
 
 /** Enough to lift the surface off the page without casting a shadow the tint then shows through. */
 private val FloatingElevation = 6.dp
+
+/**
+ * One width for every floating edge, gradient or not.
+ *
+ * The bar and the action sit one above the other at the foot of a compact screen, so an edge that
+ * were thicker on one of them would read as the two not matching rather than as one of them being
+ * the control. A gradient wants width to be seen as a gradient and does not get it here; the colour
+ * is what separates them.
+ */
+private val HairlineWidth = 1.dp
 
 /**
  * The one spacing scale.
@@ -427,24 +450,44 @@ fun Modifier.scrollableRow(): Modifier {
  * A screen of full-width cards wastes most of a wide display: a card holding three checkboxes was
  * spanning 1600 pixels. Below [minWidth] the two panes stack, which is the right answer on a cover
  * screen where height is the plentiful dimension.
+ *
+ * The one rule in this app for "two things beside each other, or stacked when they will not fit",
+ * and it is deliberately the only one. A second helper would be a second threshold, a second
+ * fallback and a second gap, and the two would agree until one of them was touched. So a pair of
+ * equals - two cards of the same standing rather than a subject and its settings - is this with
+ * [mainWeight] at 1f, not a layout of its own.
  */
 @Composable
 fun AdaptivePanes(
     minWidth: Dp = 720.dp,
     mainWeight: Float = 1.3f,
+    /**
+     * Stretches both columns to the taller of them, so their cards' backgrounds line up.
+     *
+     * Off by default, because it is wrong for the case this was built for: a tall main pane beside a
+     * short side one would drag the side column's last card down the screen to meet it. It is right
+     * for a **pair**, where two cards of the same standing sitting at two different heights reads as
+     * one of them having failed to load rather than as one simply having less in it.
+     *
+     * `IntrinsicSize.Max` measures the row before it places anything, so both columns are given the
+     * taller column's height and the cards inside them fill it.
+     */
+    alignHeights: Boolean = false,
     main: @Composable ColumnScope.() -> Unit,
     side: @Composable ColumnScope.() -> Unit,
 ) {
     BoxWithConstraints {
         if (maxWidth >= minWidth) {
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+            val row = if (alignHeights) Modifier.height(IntrinsicSize.Max) else Modifier
+            val column = if (alignHeights) Modifier.fillMaxHeight() else Modifier
+            Row(row, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                 Column(
-                    Modifier.weight(mainWeight),
+                    column.weight(mainWeight),
                     verticalArrangement = Arrangement.spacedBy(Space.m),
                     content = main,
                 )
                 Column(
-                    Modifier.weight(1f),
+                    column.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(Space.m),
                     content = side,
                 )

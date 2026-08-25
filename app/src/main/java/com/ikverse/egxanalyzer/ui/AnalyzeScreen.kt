@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.outlined.Preview
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -38,8 +37,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -58,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -131,6 +129,9 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 drawAiHalo(ai.actionGlow, ActionCorner.toPx(), motion.breath())
             }
             val teal = remember(ai.actionFill) { Brush.horizontalGradient(ai.actionFill) }
+            // The edge, in the same family and its own stops - see ExtraColors.actionLine for why
+            // it cannot simply be the fill: the fill sits inside this line.
+            val actionEdge = remember(ai.actionLine) { Brush.horizontalGradient(ai.actionLine) }
             // Read in the draw lambda rather than the composable body: read at composition the
             // drifts would recompose this screen sixty times a second, where here a frame costs a
             // repaint and nothing else.
@@ -157,8 +158,11 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                     stretch = !big,
                     // The one red left on the button, and a hairline of it. The moving fill says a
                     // model is working, which is not the same as saying what pressing this does -
-                    // and with the spinner gone the label was carrying that on its own.
-                    outline = ai.aiStop,
+                    // and with the spinner gone the label was carrying that on its own. It keeps
+                    // the red rather than the ready state's gradient for that reason: this is the
+                    // only state where pressing cancels, and no edge in the action's own colours
+                    // could say so.
+                    outline = SolidColor(ai.aiStop),
                     // The mark rather than a spinner, turning once every few seconds: the fill
                     // moving under it is what reports the run is alive. A spinner on top of that is
                     // one control saying "waiting" twice.
@@ -203,6 +207,11 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                     modifier = if (ready) haloed else actionModifier,
                     painted = fill.takeIf { ready },
                     stretch = !big,
+                    // Only the state that can spend money wears the coloured edge, for the reason
+                    // only it wears the fill: a blocked button with the action's own hairline round
+                    // it would be inviting a press that does nothing. Blocked keeps the neutral
+                    // outline every other floating thing has.
+                    outline = if (ready) actionEdge else null,
                     icon = {
                         if (ready) {
                             Spark(ai.aiSpark, if (big) BigActionIcon else ActionIcon)
@@ -262,100 +271,92 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 ChannelsSection(appState)
             },
             side = {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            shape = MaterialTheme.shapes.large,
-            border = cardOutline,
-        ) {
-            Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Outlined.TextFields,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(IconSize.Inline),
-                    )
-                    Spacer(Modifier.width(Space.s))
-                    Text("Content types", fontWeight = FontWeight.Bold)
-                }
-                // This card is built by hand rather than through SectionCard, so it carries the
-                // heading rule itself or it is the one card on the page without one.
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                // Three checkboxes stacked is a phone layout; anywhere wider it is three rows of
-                // empty space.
-                AdaptiveInline(minWidth = 340.dp) { horizontal ->
-                    if (horizontal) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(Space.l)) {
-                            ContentTypeToggle("Text", AnalysisContentType.TEXT, appState)
-                            ContentTypeToggle("Images", AnalysisContentType.IMAGES, appState)
-                            ContentTypeToggle("Voice", AnalysisContentType.AUDIO, appState)
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                            ContentTypeToggle("Text messages", AnalysisContentType.TEXT, appState)
-                            ContentTypeToggle("Images / photos", AnalysisContentType.IMAGES, appState)
-                            ContentTypeToggle("Voice messages", AnalysisContentType.AUDIO, appState)
+        // What is read and what it is read for: two settings of equal standing, so they sit as a
+        // pair rather than stacked. Through AdaptivePanes with equal weights rather than a Row of
+        // this screen's own - it is the app's one rule for "beside each other, or stacked when
+        // they will not fit", and a second one here would be a second threshold to keep in step.
+        //
+        // 600dp of container, which is the width at which each card still clears 300: the cover
+        // screen (379) keeps them stacked, the unfolded Fold (638) gives 313 each and the tablet
+        // (706) gives 347. `alignHeights` is what makes the two backgrounds line up - one card
+        // holds three checkboxes and the other two options, and left to themselves they end at two
+        // different heights, which reads as one of them having failed rather than as one simply
+        // having less in it.
+        AdaptivePanes(
+            minWidth = 600.dp,
+            mainWeight = 1f,
+            alignHeights = true,
+            main = {
+                // SectionCard, where both of these were hand-built copies of it. Two cards drawing
+                // their own background is how the pair drifted apart in the first place: the same
+                // container and shape, and then one tinting its icon and the other not.
+                SectionCard(title = "Content types", icon = Icons.Outlined.TextFields) {
+                    // Three checkboxes stacked is a phone layout; anywhere wider it is three rows of
+                    // empty space. Measured against the card's own content width, so beside the date
+                    // card - 281dp of content at 313 - it correctly keeps the long labels stacked
+                    // rather than cramming three across at ninety points apiece.
+                    AdaptiveInline(minWidth = 340.dp) { horizontal ->
+                        if (horizontal) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(Space.l)) {
+                                ContentTypeToggle("Text", AnalysisContentType.TEXT, appState)
+                                ContentTypeToggle("Images", AnalysisContentType.IMAGES, appState)
+                                ContentTypeToggle("Voice", AnalysisContentType.AUDIO, appState)
+                            }
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                                ContentTypeToggle("Text messages", AnalysisContentType.TEXT, appState)
+                                ContentTypeToggle("Images / photos", AnalysisContentType.IMAGES, appState)
+                                ContentTypeToggle("Voice messages", AnalysisContentType.AUDIO, appState)
+                            }
                         }
                     }
+                    // Drawn where the boxes are, for the same reason the model card carries its own.
+                    if (blocker == AnalyzeBlocker.NO_CONTENT_TYPE) {
+                        Text(
+                            blocker.reason,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (attempted) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
                 }
-                // Drawn where the boxes are, for the same reason the model card carries its own.
-                if (blocker == AnalyzeBlocker.NO_CONTENT_TYPE) {
-                    Text(
-                        blocker.reason,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (attempted) {
-                            MaterialTheme.colorScheme.error
+            },
+            side = {
+                SectionCard(
+                    title = "Recommendation target date",
+                    icon = Icons.Outlined.CalendarMonth,
+                ) {
+                    RecommendationDateOption(
+                        selected = appState.analysisMode == AnalysisMode.NEXT_DAY,
+                        title = "Current / next EGX session",
+                        detail = appState.recommendationTargetDate.toString(),
+                        onClick = { appState.selectAnalysisMode(AnalysisMode.NEXT_DAY) },
+                    )
+                    RecommendationDateOption(
+                        selected = appState.analysisMode == AnalysisMode.SPECIFIC_DATE,
+                        title = "Specific date",
+                        // No "Change date" button under this any more. The row itself has always
+                        // opened the picker, so the button was a second control doing one job - and
+                        // it was the reason this card changed height the moment the mode changed,
+                        // which is the one thing a card sitting beside another must not do. The
+                        // affordance moves into the line that was already there: the date, and what
+                        // pressing gets you.
+                        detail = if (appState.analysisMode == AnalysisMode.SPECIFIC_DATE) {
+                            "${appState.recommendationTargetDate} · tap to change"
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                            "Choose today or an earlier date"
+                        },
+                        onClick = {
+                            appState.selectAnalysisMode(AnalysisMode.SPECIFIC_DATE)
+                            showRecommendationDatePicker(activity, appState)
                         },
                     )
                 }
-            }
-        }
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            shape = MaterialTheme.shapes.large,
-            border = cardOutline,
-        ) {
-            Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.CalendarMonth, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Recommendation target date", fontWeight = FontWeight.Bold)
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                RecommendationDateOption(
-                    selected = appState.analysisMode == AnalysisMode.NEXT_DAY,
-                    title = "Current / next EGX session",
-                    detail = appState.recommendationTargetDate.toString(),
-                    onClick = { appState.selectAnalysisMode(AnalysisMode.NEXT_DAY) },
-                )
-                RecommendationDateOption(
-                    selected = appState.analysisMode == AnalysisMode.SPECIFIC_DATE,
-                    title = "Specific date",
-                    detail = if (appState.analysisMode == AnalysisMode.SPECIFIC_DATE) {
-                        appState.recommendationTargetDate.toString()
-                    } else {
-                        "Choose today or an earlier date"
-                    },
-                    onClick = {
-                        appState.selectAnalysisMode(AnalysisMode.SPECIFIC_DATE)
-                        showRecommendationDatePicker(activity, appState)
-                    },
-                )
-                if (appState.analysisMode == AnalysisMode.SPECIFIC_DATE) {
-                    OutlinedButton(
-                        onClick = { showRecommendationDatePicker(activity, appState) },
-                    ) {
-                        Icon(Icons.Outlined.CalendarMonth, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Change date")
-                    }
-                }
-            }
-        }
+            },
+        )
         // The reason a run cannot start sits with the button that loads what it is missing, rather
         // than as a loose line under the card it is about.
         MessagesPreview(appState, scope, blocker, attempted)
@@ -754,7 +755,7 @@ private fun AnalyzeAction(
     label: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     painted: Modifier? = null,
-    outline: Color? = null,
+    outline: Brush? = null,
     /**
      * Whether the button runs the full width of the page, which it does wherever the navigation bar
      * does - see `Screen`. Centred there rather than left-aligned: the icon and its label take about

@@ -163,6 +163,25 @@ data class ExtraColors(
      */
     val actionFill: List<Color>,
 
+    /**
+     * The same family drawn as a line rather than a surface, for the hairline the action wears when
+     * it is ready to be pressed.
+     *
+     * Its own stops rather than [actionFill]'s, for the reason [aiLine] has its own: the fill sits
+     * *inside* this line, so a line in the fill's colours is a line against itself and disappears.
+     * What it has to read against is the page scrolling behind the button - which is dark on one
+     * theme and near-white on the other, so the stops invert while the hue does not.
+     *
+     * Fully opaque, alone among the action's colours. [actionFill] and [actionAuroraBase] carry
+     * 0.84 so the page shows faintly through a control that never leaves the screen; an edge doing
+     * the same would be an edge that stops holding the shape against whatever scrolls under it,
+     * which is the one job a hairline has. `ActionPaletteTest` pins that.
+     *
+     * The hues are the aurora's own, in the aurora's own order - cyan, blue, teal - rather than a
+     * fourth set invented for the edge.
+     */
+    val actionLine: List<Color>,
+
     /** The label and the mark on [actionFill]. Pale cyan rather than white: it is a teal ground. */
     val onAction: Color,
 
@@ -237,7 +256,7 @@ data class ExtraColors(
 /** Gold, on a violet pill. The one place this app spends a colour on delight rather than meaning. */
 private val BrightGold = listOf(Color(0xFFFFE9B8), Color(0xFFFFD37A), Color(0xFFE8A53C))
 
-private val DarkExtras = ExtraColors(
+internal val DarkExtras = ExtraColors(
     expired = Color(0xFFF3C264),
     expiredContainer = Color(0xFF5A4318),
     onExpiredContainer = Color(0xFFFFE0A3),
@@ -245,6 +264,9 @@ private val DarkExtras = ExtraColors(
     aiFill = listOf(Color(0xFF4A3FBE), Color(0xFF7548AE), Color(0xFF9C4478)),
     aiOnFill = Color.White,
     actionFill = listOf(Color(0xD6004E5A), Color(0xD60B6D7F)),
+    // [actionGlow] and the aurora's own two hues, opaque. Lighter than the fill it surrounds,
+    // because on this theme the page behind the button is dark and an edge has to lift off it.
+    actionLine = listOf(Color(0xFF5DD4E8), Color(0xFF4C9DF0), Color(0xFF3FB4CE)),
     onAction = Color(0xFFCFF3FA),
     actionGlow = Color(0xFF5DD4E8),
     actionAuroraBase = Color(0xD6072A3E),
@@ -258,7 +280,7 @@ private val DarkExtras = ExtraColors(
     aiSparkOnCard = BrightGold,
 )
 
-private val LightExtras = ExtraColors(
+internal val LightExtras = ExtraColors(
     expired = Color(0xFF8A5A00),
     expiredContainer = Color(0xFFFFDFA6),
     onExpiredContainer = Color(0xFF2A1A00),
@@ -272,6 +294,10 @@ private val LightExtras = ExtraColors(
     // A shade under the dark theme's, the same way the pill's fill is: these sit on a pale page, and
     // the teal still has to run dark enough to carry [onAction] on top of it.
     actionFill = listOf(Color(0xD600414C), Color(0xD60A5C6C)),
+    // The same three roles as the dark theme's, taken from this theme's own values rather than
+    // reused: the page here is near-white, so the edge runs dark where the dark theme's runs light.
+    // #5DD4E8 on this page is the glow problem again - a line that pale does not read as a line.
+    actionLine = listOf(Color(0xFF00697A), Color(0xFF1668C7), Color(0xFF0A5C6C)),
     onAction = Color(0xFFE8FAFF),
     // Not the dark theme's #5DD4E8: a glow that pale on a near-white page is not a glow.
     actionGlow = Color(0xFF00697A),

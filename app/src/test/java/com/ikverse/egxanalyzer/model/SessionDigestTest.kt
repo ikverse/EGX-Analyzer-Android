@@ -357,6 +357,113 @@ class SessionDigestTest {
         assertEquals(2, digest.events.map(DayEvent::id).toSet().size)
     }
 
+    // ── Held scope, which is the Portfolio's card ────────────────────────────────────────────
+
+    /**
+     * The Portfolio reports the reader's own trades and the calls they only watched are Insights'.
+     *
+     * Both cards are still one pass over one digest - `heldOnly` filters what was built rather than
+     * building a second one - so the tests below are about scope and never about arithmetic.
+     */
+    @Test
+    fun `held scope keeps the trade and drops the call on a session that saw both`() {
+        val sessions = listOf(
+            session(called, high = 10.4, low = 9.9),
+            session(second, high = 12.4, low = 10.2),
+        )
+        val trade = trade(sessions = sessions)
+        val call = scoredCall(ticker = "COMI", sessions = sessions)
+
+        val digest = SessionDigest.build(week, listOf(trade), listOf(call)).first { it.date == second }
+
+        assertEquals(listOf(DayEventKind.TRADE_TARGET2, DayEventKind.CALL_TARGET2), digest.kinds())
+        assertEquals(listOf(DayEventKind.TRADE_TARGET2), digest.heldOnly().kinds())
+    }
+
+    /**
+     * The reading this split exists to prevent.
+     *
+     * A busy session that the reader had no money in was reported on the tab holding their money as
+     * though something of theirs had happened - they had to open the card to find nothing of theirs
+     * in it.
+     */
+    @Test
+    fun `a session of nothing but calls is empty to the Portfolio and not to Insights`() {
+        val sessions = listOf(
+            session(called, high = 10.4, low = 9.9),
+            session(second, high = 12.4, low = 10.2),
+        )
+        val call = scoredCall(sessions = sessions)
+
+        val digest = SessionDigest.build(week, emptyList(), listOf(call)).first { it.date == second }
+
+        assertTrue(digest.events.isNotEmpty())
+        assertTrue(digest.heldOnly().events.isEmpty())
+        assertTrue(digest.heldOnly().isEmpty)
+    }
+
+    /** What channels published is a fact about the sources, not about anything the reader owns. */
+    @Test
+    fun `new calls do not travel into held scope`() {
+        val calls = listOf(
+            scoredCall(ticker = "AMOC", channel = "one"),
+            scoredCall(ticker = "SWDY", channel = "two"),
+        )
+
+        val digest = SessionDigest.build(week, emptyList(), calls).first { it.date == called }
+
+        assertEquals(2, digest.newCalls)
+        assertEquals(2, digest.newCallSources)
+        assertEquals(0, digest.heldOnly().newCalls)
+        assertEquals(0, digest.heldOnly().newCallSources)
+    }
+
+    /**
+     * Every figure the card draws follows the scope, because every one is derived from the events.
+     *
+     * The headline is the one worth pinning: it decides the colour of the card while it is folded,
+     * and a red heading over a session whose only stop was somebody else's call would be the
+     * Portfolio reporting a loss the reader never took.
+     */
+    @Test
+    fun `the headline follows the scope rather than the session`() {
+        val won = listOf(
+            session(called, high = 10.4, low = 9.9),
+            session(second, high = 12.4, low = 10.2),
+        )
+        val lost = listOf(
+            session(called, high = 10.4, low = 9.9),
+            session(second, high = 10.4, low = 8.5),
+        )
+        val trade = trade(sessions = won)
+        val call = scoredCall(ticker = "COMI", sessions = lost)
+
+        val digest = SessionDigest.build(week, listOf(trade), listOf(call)).first { it.date == second }
+
+        // A stop outranks a target, so the whole session reads as a loss...
+        assertEquals(EventTone.LOSS, digest.headline)
+        assertEquals(1, digest.stops)
+        // ...while the reader's own half of it was a win outright.
+        assertEquals(EventTone.GAIN, digest.heldOnly().headline)
+        assertEquals(0, digest.heldOnly().stops)
+        assertEquals(1, digest.heldOnly().targets)
+    }
+
+    /** A call coming into range is news on Insights and nothing at all to a reader not in it. */
+    @Test
+    fun `a stock coming into range never reaches held scope`() {
+        val sessions = listOf(
+            session(called, high = 9.5, low = 9.2),
+            session(second, high = 10.3, low = 10.1),
+        )
+        val call = scoredCall(sessions = sessions)
+
+        val digest = SessionDigest.build(week, emptyList(), listOf(call)).first { it.date == second }
+
+        assertEquals(0, digest.heldOnly().inRange)
+        assertTrue(digest.heldOnly().events.isEmpty())
+    }
+
     // ── Fixtures ─────────────────────────────────────────────────────────────────────────────
 
     private fun SessionDigest.kinds() = events.map(DayEvent::kind)

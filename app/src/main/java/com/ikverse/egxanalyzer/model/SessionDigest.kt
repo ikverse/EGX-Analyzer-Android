@@ -82,6 +82,30 @@ data class SessionDigest(
             else -> null
         }
 
+    /**
+     * The same session, narrowed to the user's own trades.
+     *
+     * What the Portfolio's card reports. The two tabs used to draw one digest between them, on the
+     * reasoning that one card cannot then report a session two ways - which was right about the
+     * arithmetic and wrong about the question. The Portfolio is the tab holding the user's money,
+     * and a session where three channels' calls reached targets and the user held none of them
+     * belongs on Insights: on the Portfolio it reads as news about their own trades until they open
+     * the card and find nothing of theirs in it.
+     *
+     * A filter over the built digest rather than a second build, so every figure on both cards
+     * still comes from one pass and one set of rules. The scope changes what is counted; nothing
+     * changes how.
+     *
+     * [newCalls] goes with the call events. It is a count of what channels published for the
+     * session, which is a fact about the sources rather than about anything the reader owns - and
+     * on Insights it sits under a page of those calls, where it has something to refer to.
+     */
+    fun heldOnly(): SessionDigest = copy(
+        events = events.filter { it.kind.held },
+        newCalls = 0,
+        newCallSources = 0,
+    )
+
     companion object {
 
         /**
