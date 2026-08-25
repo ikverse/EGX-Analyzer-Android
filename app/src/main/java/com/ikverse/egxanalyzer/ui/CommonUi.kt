@@ -28,10 +28,6 @@ import androidx.compose.material3.SnackbarVisuals
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -117,6 +113,14 @@ internal fun Screen(
             mark = offset
         }
     }
+    // Pressing the destination already showing means "take me back to the top". Animated rather
+    // than jumped, so it reads as the page travelling rather than as the content being replaced -
+    // and the watcher above brings the navigation back on its own as the offset passes the slop.
+    val scrollToTop = LocalScrollToTop.current
+    LaunchedEffect(scrollToTop) {
+        if (scrollToTop > 0) scroll.animateScrollTo(0)
+    }
+
     // The bar floats over the page, so the page has to hold its own content out from under it.
     // Beside a rail there is no bar over anything and nothing to hold clear of.
     val compact = LocalWindowWidth.current == WindowWidth.COMPACT
@@ -151,30 +155,26 @@ internal fun Screen(
         }
         floatingAction?.let {
             if (compact) {
-                // The action is a second storey on the bar rather than a button floating near it:
-                // the bar's own side margins, its corner, its alpha, and it leaves and returns on
-                // the same scroll. Pinned rather than merely tracking - it used to slide down into
-                // the room the bar vacated and stay there, which meant two pieces of chrome moving
-                // opposite ways on one gesture.
+                // The action keeps the bar's side margins and its corner, but **not its
+                // visibility**. It used to leave and return on the same scroll the bar did, so the
+                // one control that starts a run could not be reached from anywhere but the top of
+                // the page - which is a poor trade for chrome that tidies itself away.
                 //
-                // The cost is that the action cannot be reached while the page is scrolled down.
-                // Any upward scroll brings it back, and the alternative was leaving the one control
-                // that spends money hanging over a page the navigation has already left.
-                val drop = with(LocalDensity.current) { (NavBarFootprint + PillBottomMargin).roundToPx() }
-                AnimatedVisibility(
-                    visible = navBarVisible.value,
-                    modifier = Modifier.align(Alignment.BottomCenter)
+                // What it does not do is move. Letting it drop into the room the bar vacates was
+                // tried and is what the pinning replaced: two pieces of chrome travelling opposite
+                // ways on one gesture. So it holds this height whatever the bar is doing, and when
+                // the bar goes there is simply space beneath it. A running button being slightly
+                // see-through is the other half of this - see `actionAuroraBase` - and it is what
+                // keeps a permanent button from reading as a slab parked on the page.
+                Box(
+                    Modifier.align(Alignment.BottomCenter)
                         .padding(
                             start = PillSideMargin,
                             end = PillSideMargin,
-                            // Clear of the bar, then the same gap again above it, so the two read as
-                            // one stack rather than as a button resting on a bar.
+                            // Clear of where the bar sits, then the same gap again, so the two read
+                            // as one stack rather than as a button resting on a bar.
                             bottom = NavBarFootprint + PillBottomMargin,
                         ),
-                    // Its own height would only carry it as far as the bar's top edge, where it
-                    // would fade out still on screen. [drop] is the rest of the way down.
-                    enter = fadeIn() + slideInVertically { it + drop },
-                    exit = slideOutVertically { it + drop } + fadeOut(),
                 ) { it() }
             } else {
                 // Further in from the corner on a big screen, where the edge is a long way from the
@@ -205,6 +205,18 @@ internal val LocalViewportTop = compositionLocalOf { 0f }
  * screen, so a page being scrolled has no other way to tell it to get out of the way.
  */
 internal val LocalNavBarVisible = staticCompositionLocalOf { mutableStateOf(true) }
+
+/**
+ * How many times this page has been asked to return to the top, or zero.
+ *
+ * The counterpart of [LocalNavBarVisible] and provided the other way round: the shell writes this
+ * and the page reads it. Zero means "nothing asked"; every press after that is a distinct number,
+ * which is what makes a second press restart the effect rather than look like the first one again.
+ *
+ * Provided **per destination** by the shell, so a page only ever sees presses meant for it - see
+ * `DestinationScreen`. Not `static`, because it changes.
+ */
+internal val LocalScrollToTop = compositionLocalOf { 0 }
 
 /**
  * How far text sitting loose on a page is set in from the page's own edge.

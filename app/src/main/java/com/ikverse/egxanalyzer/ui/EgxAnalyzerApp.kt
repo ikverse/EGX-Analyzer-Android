@@ -286,7 +286,11 @@ private fun AppRail(appState: AppState) {
             val selected = appState.destination == destination
             NavigationRailItem(
                 selected = selected,
-                onClick = { appState.navigate(destination) },
+                // Pressing the destination you are already on means "back to the top" - the same
+                // press every bottom bar on this platform answers that way. See AppState.scrollToTop.
+                onClick = {
+                    if (selected) appState.scrollToTop(destination) else appState.navigate(destination)
+                },
                 icon = { NavigationIcon(destination, selected) },
                 label = { Text(destination.label) },
             )
@@ -330,10 +334,14 @@ private fun FloatingNavBar(appState: AppState, modifier: Modifier = Modifier) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 AppDestination.entries.forEach { destination ->
+                    val selected = appState.destination == destination
                     PillItem(
                         destination = destination,
-                        selected = appState.destination == destination,
-                        onClick = { appState.navigate(destination) },
+                        selected = selected,
+                        // As on the rail: already here means take me back to the top.
+                        onClick = {
+                            if (selected) appState.scrollToTop(destination) else appState.navigate(destination)
+                        },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -566,12 +574,21 @@ private fun DestinationScreen(
     activity: Activity,
     appState: AppState,
 ) {
-    when (destination) {
-        AppDestination.ANALYZE -> AnalyzeScreen(activity, appState)
-        AppDestination.RESULTS -> ResultsScreen(activity, appState)
-        AppDestination.INSIGHTS -> InsightsScreen(appState)
-        AppDestination.PORTFOLIO -> PortfolioScreen(appState)
-        AppDestination.SETTINGS -> SettingsScreen(appState)
+    // The one place both shells build a page, and so the only place that knows which destination is
+    // being composed. Published from here rather than read from `AppState` inside `Screen`, because
+    // the pager keeps the neighbouring pages composed: a page that read the request directly would
+    // answer a press meant for the tab beside it and throw away a scroll position nobody touched.
+    val request = appState.scrollToTopRequest
+    CompositionLocalProvider(
+        LocalScrollToTop provides (request?.takeIf { it.first == destination }?.second ?: 0),
+    ) {
+        when (destination) {
+            AppDestination.ANALYZE -> AnalyzeScreen(activity, appState)
+            AppDestination.RESULTS -> ResultsScreen(activity, appState)
+            AppDestination.INSIGHTS -> InsightsScreen(appState)
+            AppDestination.PORTFOLIO -> PortfolioScreen(appState)
+            AppDestination.SETTINGS -> SettingsScreen(appState)
+        }
     }
 }
 

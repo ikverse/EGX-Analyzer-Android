@@ -217,6 +217,13 @@ Being right often is not the same as being worth following, and the ranking used
   name do not fit a card at `ChannelCardMinWidth` (280dp). `averageReturn` sits under it as the
   **Per judged call** figure, which is what keeps the card able to say why the list is in the order
   it is: neither number answers alone, and a rate on its own is the one that misleads.
+- **The hero opens the page and sits in a card.** `SectionCard`, the non-expandable one, with no
+  title — background only, so it keeps its own `BEST RECORD` overline rather than gaining a second
+  heading in a second type style above it. It was loose on the page until then, which made it the
+  only thing on Insights without an edge round it: readable while it stood alone, and an unfinished
+  heading once a card sat directly beneath it. `OutcomeBar` takes `on = surfaceContainer` there and
+  not `background` — that parameter is the ground its softened target-2 segment is composited onto,
+  so a card round the hero without it draws one segment a colour the card never shows.
 - **A channel still needs `MINIMUM_JUDGED_TO_RANK` (5) settled calls to lead at all.** Without it
   two good calls beat a month of evidence. Below the floor the figures are reported exactly as
   measured; they simply stop sorting above channels with a record behind them.
@@ -834,8 +841,11 @@ The app has always known every fact on this card and has never had a place to sa
 reached at eleven on Tuesday morning reached the reader as a status, on a card, inside a folded
 section, on a tab they had to choose — so *what happened today*, the one question with a daily
 rhythm to it, was the question no screen answered. `SessionDigest` is that answer, drawn by
-`TodayCard` **under Overdue on the Portfolio and above the hero on Insights**: one card, two tabs,
-one digest, so the two can never report a session differently.
+`TodayCard` **second on both tabs — under Overdue on the Portfolio and under the hero on Insights**:
+one card, two tabs, one digest, so the two can never report a session differently. Second and not
+first, for one reason on both: each of those is the thing its page exists for — the trades asking to
+be acted on, the standing verdict on the sources — while this is what changed since the reader last
+looked. Perishable, so it goes above everything that takes scrolling to reach, and no higher.
 
 - **A session, never a day, and the session comes from the prices.** The card reports on
   `PerformanceReport.pricesTo` — the newest session any stock has a row for — which is the same
@@ -1559,6 +1569,31 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   That has happened here — the ISIN migration — and nothing noticed at the time. Seven days, which
   clears the Friday–Saturday weekend plus a public holiday. Both are now standing state on Insights
   rather than a count in a toast — see **When the feed goes quiet**.
+- **Pressing the destination already showing takes that page back to the top.** The press every
+  bottom bar on this platform answers, and this app answered it with nothing — the way back from a
+  session card deep inside Insights was to scroll all of it by hand. `AppState.scrollToTopRequest`
+  is a **destination and a counter**, and both halves are load-bearing: the destination because the
+  pager keeps the neighbouring pages composed, so a bare signal would take those to the top too and
+  throw away a scroll position on a tab nobody touched; the counter because a second press is a
+  second request, and a value that repeated would restart no effect. The shell publishes it through
+  `LocalScrollToTop` from `DestinationScreen` — the one place both shells build a page and so the
+  only place that knows which destination is being composed — and `Screen` animates the scroll, so
+  all five pages get it from one change. **Deliberately not folded into `navigate()`**: the pager
+  calls that on every swipe and its `snapshotFlow` reports the page it is already on the moment it
+  starts collecting, so a scroll-to-top in there would fire on first composition and again on every
+  settle, throwing the reader to the top for having swiped to a tab.
+- **The Analyze action is always on screen, and it does not move.** It used to leave and return on
+  the same scroll the bottom bar did — tidy, and it meant the one control that starts a run could
+  not be reached from anywhere but the top of the page. Its **visibility** is unpinned; its
+  **position** deliberately is not. Letting it drop into the room the bar vacates was tried before
+  and is what the pinning replaced, because it put two pieces of chrome on one gesture travelling
+  opposite ways — so it holds its height whatever the bar does and there is simply space beneath it
+  when the bar goes. The wide layout already drew it unconditionally, so this is the compact branch
+  only. Its running ground `actionAuroraBase` is **0.84 against the resting fill's 0.94**, and those
+  ten points are the other half of the same change: a permanent button over a page the reader is
+  still scrolling reads as a slab parked on it unless the page shows faintly through. Only the
+  ground thins — the `actionAurora` circles are the light inside it, and dimming those would take
+  down the one thing on the button that says a model is working.
 - **The two shells are two call sites, so no page may hold its own state.** `EgxAnalyzerApp` branches
   on `rail` around one `AppContent` for the rail and another for the pill, and again around
   `AnimatedContent` versus `DestinationPager`. Folding the phone flips `rail`, Compose disposes one

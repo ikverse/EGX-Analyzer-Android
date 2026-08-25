@@ -45,8 +45,11 @@ import com.ikverse.egxanalyzer.ui.theme.extraColors
  * dropped on the floor.
  *
  * **One card, drawn on two screens, from one [SessionDigest].** On the Portfolio it sits under
- * Overdue, which is the only thing on that tab asking to be acted on; on Insights it leads, because
- * the record beneath it is reference and this is news. Its open state is shared through
+ * Overdue, which is the only thing on that tab asking to be acted on; on Insights under the hero,
+ * which is the standing verdict that tab exists for. Second on both, and for one reason: each of
+ * those is the thing its page is *for*, and this is what changed since the reader last looked -
+ * perishable, so it goes above everything that takes scrolling to reach, and no higher. Its open
+ * state is shared through
  * [PageState.todayExpanded] for the same reason the digest is: two cards reporting one session that
  * could be folded apart would read as two different cards that happen to agree.
  *

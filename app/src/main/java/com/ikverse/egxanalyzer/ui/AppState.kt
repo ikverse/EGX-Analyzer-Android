@@ -1630,6 +1630,37 @@ class AppState(
         this.destination = destination
     }
 
+    /**
+     * The page a reader has asked to be taken back to the top of, and how many times they have.
+     *
+     * Pressing the destination you are already on means "take me back to the top" on every platform
+     * that has a bottom bar, and this app had nothing behind that press at all - so the way back
+     * from a session card deep inside Insights was to scroll all of it by hand.
+     *
+     * A destination **and** a counter, and both halves are load-bearing. The destination, because
+     * the pager composes the pages either side of the one being read: a bare signal would take the
+     * neighbours to the top as well and quietly throw away a position on a tab nobody had touched.
+     * The counter, because a second press is a second request - a value that repeated would restart
+     * nothing, and the page would answer the first press and ignore every one after it.
+     */
+    var scrollToTopRequest by mutableStateOf<Pair<AppDestination, Int>?>(null)
+        private set
+
+    private var scrollToTopCount = 0
+
+    /**
+     * Asks [destination]'s page to return to the top.
+     *
+     * Deliberately **not** folded into [navigate]. The pager calls that on every swipe, and its
+     * `snapshotFlow` reports the page it is already on the moment it starts collecting - so a
+     * scroll-to-top inside `navigate` would fire on first composition and again every time a drag
+     * settled, which is a page throwing the reader back to the top for having swiped to it.
+     */
+    fun scrollToTop(destination: AppDestination) {
+        scrollToTopCount++
+        scrollToTopRequest = destination to scrollToTopCount
+    }
+
     fun toggleContentType(type: AnalysisContentType) {
         selectedContentTypes = if (type in selectedContentTypes) selectedContentTypes - type
         else selectedContentTypes + type

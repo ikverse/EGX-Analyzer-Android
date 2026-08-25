@@ -160,16 +160,17 @@ internal fun InsightsScreen(appState: AppState) {
             }
         }
 
-        // Above the hero, and above the filters that narrow everything below it. The record is what
-        // this tab is for and the hero is its answer, but both are reference: they are read when
-        // the reader has come to ask a question. What happened on the last session is news, it is
-        // true of the whole record whatever the filters say, and it stops being worth reading the
-        // moment the next session opens. Absent entirely until a session has prices.
-        TodayCard(appState)
-
         // The answer leads, and the controls that narrow it come after. This tab exists to settle
         // one argument - which source is worth reading - and it used to open on a filter row.
         if (report.tracked > 0) InsightsHero(report)
+
+        // Under the hero and above the filters that narrow everything below it. Both are read at
+        // the top of the page and they answer different questions: the hero is the standing verdict
+        // this tab exists for, and this is what changed since the reader last looked. The record
+        // outranks the news because the record is why anyone opens Insights - but the news is
+        // perishable, so it sits above everything that takes scrolling to reach. It is true of the
+        // whole record whatever the filters below say, and it is absent until a session has prices.
+        TodayCard(appState)
 
         // Above the empty state below on purpose: filters that vanish when they match nothing leave
         // the reader looking at "nothing matches" with no way to undo it.
@@ -448,8 +449,13 @@ private fun ScoredCall.reason(): String {
  * The bar is the argument: a rate on its own hides how the calls behind it divided, and the bar
  * under it does not. How much evidence that rests on is the line of counts beside it.
  *
- * Nothing here is drawn in a card. The hero is the page rather than something on it, and a card
- * around it would put an edge between the reader and the first thing they came for.
+ * **In a card, and it did not used to be.** Loose on the page it was the only thing on Insights
+ * without an edge round it, which read as an unfinished heading rather than as the page's own
+ * answer - and with a card beneath it carrying the session's news, a bare column above one was two
+ * different kinds of thing stacked with nothing to say which was which. [SectionCard] and not
+ * [ExpandableSection]: this is the one thing on the tab nobody should have to open, so it takes the
+ * background and none of the behaviour. No title either - the card's heading row would sit above
+ * the hero's own `BEST RECORD` overline and say the same thing twice in two type styles.
  */
 @Composable
 private fun ColumnScope.InsightsHero(report: PerformanceReport) {
@@ -460,10 +466,11 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
     // itself in two places at once.
     val best = ranked.firstOrNull { it.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK }
 
-    Column(
-        Modifier.padding(start = PageTextInset, end = Space.xs),
-        verticalArrangement = Arrangement.spacedBy(Space.s),
-    ) {
+    // The children go straight in rather than into a Column of their own: SectionCard already pads
+    // its contents by Space.l and spaces them by Space.s, which is exactly what the hand-rolled
+    // column did. Its own PageTextInset goes with it - that inset exists to line loose text up with
+    // a card's contents, and inside a card it would simply be that padding applied twice.
+    SectionCard {
         Text(
             if (best == null) "NOT ENOUGH SETTLED YET" else "BEST RECORD",
             style = MaterialTheme.typography.labelSmall,
@@ -489,7 +496,11 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            OutcomeBar(best, on = MaterialTheme.colorScheme.background)
+            // The ground the softened "reached target 2" segment is mixed onto, and it has to name
+            // the surface actually behind the bar. It said `background` while the hero was loose on
+            // the page; inside a card that is the wrong ground and the segment comes out a colour
+            // the card never shows.
+            OutcomeBar(best, on = MaterialTheme.colorScheme.surfaceContainer)
             // The figure and the line that says what it is, kept tight to each other: at the
             // column's own spacing they read as two separate things rather than as a caption.
             Column(verticalArrangement = Arrangement.spacedBy(HeroLabelBaseline)) {

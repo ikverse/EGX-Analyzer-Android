@@ -174,8 +174,16 @@ data class ExtraColors(
      *
      * [actionAurora] is drawn as three soft circles over [actionAuroraBase] on cycles that do not
      * divide into one another, so the movement never visibly repeats. Their alphas are low on
-     * purpose: they land over a ground already at 0.94, and anything stronger would make the busy
-     * parts of the sweep read as more solid than the bar beneath it.
+     * purpose: they land over a ground at 0.84, and anything stronger would make the busy parts of
+     * the sweep read as more solid than the bar beneath it.
+     *
+     * **The ground is 0.84 and the resting fill is 0.94**, and the ten points between them are the
+     * running state's own. The action no longer hides when the navigation does, so while a run is
+     * going it is a permanent object over a page the reader is still scrolling - and a solid one
+     * reads as a slab parked on top of the page rather than as a control floating over it. Letting
+     * the page show faintly through is what keeps a button that never leaves from feeling like a
+     * hole in the screen. Only the ground moves: the circles are the light inside it, and thinning
+     * those would dim the one thing on the button that says a model is working.
      *
      * The middle stop is the blue that means a price the market reached. Borrowed knowingly: that
      * rule governs a hue labelling a figure, and a light moving inside a button labels nothing. It
@@ -232,7 +240,7 @@ private val DarkExtras = ExtraColors(
     actionFill = listOf(Color(0xF0004E5A), Color(0xF00B6D7F)),
     onAction = Color(0xFFCFF3FA),
     actionGlow = Color(0xFF5DD4E8),
-    actionAuroraBase = Color(0xF0072A3E),
+    actionAuroraBase = Color(0xD6072A3E),
     actionAurora = listOf(Color(0x6B5DD4E8), Color(0x5C4C9DF0), Color(0x9E0B6D7F)),
     aiStop = Color(0xFFFF8A80),
     aiLine = listOf(Color(0xFF9E8AF0), Color(0xFFB98ADD), Color(0xFFDE86B4)),
@@ -260,7 +268,7 @@ private val LightExtras = ExtraColors(
     onAction = Color(0xFFE8FAFF),
     // Not the dark theme's #5DD4E8: a glow that pale on a near-white page is not a glow.
     actionGlow = Color(0xFF00697A),
-    actionAuroraBase = Color(0xF005303F),
+    actionAuroraBase = Color(0xD605303F),
     // The light theme's market blue in the middle stop, for the reason the dark theme's is its own:
     // #4C9DF0 was picked to read on black.
     actionAurora = listOf(Color(0x6B3FB4CE), Color(0x5C1668C7), Color(0x9E0A5C6C)),
