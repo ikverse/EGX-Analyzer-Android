@@ -1750,10 +1750,19 @@ at the foot of the screen until 2026-08-25.
   600dp of container: stacked on the 379dp cover screen, 313dp each on the 638dp unfolded Fold, 347
   each on the tablet. Note the outer pane split is 720dp and **no real device here reaches it** on
   that page (the emulator's 739 does), so those two cards get the page's full width to divide.
-  `alignHeights` stretches both columns to the taller through `IntrinsicSize.Max`; it is off by
-  default because it is wrong for the case the helper was built for — a tall main pane would drag a
-  short side column's last card down to meet it — and right for a pair, where two cards of equal
-  standing ending at two heights reads as one of them having failed to load.
+  `alignHeights` stretches both columns to the taller; it is off by default because it is wrong for
+  the case the helper was built for — a tall main pane would drag a short side column's last card
+  down to meet it — and right for a pair, where two cards of equal standing ending at two heights
+  reads as one of them having failed to load. **It measures rather than asking for an intrinsic, and
+  that distinction shipped a crash.** `Modifier.height(IntrinsicSize.Max)` is the obvious way to
+  write it and it throws: intrinsic measurement of a `SubcomposeLayout` is unsupported, and these
+  panes contain an `AdaptiveInline`, which is a `BoxWithConstraints`. Because the Row branch is only
+  taken above `minWidth`, it stood up on the cover screen and died the moment the phone was
+  unfolded — v2.1.31, reported from the device. `ResponsiveRows` carries the identical warning about
+  `IntrinsicSize.Min` a few hundred lines above, which is the part worth remembering: **the trap was
+  already written down and got walked into anyway.** The height is read back with `onSizeChanged`
+  and can only grow, so it settles in one pass, and its reset key is the width so a fold cannot
+  carry one layout's height into the other.
 - **Both were hand-built copies of `SectionCard` and are not any more.** That is what let them drift:
   same container and shape, and then one tinting its icon `primary` and the other leaving the
   calendar untinted, each spelling its own header row and divider. Drawing the background twice is

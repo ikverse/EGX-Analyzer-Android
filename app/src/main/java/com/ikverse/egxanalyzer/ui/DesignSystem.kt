@@ -16,15 +16,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -469,8 +470,16 @@ fun AdaptivePanes(
      * for a **pair**, where two cards of the same standing sitting at two different heights reads as
      * one of them having failed to load rather than as one simply having less in it.
      *
-     * `IntrinsicSize.Max` measures the row before it places anything, so both columns are given the
-     * taller column's height and the cards inside them fill it.
+     * **Measured, not intrinsic, and that distinction crashed the Analyze screen once.**
+     * `Modifier.height(IntrinsicSize.Max)` is the obvious way to write this and it throws here:
+     * intrinsic measurement of a `SubcomposeLayout` is unsupported, and the panes on Analyze contain
+     * an [AdaptiveInline], which is a `BoxWithConstraints`. It only ever took that path above
+     * [minWidth], so it stood up on a cover screen and died the moment the phone was unfolded.
+     * `ResponsiveRows` carries the same warning about `IntrinsicSize.Min` a few hundred lines up.
+     *
+     * So the height is read back from what the columns actually measured and applied to both. It
+     * can only ever grow, which is what stops it oscillating; the reset key is the width, so a fold
+     * does not carry the other layout's height across.
      */
     alignHeights: Boolean = false,
     main: @Composable ColumnScope.() -> Unit,
@@ -478,9 +487,22 @@ fun AdaptivePanes(
 ) {
     BoxWithConstraints {
         if (maxWidth >= minWidth) {
-            val row = if (alignHeights) Modifier.height(IntrinsicSize.Max) else Modifier
-            val column = if (alignHeights) Modifier.fillMaxHeight() else Modifier
-            Row(row, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+            // Keyed on the width so a fold starts this over rather than stretching one layout's
+            // columns to a height measured under the other.
+            var tallest by remember(maxWidth, alignHeights) { mutableIntStateOf(0) }
+            val stretch = with(LocalDensity.current) { tallest.toDp() }
+            val column = Modifier
+                .then(if (alignHeights && tallest > 0) Modifier.height(stretch) else Modifier)
+                .then(
+                    if (alignHeights) {
+                        // Grows only. Once both columns are held at the tallest height they both
+                        // report it, so this settles after one pass instead of trading heights.
+                        Modifier.onSizeChanged { if (it.height > tallest) tallest = it.height }
+                    } else {
+                        Modifier
+                    },
+                )
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                 Column(
                     column.weight(mainWeight),
                     verticalArrangement = Arrangement.spacedBy(Space.m),
