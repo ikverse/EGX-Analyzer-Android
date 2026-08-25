@@ -172,13 +172,18 @@ data class ExtraColors(
      * What it has to read against is the page scrolling behind the button - which is dark on one
      * theme and near-white on the other, so the stops invert while the hue does not.
      *
-     * Fully opaque, alone among the action's colours. [actionFill] and [actionAuroraBase] carry
-     * 0.84 so the page shows faintly through a control that never leaves the screen; an edge doing
-     * the same would be an edge that stops holding the shape against whatever scrolls under it,
-     * which is the one job a hairline has. `ActionPaletteTest` pins that.
+     * **Lighter-handed than the ground it surrounds**: 0.74 against [actionFill]'s 0.84. It shipped
+     * opaque and at the aurora's own full-strength hues, on the argument that an edge letting the
+     * page through stops holding the shape against whatever scrolls under it - and on the device
+     * that read as a bright cyan wire around the button, loudest thing on a dark page and competing
+     * with the label it was supposed to frame. The shape still holds at 0.74 because what draws it
+     * is the *contrast* with the page rather than the weight of the line.
      *
-     * The hues are the aurora's own, in the aurora's own order - cyan, blue, teal - rather than a
-     * fourth set invented for the edge.
+     * The hues are the aurora's own taken down about a third, in the aurora's own order - cyan,
+     * blue, teal - rather than a fourth set invented for the edge. Every stop carries the same
+     * alpha: a ramp whose stops differ in opacity fades out along its length, which reads as a
+     * gradient that has gone wrong rather than as one that was chosen. `ActionPaletteTest` pins
+     * that, and that the edge shares no stop with the fill.
      */
     val actionLine: List<Color>,
 
@@ -264,9 +269,10 @@ internal val DarkExtras = ExtraColors(
     aiFill = listOf(Color(0xFF4A3FBE), Color(0xFF7548AE), Color(0xFF9C4478)),
     aiOnFill = Color.White,
     actionFill = listOf(Color(0xD6004E5A), Color(0xD60B6D7F)),
-    // [actionGlow] and the aurora's own two hues, opaque. Lighter than the fill it surrounds,
-    // because on this theme the page behind the button is dark and an edge has to lift off it.
-    actionLine = listOf(Color(0xFF5DD4E8), Color(0xFF4C9DF0), Color(0xFF3FB4CE)),
+    // [actionGlow] and the aurora's own two hues, taken down about a third from the values this
+    // shipped with. Still lighter than the fill it surrounds, because on this theme the page behind
+    // the button is dark and an edge has to lift off it - but no longer a bright wire around it.
+    actionLine = listOf(Color(0xBD4194A2), Color(0xBD356EA8), Color(0xBD2C7E90)),
     onAction = Color(0xFFCFF3FA),
     actionGlow = Color(0xFF5DD4E8),
     actionAuroraBase = Color(0xD6072A3E),
@@ -297,7 +303,9 @@ internal val LightExtras = ExtraColors(
     // The same three roles as the dark theme's, taken from this theme's own values rather than
     // reused: the page here is near-white, so the edge runs dark where the dark theme's runs light.
     // #5DD4E8 on this page is the glow problem again - a line that pale does not read as a line.
-    actionLine = listOf(Color(0xFF00697A), Color(0xFF1668C7), Color(0xFF0A5C6C)),
+    // Deepened by the same third as the dark theme's, so the two keep the same relationship to
+    // their own grounds; on this page the effect is a firmer line rather than a quieter one.
+    actionLine = listOf(Color(0xBD004A55), Color(0xBD0F498B), Color(0xBD07404C)),
     onAction = Color(0xFFE8FAFF),
     // Not the dark theme's #5DD4E8: a glow that pale on a near-white page is not a glow.
     actionGlow = Color(0xFF00697A),

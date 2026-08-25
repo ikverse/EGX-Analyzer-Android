@@ -20,23 +20,36 @@ class ActionPaletteTest {
     private val themes = mapOf("dark" to DarkExtras, "light" to LightExtras)
 
     /**
-     * The fill lets the page through; the edge does not.
+     * Nothing the action is drawn with is solid.
      *
-     * [ExtraColors.actionFill] carries 0.84 in the colour itself because the action never leaves the
-     * screen, and a solid one reads as a slab parked on a page still being scrolled. An edge doing
-     * the same stops holding the shape against whatever passes under it, which is the one job it
-     * has - so the two figures are deliberately opposite, and the pair is asserted together because
-     * either alone reads as an arbitrary number.
+     * It never leaves the screen, so a solid anything reads as a slab parked on a page still being
+     * scrolled - the ground carries 0.84 for that reason and the edge 0.74. The exact figures are
+     * not asserted, because a test repeating a constant back proves nothing; what is asserted is
+     * that neither has quietly become opaque, which is what happens when a stop is copied from a
+     * palette that was not built to float.
      */
     @Test
-    fun `the action's fill is see-through and its edge is not`() {
+    fun `neither the action's fill nor its edge is solid`() {
         themes.forEach { (name, extras) ->
-            extras.actionFill.forEach { stop ->
-                assertTrue("$name fill stop is opaque", stop.alpha < 1f)
+            (extras.actionFill + extras.actionLine).forEach { stop ->
+                assertTrue("$name has a solid stop", stop.alpha < 1f)
             }
-            extras.actionLine.forEach { stop ->
-                assertEquals("$name edge stop is see-through", 1f, stop.alpha, 0f)
-            }
+        }
+    }
+
+    /**
+     * One alpha across a ramp.
+     *
+     * A gradient whose stops differ in opacity fades out along its length as well as changing hue,
+     * which reads as a gradient that has gone wrong rather than one that was chosen - and it is an
+     * easy slip, because the hues are edited one at a time and the alpha rides along in the same
+     * literal.
+     */
+    @Test
+    fun `every stop in a ramp carries the same alpha`() {
+        themes.forEach { (name, extras) ->
+            assertEquals("$name fill fades along its length", 1, extras.actionFill.map(Color::alpha).toSet().size)
+            assertEquals("$name edge fades along its length", 1, extras.actionLine.map(Color::alpha).toSet().size)
         }
     }
 
