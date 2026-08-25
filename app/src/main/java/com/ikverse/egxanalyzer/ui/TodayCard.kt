@@ -84,10 +84,10 @@ internal fun ColumnScope.TodayCard(appState: AppState) {
             return@ExpandableSection
         }
         BoxWithConstraints {
-            // The Overdue card's own grid, through the same helper: two tiles across on the cover
-            // screen, four on the Fold and the tablet. Two lists of small facts on two tabs laid
-            // out by two rules would be a difference the reader has to account for.
-            val columns = responsiveColumns(minColumnWidth = EventTileMinWidth, maxColumns = 4)
+            // The Overdue card's helper, deliberately not its numbers - see [EventTileMinWidth].
+            // Three across at most, so a wide screen spends its width on tiles that fit their
+            // contents rather than on more tiles that do not.
+            val columns = responsiveColumns(minColumnWidth = EventTileMinWidth, maxColumns = 3)
             Column {
                 ResponsiveRows(digest.events, columns, spacing = Space.s) { event, tileModifier ->
                     EventTile(
@@ -155,31 +155,39 @@ private fun SessionDigest.headlineLine(): AnnotatedString {
 }
 
 /**
- * One event, in three facts and a press.
+ * One event, on three lines and a press.
  *
- * Modelled on the Overdue tile, deliberately down to the layout: the mark and the ticker on the top
- * line with the arrow against the ticker's end, and everything measured on a line under them that
- * takes the tile's full width. Two grids of small cards on two tabs that looked subtly different
- * would be a difference the reader has to work out is meaningless.
+ * The mark and the ticker take the top line with the arrow against the ticker's end, exactly as the
+ * Overdue tile does. Under them what happened gets **a line to itself**, and the figure that
+ * qualifies it gets another. Both used to share one line joined by a separator, which put the
+ * longest phrase this card can print - "stopped out after target 1" - into competition for width
+ * with the one fact that says how the event landed, and on a narrow tile the reader lost the end of
+ * one to keep the start of the other.
  *
- * What happened is the coloured part, because it is what the tile is for. The channel follows it
- * where the event belongs to a call - a stop against the name that printed it is the whole point of
- * this app - and gives way first when the tile is narrow. A trade carries its return instead, in
- * the green or red it wears everywhere else: what the user's own money did is the fact a call
- * cannot supply.
+ * What happened is the coloured part, because it is what the tile is for, and it is the line
+ * allowed to **wrap rather than ellipse**. A width is a bet about the font scale and the reader's
+ * may not be the default; wrapping is what actually keeps the phrase whole, and `ResponsiveRows`
+ * already sizes every card in a row to the tallest, so a tile that takes two lines costs the
+ * alignment nothing.
+ *
+ * The line under it is a trade's return, in the green or red it wears everywhere else - what the
+ * user's own money did is the fact a call cannot supply - or, on a call, the channel that printed
+ * it, because a stop against the name behind it is the whole point of this app. It is the one line
+ * held to a single line with an ellipsis: a long Arabic source name is what should give way here,
+ * and it is **absent rather than blank** where an event has neither figure, so a tile never carries
+ * an empty row.
  */
 @Composable
 private fun EventTile(event: DayEvent, onOpen: () -> Unit, modifier: Modifier = Modifier) {
     val eventColor = toneColor(event.kind.tone)
-    val returnColor = PriceRole.forReturn(event.returnPct)
-    val meta = buildAnnotatedString {
-        withStyle(SpanStyle(color = eventColor)) { append(event.kind.summary) }
-        if (event.kind.held && event.returnPct != null) {
-            append(" · ")
-            withStyle(SpanStyle(color = returnColor)) { append(formatPercent(event.returnPct)) }
-        } else if (!event.channel.isNullOrBlank()) {
-            append(" · ${event.channel}")
-        }
+    val detail: Pair<String, Color>? = when {
+        event.kind.held && event.returnPct != null ->
+            formatPercent(event.returnPct) to PriceRole.forReturn(event.returnPct)
+
+        !event.channel.isNullOrBlank() ->
+            event.channel to MaterialTheme.colorScheme.onSurfaceVariant
+
+        else -> null
     }
     Card(
         onClick = onOpen,
@@ -217,12 +225,23 @@ private fun EventTile(event: DayEvent, onOpen: () -> Unit, modifier: Modifier = 
                 )
             }
             Text(
-                meta,
+                event.kind.summary,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                color = eventColor,
+                // Two lines rather than one, and an ellipsis only past them: this is the phrase the
+                // tile exists to carry, and losing its end is losing which way the news went.
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+            detail?.let { (text, tone) ->
+                Text(
+                    text,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = tone,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -247,11 +266,18 @@ private fun toneColor(tone: EventTone): Color = when (tone) {
 private fun plural(count: Int, word: String): String = if (count == 1) word else "${word}s"
 
 /**
- * Narrower than the Overdue tile, and for the reason that tile is 150dp: what has to fit.
+ * Wider than the Overdue tile, and paired with a lower column cap, because the content is longer.
  *
- * "stopped out after target 1" is the longest thing said here and it is longer than any overdue
- * line, but it is also the one line that may be ellipsed without losing the tile - the colour has
- * already said which way the news went, and the card behind the press says the rest. The ticker and
- * the mark are what must never wrap, and they need no more room than they do over there.
+ * The Overdue card's grid is 150dp across up to four columns and right for what it carries -
+ * "6d · 12 Aug · +3.4%" is half the length of "stopped out after target 1". Copying its numbers
+ * here produced the layout the reader actually complained about: `responsiveColumns` spends surplus
+ * width on **more** columns, so at 750dp the unfolded panel took four tiles of 187dp while the
+ * 411dp cover screen took two of 205dp - the big screen truncating harder than the small one.
+ *
+ * 200dp with at most three columns inverts that. The cover screen is deliberately unchanged, still
+ * two across at 205dp; the unfolded panel goes to three at 250dp and the tablet to three at 273dp,
+ * which is where the surplus belongs. The shared helper stays - a grid derived from the space
+ * actually available is right for both cards - and only the two numbers differ, because what has to
+ * fit in a column is a property of the column's contents and not of the app's taste in grids.
  */
-private val EventTileMinWidth = 150.dp
+private val EventTileMinWidth = 200.dp
