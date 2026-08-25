@@ -242,6 +242,25 @@ private fun EventTile(event: DayEvent, onOpen: () -> Unit, modifier: Modifier = 
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            // Only where there is room for it, which is the app's own answer to that question
+            // rather than a second measurement taken here - see LocalWindowWidth, published by the
+            // shell exactly so that screens cannot disagree about where the line falls. The cover
+            // panel is already spending its width on the phrase above.
+            if (LocalWindowWidth.current != WindowWidth.COMPACT) {
+                Text(
+                    // "called" earns its place: a bare date under an event reads as the day the
+                    // event happened, and it is not - the heading above already names that session.
+                    // This is the session the call was printed for, which on a card that can carry
+                    // a stop from a recommendation three weeks old is the context the rest lacks.
+                    "called ${shortDate(event.openedOn)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    // The role for dates, notes and counts, which is what this is. Everything above
+                    // it on the tile is a claim about a price and wears a hue that says so.
+                    color = PriceRole.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -266,18 +285,30 @@ private fun toneColor(tone: EventTone): Color = when (tone) {
 private fun plural(count: Int, word: String): String = if (count == 1) word else "${word}s"
 
 /**
- * Wider than the Overdue tile, and paired with a lower column cap, because the content is longer.
+ * Sized against the **container**, which is much narrower than the device, and that is the trap.
  *
- * The Overdue card's grid is 150dp across up to four columns and right for what it carries -
- * "6d · 12 Aug · +3.4%" is half the length of "stopped out after target 1". Copying its numbers
- * here produced the layout the reader actually complained about: `responsiveColumns` spends surplus
- * width on **more** columns, so at 750dp the unfolded panel took four tiles of 187dp while the
- * 411dp cover screen took two of 205dp - the big screen truncating harder than the small one.
+ * `responsiveColumns` measures `BoxWithConstraints`, and by the time the grid is drawn the width has
+ * lost the page's 16dp either side, the card's own 16dp either side, and on a wide window the
+ * navigation rail as well. Reading it off the device instead gives numbers that are wrong by 64dp
+ * on the cover screen and by about 144dp on the Fold - which is exactly the mistake that shipped
+ * here, and it collapsed the cover screen to a single full-width tile:
  *
- * 200dp with at most three columns inverts that. The cover screen is deliberately unchanged, still
- * two across at 205dp; the unfolded panel goes to three at 250dp and the tablet to three at 273dp,
- * which is where the surplus belongs. The shared helper stays - a grid derived from the space
- * actually available is right for both cards - and only the two numbers differ, because what has to
- * fit in a column is a property of the column's contents and not of the app's taste in grids.
+ * | screen | device | container | at 150dp | at 200dp | at 170dp |
+ * |---|---|---|---|---|---|
+ * | Fold cover | 411 | **347** | 2 x 173 | **1 x 347** | 2 x 173 |
+ * | Fold inner | 750 | **606** | 4 x 151 | 3 x 202 | 3 x 202 |
+ * | Tablet | 818 | **674** | 4 x 168 | 3 x 225 | 3 x 225 |
+ *
+ * So 170dp with at most three columns. The **cap is what fixed the wide screens** - the original
+ * four columns spent a big screen's surplus on more tiles rather than wider ones, so the unfolded
+ * panel truncated harder than the cover did - and the minimum only has to stay under half the
+ * narrowest container, which 200 did not. 170 rather than back to 150 is for the widths in between:
+ * a 600dp window (456dp of container) takes three cramped 152dp columns at 150 and two roomy 228dp
+ * ones at 170.
+ *
+ * The Overdue card keeps 150dp across four columns and is right to: "6d · 12 Aug · +3.4%" is half
+ * the length of "stopped out after target 1". The shared helper stays, because a grid derived from
+ * the space actually available is right for both; only the numbers differ, because what has to fit
+ * in a column is a property of that column's contents rather than of a house grid.
  */
-private val EventTileMinWidth = 200.dp
+private val EventTileMinWidth = 170.dp

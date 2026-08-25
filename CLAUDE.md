@@ -891,22 +891,45 @@ one digest, so the two can never report a session differently.
   announcing it would be furniture; "nothing moved on this session" is a genuine answer to the
   question being asked, and its absence would read as the app not having looked. The card is absent
   only when there is no session at all — a fresh install with no prices.
-- **Tiles, through the Overdue card's helper but deliberately not its numbers.** 200dp across up to
-  **three** columns, against Overdue's 150dp up to four, and the difference is the whole reason the
-  first version of this was wrong. `responsiveColumns` spends surplus width on *more* columns, so
-  copying a grid tuned for "6d · 12 Aug · +3.4%" gave the 750dp unfolded panel four tiles of 187dp
-  while the 411dp cover screen got two of 205dp — **the big screen truncating harder than the small
-  one**, which is exactly backwards and is what the reader reported. Now the cover is unchanged at
-  two across, the Fold goes to three at 250dp and the tablet to three at 273dp. The shared helper
-  stays; what has to fit in a column is a property of that column's contents, not of a house grid.
-- **Three lines, and only the last one may be lost.** The ticker, then what happened on a line of
-  its own, then the figure that qualifies it — a trade's return in its own green or red, or on a
-  call the channel that printed it. The first two used to share one line joined by a separator,
-  which put "stopped out after target 1" into competition for width with the fact saying how it
-  landed. What happened is allowed to **wrap to two lines rather than ellipse**, because a column
-  width is a bet about the reader's font scale and wrapping is what actually keeps the phrase whole;
-  `ResponsiveRows` sizes every card in a row to the tallest, so it costs the alignment nothing. The
-  last line is held to one and is **absent rather than blank** where an event has neither figure.
+- **Tiles, through the Overdue card's helper but deliberately not its numbers** — 170dp across up
+  to **three** columns, against Overdue's 150dp up to four. Two separate mistakes were made getting
+  to those, and both are worth keeping written down because both are easy to repeat. The first was
+  copying Overdue's four-column cap: `responsiveColumns` spends surplus width on *more* columns, so
+  a grid tuned for "6d · 12 Aug · +3.4%" gave the unfolded panel four narrow tiles while the cover
+  screen got two wider ones — **the big screen truncating harder than the small one**. The second
+  was fixing that by sizing the minimum against **device** width rather than the **container**: by
+  the time the grid is measured the width has lost the page's 16dp either side, the card's 16dp
+  either side, and on a wide window the rail as well, which is 64dp on the cover and about 144dp on
+  the Fold. 200dp looked comfortable against 411 and sat just above half of the real 347, collapsing
+  the cover to one full-width tile.
+
+  | screen | device | container | at 150dp | at 200dp | at 170dp |
+  |---|---|---|---|---|---|
+  | Fold cover | 411 | **347** | 2 x 173 | **1 x 347** | 2 x 173 |
+  | Fold inner | 750 | **606** | 4 x 151 | 3 x 202 | 3 x 202 |
+  | Tablet | 818 | **674** | 4 x 168 | 3 x 225 | 3 x 225 |
+
+  The cap is what fixes the wide screens; the minimum only has to stay under half the narrowest
+  container. 170 rather than back to 150 is for the widths in between — a 600dp window takes three
+  cramped 152dp columns at 150 and two roomy 228dp ones at 170. The shared helper stays; what has to
+  fit in a column is a property of that column's contents, not of a house grid.
+- **Three lines, four on a wide screen, and only the last may be lost.** The ticker, then what
+  happened on a line of its own, then the figure that qualifies it — a trade's return in its own
+  green or red, or on a call the channel that printed it. The first two used to share one line
+  joined by a separator, which put "stopped out after target 1" into competition for width with the
+  fact saying how it landed. What happened is allowed to **wrap to two lines rather than ellipse**,
+  because a column width is a bet about the reader's font scale and wrapping is what actually keeps
+  the phrase whole; `ResponsiveRows` sizes every card in a row to the tallest, so it costs the
+  alignment nothing. The figure line is held to one and is **absent rather than blank** where an
+  event has neither.
+- **The call's own date is the fourth line, and only where there is room** — gated on
+  `LocalWindowWidth != COMPACT`, which is the shell's published answer to that question and not a
+  second measurement taken in the card, so the two cannot disagree about where the line falls. It
+  reads **"called 14 Aug"** rather than a bare date: the heading above already names the session the
+  events belong to, so an unlabelled date under one reads as the day it happened, when it is the
+  session the call was *printed for* — which on a card that can carry a stop from a recommendation
+  three weeks old is the context nothing else on the tile supplies. `shortDate` and `PriceRole.muted`,
+  the same helper and the same role the Overdue tile gives its entry date.
 - A press goes to `AppState.openPosition` for a trade and `AppState.openCall` for a call —
   the two entrances every other cross-tab press already uses, so the same tile leads to the same
   place from either tab. Not narrowed by any filter on either screen, for the reason Overdue is not.
