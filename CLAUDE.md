@@ -108,6 +108,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   trade's card, and the Bought button and closing controls that sit on a recommendation card.
 - `ui/CommonUi.kt` holds `Figure` and `FigureGroup`, and `ui/DesignSystem.kt` holds `AppDates` —
   the one figure layout and the one set of date patterns, for every screen that draws either.
+- `ui/EgxAnalyzerApp.kt` holds `AppHeader` and `AppStatusLine` — the app's name, and the one line
+  that says what it is doing or has just done. See **The status line** below.
 - `model/ScheduleClock.kt` + `model/ScheduledJob.kt` — when a scheduled job fires, and what one is.
 - `model/AnalysisPlan.kt` — what a run covers, said explicitly, so the screen and the scheduler
   build the same request. See **Schedules** below.
@@ -1498,6 +1500,53 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   analysis even by accident still holds and now rests on a second thing as well: a scheduled run
   refuses without a saved credential, and the API key has never synced.
 
+## The status line
+
+One line in the header says what the app is doing and what it has just done. It was a floating toast
+at the foot of the screen until 2026-08-25.
+
+- **It moved because of where it was, not how it looked.** An app that reports something after
+  almost every tap was answering from the far end of the screen from the button that had been
+  pressed — on the unfolded panel, the better part of a foot away. And it was the only piece of
+  chrome that had to be lifted clear of the navigation bar and lowered again as that bar came and
+  went (`toastClearance`), which is a whole mechanism existing to keep one transient message off one
+  transient bar. Both problems are answered by putting it where the app's own name already is.
+- **`busyLabel` and `statusMessage` share the line, and a running action wins it.** They describe
+  the same activity a moment apart — `runAction` sets the first, then clears it and sets the second
+  — so two surfaces meant the header could say "Fetching prices" while a tick sat under it reporting
+  the *previous* fetch. `BusyBar` is gone; the `LinearProgressIndicator` stays as a hairline under
+  the header, and its label moved up into the line.
+- **`StatusStage` is what the glyph and the timing read**, not `succeeded`. A step still running is
+  `WORKING` and gets a spinner; reading progress off `succeeded` put a tick beside work the app had
+  not finished, which is what "Connecting to Telegram" used to show. It defaults from `succeeded`,
+  so the fifty-odd ordinary outcomes are unchanged and only a step in flight names it. Not to be
+  confused with `StatusTone` in `CommonUi.kt`, which is GOOD/BAD/NEUTRAL for a `StatusPill` — the
+  two are unrelated and the name collision is why this one is `Stage`.
+- **A confirmation clears itself after 4 seconds; a failure waits to be tapped.** A failure is the
+  one kind worth reading twice and the one kind that can arrive while the reader is looking
+  somewhere else — a provider's refusal is often the only account of why nothing happened. The
+  timer is a `LaunchedEffect` keyed on the message, so a second outcome cancels the first one's
+  clock rather than clearing the new line early.
+- **Beside the name where there is width, under it where there is not**, on `LocalWindowWidth`
+  rather than on the header's own measurement: the shell already works the width out to choose a
+  rail or a bar, and that value is published precisely so two parts of the app cannot disagree about
+  where the line falls. Below 600dp the cover screen has under 200dp spare after a 22sp title, which
+  is most of these messages truncated, so the line drops to a row of its own there.
+- **The row fills the width and the arrangement does the aligning.** Capping it instead left it
+  stranded mid-header on the wide layout: a capped row inside a weighted slot sits at the start of
+  that slot, not at its end.
+- **It animates height as well as opacity.** On the compact layout the line has a row of its own, so
+  a plain fade makes the header jump a line taller the instant a message lands — which reads as the
+  page twitching rather than as an announcement.
+- **The tone is one tinted glyph and never the text.** Colouring the words would make every routine
+  confirmation the loudest thing on screen, and this line now sits beside the app's own name, which
+  is the last place that should flash. Same rule the toast followed.
+- **Wording.** Sentence case, no trailing full stop, an ellipsis only on something still running,
+  and `·` only between counts — `Priced 40/42 · 2 unpriced · 1 stale` is what it is for, where
+  `Key verified · 8 models` was using it to join a clause to a count. One event gets one wording:
+  the chat count is `N chats` from both the launch collector and the Analyze refresh, which used to
+  say "loaded" and "found".
+
 ## Gotchas
 
 - `local.properties` holds `telegramApiId` / `telegramApiHash` and is gitignored. Absent, the app
@@ -1582,18 +1631,28 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   calls that on every swipe and its `snapshotFlow` reports the page it is already on the moment it
   starts collecting, so a scroll-to-top in there would fire on first composition and again on every
   settle, throwing the reader to the top for having swiped to a tab.
-- **The Analyze action is always on screen, and it does not move.** It used to leave and return on
-  the same scroll the bottom bar did — tidy, and it meant the one control that starts a run could
-  not be reached from anywhere but the top of the page. Its **visibility** is unpinned; its
-  **position** deliberately is not. Letting it drop into the room the bar vacates was tried before
-  and is what the pinning replaced, because it put two pieces of chrome on one gesture travelling
-  opposite ways — so it holds its height whatever the bar does and there is simply space beneath it
-  when the bar goes. The wide layout already drew it unconditionally, so this is the compact branch
-  only. Its running ground `actionAuroraBase` is **0.84 against the resting fill's 0.94**, and those
-  ten points are the other half of the same change: a permanent button over a page the reader is
-  still scrolling reads as a slab parked on it unless the page shows faintly through. Only the
-  ground thins — the `actionAurora` circles are the light inside it, and dimming those would take
-  down the one thing on the button that says a model is working.
+- **The Analyze action never leaves, and it follows the bar down.** It used to go with the bar on
+  the same scroll — tidy, and it meant the one control that starts a run was reachable only from the
+  top of the page. It is always on screen now, and rather than holding its height over the hole the
+  bar leaves, it travels into the bar's own place: `animateDpAsState` between
+  `NavBarFootprint + PillBottomMargin` (94dp, clear of the bar and then the same gap again, so the
+  two read as one stack) and `PillBottomMargin` (10dp, the bar's own float off the bottom). The
+  travel is exactly `NavBarFootprint`, which is what makes it land there rather than near there.
+  **This was the rule `toastClearance` in the shell followed**, back when an outcome was a toast at
+  the foot of the screen — same problem, same `animateDpAsState`, and its comment said why: "so a
+  toast raised on a scrolled page does not hang over the gap where the bar used to be". The status
+  line lives in the header now and that clearance is gone with it, so the action is the only
+  floating chrome left that has to follow the bar at all. The wide layout draws it unconditionally with no bar to follow, so all of this is
+  the compact branch only.
+- **The action's ground is 0.84 in both states, against the bar's 0.94.** `actionFill` and
+  `actionAuroraBase` carry the same figure deliberately. The bar tidies itself away while a page is
+  read and the action does not, so the action is a permanent object over a page still being
+  scrolled — and at the bar's opacity it reads as a slab parked on the page rather than as a control
+  floating above it. The two states match because the transparency is a property of the button, not
+  of one of its states: a button that changed weight the moment a run started would report the run
+  twice, once in a way nobody could name. Only the grounds carry it — `onAction` stays opaque so the
+  label survives whatever scrolls behind, and the `actionAurora` circles are the light *inside* the
+  ground, so thinning those would dim the one thing saying a model is working.
 - **The two shells are two call sites, so no page may hold its own state.** `EgxAnalyzerApp` branches
   on `rail` around one `AppContent` for the rail and another for the pill, and again around
   `AnimatedContent` versus `DestinationPager`. Folding the phone flips `rail`, Compose disposes one

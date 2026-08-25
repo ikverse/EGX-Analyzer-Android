@@ -720,7 +720,7 @@ private suspend fun exportReport(activity: Activity, appState: AppState, saved: 
 private fun exportable(appState: AppState, saved: SavedAnalysis): Boolean {
     if (saved.result.consolidated.isNotEmpty()) return true
     appState.statusMessage = StatusMessage(
-        "This run predates the table, so there is nothing to export.",
+        "This run predates the table, so there is nothing to export",
         succeeded = false,
     )
     return false

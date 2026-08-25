@@ -245,7 +245,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 scope.launch {
                     appState.runAction(
                         label = "Refreshing chats",
-                        success = { "${appState.channels.size} chats found" },
+                        success = { "${appState.channels.size} chats" },
                     ) { appState.refreshTelegramChats() }
                 }
             }

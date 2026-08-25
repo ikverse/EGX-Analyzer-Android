@@ -3,6 +3,7 @@ package com.ikverse.egxanalyzer.ui
 import android.app.Activity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
@@ -11,11 +12,12 @@ import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -37,6 +39,8 @@ import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.AutoGraph
 import androidx.compose.material.icons.outlined.Forum
@@ -57,9 +61,8 @@ import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailDefaults
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldLayout
@@ -73,6 +76,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -86,6 +90,8 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -239,37 +245,181 @@ private val RailTopInset = 70.dp
 private val AppMarkSize = 24.dp
 
 /**
- * Says which app this is, above whatever page is showing.
+ * Says which app this is, and what it is doing, above whatever page is showing.
  *
  * Fixed, where the page titles under it scroll away with their content: a name that goes with them
  * leaves the top of a long page saying nothing at all. The mark is the launcher artwork reduced to
  * one colour: the full tile in the rail read as a sticker among the flat navigation glyphs, and it
  * only ever appeared on the wide layout, where this says the same thing on both.
+ *
+ * **The status line lives here now**, where a floating toast used to carry it. Two things put it
+ * here. It was the only piece of chrome that had to be lifted clear of the navigation bar and
+ * lowered again as that bar came and went, which is a whole mechanism existing to keep one
+ * transient message off one transient bar. And an app that says something after almost every tap
+ * was answering from the far end of the screen from the button that had just been pressed - on the
+ * unfolded panel, the better part of a foot away from it.
+ *
+ * @see AppStatusLine for what it draws, and [StatusStage] for how long each kind stays.
  */
 @Composable
-private fun AppHeader() {
+private fun AppHeader(appState: AppState, onDismissStatus: () -> Unit) {
     // A step up from the page it sits on, which separates it without a rule underneath as well.
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+        // The window's own width, not this header's, and not measured again here: the shell already
+        // works it out to choose a rail or a bar, and LocalWindowWidth is published so that two
+        // parts of the app cannot disagree about where the line falls.
+        val beside = LocalWindowWidth.current != WindowWidth.COMPACT
+        // No arrangement spacing: the gap above a message belongs to the message, and spacing here
+        // would hold 6dp open under the name on every idle compact header. It is applied inside the
+        // line instead, where it collapses along with it.
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    painterResource(R.drawable.ic_egx_notification),
+                    // The name is right beside it, and a reader announcing both says it twice.
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(AppMarkSize),
+                )
+                Text(
+                    stringResource(R.string.app_name),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                // Beside the name where there is width for it, taking the surplus rather than a
+                // share of it - the name is what it is, and everything left over is the message's.
+                // Below 600dp the cover screen has under 200dp spare after a 22sp title, which is
+                // most of these messages truncated, so there the line drops underneath instead.
+                if (beside) {
+                    AppStatusLine(
+                        appState = appState,
+                        alignEnd = true,
+                        onDismiss = onDismissStatus,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            if (!beside) {
+                AppStatusLine(
+                    appState = appState,
+                    alignEnd = false,
+                    onDismiss = onDismissStatus,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+/** Between the name and a message sitting under it, on the layout where one does. */
+private val StatusLineGap = 6.dp
+
+/**
+ * One line for everything the app is doing or has just done.
+ *
+ * A running action always wins the line. `busyLabel` and `statusMessage` describe the same activity
+ * a moment apart - `runAction` sets the first, then clears it and sets the second - so showing them
+ * in one place is what stops the header saying "Fetching prices" above a page while a tick sits
+ * beside it reporting the previous fetch.
+ *
+ * Whether it worked is carried by one tinted glyph, exactly as the toast carried it. Colouring the
+ * text would make every routine confirmation the loudest thing on a screen that raises one after
+ * almost every tap - and this line now sits beside the app's own name, which is the last place that
+ * should flash.
+ */
+@Composable
+private fun AppStatusLine(
+    appState: AppState,
+    alignEnd: Boolean,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val busy = appState.busyLabel
+    val message = appState.statusMessage
+    val text = busy ?: message?.text
+    val stage = when {
+        busy != null -> StatusStage.WORKING
+        else -> message?.stage
+    }
+    AnimatedVisibility(
+        visible = text != null && stage != null,
+        // Height as well as opacity. On the compact layout the line has a row of its own, so
+        // without this the header jumps a line taller the instant a message lands and shorter again
+        // when it clears - which reads as the page below it twitching rather than as an
+        // announcement. On the wide layout the row is already as tall as the title beside it, so
+        // the expansion costs nothing there.
+        enter = fadeIn() + expandVertically(),
+        exit = fadeOut() + shrinkVertically(),
+        modifier = modifier,
+    ) {
+        // Held from the last non-null pair so the line fades out reading what it read, rather than
+        // emptying a frame before it goes.
+        val shown = remember { mutableStateOf(text.orEmpty() to (stage ?: StatusStage.DONE)) }
+        if (text != null && stage != null) shown.value = text to stage
+        val (label, glyph) = shown.value
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier
+                // A working line reflects live state and there is nothing to dismiss; the other two
+                // are messages, and a message the reader has finished with should go when tapped.
+                .then(if (glyph == StatusStage.WORKING) Modifier else Modifier.clickable(onClick = onDismiss))
+                // Inside the animated content, so the gap under the name arrives and leaves with
+                // the message rather than being held open under an idle header.
+                .padding(top = if (alignEnd) 0.dp else StatusLineGap)
+                // Full width so the arrangement below can push the line against the header's end on
+                // the wide layout. Capping the width instead left it stranded mid-header: a capped
+                // row inside a weighted slot sits at the start of that slot, not at its end.
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, if (alignEnd) Alignment.End else Alignment.Start),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                painterResource(R.drawable.ic_egx_notification),
-                // The name is right beside it, and a reader announcing both says it twice.
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(AppMarkSize),
-            )
+            StatusGlyph(glyph)
             Text(
-                stringResource(R.string.app_name),
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.primary,
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
+                // Two lines is the ceiling, as it was on the toast. Anything needing more than that
+                // is a screen, not a status line, and a provider's own error can run to a paragraph.
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                // fill = false, or a three-word confirmation is padded out to the full width and
+                // the glyph beside it ends up a long way from the words it qualifies.
+                modifier = Modifier.weight(1f, fill = false),
             )
         }
     }
 }
+
+@Composable
+private fun StatusGlyph(stage: StatusStage) {
+    when (stage) {
+        StatusStage.WORKING -> CircularProgressIndicator(
+            modifier = Modifier.size(StatusGlyphSize),
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        StatusStage.DONE -> Icon(
+            Icons.Outlined.CheckCircle,
+            // The message says what happened; a reader announcing the tone as well says it twice.
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.size(StatusGlyphSize),
+        )
+        StatusStage.FAILED -> Icon(
+            Icons.Outlined.ErrorOutline,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(StatusGlyphSize),
+        )
+    }
+}
+
+/** Smaller than an inline icon: it sits against body text, not against a control. */
+private val StatusGlyphSize = 14.dp
 
 /** Room between rail items, where Material leaves 4dp and the four destinations read as one block. */
 private val RailItemGap = 16.dp
@@ -427,47 +577,36 @@ private fun NavigationIcon(
 
 @Composable
 private fun AppContent(activity: Activity, appState: AppState, rail: Boolean) {
-    val snackbarHost = remember { SnackbarHostState() }
-
     // Arriving somewhere new with the navigation still hidden reads as the bar having gone missing,
     // and the page that hid it is no longer on screen to bring it back.
     val navBarVisible = LocalNavBarVisible.current
     LaunchedEffect(appState.destination) { navBarVisible.value = true }
 
-    // Actions report their outcome once, in a few words, then the message is cleared so it cannot
-    // reappear on the next recomposition. Raised as visuals rather than as a bare string, which is
-    // what carries whether it worked through to the toast.
+    // How long the header keeps a message. A confirmation gets out of the way on its own; a failure
+    // does not, because it is the one kind worth reading twice and the one kind that can arrive
+    // while the reader is looking somewhere else - a provider's refusal is often the only account
+    // of why nothing happened. It waits to be tapped instead. Keyed on the message, so a second
+    // outcome arriving cancels the first one's clock rather than clearing the new line early.
     LaunchedEffect(appState.statusMessage) {
-        appState.statusMessage?.let { message ->
-            snackbarHost.showSnackbar(ToastVisuals(message.text, message.succeeded))
-            appState.consumeStatusMessage()
-        }
+        val message = appState.statusMessage ?: return@LaunchedEffect
+        if (message.stage != StatusStage.DONE) return@LaunchedEffect
+        delay(StatusDoneMilliseconds)
+        appState.consumeStatusMessage()
     }
-
-    // A toast is raised at the foot of the Scaffold, and on a phone the foot of the Scaffold is
-    // underneath the bar - in position and, since the bar is drawn over this whole layer, in front
-    // of it as well. Lifted clear, and lowered again when the bar goes, so a toast raised on a
-    // scrolled page does not hang over the gap where the bar used to be.
-    val toastClearance by animateDpAsState(
-        if (!rail && navBarVisible.value) NavBarFootprint else 0.dp,
-        label = "toast clearance",
-    )
 
     Scaffold(
         // The navigation suite draws edge to edge, so the content keeps itself clear of the status
         // bar and any cutout.
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        snackbarHost = {
-            SnackbarHost(snackbarHost, Modifier.padding(bottom = toastClearance)) { AppToast(it) }
-        },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            AppHeader()
+            AppHeader(appState, onDismissStatus = appState::consumeStatusMessage)
             // Above the well rather than inside it, so a run starting does not push the rounded
-            // edge down the screen.
-            appState.busyLabel?.let { label ->
-                BusyBar(label)
+            // edge down the screen. The bar carries no label any more - the header above it names
+            // what is running, and the two said the same thing a few pixels apart.
+            if (appState.busyLabel != null) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
             }
             // The page sits in the chrome the way a card sits on the page, and takes the corner
             // radius the cards themselves use. The hairline is what keeps that edge drawn when a
@@ -628,19 +767,12 @@ private fun Modifier.wellOutline(
     drawPath(path, color, style = Stroke(stroke))
 }
 
-/** Names the running action rather than showing a bare spinner, so a slow step is explainable. */
-@Composable
-private fun BusyBar(label: String) {
-    Column(Modifier.fillMaxWidth()) {
-        LinearProgressIndicator(Modifier.fillMaxWidth())
-        Text(
-            label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-        )
-    }
-}
+/**
+ * How long a confirmation stays in the header before it clears itself.
+ *
+ * Material's own short snackbar, which is what these messages used to be shown for.
+ */
+private const val StatusDoneMilliseconds = 4_000L
 
 private val AppDestination.icon: ImageVector
     get() = when (this) {

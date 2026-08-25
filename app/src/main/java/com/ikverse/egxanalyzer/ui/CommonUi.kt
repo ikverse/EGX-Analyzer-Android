@@ -22,13 +22,11 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarData
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarVisuals
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -155,26 +153,29 @@ internal fun Screen(
         }
         floatingAction?.let {
             if (compact) {
-                // The action keeps the bar's side margins and its corner, but **not its
-                // visibility**. It used to leave and return on the same scroll the bar did, so the
-                // one control that starts a run could not be reached from anywhere but the top of
-                // the page - which is a poor trade for chrome that tidies itself away.
+                // The action keeps the bar's side margins and its corner, and **never leaves**. It
+                // used to go with the bar on the same scroll, so the one control that starts a run
+                // could not be reached from anywhere but the top of the page - a poor trade for
+                // chrome that tidies itself away.
                 //
-                // What it does not do is move. Letting it drop into the room the bar vacates was
-                // tried and is what the pinning replaced: two pieces of chrome travelling opposite
-                // ways on one gesture. So it holds this height whatever the bar is doing, and when
-                // the bar goes there is simply space beneath it. A running button being slightly
-                // see-through is the other half of this - see `actionAuroraBase` - and it is what
-                // keeps a permanent button from reading as a slab parked on the page.
+                // It follows the bar down instead of holding its height. Above the bar it stands
+                // clear of it and then the same gap again, so the two read as one stack; with the
+                // bar gone it takes the bar's own place, on the bar's own PillBottomMargin, rather
+                // than hovering over the hole it left. The travel is exactly NavBarFootprint, which
+                // is what makes it land there and not near there.
+                //
+                // This is the rule `toastClearance` in the shell already follows, for the same
+                // reason and in the same words - "so a toast raised on a scrolled page does not
+                // hang over the gap where the bar used to be". The action was the one piece of
+                // floating chrome not following it.
+                val liftedClear = NavBarFootprint + PillBottomMargin
+                val lift by animateDpAsState(
+                    if (navBarVisible.value) liftedClear else PillBottomMargin,
+                    label = "action lift",
+                )
                 Box(
                     Modifier.align(Alignment.BottomCenter)
-                        .padding(
-                            start = PillSideMargin,
-                            end = PillSideMargin,
-                            // Clear of where the bar sits, then the same gap again, so the two read
-                            // as one stack rather than as a button resting on a bar.
-                            bottom = NavBarFootprint + PillBottomMargin,
-                        ),
+                        .padding(start = PillSideMargin, end = PillSideMargin, bottom = lift),
                 ) { it() }
             } else {
                 // Further in from the corner on a big screen, where the edge is a long way from the
@@ -592,94 +593,6 @@ private val PillOutline = 1.dp
  */
 internal val PillStackGap: Dp = 3.dp
 
-/**
- * What an action reports, and whether it worked.
- *
- * Material's snackbar carries a string and nothing else, so a tone the state already knows is lost
- * on the way to the toast that draws it unless it travels as visuals.
- */
-internal class ToastVisuals(
-    override val message: String,
-    val succeeded: Boolean,
-) : SnackbarVisuals {
-    override val actionLabel: String? = null
-
-    // Drawn by the toast itself as a glyph. Material's dismiss action is a text button, which is
-    // wider than most of these messages are.
-    override val withDismissAction: Boolean = false
-
-    /** A confirmation gets out of the way; a failure stays long enough to be read. */
-    override val duration: SnackbarDuration =
-        if (succeeded) SnackbarDuration.Short else SnackbarDuration.Long
-}
-
-/**
- * The app's own toast, in the app's own colours.
- *
- * Material draws its snackbar on `inverseSurface`, which a dark scheme leaves as the baseline
- * near-white: a light slab in the middle of a dark app. This is the card recipe instead - a
- * container step, a hairline, the medium corner - so a message reads as part of the screen it
- * interrupts rather than as something pasted over it.
- *
- * Whether the action worked is carried by one tinted glyph. Colouring the whole bar would make
- * every routine confirmation the loudest thing on screen, and there is one after almost every tap.
- */
-@Composable
-internal fun AppToast(data: SnackbarData) {
-    // Anything not raised through ToastVisuals is a plain message with nothing to report against it.
-    val succeeded = (data.visuals as? ToastVisuals)?.succeeded != false
-    Box(Modifier.fillMaxWidth().padding(Space.m)) {
-        Surface(
-            // Sized to its message and left where the content starts, rather than stretched across
-            // it: on the inner display and on a tablet a full-width bar for three words is a stripe.
-            Modifier.widthIn(max = ToastMaxWidth).clickable { data.dismiss() },
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            shape = MaterialTheme.shapes.medium,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            shadowElevation = ToastElevation,
-        ) {
-            Row(
-                Modifier.padding(horizontal = Space.m, vertical = Space.s),
-                horizontalArrangement = Arrangement.spacedBy(Space.s),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    if (succeeded) Icons.Outlined.CheckCircle else Icons.Outlined.ErrorOutline,
-                    // The message says what happened; a reader announcing the tone as well says it
-                    // twice.
-                    contentDescription = null,
-                    tint = if (succeeded) MaterialTheme.colorScheme.tertiary
-                    else MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(IconSize.Inline),
-                )
-                Text(
-                    data.visuals.message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    // Two lines is the ceiling. Anything needing more than that is a screen, not a
-                    // toast, and a provider's own error message can run to a paragraph.
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    // fill = false so a short message keeps a short toast: weight alone would pad
-                    // every one of them out to the full width.
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                Icon(
-                    Icons.Outlined.Close,
-                    contentDescription = "Dismiss",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(IconSize.Inline),
-                )
-            }
-        }
-    }
-}
-
-/** Wide enough for two lines of a short message, and no wider. */
-private val ToastMaxWidth = 400.dp
-
-/** Enough to lift it off the page it covers. The hairline does the rest of the separating. */
-private val ToastElevation = 6.dp
 
 /** Placeholder for a screen with nothing to show yet, so empty states explain themselves. */
 @Composable

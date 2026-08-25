@@ -1378,8 +1378,13 @@ class AppState(
                 if (state.step != announced) {
                     announced = state.step
                     when (state.step) {
-                        TelegramAuthStep.INITIALIZING ->
-                            statusMessage = StatusMessage("Connecting to Telegram…", succeeded = true)
+                        // Working rather than done: this is a step in flight, and a tick beside it
+                        // claimed a connection the app was still waiting on.
+                        TelegramAuthStep.INITIALIZING -> statusMessage = StatusMessage(
+                            "Connecting to Telegram",
+                            succeeded = true,
+                            stage = StatusStage.WORKING,
+                        )
                         // Deliberately no count here: READY arrives before the chat list does, so
                         // reading it now reports zero while six are about to appear. The count is
                         // announced by the collector below, when there is one.
@@ -1403,7 +1408,7 @@ class AppState(
                 .distinctUntilChanged()
                 .filter { it > 0 }
                 .collect { count ->
-                    statusMessage = StatusMessage("$count chats loaded", succeeded = true)
+                    statusMessage = StatusMessage("$count chats", succeeded = true)
                 }
         }
         // Independent of Telegram, unlike the sync: this is one public URL, so it does not have to
@@ -1755,7 +1760,7 @@ class AppState(
             // The card keeps the sentence and the toast gets the short form of it: this only ever
             // runs from Settings, so the fuller wording is already on screen behind the toast.
             settingsMessage = "API key verified. ${models.size} models available."
-            statusMessage = StatusMessage("Key verified · ${models.size} models", succeeded = true)
+            statusMessage = StatusMessage("Key verified, ${models.size} models", succeeded = true)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -3261,8 +3266,27 @@ class AppState(
 /** Shared, so a screen naming a session "today" and the app storing one agree on where today is. */
 internal const val EGX_ZONE = "Africa/Cairo"
 
-/** Outcome of a finished action, shown once and dismissed. */
-data class StatusMessage(val text: String, val succeeded: Boolean)
+/**
+ * How a status line reads, which is not the same question as whether an action worked.
+ *
+ * The header shows one line for everything the app is doing or has just done, so it has to tell a
+ * step still running from an outcome: a spinner against "Connecting to Telegram" and a tick against
+ * "Telegram ready". Reading that off `succeeded` alone put a tick beside work that had not finished.
+ * It also decides how long the line stays - see `AppStatusLine`.
+ */
+enum class StatusStage { WORKING, DONE, FAILED }
+
+/**
+ * What an action reports, and how it reads.
+ *
+ * [stage] derives from [succeeded] unless a caller says otherwise, so the fifty-odd places that raise
+ * an ordinary outcome are unchanged; only a step that is still running has to name it.
+ */
+data class StatusMessage(
+    val text: String,
+    val succeeded: Boolean,
+    val stage: StatusStage = if (succeeded) StatusStage.DONE else StatusStage.FAILED,
+)
 
 /**
  * Strips everything an API key cannot contain.
