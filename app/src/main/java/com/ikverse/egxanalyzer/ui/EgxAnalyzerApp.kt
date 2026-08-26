@@ -4,6 +4,7 @@ import android.app.Activity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
@@ -76,7 +77,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -649,9 +655,19 @@ private fun AppContent(activity: Activity, appState: AppState, rail: Boolean) {
  * The destinations laid out side by side, swiped through as well as tapped.
  *
  * The bar's items and the pager are two ways of moving the same pointer, so each follows the other:
- * a tap animates the pager to the page, and a swipe names the page it settles nearest. Neither can
- * chase the other round: each checks where it already is before moving, and the pages a tap scrolls
- * over do not answer for themselves.
+ * a tap animates the pager to the page, and a swipe names the page it lands on. What keeps the two
+ * from chasing each other round is that exactly one coroutine ever moves the pager, nothing the
+ * pager itself says can restart that coroutine, and only a scroll the reader started is allowed to
+ * name a destination.
+ *
+ * **Keyed on the pager rather than on the destination, and that is the heart of it.** Keyed on the
+ * destination, a swipe restarted the very effect that does the scrolling - because a swipe publishes
+ * its own arrival, and the destination was that effect's key. The restarted copy then compared a
+ * target read at recomposition against a page read a frame or more later, so a second swipe arriving
+ * before the restart scrolled the reader back to the page they had just left. That was "swiping goes
+ * to a random page". The flag that used to guard it was raised inside the scrolling coroutine, a
+ * frame after the scroll had started, and a page that turned over inside that gap was swallowed and
+ * never said again - which is how the bar came to be lit on a tab the reader was not on.
  *
  * Compact only. A tab a swipe away is the phone's gesture; beside a rail there is no reason to expect
  * it and a page-wide horizontal drag would be caught by the tables that scroll sideways.
@@ -663,34 +679,72 @@ private fun DestinationPager(activity: Activity, appState: AppState) {
         initialPage = destinations.indexOf(appState.destination),
         pageCount = { destinations.size },
     )
-    // Set while the shell is scrolling the pager itself, so the pages it travels over do not report
-    // themselves back as arrivals.
+    // Whether the reader is the one moving the pager: set the moment they touch it, cleared when it
+    // comes to rest, so it spans the fling as well as the finger.
     //
-    // Without it the two effects below cancelled each other: a scroll to a far page changed the
-    // current page on the way, the current page changed the destination, and the destination is this
-    // effect's own key - so Compose restarted the effect and killed the scroll it was running.
-    // Analyze to Settings stopped on Portfolio, where the long jump had put it; Results to Portfolio
-    // stopped between two pages with nothing left to snap it.
-    val scrolling = remember { mutableStateOf(false) }
-    // Tapped, not swiped: the bar has already moved the destination, and the pages follow it.
-    LaunchedEffect(appState.destination) {
-        val target = destinations.indexOf(appState.destination)
-        if (pager.currentPage != target) {
-            scrolling.value = true
-            try {
-                pager.animateScrollToPage(target)
-            } finally {
-                scrolling.value = false
+    // Read from the pager's own interactions rather than raised by the code that scrolls it, which is
+    // the difference that matters - a flag raised inside the scrolling coroutine goes up a frame
+    // after the scroll has started, and the page that turned over inside that frame was lost.
+    //
+    // Everything else here hangs off it. A page only names a destination while this is set, so the
+    // pages a tap travels over cannot report themselves as arrivals, and neither can the page a tap
+    // was abandoned on when a second tap replaced it - that one is not an arrival either, and left to
+    // speak it would win the race against the tap that cancelled it.
+    val readerScroll = remember { mutableStateOf(false) }
+
+    LaunchedEffect(pager) {
+        launch {
+            pager.interactionSource.interactions.collect { interaction ->
+                when (interaction) {
+                    is DragInteraction.Start -> readerScroll.value = true
+                    // A drag that ended without moving the pager at all has nothing to come to rest,
+                    // so it is closed here; one that flung is closed below, when the pager stops.
+                    is DragInteraction.Stop, is DragInteraction.Cancel ->
+                        if (!pager.isScrollInProgress) readerScroll.value = false
+                    else -> Unit
+                }
             }
         }
-    }
-    // Swiped: the current page turns over as the drag passes the halfway mark, so the bar lights up
-    // the destination being dragged towards rather than waiting for the pages to settle. A drag never
-    // sets the flag, so this stays true of every scroll the reader starts - including one that
-    // interrupts a scroll the shell started.
-    LaunchedEffect(pager) {
-        snapshotFlow { pager.currentPage }.collect {
-            if (!scrolling.value) appState.navigate(destinations[it])
+        launch {
+            // Under the reader's hand the current page turns over at the halfway mark, so the bar
+            // lights up the tab being dragged towards rather than waiting for the pages to settle.
+            snapshotFlow { pager.currentPage to readerScroll.value }.collect { (page, reader) ->
+                if (reader) appState.navigate(destinations[page])
+            }
+        }
+        launch {
+            // Wherever it came to rest, in case the last page turn landed in the same frame as the
+            // stop and the collector above read the two out of step. The page is published before the
+            // scroll is closed, in one collector, so there is no frame between them for that to
+            // happen again here.
+            snapshotFlow { pager.isScrollInProgress }.collect { moving ->
+                if (moving) return@collect
+                if (readerScroll.value) appState.navigate(destinations[pager.currentPage])
+                readerScroll.value = false
+            }
+        }
+        // Tapped, or sent here by the app itself - a run finishing, a card carrying a press to its
+        // counterpart. `collectLatest` so a second tap during the first one's travel wins rather than
+        // being undone when the first arrives, and so a cancelled travel always has a replacement
+        // scroll to snap it rather than being left parked between two pages.
+        snapshotFlow { destinations.indexOf(appState.destination) }.collectLatest { target ->
+            // Already there, and settled rather than mid-travel: nothing to do, and this is also what
+            // keeps first composition from scrolling the pager to the page it opened on.
+            if (pager.currentPage == target && pager.currentPageOffsetFraction == 0f) {
+                return@collectLatest
+            }
+            // The pager is already moving under a hand or a fling, which outranks anything started
+            // here and would refuse it anyway. Where it comes to rest is what the destination will
+            // read a moment later.
+            if (pager.isScrollInProgress) return@collectLatest
+            try {
+                pager.animateScrollToPage(target)
+            } catch (_: CancellationException) {
+                // The reader took hold of the pager mid-travel: a drag holds it at a priority a
+                // scroll started here cannot take, so this is refused outright rather than
+                // interrupted. Let them have it - but a real cancellation still has to pass.
+                currentCoroutineContext().ensureActive()
+            }
         }
     }
     HorizontalPager(
