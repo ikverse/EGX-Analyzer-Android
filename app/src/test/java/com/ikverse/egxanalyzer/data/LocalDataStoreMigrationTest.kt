@@ -501,4 +501,121 @@ class LocalDataStoreMigrationTest {
             )
         }
     }
+
+    @Test
+    fun `days the exchange was shut are cleared out of a database that stored them`() {
+        // Yahoo answers an EGX holiday with the previous close repeated across the high, the low
+        // and the close, and no volume. Those went in as ordinary sessions, and a session that
+        // never happened still counts against a call's window - which is half of a T+1's.
+        //
+        // The parse refuses them now, but only guards what arrives next: the refresh re-asks for
+        // three days and the heal that rewrites a whole history fires only on a change of scale,
+        // so rows already on disk would have stayed for good.
+        Version21(context).writableDatabase.use { old ->
+            old.insert("daily_prices", null, session("AMOC", "2026-08-06", 6.18, 5.81, 5.90, 13_361_341.0))
+            // The holiday: one price, no volume.
+            old.insert("daily_prices", null, session("AMOC", "2026-08-09", 5.90, 5.90, 5.90, 0.0))
+            old.insert("daily_prices", null, session("AMOC", "2026-08-11", 7.19, 6.48, 7.15, 15_348_885.0))
+            // A real session that printed once, which looks the same but for the volume against it.
+            old.insert("daily_prices", null, session("THIN", "2026-08-11", 4.20, 4.20, 4.20, 900.0))
+            old.insert("price_events", null, ContentValues().apply {
+                put("ticker", "AMOC")
+                put("session_date", "2026-08-11")
+                put("previous_close", 5.90)
+                put("opening_price", 7.15)
+                put("detected_at", 1L)
+            })
+            old.insert("settled_calls", null, ContentValues().apply {
+                put("call_key", "AMOC@2026-08-06@a#1#1#2#3#0.5#30/30")
+                put("ticker", "AMOC")
+                put("outcome", "STOPPED")
+                put("stopped_after_partial", 0)
+                put("window_complete", 1)
+                put("sessions_elapsed", 3)
+                put("sessions", "[]")
+                put("settled_at", 1L)
+            })
+        }
+
+        val store = LocalDataStore(context)
+        val amoc = store.sessionsFrom("AMOC", LocalDate.of(2026, 8, 1)).map { it.date.toString() }
+
+        assertEquals(listOf("2026-08-06", "2026-08-11"), amoc)
+        // The volume is what separates a closed exchange from a stock nobody wanted that day.
+        assertEquals(1, store.sessionsFrom("THIN", LocalDate.of(2026, 8, 1)).size)
+        // Both are derived from the prices this just changed, and both re-derive on the next
+        // refresh. Cleared only because something was actually removed.
+        assertTrue(store.priceBreakDates()["AMOC"].isNullOrEmpty())
+        assertTrue(store.settledCalls().isEmpty())
+    }
+
+    private fun session(
+        ticker: String,
+        date: String,
+        high: Double,
+        low: Double,
+        close: Double,
+        volume: Double,
+    ) = ContentValues().apply {
+        put("ticker", ticker)
+        put("session_date", date)
+        put("open", close)
+        put("high", high)
+        put("low", low)
+        put("close", close)
+        put("volume", volume)
+        put("source", "Yahoo Finance")
+    }
+
+    /** The three tables the non-trading-day migration touches, as they shipped under schema 21. */
+    private class Version21(context: Context) :
+        SQLiteOpenHelper(context, LocalDataStore.DATABASE_NAME, null, 21) {
+
+        override fun onCreate(db: SQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS daily_prices (
+                    ticker TEXT NOT NULL,
+                    session_date TEXT NOT NULL,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume REAL,
+                    source TEXT,
+                    PRIMARY KEY (ticker, session_date)
+                )""",
+            )
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS price_events (
+                    ticker TEXT NOT NULL,
+                    session_date TEXT NOT NULL,
+                    previous_close REAL NOT NULL,
+                    opening_price REAL NOT NULL,
+                    detected_at INTEGER NOT NULL,
+                    PRIMARY KEY (ticker, session_date)
+                )""",
+            )
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS settled_calls (
+                    call_key TEXT PRIMARY KEY,
+                    ticker TEXT NOT NULL,
+                    outcome TEXT NOT NULL,
+                    settled_on TEXT,
+                    stopped_on TEXT,
+                    stopped_after_partial INTEGER NOT NULL,
+                    window_complete INTEGER NOT NULL,
+                    peak_high REAL,
+                    peak_on TEXT,
+                    trough_low REAL,
+                    trough_on TEXT,
+                    return_pct REAL,
+                    sessions_elapsed INTEGER NOT NULL,
+                    sessions TEXT NOT NULL,
+                    settled_at INTEGER NOT NULL
+                )""",
+            )
+        }
+
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    }
 }

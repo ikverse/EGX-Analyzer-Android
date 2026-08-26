@@ -130,6 +130,42 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         db.createCallAlertSeen()
         db.createSettledCalls()
         db.createSessionEvents()
+        db.dropNonTradingSessions()
+    }
+
+    /**
+     * Clears out the days the exchange was shut that were stored as sessions.
+     *
+     * Yahoo does not omit an EGX holiday: it answers with a flat row at the previous close and no
+     * volume, and until the parse learned to drop those, every one of them went in as an ordinary
+     * session. A session that never happened is still a session to everything that counts them - so
+     * a call's window was short by however many fell inside it, a T+1 posted the day before one
+     * spent its entire sell side on a day nothing could trade, and every "sessions to a target"
+     * figure on a channel card was inflated by the holidays it ran through.
+     *
+     * Here as well as in the parse because the parse only guards what arrives next. The refresh
+     * re-asks for three days and the heal that would rewrite a whole history fires only on a
+     * detected change of scale, so rows already on disk would have sat there for good.
+     *
+     * **Gated on having actually removed something, not on a version number.** The delete is a
+     * no-op once it has run, which makes it safe on every upgrade; the two clears below are not, so
+     * they are reached only when this really did change the prices underneath them.
+     */
+    private fun SQLiteDatabase.dropNonTradingSessions() {
+        val removed = delete(
+            "daily_prices",
+            "close IS NOT NULL AND high = low AND low = close AND (volume IS NULL OR volume <= 0)",
+            null,
+        )
+        if (removed == 0) return
+        // Both are derived from the prices this just changed, and both re-derive on the next
+        // refresh. A break is a comparison between two sessions, and some of the pairs it was
+        // measured across were a real session and a closed day - which is how a stock quoting a
+        // frozen price all year read as a change of scale on the morning its feed came back.
+        delete("price_events", null, null)
+        // A frozen verdict carries the sessions it was judged on, and those sessions included days
+        // the market was shut. Dropped rather than kept: re-scoring is the point of this.
+        delete("settled_calls", null, null)
     }
 
     /**
@@ -2417,6 +2453,6 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 21
+        const val DATABASE_VERSION = 22
     }
 }

@@ -31,18 +31,25 @@ object PromptComposer {
     private val anchor = Regex("""^[ \t]*<!--\s*EGX_RULES:\s*([a-z0-9.\-]+)\s*-->[ \t]*\r?\n?""", RegexOption.MULTILINE)
 
     fun compose(defaultPrompt: String, rules: RuleSet, useDefaultOnly: Boolean = false): ComposedPrompt {
+        // One spelling of a line break before anything reads the prompt, because [identify] hashes
+        // this text and a carriage return is not a difference in what the prompt says. The same
+        // shipped file arrived here both ways - checked out under one line-ending setting and then
+        // the other - and produced two ids for one prompt, which this device stored as two "first
+        // run" versions a week apart. Applied here rather than at the hash alone, so the text a
+        // report shows and the id it is filed under can never come from different strings.
+        val shipped = defaultPrompt.replace("\r\n", "\n")
         val active = if (useDefaultOnly) emptyList() else rules.promptRules()
         val bySlot = active.groupBy(WordingRule::slot)
-        val text = anchor.replace(defaultPrompt) { match ->
+        val text = anchor.replace(shipped) { match ->
             val slot = RuleSlot.entries.firstOrNull { it.anchor == match.groupValues[1] }
             // An anchor whose slot has nothing to say disappears entirely, which is what keeps a
             // removed rule from leaving a heading behind it.
             slot?.let { render(it, bySlot[it].orEmpty()) }.orEmpty()
         }
         return ComposedPrompt(
-            id = identify(defaultPrompt, active),
+            id = identify(shipped, active),
             text = text,
-            schemaVersion = schemaOf(defaultPrompt),
+            schemaVersion = schemaOf(shipped),
             ruleIds = active.map(WordingRule::id),
         )
     }

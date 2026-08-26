@@ -13,6 +13,7 @@ import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.RecordSplit
 import com.ikverse.egxanalyzer.model.SavedAnalysis
+import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
@@ -87,6 +88,15 @@ object PerformanceCalculator {
          * write instruction inside the thing every screen draws from.
          */
         onSettled: (List<SettledCall>) -> Unit = {},
+        /**
+         * The exchange's date, so a window is only called spent once its last session has closed.
+         *
+         * Read once for the whole recompute and handed down rather than taken from the clock inside
+         * [Scoring.score]: a report is one reading of the record, and a recompute that crossed
+         * midnight partway would otherwise judge the calls at its end against a different day from
+         * the ones at its start.
+         */
+        today: LocalDate = LocalDate.now(ScheduleClock.ZONE),
     ): PerformanceReport {
         if (pricesFrom == null) return PerformanceReport()
         // Whichever starting line is later. Prices reaching further back than [ANALYSIS_START] are
@@ -122,6 +132,7 @@ object PerformanceCalculator {
                         entrySessions = call.entrySessions,
                         priceBreaks = priceBreaksFor(call.ticker),
                         intradayFor = { date -> intradayFor(call.ticker, date) },
+                        today = today,
                     )
                     call.copy(
                         outcome = scored.outcome,
@@ -491,6 +502,9 @@ object PerformanceCalculator {
             sessionsElapsed = 0,
             windowSessions = deadline.sessions,
             entrySessions = deadline.entrySessions,
+            // Off the card, not off the two windows above. They are equal now, so a derivation
+            // from them would report every T+1 call as an ordinary one.
+            isTPlusOne = isTPlusOne,
             requestId = requestId,
         )
     }

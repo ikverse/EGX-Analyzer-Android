@@ -43,11 +43,22 @@ data class ScoredCall(
     /**
      * Leading sessions of that window the entry could first trade in.
      *
-     * Equal to [windowSessions] for everything but a T+1 call, so the two differing is what marks
-     * one - and is what a card checks before saying the buy zone missed its one session rather
-     * than its whole window.
+     * Equal to [windowSessions] everywhere now that a T+1 band is on offer for both its sessions.
+     * Kept as its own number because it is its own question, and the scorer would otherwise be
+     * reading a window as an answer to it.
      */
     val entrySessions: Int = windowSessions,
+    /**
+     * The channel printed this as a T+1 trade: buy on this session, out on the next.
+     *
+     * Carried from the card rather than inferred from the two windows. It used to read
+     * `entrySessions < windowSessions`, which was true only while a T+1 was the one call whose
+     * entry closed early - and the moment that band was allowed to trade on both its sessions the
+     * two numbers became equal and every T+1 card on the screen quietly stopped saying it was one.
+     * A derivation that holds until a rule changes is a fact waiting to become wrong; the basis the
+     * model read off the card is the thing itself.
+     */
+    val isTPlusOne: Boolean = false,
     /** Set only for [Outcome.AMBIGUOUS], saying which pair of events could not be ordered. */
     val ambiguity: Ambiguity? = null,
     /** The first target was banked and the stop was reached afterwards. */
@@ -131,16 +142,6 @@ data class ScoredCall(
      */
     val signals: Set<CallSignal> = emptySet(),
 ) {
-    /**
-     * The channel printed this as a T+1 trade: buy on this session, out on the next.
-     *
-     * Read off the two windows rather than carried as a flag of its own, because that is what makes
-     * one: a T+1 card is the only call whose entry may trade in fewer sessions than it is judged
-     * over. It was already the test three places on the Insights screen made by hand, spelled out
-     * as `entrySessions < windowSessions`, which is the same question asked in a way that has to be
-     * decoded before it can be read.
-     */
-    val isTPlusOne: Boolean get() = entrySessions < windowSessions
 }
 
 /**

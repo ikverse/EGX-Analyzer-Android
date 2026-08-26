@@ -444,11 +444,14 @@ class PortfolioCalculatorTest {
             position = position(windowSessions = 3, target1 = 20.0, target2 = 22.0, stopLoss = 1.0),
             sessions = sessions,
             currentPrice = 10.0,
-            today = called.plusDays(2),
+            // The morning after the third session, which is when this window is first past. On the
+            // third session itself it was still trading, and a window is not spent by a session
+            // that has merely opened.
+            today = called.plusDays(3),
         )
 
-        // It belongs in the expired section from the moment the window closes, but it is not late
-        // until a day has gone by without the user saying what they did.
+        // It belongs in the expired section from the moment the window closes. What makes a trade
+        // late is the clock that runs on one the user is holding on purpose, and this is not one.
         assertTrue(view.ranOutOfTime)
         assertEquals(0L, view.overdueDays)
         assertFalse(view.overdue)
@@ -910,4 +913,103 @@ class PortfolioCalculatorTest {
         volume = 1_000.0,
         open = low,
     )
+
+    @Test
+    fun `a T plus one trade is not expired while its sell session is still trading`() {
+        // Two sessions, the second of them today's. It is in the price table from the opening bell,
+        // and counting it spent dropped the trade into the Expired section - and started the
+        // overdue clock - at 10:00 on the one session the user was still meant to be selling in.
+        val prices = listOf(
+            session(called, high = 10.5, low = 9.5),
+            session(called.plusDays(1), high = 10.6, low = 10.1),
+        )
+        val trade = position(
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            target1 = 20.0,
+            target2 = 22.0,
+            stopLoss = 1.0,
+        )
+
+        val stillTrading = PortfolioCalculator.evaluate(
+            position = trade,
+            sessions = prices,
+            currentPrice = 10.3,
+            today = called.plusDays(1),
+        )
+        val closed = PortfolioCalculator.evaluate(
+            position = trade,
+            sessions = prices,
+            currentPrice = 10.3,
+            today = called.plusDays(2),
+        )
+
+        assertEquals(PositionStatus.OPEN, stillTrading.status)
+        assertTrue(stillTrading.open)
+        assertFalse(stillTrading.ranOutOfTime)
+        assertNull(stillTrading.deadlineDate)
+        // The sell session is owed, not spent: the card reads "1 of 2 left" rather than none.
+        assertEquals(1, stillTrading.sessionsRemaining)
+
+        // And the verdict itself is unchanged once that session has closed.
+        assertEquals(PositionStatus.EXPIRED, closed.status)
+        assertFalse(closed.open)
+        assertTrue(closed.ranOutOfTime)
+        assertEquals(called.plusDays(1), closed.deadlineDate)
+        assertEquals(0, closed.sessionsRemaining)
+    }
+
+    @Test
+    fun `the ARCC trade this rule was written for`() {
+        // The trade taken on that call, off the phone: bought at 77.00 on the 26th - the session
+        // the T+1 was to be sold in - against a call dated the 25th. The entry lands on the last
+        // session of the window, so the scorer is handed one session and the old count called that
+        // window spent the moment it opened: the trade was retired as out of time on the same
+        // morning it was bought, which is what Keep Open was reached for.
+        val prices = listOf(
+            DailySession(
+                ticker = "ARCC", date = LocalDate.of(2026, 8, 25),
+                high = 78.49, low = 75.98, close = 77.00, volume = 899_325.0, open = 75.59,
+            ),
+            DailySession(
+                ticker = "ARCC", date = LocalDate.of(2026, 8, 26),
+                high = 77.30, low = 75.30, close = 75.63, volume = 271_863.0, open = 77.00,
+            ),
+        )
+        val trade = Position(
+            ticker = "ARCC",
+            recommendationDate = LocalDate.of(2026, 8, 25),
+            entryPrice = 77.00,
+            entryDate = LocalDate.of(2026, 8, 26),
+            entryLow = 76.50,
+            entryHigh = 77.00,
+            target1 = 79.50,
+            target2 = 81.00,
+            stopLoss = 75.00,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+        )
+
+        val onTheSellSession = PortfolioCalculator.evaluate(
+            position = trade,
+            sessions = prices,
+            currentPrice = 75.63,
+            today = LocalDate.of(2026, 8, 26),
+        )
+        val theMorningAfter = PortfolioCalculator.evaluate(
+            position = trade,
+            sessions = prices,
+            currentPrice = 75.63,
+            today = LocalDate.of(2026, 8, 27),
+        )
+
+        assertEquals(PositionStatus.OPEN, onTheSellSession.status)
+        assertTrue(onTheSellSession.open)
+        assertFalse(onTheSellSession.ranOutOfTime)
+        assertNull(onTheSellSession.deadlineDate)
+        assertEquals(1, onTheSellSession.sessionsRemaining)
+
+        // And it does expire, on the morning after the session it was to be sold in.
+        assertEquals(PositionStatus.EXPIRED, theMorningAfter.status)
+        assertTrue(theMorningAfter.ranOutOfTime)
+        assertEquals(LocalDate.of(2026, 8, 26), theMorningAfter.deadlineDate)
+    }
 }

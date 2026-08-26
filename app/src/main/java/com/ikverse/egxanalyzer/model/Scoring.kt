@@ -61,13 +61,18 @@ object Scoring {
     /**
      * How much of that window the entry is still takeable in.
      *
-     * The buy session and no further. An ordinary call whose buy zone first traded on day four was
-     * still there to be taken and is judged from where it was taken; a T+1 band that first traded
-     * on the sell session was never takeable at all, and expiring it would count a trade nobody
-     * could have made against the channel that called it. Unentered is excluded from every rate,
-     * which is the honest answer here.
+     * The whole of it. A channel that prints a T+1 band is offering that band for the trade it
+     * described, and the trade is two sessions long - so a buy zone the market reached on the
+     * second of them was reached while the call still stood. This was the buy session and no
+     * further, on the reasoning that a band first trading on the sell session was never takeable;
+     * that is a rule about settlement the cards do not print, and refusing an entry the market
+     * genuinely presented is the app judging a call the channel never made.
+     *
+     * Equal to [T_PLUS_ONE_WINDOW_SESSIONS], which means no call anywhere now shortens its entry.
+     * The parameter stays because the scorer's question - how long was this band on offer - is
+     * worth asking explicitly even when every caller answers it the same way.
      */
-    const val T_PLUS_ONE_ENTRY_SESSIONS = 1
+    const val T_PLUS_ONE_ENTRY_SESSIONS = T_PLUS_ONE_WINDOW_SESSIONS
 
     fun clampWindow(sessions: Int): Int =
         sessions.coerceIn(MIN_WINDOW_SESSIONS, MAX_WINDOW_SESSIONS)
@@ -132,12 +137,25 @@ object Scoring {
          * caller with no intraday history scores exactly as before.
          */
         intradayFor: (LocalDate) -> List<IntradayBar> = { emptyList() },
+        /**
+         * The exchange's own date, against which a stored session is judged finished or still open.
+         *
+         * The scorer counts sessions, and a session dated today is in the table from the opening
+         * bell onward - the feed is re-asked for the last three days on every refresh precisely so
+         * a half-traded session overwrites itself. Counting it as one the window has spent closed a
+         * T+1 call at the open of the very session it was to be sold in. See [walk].
+         *
+         * Defaulted to the exchange's date rather than left to the caller: a caller who forgets it
+         * gets the right answer, where a null default would hand back the bug. Both callers in the
+         * app pass it anyway, so the whole recompute reads one date rather than a clock per call.
+         */
+        today: LocalDate = LocalDate.now(ScheduleClock.ZONE),
     ): Scored {
         val fullTargetLevel = target2 ?: target1
         val partialTargetLevel = target1.takeIf { target2 != null }
         val plain = walk(
             sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, entrySessions,
-            priceBreaks,
+            priceBreaks, today,
         ) { day ->
             resolveFromBars(
                 intradayFor(day.date), entryLow, entryHigh, partialTargetLevel, fullTargetLevel,
@@ -152,11 +170,11 @@ object Scoring {
         // is nothing left to be ambiguous about.
         val entryFirst = walk(
             sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, entrySessions,
-            priceBreaks,
+            priceBreaks, today,
         ) { Ordering.ENTRY_FIRST }
         val targetFirst = walk(
             sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, entrySessions,
-            priceBreaks,
+            priceBreaks, today,
         ) { Ordering.TARGET_FIRST }
         // The pessimistic run is the one reported. Where the two agree it is also the later of the
         // two, since it never credits the unproven target - so this is the conservative settlement
@@ -180,6 +198,7 @@ object Scoring {
         windowSessions: Int,
         entrySessions: Int,
         priceBreaks: Set<LocalDate>,
+        today: LocalDate,
         ordering: (DailySession) -> Ordering,
     ): Scored {
         // Not [clampWindow]: its ceiling belongs to the trade window, which is a deadline a user
@@ -269,6 +288,16 @@ object Scoring {
                     // The entry first became available on the same session a target was reached.
                     // The open orders those for free where it already sits inside the band; failing
                     // that it takes the bars, and failing those the caller's assumption.
+                    //
+                    // The open it is handed is now only one the session could actually have opened
+                    // at - [DailySession.traded] reads a value outside the session's own high and
+                    // low as unknown, which is what this feed reports whenever a stock gapped away
+                    // from the previous close it puts in that field. What remains is a previous
+                    // close that happens to fall inside the day's range, which no data here can
+                    // tell from a real open. Dropping the shortcut altogether was tried and costs
+                    // far more than it buys: every call reaching its target on the session it was
+                    // made for would then need intraday bars, and would be unjudged whenever the
+                    // feed no longer has them.
                     if (enteredHere && !day.buyableAtOpen(entryLow, entryHigh)) {
                         when (val order = ordering(day)) {
                             // The band traded before the high, so the target counts and this
@@ -324,7 +353,24 @@ object Scoring {
             }
         }
 
-        val complete = considered.size >= window
+        // Enough sessions, and the last of them finished trading.
+        //
+        // The count alone was the whole of this, and on the general horizon the difference is
+        // invisible: one session early out of thirty moves nothing. On a T+1 card it is half the
+        // trade. Today's session is written into the price table from the opening bell - the daily
+        // feed is re-asked for the last three days on every refresh, so a session in progress
+        // overwrites itself as it goes - which made the window two sessions long the moment the
+        // second one opened, and the call was reported Expired at the bell of the session it was
+        // meant to be sold in, priced to whatever the first trade of the morning had printed.
+        //
+        // Dated rather than timed, and to the exchange's calendar rather than the phone's. It is
+        // the same test [LatestPrice] already applies to decide a stored price is provisional, and
+        // one definition of "that session is not final yet" is worth more here than the nine hours
+        // of precision an instant would buy: this way a call can settle late, never early, and the
+        // two never disagree about the same session. A target reached or a stop broken inside the
+        // live session still settles it on the spot - only running out of time waits for the close,
+        // because that is the one verdict the rest of the session can still overturn.
+        val complete = considered.size >= window && considered.last().date < today
         // Where a call that ran out of time actually ended up.
         //
         // The window closed with the reader still holding, so the last close is where they stand,
@@ -470,7 +516,8 @@ object Scoring {
      * This is the one thing daily figures can say about ordering: the open precedes every other
      * price in the session, so an open at or below the top of the band means the entry was
      * available before the day's high. Sessions stored before the open was recorded report null,
-     * which is treated as unknown rather than favourable.
+     * which is treated as unknown rather than favourable - as is one this feed reported outside the
+     * session it belongs to, which [DailySession.traded] has already nulled by the time this runs.
      */
     private fun DailySession.buyableAtOpen(low: Double?, high: Double?): Boolean {
         val bound = listOfNotNull(low, high).maxOrNull() ?: return false
@@ -587,7 +634,19 @@ data class DailySession(
             high = high?.takeIf { it > 0.0 },
             low = low?.takeIf { it > 0.0 },
             close = close?.takeIf { it > 0.0 },
-            open = open?.takeIf { it > 0.0 },
+            // An open outside the session's own high and low is not that session's open. This feed
+            // answers most EGX days with the previous close in the field, and where the stock then
+            // gapped away from it the number lands outside the range it claims to begin - checked
+            // against stored five-minute bars, seven of fifteen sessions put the stored open
+            // outside the first bar of their own session, and six of those seven sat below where
+            // trading actually started. It cannot be repaired, only recognised: read as unknown,
+            // the split check falls back to close-to-close instead of measuring a day's move from
+            // a price belonging to the day before.
+            open = open?.takeIf { value ->
+                value > 0.0 &&
+                    (high == null || value <= high * (1 + FLOAT_NOISE)) &&
+                    (low == null || value >= low * (1 - FLOAT_NOISE))
+            },
         )
 
     /**

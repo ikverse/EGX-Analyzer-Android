@@ -10,6 +10,7 @@ import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.Quote
+import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.round
 import java.time.LocalDate
@@ -38,8 +39,15 @@ object PortfolioCalculator {
          * fortnight-old close as today's.
          */
         latestQuoteFor: (ticker: String) -> Quote?,
-        /** Passed in rather than read here, so how overdue a trade is can be tested at all. */
-        today: LocalDate = LocalDate.now(),
+        /**
+         * Passed in rather than read here, so how overdue a trade is can be tested at all.
+         *
+         * The exchange's zone in the default, not the device's. It was the device's while this only
+         * decided how late a trade looked; it now decides when one expires, and a phone an hour
+         * ahead of Cairo would run a window out before the session it belongs to had closed - which
+         * is the bug [Scoring.score] takes this date to avoid, arriving by another door.
+         */
+        today: LocalDate = LocalDate.now(ScheduleClock.ZONE),
         /** The sessions on which each stock's prices changed scale - a split, a bonus issue. */
         priceBreaksFor: (ticker: String) -> Set<LocalDate> = { emptySet() },
     ): Portfolio {
@@ -70,13 +78,20 @@ object PortfolioCalculator {
         currentPrice: Double?,
         /** Defaulted rather than required: a caller with no feed date still has a price to score. */
         currentPriceOn: LocalDate? = null,
-        today: LocalDate = LocalDate.now(),
+        today: LocalDate = LocalDate.now(ScheduleClock.ZONE),
         priceBreaks: Set<LocalDate> = emptySet(),
     ): PositionView {
         // The deadline set: the recommendation's own window, counted from its own session.
         val window = sessions.take(position.windowSessions)
         val elapsed = window.size
-        val remaining = (position.windowSessions - elapsed).coerceAtLeast(0)
+        // Sessions the window has actually spent, which is not the same as sessions it has rows
+        // for. A session dated today is in the price table from the opening bell and is still
+        // trading, so counting it spent retired the trade at the open of the session it was meant
+        // to be sold in - and on a two-session T+1 window that is the whole of the sell side. The
+        // same test [Scoring.score] applies to the call this trade was taken on, so the Portfolio
+        // and Insights can never disagree about whether one session's window has run out.
+        val spent = window.count { it.date < today }
+        val remaining = (position.windowSessions - spent).coerceAtLeast(0)
         val deadlineDate = window.lastOrNull()?.date?.takeIf { remaining == 0 }
 
         // Only the part of the window the user actually held. A target reached before they bought
@@ -94,6 +109,7 @@ object PortfolioCalculator {
             // scorer calls the window complete exactly when the recommendation's deadline passes.
             windowSessions = (position.windowSessions - skipped).coerceAtLeast(1),
             priceBreaks = priceBreaks,
+            today = today,
         )
 
         // The prices moved scale under this trade. Every figure on the card would be measured

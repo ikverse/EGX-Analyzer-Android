@@ -416,11 +416,11 @@ private fun ScoredCall.reason(): String {
             "Reached neither a target nor the stop in $windowSessions sessions, which is as long " +
                 "as a call is followed for."
         }
-        // A shortened entry is what marks a T+1 call, and this is the case it was shortened for:
-        // the band was never offered on the one session the card said to buy on.
+        // Both of a T+1's sessions, since the band is on offer for the whole of the trade the card
+        // described. It said "the session this call was made for" while the entry closed after one.
         Outcome.ENTRY_NOT_REACHED -> if (isTPlusOne) {
-            "The buy zone never traded on the session this call was made for, so there was no " +
-                "T+1 trade to take. Not counted for or against."
+            "The buy zone never traded in either session of this T+1, so there was no trade to " +
+                "take. Not counted for or against."
         } else {
             "The buy zone never traded."
         }

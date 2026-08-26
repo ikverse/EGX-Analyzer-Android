@@ -42,7 +42,8 @@ data class TradeWindow(
  * Nothing the user chose. A call runs until it resolves, out to
  * [Scoring.JUDGING_HORIZON_SESSIONS] - the record is meant to say how long a source's calls take,
  * and a short deadline answers that by deleting the slow ones. The one exception is a T+1 card,
- * which named its own deadline: buy on the session it is for, sell on the next.
+ * which named its own deadline: buy on the session it is for, sell on the next. Its band is on
+ * offer across both of them, so the entry runs the length of the window like every other call's.
  */
 fun RecommendationDataPoint.judgingWindow(): TradeWindow = if (isTPlusOne) {
     TradeWindow(Scoring.T_PLUS_ONE_WINDOW_SESSIONS, Scoring.T_PLUS_ONE_ENTRY_SESSIONS)
@@ -57,7 +58,8 @@ fun RecommendationDataPoint.judgingWindow(): TradeWindow = if (isTPlusOne) {
  * [judgingWindow]: a channel's record is not a trade, and the reader who wants to be out in five
  * sessions is not asking for the source to be judged on five. A T+1 card still overrides it, since
  * a trade taken on one is over the next session by construction - the dialog lets that be typed
- * over like any other.
+ * over like any other. What a T+1 no longer overrides is where the entry may trade: both sessions,
+ * the same as the window, because that is how long the channel left the band standing.
  */
 fun RecommendationDataPoint.offeredTradeWindow(setting: Int): TradeWindow = if (isTPlusOne) {
     TradeWindow(Scoring.T_PLUS_ONE_WINDOW_SESSIONS, Scoring.T_PLUS_ONE_ENTRY_SESSIONS)

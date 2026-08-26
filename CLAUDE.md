@@ -160,6 +160,41 @@ name `scoringWindowSessions` because renaming a persisted key resets it on every
   loss. Daily bars cannot prove the order; this credits the favourable one deliberately.
 - Prices that are not positive are stripped before scoring. A session in progress can arrive with a
   high of zero, which force-stopped every call on that stock.
+- **A day the exchange was shut is not a session, whatever the feed says.** Yahoo does not omit an
+  EGX holiday: it answers with the previous close repeated across the high, the low and the close
+  and no volume against it. `neverTraded` refuses those at the parse, and `dropNonTradingSessions`
+  clears the ones already stored - ten dates across a year, on ninety-one of ninety-two stocks at
+  once. Stored, they are sessions to everything that counts sessions: a window short by however many
+  fall inside it, **a T+1 posted the day before one spending its whole sell side on a day nothing
+  could trade**, and every "sessions to a target" figure carrying them. The volume is what separates
+  a closed exchange from a stock so illiquid it printed once - the three prices being one number is
+  not enough on its own. Clearing them also re-arms `PriceSanity.isStale`, which is written for
+  exactly the frozen-feed case and had been blinded by those rows for a year.
+- **An open outside its own session's high and low is read as unknown.** This feed reports the
+  previous session's close in the open field on ninety-eight EGX rows in a hundred, and where the
+  stock gapped away from it the number lands outside the range it claims to begin - seven of the
+  fifteen sessions with stored five-minute bars put the open outside the first bar of their own
+  session, six of them below where trading actually started. `DailySession.traded` nulls those, so
+  the split check falls back to close-to-close rather than measuring a day's move from the day
+  before. What it cannot catch is a previous close that happens to land inside the range, which no
+  data here separates from a real open. Dropping `buyableAtOpen` altogether was tried and costs far
+  more than it buys: every call reaching its target on the session it was made for would need
+  intraday bars, and would be unjudged wherever the feed no longer has them.
+- **A window is spent when its last session closes, not when that session appears.** `Scoring.score`
+  takes the exchange's date and a window only counts complete once its final session is behind it.
+  Today's session is in `daily_prices` from the opening bell - the daily feed is re-asked for the
+  last three days on every refresh, so a half-traded session overwrites itself as it goes - and
+  counting it the moment it arrived reported a **T+1 call as Expired at 10:00 on the session the
+  card said to sell in**, priced to the first trade of the morning. On the thirty-session horizon
+  the same bug is invisible; on a two-session window it is half the trade. Dated against
+  `ScheduleClock.ZONE` rather than timed, which is the same test `LatestPrice.provisional` already
+  applies to a stored price: one definition of "that session is not final yet", and a call that can
+  settle late but never early. **Only running out of time waits** - a target reached or a stop
+  broken inside the live session still settles it on the spot, because those are facts about the
+  session whether or not it has finished, and expiry is the one verdict the rest of the day can
+  still overturn. `PerformanceCalculator.report` and `PortfolioCalculator` each read the date once
+  for a whole recompute, so a rebuild that crossed midnight cannot judge its first calls against a
+  different day from its last.
 - **Judged** outcomes are full hit, partial hit, stopped, expired. Still open, entry never traded,
   ambiguous, not priced and **prices changed scale** say nothing about the channel and are excluded
   from every rate.
@@ -191,9 +226,18 @@ name `scoringWindowSessions` because renaming a persisted key resets it on every
   It is the one call with a deadline the channel printed itself, and that was the most consequential
   thing about a card the card never said — it reached the screen only as a caption under a figure
   and inside the outcome sentence behind another chip, so a two-session call and a thirty-session
-  one looked identical until one of them expired. `ScoredCall.isTPlusOne` is the test, spelled once:
-  a T+1 card is the only call whose entry may trade in fewer sessions than it is judged over, which
-  three places used to ask by hand as `entrySessions < windowSessions`.
+  one looked identical until one of them expired. `ScoredCall.isTPlusOne` is the test, and it is
+  **carried from the card's own `effective_date_basis`, not derived**. It used to read
+  `entrySessions < windowSessions`, which held only while a T+1 was the one call whose entry closed
+  early; the moment that band was allowed to trade across both its sessions the two numbers became
+  equal and every T+1 chip on the screen would have gone quietly out.
+- **A T+1 band is on offer for both of its sessions.** `T_PLUS_ONE_ENTRY_SESSIONS` equals the
+  window, so a buy zone the market first reached on the sell session is a trade that was there to
+  take. It was the buy session and no further, on the reasoning that a band first trading on the
+  sell session was never takeable - which is a rule about settlement the cards do not print, and
+  refusing an entry the market genuinely presented judges a call the channel never made. No call
+  anywhere shortens its entry now; the parameter stays because how long a band was on offer is its
+  own question, and a window is not an answer to it.
 - A **split or bonus issue inside the window** makes the call unjudgeable rather than a loss. The
   levels were printed in the old money and every price after the split is quoted in the new, so a
   2-for-1 reads as a 50% collapse and files the call as a stop-out — silently, and against whichever
@@ -702,7 +746,11 @@ trade is then managed, in whatever state it has reached.
   closed while the user was still holding it, and a partial hit that never saw target 2 — which
   keeps its own "Partial target hit" chip, because "Expired" would hide that it got somewhere.
   Counted in calendar days from `deadlineDate`, with `today` injected into `PortfolioCalculator` so
-  it can be tested at all. Zero on the day the deadline lands: expiring today is not being late.
+  it can be tested at all. The deadline lands at the **close** of the window's last session, so the
+  first morning a trade is expired is the morning after it - and the clock reads one day from that
+  morning, which is exactly when the reminder used to arrive. `sessionsRemaining` counts the same
+  way: the session trading right now is owed, not spent, so a T+1 trade reads "1 of 2 left" through
+  the session it is to be sold in rather than dropping into the Expired section at its bell.
 - Nothing about overdue is cached: it is derived on every recompute from the stored deadline and the
   current date, which is what makes it right after a restart. A `LifecycleResumeEffect` in
   `MainActivity` recomputes when the app returns to the foreground, so a phone left on the Portfolio

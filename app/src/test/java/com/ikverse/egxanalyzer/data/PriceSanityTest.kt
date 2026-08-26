@@ -134,4 +134,28 @@ class PriceSanityTest {
     private companion object {
         const val TICKER = "AMOC"
     }
+
+    @Test
+    fun `a day the exchange was shut is not a session`() {
+        // Yahoo does not omit an EGX holiday. It answers with the previous close repeated across
+        // the high, the low and the close, and nothing traded against it - and ten such dates in a
+        // year of prices came back that way on ninety-one of ninety-two stocks at once.
+        assertTrue(neverTraded(high = 5.9, low = 5.9, close = 5.9, volume = 0.0))
+        assertTrue(neverTraded(high = 5.9, low = 5.9, close = 5.9, volume = null))
+    }
+
+    @Test
+    fun `a real session that printed once is kept`() {
+        // The three prices being one number is not enough on its own: a stock so illiquid it traded
+        // at a single price looks identical, and it did trade. The volume is the whole difference,
+        // and dropping those would take a stock's real sessions out of every window on it.
+        assertFalse(neverTraded(high = 4.2, low = 4.2, close = 4.2, volume = 900.0))
+    }
+
+    @Test
+    fun `a session that moved is never mistaken for a closed day`() {
+        assertFalse(neverTraded(high = 6.18, low = 5.81, close = 5.9, volume = 0.0))
+        // A session still trading reports no close yet, which is not the same as not having traded.
+        assertFalse(neverTraded(high = 5.9, low = 5.9, close = null, volume = 0.0))
+    }
 }

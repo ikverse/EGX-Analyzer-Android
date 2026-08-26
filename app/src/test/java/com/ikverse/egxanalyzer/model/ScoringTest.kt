@@ -735,31 +735,39 @@ class ScoringTest {
     }
 
     @Test
-    fun `a T plus one buy zone that only trades on the sell session is not judged`() {
-        // The instruction was to buy on the first of these and sell on the second. The band never
-        // traded on the buy session, so there was no trade to take - and expiring it would count a
-        // loss against a channel for a trade nobody could have been in.
-        val prices = sessions(11.0 to 10.5, 14.5 to 9.5)
-        val tPlusOne = Scoring.score(
-            sessions = prices,
+    fun `a T plus one buy zone that first trades on the sell session is taken`() {
+        // The band did not trade on the buy session and did on the next, which is a band the market
+        // presented while the call still stood. It used to be refused - the entry closed after one
+        // session - which meant a channel was never judged on a trade its own card was still
+        // offering. Judged now, and here it simply runs out of time.
+        val scored = Scoring.score(
+            sessions = sessions(11.0 to 10.5, 10.2 to 9.5),
             entryLow = 9.8, entryHigh = 10.0,
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
             entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
-        )
-        // An ordinary call is judged on the same prices: its band was still being offered on the
-        // second session, so it was taken there and the target counts.
-        val ordinary = Scoring.score(
-            sessions = prices,
-            entryLow = 9.8, entryHigh = 10.0,
-            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
-            windowSessions = 10,
+            today = start.plusDays(2),
         )
 
-        assertEquals(Outcome.ENTRY_NOT_REACHED, tPlusOne.outcome)
-        // Unjudged is the point of it: it says nothing about the channel either way.
+        assertEquals(Outcome.EXPIRED, scored.outcome)
+        assertEquals(true, Outcome.EXPIRED.judged)
+    }
+
+    @Test
+    fun `a T plus one buy zone that trades in neither session is not judged`() {
+        // Still the honest answer where the band really was never on offer: there was no trade to
+        // take, and counting one against the channel would be judging a trade nobody could make.
+        val scored = Scoring.score(
+            sessions = sessions(11.0 to 10.5, 11.5 to 10.6),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
+            today = start.plusDays(2),
+        )
+
+        assertEquals(Outcome.ENTRY_NOT_REACHED, scored.outcome)
         assertEquals(false, Outcome.ENTRY_NOT_REACHED.judged)
-        assertEquals(Outcome.FULL_HIT, ordinary.outcome)
     }
 
     @Test
@@ -781,5 +789,191 @@ class ScoringTest {
         )
 
         assertEquals(withoutArgument, spelledOut)
+    }
+
+    @Test
+    fun `a T plus one call is not out of time while its sell session is still trading`() {
+        // The session the card said to sell in is in the price table from the opening bell, because
+        // the daily feed is re-asked for the last three days on every refresh and a session in
+        // progress overwrites itself as it goes. Counted the moment it appeared, it made the window
+        // two sessions long at 10:00 and reported the call Expired - priced to the first trade of
+        // the morning - on the one session the reader was still meant to be holding through.
+        val prices = sessions(10.0 to 9.5, 11.0 to 10.2)
+        val stillTrading = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
+            today = start.plusDays(1),
+        )
+        val closed = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
+            today = start.plusDays(2),
+        )
+
+        assertEquals(Outcome.OPEN, stillTrading.outcome)
+        assertNull(stillTrading.returnPct)
+        // The verdict itself is unchanged - it arrives when the session it is about has finished.
+        assertEquals(Outcome.EXPIRED, closed.outcome)
+    }
+
+    @Test
+    fun `a target reached inside the live session still settles the call`() {
+        // Only running out of time waits for the close. A target the market actually traded through
+        // is a fact about that session whether or not it has finished, and holding it back would
+        // silence the card about the one thing it exists to report.
+        val scored = Scoring.score(
+            sessions = sessions(10.0 to 9.5, 14.5 to 10.2),
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
+            today = start.plusDays(1),
+        )
+
+        assertEquals(Outcome.FULL_HIT, scored.outcome)
+        assertEquals(start.plusDays(1), scored.settledOn)
+    }
+
+    @Test
+    fun `a partial hit is not complete while the last session is still trading`() {
+        // `windowComplete` is what keeps "target 2 is still in reach" on the card and in the prompt
+        // the model is handed. Set a session early it told the reader the trade was over on the
+        // session target 2 could still have arrived in.
+        val prices = sessions(10.0 to 9.5, 12.5 to 10.2)
+        val stillTrading = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
+            today = start.plusDays(1),
+        )
+        val closed = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
+            today = start.plusDays(2),
+        )
+
+        assertEquals(Outcome.PARTIAL_HIT, stillTrading.outcome)
+        assertEquals(false, stillTrading.windowComplete)
+        assertEquals(Outcome.PARTIAL_HIT, closed.outcome)
+        assertEquals(true, closed.windowComplete)
+    }
+
+    @Test
+    fun `the horizon waits for its own last session to close as well`() {
+        // The same rule where it is nearly invisible. One session early out of thirty moves no
+        // figure worth reading, but it is the same mistake with a smaller face, and a window that
+        // ran out at an opening bell is not a window that ran out.
+        val prices = sessions(*Array(10) { 10.5 to 9.5 })
+        val stillTrading = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+            today = start.plusDays(9),
+        )
+        val closed = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = 10,
+            today = start.plusDays(10),
+        )
+
+        assertEquals(Outcome.OPEN, stillTrading.outcome)
+        assertEquals(Outcome.EXPIRED, closed.outcome)
+    }
+
+    @Test
+    fun `a window whose sessions are all behind the exchange is unaffected`() {
+        // Every call the record already holds is scored on sessions that closed days ago, so the
+        // date reaches none of them: this is what keeps the change to the one call it is about.
+        val prices = sessions(10.0 to 9.5, 11.0 to 10.2)
+        val explicit = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
+            today = start.plusDays(30),
+        )
+        val farLater = Scoring.score(
+            sessions = prices,
+            entryLow = 9.8, entryHigh = 10.0,
+            target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
+            today = start.plusYears(1),
+        )
+
+        assertEquals(explicit, farLater)
+        assertEquals(Outcome.EXPIRED, explicit.outcome)
+    }
+
+    @Test
+    fun `the ARCC call this rule was written for`() {
+        // The real one, off the phone. Arabia Cement, a T+1 dated 25 August 2026: buy 76.50-77.00,
+        // targets 79.50 and 81.00, stop 75.00. The band traded on the buy session, and neither a
+        // target nor the stop was reached on either session - so this genuinely is an expiry, and
+        // that is the point. The verdict was right and its timing was not: it was reported at the
+        // opening bell of the 26th, taking the morning's first print for where the trade ended.
+        val prices = listOf(
+            DailySession(
+                ticker = "ARCC", date = LocalDate.of(2026, 8, 25),
+                high = 78.49, low = 75.98, close = 77.00, volume = 899_325.0, open = 75.59,
+            ),
+            DailySession(
+                ticker = "ARCC", date = LocalDate.of(2026, 8, 26),
+                high = 77.30, low = 75.30, close = 75.63, volume = 271_863.0, open = 77.00,
+            ),
+        )
+        fun scored(today: LocalDate) = Scoring.score(
+            sessions = prices,
+            entryLow = 76.50, entryHigh = 77.00,
+            target1 = 79.50, target2 = 81.00, stopLoss = 75.00,
+            windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
+            entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
+            today = today,
+        )
+
+        // The session it was to be sold in, still trading. This read Expired.
+        assertEquals(Outcome.OPEN, scored(LocalDate.of(2026, 8, 26)).outcome)
+        // The morning after, with that session closed: the same verdict, now earned. Measured from
+        // the 76.75 midpoint of the band to the 75.63 it actually closed at.
+        val settled = scored(LocalDate.of(2026, 8, 27))
+        assertEquals(Outcome.EXPIRED, settled.outcome)
+        assertEquals(-1.46, settled.returnPct!!, 0.01)
+        assertEquals(2, settled.sessionsElapsed)
+    }
+
+    @Test
+    fun `an open outside its own session is read as unknown`() {
+        // This feed reports most EGX days with the previous session's close in the open field, and
+        // where the stock then gapped away from it the number lands outside the range it claims to
+        // begin. Checked against stored five-minute bars, seven of fifteen sessions put the stored
+        // open outside the first bar of their own session. It cannot be repaired, only recognised.
+        val below = DailySession(
+            ticker = "EGAL", date = start,
+            high = 373.77, low = 353.0, close = 365.0, volume = 1000.0, open = 352.75,
+        )
+        val above = below.copy(open = 400.0)
+        val real = below.copy(open = 360.0)
+
+        assertNull(below.traded.open)
+        assertNull(above.traded.open)
+        assertEquals(360.0, real.traded.open!!, 0.0001)
+        // Only the open is in question - the session itself is perfectly good.
+        assertEquals(373.77, below.traded.high!!, 0.0001)
+        assertEquals(365.0, below.traded.close!!, 0.0001)
     }
 }

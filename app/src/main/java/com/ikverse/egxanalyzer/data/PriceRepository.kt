@@ -351,6 +351,10 @@ class PriceRepository(
                 val low = lows?.price(index)
                 // A session still open reports nulls, and sometimes zeros; it is not history yet.
                 if (high == null || low == null) continue
+                val close = closes?.price(index)
+                val volume = volumes?.optDouble(index)?.takeUnless(Double::isNaN)
+                // A day the exchange was shut is not a session, whatever this feed says about it.
+                if (neverTraded(high, low, close, volume)) continue
                 add(
                     DailySession(
                         ticker = ticker,
@@ -359,8 +363,8 @@ class PriceRepository(
                             .toLocalDate(),
                         high = high,
                         low = low,
-                        close = closes?.price(index),
-                        volume = volumes?.optDouble(index)?.takeUnless(Double::isNaN),
+                        close = close,
+                        volume = volume,
                         open = opens?.price(index),
                     ),
                 )
@@ -469,3 +473,26 @@ class PriceRepository(
  */
 internal fun JSONArray.price(index: Int): Double? =
     optDouble(index).takeUnless { it.isNaN() || it <= 0.0 }
+
+/**
+ * Whether a row describes a day the exchange never opened.
+ *
+ * EGX shuts for public holidays and this feed does not omit them: it answers with the previous
+ * close repeated across the high, the low and the close, and no volume against it. Stored, those
+ * rows are sessions to everything downstream that counts sessions - a call's window is short by
+ * however many fall inside it, a T+1 posted the day before one spends its whole sell side on a day
+ * nothing could trade, and every "sessions to a target" figure carries them.
+ *
+ * The three prices being one number is not enough on its own: a stock so illiquid that it printed
+ * once looks exactly like that, and it did trade. The volume is what separates them, and requiring
+ * both is what keeps a real session with one print out of this. A stock whose single print came
+ * back with no volume at all is dropped, which is the safe direction to be wrong in - a session the
+ * app never sees cannot reach a target or break a stop, and neither could that one.
+ *
+ * Ten dates across a year of prices answered this on ninety-one of ninety-two stocks at once, which
+ * is what a closed exchange looks like from here.
+ */
+internal fun neverTraded(high: Double?, low: Double?, close: Double?, volume: Double?): Boolean =
+    high != null && low != null && close != null &&
+        high == low && low == close &&
+        (volume == null || volume <= 0.0)

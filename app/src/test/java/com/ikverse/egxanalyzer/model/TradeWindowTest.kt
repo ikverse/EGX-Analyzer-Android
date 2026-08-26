@@ -55,13 +55,13 @@ class TradeWindowTest {
     }
 
     @Test
-    fun `the T plus one window is two sessions and its entry is only the first`() {
-        // Two rather than one because the count is inclusive of the buy session. The entry being
-        // the shorter of the two is what marks a T+1 call to everything downstream, so it is not
-        // an implementation detail anything is free to change.
+    fun `the T plus one window is two sessions and its band is offered across both`() {
+        // Two rather than one because the count is inclusive of the buy session. The entry runs the
+        // whole of it: a channel that prints a band is offering it for the trade it described, and
+        // a buy zone the market reached on the sell session was reached while the call still stood.
         assertEquals(2, Scoring.T_PLUS_ONE_WINDOW_SESSIONS)
-        assertEquals(1, Scoring.T_PLUS_ONE_ENTRY_SESSIONS)
-        assertTrue(Scoring.T_PLUS_ONE_ENTRY_SESSIONS < Scoring.T_PLUS_ONE_WINDOW_SESSIONS)
+        assertEquals(2, Scoring.T_PLUS_ONE_ENTRY_SESSIONS)
+        assertEquals(Scoring.T_PLUS_ONE_WINDOW_SESSIONS, Scoring.T_PLUS_ONE_ENTRY_SESSIONS)
     }
 
     @Test

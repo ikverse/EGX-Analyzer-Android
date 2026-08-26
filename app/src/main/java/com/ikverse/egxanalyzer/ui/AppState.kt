@@ -2423,6 +2423,9 @@ class AppState(
                 // On this thread and inside this recompute, because it is the same write the read
                 // above paid for the connection to.
                 onSettled = localDataStore::saveSettledCalls,
+                // The same date the provisional flag above is set from, so a session the card calls
+                // still trading is never one the scorer has already run a call out of time on.
+                today = today,
             )
             // On the same thread and from the same read: the breaks and the latest sessions are
             // already in hand here, and asking for them again on the main thread would be a second
