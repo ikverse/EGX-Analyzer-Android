@@ -79,6 +79,7 @@ import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.StockOpinion
 import com.ikverse.egxanalyzer.model.opinionId
 import com.ikverse.egxanalyzer.model.positionId
+import com.ikverse.egxanalyzer.model.reachedTarget1
 import com.ikverse.egxanalyzer.model.riskReward
 import com.ikverse.egxanalyzer.model.sessionFor
 import com.ikverse.egxanalyzer.ui.theme.extraColors
@@ -525,7 +526,11 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
                 // the same left edge.
                 Text(
                     listOfNotNull(
-                        "reached target 1 / target 2",
+                        // The same wording the cards use, and for the same reason: the rate above
+                        // counts a call that ran to target 2 inside both figures, and the bar above
+                        // that cannot. See the caption on ChannelCard.
+                        "${best.reachedTarget1} reached target 1, " +
+                            "${best.fullHits} ran on to target 2",
                         "${best.averageReturn.signedPercent()} per call",
                         // How long being right takes this source. A rate says whether to follow a
                         // channel and this says what following it costs in patience - and it is
@@ -711,7 +716,18 @@ private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
             }
             Text(
                 listOfNotNull(
-                    if (thin) "too few judged to rank" else "reached target 1 / target 2",
+                    // The counts in words, because the two figures above and the bar below divide
+                    // the same calls in different ways and both are right. The rate is cumulative -
+                    // a call that ran to target 2 reached target 1 on the way and is inside both
+                    // figures. The bar cannot be: each call has to land in exactly one segment, so
+                    // its first segment is target 1 *only*. Saying "reached ... ran on to" once
+                    // here is what stops the bar reading as a contradiction of the rate.
+                    if (thin) {
+                        "too few judged to rank"
+                    } else {
+                        "${channel.reachedTarget1} reached target 1, " +
+                            "${channel.fullHits} ran on to target 2"
+                    },
                     // The rate the evidence will bear, under the rate that was measured. Six of six
                     // is a true 100% and a floor of 61%; a long record at 80% floors above that,
                     // which is why the order is not the rate. It qualifies the first figure only -
@@ -788,6 +804,36 @@ private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
                         Figure(
                             "Not tradable", channel.notTradable.toString(),
                             Modifier.weight(1f), tone = PriceRole.muted,
+                        )
+                    },
+                    // Whether to bank the whole position at target 1 or let half of it run, which
+                    // no figure on this card could answer before. The rate first, because it is the
+                    // one the decision actually turns on, then what each rule was worth.
+                    {
+                        Figure(
+                            "Ran on to target 2",
+                            formatPercent(channel.continuationRate, signed = false),
+                            Modifier.weight(1f),
+                            tone = PriceRole.target,
+                            caption = "of the ${channel.reachedTarget1} that reached target 1",
+                        )
+                    },
+                    {
+                        Figure(
+                            "All out at target 1",
+                            channel.sellAtTarget1Return.signedPercent(),
+                            Modifier.weight(1f),
+                            tone = PriceRole.forReturn(channel.sellAtTarget1Return),
+                            caption = "per call, over ${channel.policyCalls} priced both ways",
+                        )
+                    },
+                    {
+                        Figure(
+                            "Half out, half runs",
+                            channel.splitReturn.signedPercent(),
+                            Modifier.weight(1f),
+                            tone = PriceRole.forReturn(channel.splitReturn),
+                            caption = "per call, over the same ${channel.policyCalls}",
                         )
                     },
                 ),

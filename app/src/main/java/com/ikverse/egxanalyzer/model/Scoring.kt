@@ -339,7 +339,11 @@ object Scoring {
                 Scored(Outcome.ENTRY_NOT_REACHED, null, null, considered.size, peak, peakOn, trough, troughOn, null)
             partialOn != null -> partial(partialTarget, partialOn, partialElapsed, peak, peakOn,
                 trough, troughOn, entryLow, entryHigh, stoppedAfter = false,
-                stoppedOn = null, windowComplete = complete)
+                stoppedOn = null, windowComplete = complete,
+                // Only once the window has actually closed. While it is still running this call can
+                // still be promoted to a full hit, so there is no ending to record and a mark taken
+                // today would be read as one.
+                lastClose = lastClose.takeIf { complete })
             complete -> Scored(
                 Outcome.EXPIRED, null, lastClose, considered.size, peak, peakOn, trough, troughOn,
                 returnPct(entryLow, entryHigh, lastClose),
@@ -362,6 +366,13 @@ object Scoring {
         /** The session the stop broke on, which is not [on] unless both happened in one. */
         stoppedOn: LocalDate?,
         windowComplete: Boolean,
+        /**
+         * Where the price stood when the window closed, for a partial the stop never took back.
+         *
+         * Null on every partial the stop ended, because there the stop *is* where it ended and the
+         * call already carries that level. See [Scored.lastCloseAfterPartial].
+         */
+        lastClose: Double? = null,
     ) = Scored(
         outcome = Outcome.PARTIAL_HIT,
         settledOn = on,
@@ -375,6 +386,7 @@ object Scoring {
         stoppedAfterPartial = stoppedAfter,
         stoppedOn = stoppedOn,
         windowComplete = windowComplete,
+        lastCloseAfterPartial = lastClose,
     )
 
     /** The session traded through the entry band at some point. */
@@ -659,6 +671,20 @@ data class Scored(
     val ambiguity: Ambiguity? = null,
     /** False while the window is still running, so a partial hit may still become a full one. */
     val windowComplete: Boolean = false,
+    /**
+     * Where a partial hit stood when its window closed without the stop ever taking it back.
+     *
+     * [returnPct] on a partial is measured at the first target, which is the return of having sold
+     * there. That answers what the call was worth to a reader who took the money and left, and says
+     * nothing about what the rest of the position then did - and "what did the rest do" is the only
+     * question that separates selling at the first target from holding half for the second.
+     *
+     * The stop answers it for a partial the stop ended, and the call already prints that level. This
+     * is the other case: the window closed with the call still alive and still short of the second
+     * target, so the last close is where the un-sold half ended up. Null everywhere else, including
+     * on a partial that is still running - there is no ending yet to record.
+     */
+    val lastCloseAfterPartial: Double? = null,
 )
 
 /** Prices come off the feed at full float precision, which reads as noise rather than a price. */

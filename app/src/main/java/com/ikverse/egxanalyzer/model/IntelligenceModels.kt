@@ -62,6 +62,15 @@ data class ScoredCall(
     val stoppedOn: LocalDate? = null,
     /** False while the window is still running, so a partial hit may still become a full one. */
     val windowComplete: Boolean = false,
+    /**
+     * Where the un-sold half of a partial hit ended, for a partial the stop never took back.
+     *
+     * See [Scored.lastCloseAfterPartial]. Carried onto the call because the second-target question -
+     * bank everything at target 1, or let half of it run - is answered per source out of these, and
+     * a partial whose window closed short of target 2 is the case where holding cost something and
+     * no level the call printed says how much.
+     */
+    val lastCloseAfterPartial: Double? = null,
     /** The sessions this call was judged on, so the card can show them without another query. */
     val sessions: List<DailySession> = emptyList(),
     /**
@@ -200,6 +209,11 @@ data class CallTally(
     val anyTargetRateFloor: Double?,
     val averageRiskReward: Double?,
     val repeats: Int,
+    val continuationRate: Double? = null,
+    val continuationRateFloor: Double? = null,
+    val sellAtTarget1Return: Double? = null,
+    val splitReturn: Double? = null,
+    val policyCalls: Int = 0,
 )
 
 /**
@@ -453,7 +467,67 @@ data class ChannelScore(
     val averageRiskReward: Double? = null,
     /** Re-postings of a call already counted, left out of every figure above. */
     val repeats: Int = 0,
+    /**
+     * Of the calls that reached target 1, how many went on to target 2.
+     *
+     * **The one figure the sell-or-hold decision turns on**, and the reason it is not [fullHitRate]:
+     * that rate is full hits over *every* judged call, so it is dragged down by calls that never
+     * reached target 1 at all. Those calls are beside the point - if target 1 never printed, there
+     * was never a decision to take. Conditioning on having got there is what makes the number
+     * answer the question actually being asked.
+     */
+    val continuationRate: Double? = null,
+    /**
+     * The Wilson 95% lower bound on [continuationRate], on the same footing as [anyTargetRateFloor].
+     *
+     * Carried because this rate is conditioned on a *subset* of the judged calls and so rests on
+     * fewer of them than any other rate on the card - often far fewer. Four continuing out of six is
+     * 67% and a floor of 30%, which is the difference between "hold" and "no idea".
+     */
+    val continuationRateFloor: Double? = null,
+    /**
+     * What one call was worth taking the whole position off at target 1.
+     *
+     * Both this and [splitReturn] are what [averageReturn] cannot be. That figure books a partial
+     * hit at target 1 and a full hit at target 2, which is neither policy - it sells at target 1
+     * exactly on the calls that were never going to reach target 2 and holds exactly on the ones
+     * that were. That is a strategy needing tomorrow's newspaper, and it flatters every source.
+     *
+     * These two are followable rules, priced over the same calls, so the difference between them is
+     * the price of the decision and nothing else.
+     */
+    val sellAtTarget1Return: Double? = null,
+    /**
+     * What one call was worth selling half at target 1 and letting the rest run.
+     *
+     * The rest ends where the market put it: target 2, or the stop for a call that gave it back, or
+     * the last close for a window that closed in between. Weighted half and half because that is the
+     * split the question was asked about, and because any other weighting is a parameter this card
+     * would then have to explain.
+     */
+    val splitReturn: Double? = null,
+    /**
+     * How many calls [sellAtTarget1Return] and [splitReturn] are both measured over.
+     *
+     * Its own count because the two policies are priced on a **narrower** set than every other
+     * figure here, and a reader comparing them is entitled to know how narrow. Left out are calls
+     * that printed only one target - with no second target there is no decision to price - and
+     * partial hits still running, whose un-sold half has not finished yet. Both policies are priced
+     * over the identical set, or their difference would be a change of subject rather than a result.
+     */
+    val policyCalls: Int = 0,
 )
+
+/**
+ * Every call that reached target 1, the ones that carried on to target 2 included.
+ *
+ * The number a reader looks for and the app never printed. [ChannelScore.partialHits] is target 1
+ * *only* - it is a segment of a bar that partitions the judged calls, so a call that ran to target 2
+ * is counted in the segment beside it rather than in this one. That is correct for a bar, where each
+ * call must land in exactly one place, and it is not what "reached target 1" means in the rate above
+ * it. Printed in words beside the bar so the two readings cannot be taken for each other.
+ */
+val ChannelScore.reachedTarget1: Int get() = partialHits + fullHits
 
 data class PerformanceReport(
     /**

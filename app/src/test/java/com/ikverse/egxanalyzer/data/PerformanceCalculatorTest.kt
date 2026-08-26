@@ -3,6 +3,7 @@ package com.ikverse.egxanalyzer.data
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.CloudProvider
+import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.Outcome
@@ -11,6 +12,7 @@ import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.SettledCall
 import com.ikverse.egxanalyzer.model.SourceTrace
+import com.ikverse.egxanalyzer.model.reachedTarget1
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -478,6 +480,193 @@ class PerformanceCalculatorTest {
         )
     }
 
+    @Test
+    fun `a call that ran to target 2 still counts as having reached target 1`() {
+        // The question the figures exist to answer, and the one the outcome bar cannot: its first
+        // segment is target 1 *only*, so a reader adding the segments up is the only reader who
+        // ever sees how many calls actually got there.
+        val channel = policyChannel(
+            PolicyStock("AAA", reaching(14.5)),
+            PolicyStock("BBB", target1ThenStop()),
+        )
+
+        assertEquals(2, channel.judged)
+        // One in each segment of the bar, and both reached target 1.
+        assertEquals(1, channel.fullHits)
+        assertEquals(1, channel.partialHits)
+        assertEquals(2, channel.reachedTarget1)
+        assertEquals(100.0, channel.anyTargetRate!!, 0.01)
+        // Of the two that got to target 1, one carried on - which is not the 50% that fullHitRate
+        // happens to read here, and the next test is what separates them.
+        assertEquals(50.0, channel.continuationRate!!, 0.01)
+    }
+
+    @Test
+    fun `the continuation rate ignores calls that never reached target 1`() {
+        // fullHitRate divides by every judged call, so a stop-out drags it down; the sell-or-hold
+        // decision is only ever taken on a call that got to target 1, so this must not move.
+        val channel = policyChannel(
+            PolicyStock("AAA", reaching(14.5)),
+            PolicyStock("BBB", target1ThenStop()),
+            PolicyStock("CCC", straightToStop()),
+        )
+
+        assertEquals(3, channel.judged)
+        assertEquals(2, channel.reachedTarget1)
+        // A third call, and the two rates part company: one third against one half.
+        assertEquals(33.3, channel.fullHitRate!!, 0.05)
+        assertEquals(50.0, channel.continuationRate!!, 0.01)
+    }
+
+    @Test
+    fun `both rules are priced over the same calls`() {
+        // Entry midpoint 9.9, so target 1 is +21.21% and target 2 is +41.41%. The full hit splits
+        // to (21.21 + 41.41) / 2 and the one the stop took back to (21.21 + -9.09) / 2.
+        val channel = policyChannel(
+            PolicyStock("AAA", reaching(14.5)),
+            PolicyStock("BBB", target1ThenStop()),
+        )
+
+        assertEquals(2, channel.policyCalls)
+        assertEquals(21.21, channel.sellAtTarget1Return!!, 0.01)
+        assertEquals(18.69, channel.splitReturn!!, 0.02)
+    }
+
+    @Test
+    fun `a partial hit that ran out of time is priced at its last close`() {
+        // The case the stored verdict cannot answer: no stop took this back, so the level it ended
+        // at is on no card. Without the last close the un-sold half has no ending and the call
+        // would drop out of the comparison entirely.
+        val channel = policyChannel(PolicyStock("AAA", target1ThenDrift(sessions = 30, close = 11.0)))
+
+        assertEquals(1, channel.policyCalls)
+        assertEquals(21.21, channel.sellAtTarget1Return!!, 0.01)
+        // Half banked at target 1, half left to close at 11.0, which is +11.11% from the midpoint.
+        assertEquals(16.16, channel.splitReturn!!, 0.02)
+    }
+
+    @Test
+    fun `a partial hit still running is left out of both figures`() {
+        // Its un-sold half has not finished, so holding has no result yet. Marking it at today's
+        // close would put a price that is not an outcome into an average of outcomes - and it is
+        // still a judged call, so it must stay in every rate above.
+        val channel = policyChannel(
+            PolicyStock("AAA", reaching(14.5)),
+            PolicyStock("BBB", target1ThenDrift(sessions = 5, close = 11.0)),
+        )
+
+        assertEquals(2, channel.judged)
+        assertEquals(2, channel.reachedTarget1)
+        // Only the settled one is priced, and on it the two rules are just its own two returns.
+        assertEquals(1, channel.policyCalls)
+        assertEquals(21.21, channel.sellAtTarget1Return!!, 0.01)
+        assertEquals(31.31, channel.splitReturn!!, 0.02)
+    }
+
+    @Test
+    fun `a call printing one target is left out of the pair`() {
+        // With no second target there is nothing to hold for, so both rules would price it
+        // identically and it would drag the two figures toward each other for no reason.
+        val channel = policyChannel(
+            PolicyStock("AAA", reaching(14.5)),
+            PolicyStock("BBB", reaching(12.5), target2 = null),
+        )
+
+        assertEquals(2, channel.judged)
+        // Scoring makes the only target the full one, so it lands as a full hit either way.
+        assertEquals(2, channel.fullHits)
+        assertEquals(1, channel.policyCalls)
+    }
+
+    /** The one channel's score out of a run naming each stock once, with its own price path. */
+    private fun policyChannel(vararg stocks: PolicyStock): ChannelScore {
+        val paths = stocks.associate { it.ticker to it.path }
+        val report = PerformanceCalculator.report(
+            analyses = listOf(policyRun(stocks.toList())),
+            pricesFrom = called,
+            sessionsFor = { ticker, _ -> paths[ticker].orEmpty() },
+        )
+        return report.channels.single()
+    }
+
+    /** One stock's call: the levels it printed, and what the market then did about them. */
+    private data class PolicyStock(
+        val ticker: String,
+        val path: List<DailySession>,
+        val target1: Double? = 12.0,
+        val target2: Double? = 14.0,
+    )
+
+    /** Enters on the first session and reaches [high] on it. */
+    private fun reaching(high: Double) = listOf(session(called, high = high, low = 9.9))
+
+    /** Reaches target 1, then the stop breaks by more than the 2% the rule allows. */
+    private fun target1ThenStop() = listOf(
+        session(called, high = 12.5, low = 9.9),
+        session(called.plusDays(1), high = 10.0, low = 8.5),
+    )
+
+    /** Reaches target 1, then sits at [close] for the rest of [sessions] without resolving. */
+    private fun target1ThenDrift(sessions: Int, close: Double) =
+        listOf(session(called, high = 12.5, low = 9.9)) +
+            (1 until sessions).map {
+                session(called.plusDays(it.toLong()), high = close, low = close)
+            }
+
+    /** Enters, never reaches a target, and the stop takes it out. */
+    private fun straightToStop() = listOf(
+        session(called, high = 10.5, low = 9.9),
+        session(called.plusDays(1), high = 10.0, low = 8.5),
+    )
+
+    /** One run naming each stock once for a single session, on one channel. */
+    private fun policyRun(stocks: List<PolicyStock>) = SavedAnalysis(
+        id = 1,
+        provider = CloudProvider.QWEN,
+        model = "test-model",
+        result = AnalysisResult(
+            requestId = "request-policy",
+            recommendations = emptyList(),
+            recommendationTargetDate = called,
+            completedAt = Instant.parse("2026-08-10T09:00:00Z"),
+            inquiryReplyCount = 0,
+            sources = listOf(
+                SourceTrace(
+                    sourceId = "source-policy",
+                    channelId = 1,
+                    channelName = "First channel",
+                    messageId = 42,
+                    timestamp = Instant.parse("2026-08-10T10:00:00Z"),
+                    contentType = AnalysisContentType.TEXT,
+                    preview = "",
+                ),
+            ),
+            // Separate stocks rather than separate sessions, deliberately: one channel printing the
+            // same levels on adjacent analysed sessions is one call re-posted, and every rate here
+            // would drop all but the first of them.
+            consolidated = stocks.mapIndexed { index, stock ->
+                ConsolidatedRecommendation(
+                    stockCode = stock.ticker,
+                    stockNameEnglish = stock.ticker,
+                    stockNameArabic = null,
+                    mentionCount = 1,
+                    rank = index + 1,
+                    notesSummary = null,
+                    dataPoints = listOf(
+                        point(
+                            messageId = "42",
+                            entryLow = 9.8,
+                            entryHigh = 10.0,
+                            stopLoss = 9.0,
+                            target1 = stock.target1,
+                            target2 = stock.target2,
+                        ),
+                    ),
+                )
+            },
+        ),
+    )
+
     private fun sessions(high: Double) = listOf(session(called, high))
 
     private fun session(date: LocalDate, high: Double, low: Double = 9.9) =
@@ -572,6 +761,8 @@ class PerformanceCalculatorTest {
         entryHigh: Double?,
         stopLoss: Double?,
         basis: String = "explicit",
+        target1: Double? = 12.0,
+        target2: Double? = 14.0,
     ) = RecommendationDataPoint(
         date = called,
         effectiveDateBasis = basis,
@@ -585,9 +776,9 @@ class PerformanceCalculatorTest {
         buyPrice = null,
         buyPriceLow = entryLow,
         buyPriceHigh = entryHigh,
-        target1 = 12.0,
+        target1 = target1,
         returnTp1Pct = null,
-        target2 = 14.0,
+        target2 = target2,
         returnTp2Pct = null,
         stopLoss = stopLoss,
         support = null,

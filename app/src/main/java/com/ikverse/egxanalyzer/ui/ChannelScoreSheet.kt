@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.data.PerformanceCalculator
 import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.Scoring
+import com.ikverse.egxanalyzer.model.reachedTarget1
 import com.ikverse.egxanalyzer.ui.theme.extraColors
 
 /**
@@ -147,10 +148,19 @@ internal fun ChannelScoreSheet(channel: ChannelScore, onDismiss: () -> Unit) {
             HorizontalDivider()
             ExplainerSection("What the numbers on the card mean") {
                 Bullet(step++, MaterialTheme.colorScheme.primary, "The two rates are nested.") {
-                    "${formatPercent(channel.anyTargetRate, signed = false)} reached target 1, " +
-                        "and ${formatPercent(channel.fullHitRate, signed = false)} of all judged " +
-                        "calls went the whole way to target 2. The second is part of the first, " +
-                        "not something beside it."
+                    "${channel.reachedTarget1} of ${channel.judged} settled calls reached " +
+                        "target 1 - ${formatPercent(channel.anyTargetRate, signed = false)} - and " +
+                        "${channel.fullHits} of those ran on to target 2, which is " +
+                        "${formatPercent(channel.fullHitRate, signed = false)} of all judged " +
+                        "calls. The second is part of the first, not something beside it."
+                }
+                Bullet(step++, PriceRole.muted, "The bar divides them differently, on purpose.") {
+                    "Each call has to sit in exactly one segment or the bar would not be a " +
+                        "picture of the ${channel.judged} settled calls, so its first segment is " +
+                        "target 1 and no further - ${channel.partialHits} calls - and the " +
+                        "${channel.fullHits} that ran on are in the segment beside it. Add the " +
+                        "two to get the ${channel.reachedTarget1} above. The rate counts a call " +
+                        "that reached target 2 in both figures; the bar cannot count it twice."
                 }
                 Bullet(step++, PriceRole.forReturn(channel.averageReturn), "Per judged call is what orders the list.") {
                     "What one call from this source has been worth on average: " +
@@ -174,6 +184,57 @@ internal fun ChannelScoreSheet(channel: ChannelScore, onDismiss: () -> Unit) {
                         "Six out of six is a true 100% resting on very little. This is the lowest " +
                             "rate the calls behind it can honestly support, and it covers target " +
                             "1 only."
+                    }
+                }
+            }
+
+            HorizontalDivider()
+            ExplainerSection("Sell at target 1, or let half run?") {
+                Bullet(step++, PriceRole.target, "How often holding paid.") {
+                    channel.continuationRate?.let {
+                        "${formatPercent(it, signed = false)} of the calls that reached target 1 " +
+                            "went on to target 2 - ${channel.fullHits} of " +
+                            "${channel.reachedTarget1}. This is not the target 2 rate on the card " +
+                            "above: that one is measured over every judged call, including the " +
+                            "ones that never reached target 1, where there was no decision to take."
+                    } ?: "No call from this source has reached target 1 yet, so there is nothing " +
+                        "to say about holding past it."
+                }
+                channel.continuationRateFloor?.let { floor ->
+                    Bullet(step++, PriceRole.muted, "What that rate will actually bear.") {
+                        "At least ${formatPercent(floor, signed = false)}, on " +
+                            "${channel.reachedTarget1} calls. This rate rests on fewer calls than " +
+                            "any other figure here - only the ones that got to target 1 - so it " +
+                            "is the shakiest number on the card and the floor under it is wide."
+                    }
+                }
+                if (channel.policyCalls > 0) {
+                    Bullet(step++, PriceRole.forReturn(channel.sellAtTarget1Return), "What each rule was worth.") {
+                        "Taking the whole position off at target 1 returned " +
+                            "${formatPercent(channel.sellAtTarget1Return)} a call. Selling half " +
+                            "there and letting the rest run returned " +
+                            "${formatPercent(channel.splitReturn)}. Both over the same " +
+                            "${channel.policyCalls} calls, so the difference between them is the " +
+                            "decision and nothing else."
+                    }
+                    Bullet(step++, PriceRole.muted, "Why these are not the per-call figure above.") {
+                        "That one books a partial hit at target 1 and a full hit at target 2 - it " +
+                            "sells early on exactly the calls that were going to stall and holds " +
+                            "on exactly the ones that were going to run. No one can trade that " +
+                            "without knowing which is which in advance. These two are rules you " +
+                            "could actually follow."
+                    }
+                    Bullet(step++, PriceRole.muted, "What is left out of the pair.") {
+                        "Calls that printed only one target, where there is no second target to " +
+                            "hold for and so no decision to price. And partial hits still running, " +
+                            "whose un-sold half has not finished yet. " +
+                            "${channel.judged - channel.policyCalls} of this source's " +
+                            "${channel.judged} settled calls are out on one of those two counts."
+                    }
+                } else {
+                    Bullet(step++, extraColors.expired, "Not enough to price the two rules.") {
+                        "It takes calls that printed both targets and have finished. This source " +
+                            "has none yet, so neither rule has a return to compare."
                     }
                 }
             }

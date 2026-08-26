@@ -136,6 +136,7 @@ object PerformanceCalculator {
                         stoppedAfterPartial = scored.stoppedAfterPartial,
                         stoppedOn = scored.stoppedOn,
                         windowComplete = scored.windowComplete,
+                        lastCloseAfterPartial = scored.lastCloseAfterPartial,
                         sessions = sessions,
                         // Checked against the call's own session, which is the first one it was
                         // replayed on. Nothing here changes what was scored above - a fault
@@ -524,6 +525,9 @@ object PerformanceCalculator {
         // Every call made, not only the judged ones: this describes the levels that were printed,
         // which were printed whatever the market then did about them.
         val riskRewards = rows.mapNotNull(ScoredCall::riskReward)
+        // Bank it all at target 1, or sell half and let the rest run - the same calls priced under
+        // both rules. Narrower than `judged` by construction; see `policyPairs`.
+        val policy = policyPairs(judged)
         return CallTally(
             calls = rows.size,
             judged = judged.size,
@@ -560,8 +564,78 @@ object PerformanceCalculator {
                 ?.average()
                 ?.round(2),
             repeats = posted.size - rows.size,
+            // Conditioned on having reached target 1, which is the whole point of it: over every
+            // judged call this is `fullHitRate`, and that answers a different question.
+            continuationRate = any.size
+                .takeIf { it > 0 }
+                ?.let { (full.size.toDouble() / it * 100).round(1) },
+            continuationRateFloor = wilsonLowerBound(full.size, any.size),
+            sellAtTarget1Return = policy.map(PolicyPair::sellAll).averageOrNull(),
+            splitReturn = policy.map(PolicyPair::split).averageOrNull(),
+            policyCalls = policy.size,
         )
     }
+
+    /** One call priced twice: once under each rule, so the pair can be differenced. */
+    private data class PolicyPair(val sellAll: Double, val split: Double)
+
+    /**
+     * Both policies priced over the calls where the decision is real and finished.
+     *
+     * Three exclusions, and each of them would otherwise bend the comparison toward "it makes no
+     * difference":
+     *
+     * - **Only one target printed.** `Scoring` gives such a call `partialTarget = null`, so it can
+     *   only ever be a full hit. There is no second target to hold for, so there is no decision, and
+     *   both policies would price it identically.
+     * - **A partial hit still running.** Its un-sold half has not finished, so holding has no
+     *   result yet. Marking it at today's close would put a price that is not an outcome into an
+     *   average of outcomes.
+     * - **No priceable ending.** A call whose levels or last close leave either policy unpriceable
+     *   is dropped from *both*, never from one.
+     *
+     * A call that stopped or expired without ever reaching target 1 stays in, priced the same under
+     * both: nothing was sold at target 1 because target 1 never came. Dropping those would turn each
+     * figure into a return conditional on winning, which is not what following a source pays.
+     */
+    private fun policyPairs(judged: List<ScoredCall>): List<PolicyPair> = judged.mapNotNull { call ->
+        val t1 = call.target1
+        val t2 = call.target2
+        if (t1 == null || t2 == null) return@mapNotNull null
+        val atTarget1 = call.returnTo(t1) ?: return@mapNotNull null
+        when (call.outcome) {
+            Outcome.FULL_HIT -> call.returnTo(t2)?.let { PolicyPair(atTarget1, (atTarget1 + it) / 2) }
+            Outcome.PARTIAL_HIT -> {
+                // Where the half that was left to run actually ended: the stop took it back, or the
+                // window closed with it still short of target 2. A partial that is neither is still
+                // running and has no ending to price.
+                val rest = if (call.stoppedAfterPartial) call.stopLoss else call.lastCloseAfterPartial
+                rest?.let { call.returnTo(it) }
+                    ?.let { PolicyPair(atTarget1, (atTarget1 + it) / 2) }
+            }
+            // Target 1 never came, so neither rule ever sold anything and both end where the call
+            // did. `returnPct` is already measured at the stop and at the last close respectively.
+            Outcome.STOPPED, Outcome.EXPIRED -> call.returnPct?.let { PolicyPair(it, it) }
+            else -> null
+        }
+    }
+
+    /**
+     * A price as a return from the middle of the entry band.
+     *
+     * The same base `Scoring` measures every return from, so a policy figure and the scored return
+     * beside it differ in where they end and in nothing else.
+     */
+    private fun ScoredCall.returnTo(exit: Double): Double? {
+        val low = entryLow
+        val high = entryHigh
+        val entry = if (low != null && high != null) (low + high) / 2 else low ?: high ?: return null
+        if (entry == 0.0) return null
+        return ((exit - entry) / entry * 100).round(2)
+    }
+
+    private fun List<Double>.averageOrNull(): Double? =
+        takeIf(List<Double>::isNotEmpty)?.average()?.round(2)
 
     internal fun channelScores(calls: List<ScoredCall>): List<ChannelScore> = calls
         .groupBy(ScoredCall::channel)
@@ -585,6 +659,11 @@ object PerformanceCalculator {
                 anyTargetRateFloor = figures.anyTargetRateFloor,
                 averageRiskReward = figures.averageRiskReward,
                 repeats = figures.repeats,
+                continuationRate = figures.continuationRate,
+                continuationRateFloor = figures.continuationRateFloor,
+                sellAtTarget1Return = figures.sellAtTarget1Return,
+                splitReturn = figures.splitReturn,
+                policyCalls = figures.policyCalls,
             )
         }
         // A record needs enough behind it to be a record, and being right often is not the same as
@@ -798,6 +877,11 @@ object PerformanceCalculator {
         stoppedAfterPartial = settled.stoppedAfterPartial,
         stoppedOn = settled.stoppedOn,
         windowComplete = settled.windowComplete,
+        // Null by construction rather than by omission, and so not stored: `isFinal` freezes a
+        // partial hit **only** once the stop has taken it back, and there the stop is where the
+        // un-sold half ended. The case this field exists for - a window that closed short of the
+        // second target with the call still alive - is never frozen and is re-derived every run.
+        lastCloseAfterPartial = null,
         sessions = settled.sessions,
         // Re-derived rather than frozen: a fault is a reading of the levels against the call's own
         // first session, both of which are in hand here, and it captions the card without moving a
