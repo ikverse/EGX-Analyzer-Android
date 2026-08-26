@@ -1698,6 +1698,28 @@ at the foot of the screen until 2026-08-25.
   That has happened here — the ISIN migration — and nothing noticed at the time. Seven days, which
   clears the Friday–Saturday weekend plus a public holiday. Both are now standing state on Insights
   rather than a count in a toast — see **When the feed goes quiet**.
+- **Only a scroll the reader started may name a destination, and the effect that scrolls is keyed on
+  the pager.** The bar and the pager move the same pointer, so each follows the other, and the two
+  ways that link can go wrong have both now been shipped. Keyed on `appState.destination`, the
+  scrolling effect was restarted by the very thing it was meant to serve — a swipe publishes its own
+  arrival — and the restarted copy compared a target read at recomposition against a page read a
+  frame or more later, so a second swipe arriving inside that window scrolled the reader **back to
+  the page they had just left**. One `LaunchedEffect(pager)` owns the whole link now; nothing the
+  pager says can restart it, so no stale target survives to be acted on. The guard against the
+  write-back was the second fault: a flag raised *inside* the scrolling coroutine goes up a frame
+  after the scroll starts and down a frame after it ends, and a page that turned over inside either
+  gap was swallowed and never said again — which is how the bar came to be lit on a tab the reader
+  was not on. It is read from the pager's own `interactionSource` instead, set on
+  `DragInteraction.Start` and cleared when the pager **comes to rest** rather than when the finger
+  lifts, so it covers the fling. That buys one rule, and the rule is what makes the rest fall out:
+  the pages a tap travels over stay silent, and so does **the page a tap is abandoned on when a
+  second tap replaces it** — not an arrival either, and left to speak it wins the race against the
+  tap that cancelled it and takes the reader somewhere neither tap named. Taps run through
+  `collectLatest` so the second of two wins rather than being undone when the first lands, and so a
+  cancelled travel always has a replacement to snap it rather than being left parked between two
+  pages. The `animateScrollToPage` is wrapped: a drag holds the pager at a priority a scroll started
+  in the shell cannot take, so it is refused outright rather than interrupted, and that refusal is
+  swallowed while a real cancellation still passes.
 - **Pressing the destination already showing takes that page back to the top.** The press every
   bottom bar on this platform answers, and this app answered it with nothing — the way back from a
   session card deep inside Insights was to scroll all of it by hand. `AppState.scrollToTopRequest`
