@@ -8,6 +8,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.outlined.Preview
@@ -24,6 +25,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoGraph
 import androidx.compose.material.icons.outlined.CalendarMonth
@@ -53,12 +56,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -290,7 +295,16 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 // SectionCard, where both of these were hand-built copies of it. Two cards drawing
                 // their own background is how the pair drifted apart in the first place: the same
                 // container and shape, and then one tinting its icon and the other not.
-                SectionCard(title = "Content types", icon = Icons.Outlined.TextFields) {
+                // `fillMaxHeight`, because `alignHeights` stretches the two *columns* and a card
+                // inside one keeps its own height regardless - so the shorter card's background
+                // ended early and the stretch was invisible empty space under it, which is the
+                // exact mismatch alignHeights exists to remove. No-op when the panes stack, where
+                // the column height is unbounded.
+                SectionCard(
+                    title = "Content types",
+                    icon = Icons.Outlined.TextFields,
+                    modifier = Modifier.fillMaxHeight(),
+                ) {
                     // Three checkboxes stacked is a phone layout; anywhere wider it is three rows of
                     // empty space. Measured against the card's own content width, so beside the date
                     // card - 281dp of content at 313 - it correctly keeps the long labels stacked
@@ -328,6 +342,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                 SectionCard(
                     title = "Recommendation target date",
                     icon = Icons.Outlined.CalendarMonth,
+                    modifier = Modifier.fillMaxHeight(),
                 ) {
                     RecommendationDateOption(
                         selected = appState.analysisMode == AnalysisMode.NEXT_DAY,
@@ -405,11 +420,25 @@ private fun RecommendationDateOption(
     detail: String,
     onClick: () -> Unit,
 ) {
+    // The whole row selects, not just the button. The title and the date are the part being read,
+    // and on the specific-date option the detail line says "tap to change" - a label that names the
+    // gesture and then ignores it is worse than no label. One `selectable` rather than a click on
+    // each child, so a screen reader announces one option instead of a button and two loose texts.
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .selectable(
+                selected = selected,
+                role = Role.RadioButton,
+                onClick = onClick,
+            )
+            .padding(vertical = Space.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, onClick = onClick)
+        // Null: the row owns the click now, and a button with its own would be a second target
+        // sitting inside the first.
+        RadioButton(selected = selected, onClick = null)
         Column {
             Text(title, fontWeight = FontWeight.SemiBold)
             Text(
@@ -446,12 +475,25 @@ private fun showRecommendationDatePicker(activity: Activity, appState: AppState)
 
 @Composable
 private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState: AppState) {
-    // The checkbox keeps its own 48dp target; only the gap it leaves beside the label is pulled in,
-    // so three of these stop reading as three separate paragraphs.
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    // The label toggles as well as the box, for the reason the date rows beside this card do: two
+    // cards side by side, one answering a tap on its text and the other not, reads as one of them
+    // being broken. The checkbox keeps its own 48dp target inside the row; only the gap it leaves
+    // beside the label is pulled in, so three of these stop reading as three separate paragraphs.
+    Row(
+        modifier = Modifier
+            .clip(MaterialTheme.shapes.medium)
+            .toggleable(
+                value = type in appState.selectedContentTypes,
+                role = Role.Checkbox,
+                onValueChange = { appState.toggleContentType(type) },
+            )
+            .padding(end = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Null for the same reason the date rows pass it: the row is the target.
         Checkbox(
             checked = type in appState.selectedContentTypes,
-            onCheckedChange = { appState.toggleContentType(type) },
+            onCheckedChange = null,
         )
         Text(label, modifier = Modifier.offset(x = (-4).dp))
     }
