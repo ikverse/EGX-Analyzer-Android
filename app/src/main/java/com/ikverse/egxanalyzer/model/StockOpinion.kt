@@ -5,15 +5,21 @@ import java.time.LocalDate
 /**
  * What the model says about one stock and the call made on it.
  *
- * Two judgements and three lists. The judgements are what it makes of the stock and what it makes
- * of the levels the channel printed; every figure a reader might otherwise want is already on the
- * card this opens from, which is why the prompt spends a whole section forbidding the model from
- * reciting them back.
+ * Four judgements and three lists. The judgements are how the stock has actually traded, what the
+ * business is, where it goes over three spans of time, and what the levels the channel printed are
+ * worth.
  *
- * The lists are what the judgements rest on and were the thing missing: [news] is what a searched
- * request actually found, dated and attributed, rather than melted into a paragraph where a
- * headline from last year reads exactly like one from last week; [catalysts] is what is already
- * scheduled ahead of the reader; [risks] is what goes wrong for someone who buys.
+ * [standing] and [forecast] were added because without them every answer read the same. The prompt
+ * had one free-text field for the stock and forbade the model from naming any figure in it, so on a
+ * quiet stock there was nothing specific left to say and what came back fitted any ticker on the
+ * exchange. [standing] is measured rather than recalled and cannot come out the same twice;
+ * [forecast] asks three questions where there was one, and a reason that carries all three spans is
+ * one reading rather than three.
+ *
+ * The lists are what the judgements rest on: [news] is what a searched request actually found,
+ * dated and attributed, rather than melted into a paragraph where a headline from last year reads
+ * exactly like one from last week; [catalysts] is what is already scheduled ahead of the reader;
+ * [risks] is what goes wrong for someone who buys.
  *
  * The token fields stay English in transit and are printed in Arabic by the screen. Letting the
  * model answer them in Arabic would put the parser at the mercy of its choice of synonym, and a
@@ -21,12 +27,29 @@ import java.time.LocalDate
  */
 data class StockOpinion(
     val verdict: Verdict,
+    /**
+     * How long to hold, derived from [forecast] rather than asked for.
+     *
+     * Schema 3 stopped asking the model for this. Two fields answering "how long" is two fields
+     * free to contradict each other - a `SHORT` horizon printed beside a short leg pointing down -
+     * and the forecast is strictly the more informative of the two. Kept on the answer because
+     * opinions saved under schema 2 carry one and the sheet still prints theirs.
+     */
     val horizon: Horizon,
     val confidence: Confidence,
     /** The answer before the reasoning, in Arabic. */
     val headline: String,
-    /** The stock itself, in Arabic: what moves it and what to want before paying today's price. */
+    /**
+     * How the stock has actually traded, in Arabic, against the figures the app measured.
+     *
+     * Blank on an opinion given under schema 2, which had no such field - not on one where the
+     * model declined to answer, which the parser refuses outright.
+     */
+    val standing: String = "",
+    /** The business itself, in Arabic: what moves it and what to want before paying today's price. */
     val outlook: String,
+    /** Where it goes over three spans. Null on a schema 2 answer and on one that arrived short. */
+    val forecast: Forecast? = null,
     val onTheCall: CallView,
     /**
      * What a live search turned up inside the window it was given, newest first.
@@ -56,7 +79,89 @@ data class StockOpinion(
     /** Whether live search was attached, which is the difference between a view and a guess. */
     val searched: Boolean,
 ) {
-    data class CallView(val stance: Stance, val detail: String)
+    /**
+     * The levels as printed, judged one number at a time.
+     *
+     * [detail] used to be the whole of this: three or four sentences covering the ratio, the stop,
+     * both targets and whether the price had left the band behind. Four questions in one paragraph
+     * average into the same paragraph - "the ratio is acceptable but the stop is tight" fitted
+     * almost every call - and the reader had asked what the *numbers* were worth. [checks] asks
+     * each of the five separately and rates it, so two calls on one stock can disagree visibly.
+     *
+     * Empty on a schema 2 answer, which carried only the prose.
+     */
+    data class CallView(
+        val stance: Stance,
+        val detail: String,
+        val checks: List<Check> = emptyList(),
+    )
+
+    /** One of the printed numbers, rated on its own. [note] is Arabic and names a figure. */
+    data class Check(val item: CheckItem, val rating: Rating, val note: String)
+
+    /**
+     * Where the stock goes, over three spans that are asked separately.
+     *
+     * A list rather than three named fields because the sheet reads it as a row of three and the
+     * store writes it as an array; [Leg.span] carries which is which. The parser builds one only
+     * where all three arrived, so anything holding a [Forecast] is holding a complete one - a
+     * two-legged forecast on screen would be the app deciding which span to drop.
+     */
+    data class Forecast(val legs: List<Leg>) {
+
+        fun leg(span: Span): Leg? = legs.firstOrNull { it.span == span }
+
+        /** One span's reading. [confidence] is this leg's own and usually falls as the span grows. */
+        data class Leg(
+            val span: Span,
+            val direction: Direction,
+            /** One or two sentences, in Arabic, and not the reason another leg gave. */
+            val why: String,
+            val confidence: Confidence,
+        )
+    }
+
+    /**
+     * The three spans, in the order they are read.
+     *
+     * [window] is printed under the Arabic label rather than left to the reader: "medium" is a word
+     * every market column uses and none of them define, and a forecast whose span is guessed at is
+     * a forecast about nothing.
+     */
+    enum class Span(val arabic: String, val window: String) {
+        SHORT("أجل قصير", "days to 4 weeks"),
+        MEDIUM("أجل متوسط", "1 to 3 months"),
+        LONG("أجل طويل", "6 to 12 months"),
+    }
+
+    /**
+     * Where the price goes over one span - not whether to buy.
+     *
+     * Deliberately separate from [Verdict]: a stock can be heading up and still be a poor buy at
+     * today's close because the move is already paid for, and collapsing the two would lose exactly
+     * that answer.
+     */
+    enum class Direction(val arabic: String) {
+        UP("صاعد"),
+        DOWN("هابط"),
+        SIDEWAYS("عرضي"),
+    }
+
+    /** Which printed number a [Check] is about. The label is English, like every heading. */
+    enum class CheckItem(val label: String) {
+        RISK_REWARD("Risk to reward"),
+        STOP("Stop"),
+        TARGET_1("Target 1"),
+        TARGET_2("Target 2"),
+        ENTRY_STILL_VALID("Entry still valid"),
+    }
+
+    /** What one printed number is worth, on its own. */
+    enum class Rating(val arabic: String) {
+        GOOD("جيد"),
+        FAIR("مقبول"),
+        POOR("ضعيف"),
+    }
 
     /**
      * One thing the search found.
@@ -105,7 +210,35 @@ data class StockOpinion(
         BOTH("قصير وطويل"),
 
         /** The answer is not to buy at all, so there is no holding period to name. */
-        NEITHER("لا شراء"),
+        NEITHER("لا شراء");
+
+        companion object {
+            /**
+             * The holding period the forecast implies, since the model is no longer asked for one.
+             *
+             * Three spans read into four values, so the mapping has to say what it is doing:
+             * `SHORT` means the case is in the near spans, `LONG` that it is out at six to twelve
+             * months, `BOTH` that it is at both ends. A medium leg counts toward `SHORT` because
+             * one to three months is a holding period a reader plans in weeks, not the one they
+             * plan in years.
+             *
+             * `NEITHER` on `AVOID`, whatever the directions say - there is no holding period on a
+             * stock the answer says not to buy - and on an answer that carried no forecast at all,
+             * which is a schema 2 row being re-read or an answer that arrived short.
+             */
+            fun from(verdict: Verdict, forecast: Forecast?): Horizon {
+                if (verdict == Verdict.AVOID || forecast == null) return NEITHER
+                fun rising(span: Span) = forecast.leg(span)?.direction == Direction.UP
+                val near = rising(Span.SHORT) || rising(Span.MEDIUM)
+                val far = rising(Span.LONG)
+                return when {
+                    near && far -> BOTH
+                    far -> LONG
+                    near -> SHORT
+                    else -> NEITHER
+                }
+            }
+        }
     }
 
     enum class Confidence(val arabic: String) {

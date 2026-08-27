@@ -101,7 +101,7 @@ object OpinionPrompt {
         appendLine("  Return so far  ${percent(call.returnPct)}")
         appendLine()
         appendLine(latest.line(call))
-        appendStanding(feed)
+        appendStanding(feed, latest?.session?.close ?: feed.lastOrNull()?.close)
         appendLiquidity(feed)
         appendSessions(feed)
         channel?.let { appendChannel(it) }
@@ -127,8 +127,15 @@ object OpinionPrompt {
      * None of this is on the card, and all of it is arithmetic the model would otherwise be asked
      * to do in its head over a table of thirty rows. A moving average worked out wrong is worse
      * than one left out, so it is worked out here or not stated.
+     *
+     * Every figure here is now stated **twice**: as the level, and as the distance from today's
+     * close. The prompt requires the model to read this section back rather than forbidding it -
+     * an answer with no figure in it fitted every stock on the exchange, which is why every answer
+     * read the same - and requiring it to name a gap it had to work out itself would be requiring
+     * a wrong number. The rule risk-to-reward has followed since it was added: computed in Kotlin
+     * or not stated.
      */
-    private fun StringBuilder.appendStanding(feed: List<DailySession>) {
+    private fun StringBuilder.appendStanding(feed: List<DailySession>, close: Double?) {
         val closes = feed.mapNotNull(DailySession::close)
         val short = closes.averageOfLast(SHORT_AVERAGE)
         val long = closes.averageOfLast(LONG_AVERAGE)
@@ -138,14 +145,44 @@ object OpinionPrompt {
         if (short == null && long == null && high == null) return
         appendLine()
         appendLine("Where the price stands, measured from the feed:")
-        short?.let { appendLine("  $SHORT_AVERAGE-session average close   ${price(it)}") }
-        long?.let { appendLine("  $LONG_AVERAGE-session average close   ${price(it)}") }
+        short?.let {
+            appendLine("  $SHORT_AVERAGE-session average close   ${price(it)}${close.against(it)}")
+        }
+        long?.let {
+            appendLine("  $LONG_AVERAGE-session average close   ${price(it)}${close.against(it)}")
+        }
+        // Which of the two averages is on top is the trend, and by how much is whether it is worth
+        // saying out loud. Both are one subtraction the model would otherwise make on two numbers
+        // printed three characters apart, which is exactly the kind it gets wrong confidently.
+        if (short != null && long != null && long > 0) {
+            appendLine(
+                "  The $SHORT_AVERAGE-session average is ${percent((short - long) / long * 100)} " +
+                    "against the $LONG_AVERAGE-session one.",
+            )
+        }
         if (high != null && low != null) {
             appendLine(
                 "  Over the last ${ranged.size} sessions: high ${price(high.first)} on " +
                     "${high.second}, low ${price(low.first)} on ${low.second}",
             )
+            // Where in its own range the price sits, as one number. "Near the top" and "near the
+            // bottom" are the readings the reader wants and the two the model has to place a close
+            // between two prices to reach.
+            val span = high.first - low.first
+            if (close != null && span > 0) {
+                appendLine(
+                    "  The latest close sits at " +
+                        "${percent((close - low.first) / span * 100, signed = false)} of that " +
+                        "range, measured from the low.",
+                )
+            }
         }
+    }
+
+    /** Today's close against a level, as the gap the model must not be asked to work out. */
+    private fun Double?.against(level: Double): String {
+        if (this == null || level <= 0) return ""
+        return ", latest close ${percent((this - level) / level * 100)} against it"
     }
 
     /**

@@ -46,6 +46,47 @@ class StockOpinionStoreTest {
         searched = true,
     )
 
+    /** The same answer as [opinion], given under schema 3 - three spans and five rated numbers. */
+    private val forecasting = opinion.copy(
+        standing = "الإغلاق فوق متوسط 20 جلسة بنحو 3% ودون قمة الستين جلسة.",
+        forecast = StockOpinion.Forecast(
+            listOf(
+                StockOpinion.Forecast.Leg(
+                    span = StockOpinion.Span.SHORT,
+                    direction = StockOpinion.Direction.SIDEWAYS,
+                    why = "السعر داخل نطاق ضيق منذ أسبوعين.",
+                    confidence = StockOpinion.Confidence.MEDIUM,
+                ),
+                StockOpinion.Forecast.Leg(
+                    span = StockOpinion.Span.MEDIUM,
+                    direction = StockOpinion.Direction.UP,
+                    why = "قسيمة التوزيع في سبتمبر.",
+                    confidence = StockOpinion.Confidence.LOW,
+                ),
+                StockOpinion.Forecast.Leg(
+                    span = StockOpinion.Span.LONG,
+                    direction = StockOpinion.Direction.UP,
+                    why = "الطلب على اليوريا وسعر الغاز المدعوم.",
+                    confidence = StockOpinion.Confidence.LOW,
+                ),
+            ),
+        ),
+        onTheCall = opinion.onTheCall.copy(
+            checks = listOf(
+                StockOpinion.Check(
+                    item = StockOpinion.CheckItem.RISK_REWARD,
+                    rating = StockOpinion.Rating.FAIR,
+                    note = "1.6 إلى 1 من منتصف النطاق.",
+                ),
+                StockOpinion.Check(
+                    item = StockOpinion.CheckItem.ENTRY_STILL_VALID,
+                    rating = StockOpinion.Rating.POOR,
+                    note = "السعر تجاوز النطاق بالكامل.",
+                ),
+            ),
+        ),
+    )
+
     private fun LocalDataStore.save(id: String = call, requestId: String = "run-1") =
         saveStockOpinion(
             id = id,
@@ -327,6 +368,98 @@ class StockOpinionStoreTest {
         assertEquals(0, restored.newsWindowDays)
         // The list it did carry is untouched by the upgrade.
         assertEquals(listOf("آخر نتائج أعمال معلنة"), restored.unknowns)
+        // Nor did schema 3's columns invent a reading it never gave. Blank and null are what an
+        // answer from before those questions were asked actually holds.
+        assertEquals("", restored.standing)
+        assertNull(restored.forecast)
+        assertTrue(restored.onTheCall.checks.isEmpty())
+    }
+
+    /**
+     * The two judgements schema 3 added survive the round trip, spans and ratings included.
+     *
+     * Stored as JSON in a column each, like the findings, so nothing but this stands between a
+     * renamed key and a sheet that draws no forecast at all - which looks exactly like a model that
+     * declined to give one.
+     */
+    @Test
+    fun `the standing forecast and checks come back exactly as they went in`() {
+        val store = LocalDataStore(context)
+        store.saveStockOpinion(
+            id = call,
+            requestId = "run-1",
+            ticker = "ABUK",
+            openedOn = LocalDate.parse("2026-08-11"),
+            channel = "EGX Signals",
+            opinion = forecasting,
+        )
+
+        assertEquals(forecasting, store.stockOpinions()[call])
+    }
+
+    /**
+     * A span or a direction a later build wrote costs the forecast, never the answer around it.
+     *
+     * Two of three spans on screen would not be a smaller forecast - it would be the app choosing
+     * which reading to hide, on a sheet whose point is that the three can disagree.
+     */
+    @Test
+    fun `a forecast leg this build cannot read costs the forecast and nothing else`() {
+        val store = LocalDataStore(context)
+        store.saveStockOpinion(
+            id = call,
+            requestId = "run-1",
+            ticker = "ABUK",
+            openedOn = LocalDate.parse("2026-08-11"),
+            channel = "EGX Signals",
+            opinion = forecasting,
+        )
+        store.writableDatabase.update(
+            "stock_opinions",
+            ContentValues().apply {
+                put(
+                    "forecast",
+                    """[{"span":"SHORT","direction":"UP","why":"","confidence":"LOW"},
+                       {"span":"MEDIUM","direction":"SIDEWAYS","why":"","confidence":"LOW"},
+                       {"span":"DECADE","direction":"UP","why":"","confidence":"LOW"}]""",
+                )
+            },
+            "id = ?",
+            arrayOf(call),
+        )
+
+        val restored = store.stockOpinions().getValue(call)
+
+        assertNull(restored.forecast)
+        assertEquals(forecasting.standing, restored.standing)
+        assertEquals(forecasting.onTheCall.checks, restored.onTheCall.checks)
+    }
+
+    /**
+     * A phone holding opinions from before the forecast existed keeps every one of them.
+     *
+     * Version 22 is what every phone that has ever pressed Ask AI is on, so this is the upgrade
+     * that actually runs on a real device. The columns arrive by ALTER, one guard each, so the risk
+     * is not that it fails - it is that it takes answers with it that cannot be re-asked for free.
+     */
+    @Test
+    fun `an opinion saved before the forecast existed survives the upgrade`() {
+        Version22(context).writableDatabase.use { old ->
+            old.insert("stock_opinions", null, version22Opinion())
+        }
+
+        val store = LocalDataStore(context)
+        val restored = store.stockOpinions().getValue(call)
+
+        assertEquals(StockOpinion.Verdict.WAIT, restored.verdict)
+        assertEquals(StockOpinion.Horizon.SHORT, restored.horizon)
+        assertEquals("سهم توزيعات محكوم بسعر اليوريا وسعر الغاز.", restored.outlook)
+        // What it found is untouched by the upgrade, which is the half worth paying for again.
+        assertEquals(listOf("سيولة ضعيفة"), restored.risks)
+        assertEquals(15, restored.newsWindowDays)
+        assertEquals("", restored.standing)
+        assertNull(restored.forecast)
+        assertTrue(restored.onTheCall.checks.isEmpty())
     }
 
     private fun version15Opinion() = ContentValues().apply {
@@ -373,6 +506,69 @@ class StockOpinionStoreTest {
                     stance TEXT NOT NULL,
                     stance_detail TEXT NOT NULL,
                     unknowns TEXT NOT NULL DEFAULT '[]',
+                    model TEXT NOT NULL,
+                    asked_on TEXT NOT NULL,
+                    searched INTEGER NOT NULL DEFAULT 0
+                )""",
+            )
+        }
+
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    }
+
+    private fun version22Opinion() = ContentValues().apply {
+        put("id", call)
+        put("request_id", "run-1")
+        put("ticker", "ABUK")
+        put("opened_on", "2026-08-11")
+        put("channel", "EGX Signals")
+        put("verdict", "WAIT")
+        put("horizon", "SHORT")
+        put("confidence", "MEDIUM")
+        put("headline", "الفرصة فاتت عند هذه المستويات")
+        put("outlook", "سهم توزيعات محكوم بسعر اليوريا وسعر الغاز.")
+        put("stance", "OVERTAKEN")
+        put("stance_detail", "المستويات كانت معقولة وقت النشر.")
+        put("news", "[]")
+        put("catalysts", "[]")
+        put("risks", """["سيولة ضعيفة"]""")
+        put("unknowns", "[]")
+        put("news_window", 15)
+        put("model", "qwen-plus")
+        put("asked_on", "2026-08-20")
+        put("searched", 1)
+    }
+
+    /**
+     * The opinions table as version 22 wrote it - the findings, and no reading of the price.
+     *
+     * The version every phone that has used Ask AI is actually on, and written by hand for the
+     * reason [Version15] is: an "old" schema generated from today's code moves whenever today's
+     * code moves, so it can never catch the migration going wrong.
+     */
+    private class Version22(context: Context) :
+        SQLiteOpenHelper(context, LocalDataStore.DATABASE_NAME, null, 22) {
+
+        override fun onCreate(db: SQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS stock_opinions (
+                    id TEXT PRIMARY KEY,
+                    request_id TEXT NOT NULL,
+                    ticker TEXT NOT NULL,
+                    opened_on TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    verdict TEXT NOT NULL,
+                    horizon TEXT NOT NULL,
+                    confidence TEXT NOT NULL,
+                    headline TEXT NOT NULL,
+                    outlook TEXT NOT NULL,
+                    stance TEXT NOT NULL,
+                    stance_detail TEXT NOT NULL,
+                    news TEXT NOT NULL DEFAULT '[]',
+                    catalysts TEXT NOT NULL DEFAULT '[]',
+                    risks TEXT NOT NULL DEFAULT '[]',
+                    unknowns TEXT NOT NULL DEFAULT '[]',
+                    news_window INTEGER NOT NULL DEFAULT 0,
                     model TEXT NOT NULL,
                     asked_on TEXT NOT NULL,
                     searched INTEGER NOT NULL DEFAULT 0

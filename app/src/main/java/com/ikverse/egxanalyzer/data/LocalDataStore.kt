@@ -205,6 +205,19 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         if ("news_window" !in columns) {
             execSQL("ALTER TABLE stock_opinions ADD COLUMN news_window INTEGER NOT NULL DEFAULT 0")
         }
+        // Schema 3 of the prompt: how the stock has traded, where it goes over three spans, and the
+        // printed numbers rated one at a time. The defaults are what an answer given before any of
+        // them existed actually holds - a blank reading and two empty lists - rather than anything
+        // this build could invent on its behalf.
+        if ("standing" !in columns) {
+            execSQL("ALTER TABLE stock_opinions ADD COLUMN standing TEXT NOT NULL DEFAULT ''")
+        }
+        if ("forecast" !in columns) {
+            execSQL("ALTER TABLE stock_opinions ADD COLUMN forecast TEXT NOT NULL DEFAULT '[]'")
+        }
+        if ("checks" !in columns) {
+            execSQL("ALTER TABLE stock_opinions ADD COLUMN checks TEXT NOT NULL DEFAULT '[]'")
+        }
     }
 
     /**
@@ -1364,9 +1377,12 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
             horizon TEXT NOT NULL,
             confidence TEXT NOT NULL,
             headline TEXT NOT NULL,
+            standing TEXT NOT NULL DEFAULT '',
             outlook TEXT NOT NULL,
+            forecast TEXT NOT NULL DEFAULT '[]',
             stance TEXT NOT NULL,
             stance_detail TEXT NOT NULL,
+            checks TEXT NOT NULL DEFAULT '[]',
             news TEXT NOT NULL DEFAULT '[]',
             catalysts TEXT NOT NULL DEFAULT '[]',
             risks TEXT NOT NULL DEFAULT '[]',
@@ -1403,9 +1419,12 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
             put("horizon", opinion.horizon.name)
             put("confidence", opinion.confidence.name)
             put("headline", opinion.headline)
+            put("standing", opinion.standing)
             put("outlook", opinion.outlook)
+            put("forecast", opinion.forecast.forecastJson().toString())
             put("stance", opinion.onTheCall.stance.name)
             put("stance_detail", opinion.onTheCall.detail)
+            put("checks", opinion.onTheCall.checks.checksJson().toString())
             put("news", opinion.news.newsJson().toString())
             put("catalysts", opinion.catalysts.catalystJson().toString())
             put("risks", JSONArray(opinion.risks).toString())
@@ -1440,10 +1459,13 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         horizon = StockOpinion.Horizon.valueOf(getString(getColumnIndexOrThrow("horizon"))),
         confidence = StockOpinion.Confidence.valueOf(getString(getColumnIndexOrThrow("confidence"))),
         headline = getString(getColumnIndexOrThrow("headline")),
+        standing = getString(getColumnIndexOrThrow("standing")),
         outlook = getString(getColumnIndexOrThrow("outlook")),
+        forecast = getString(getColumnIndexOrThrow("forecast")).toForecast(),
         onTheCall = StockOpinion.CallView(
             stance = StockOpinion.Stance.valueOf(getString(getColumnIndexOrThrow("stance"))),
             detail = getString(getColumnIndexOrThrow("stance_detail")),
+            checks = getString(getColumnIndexOrThrow("checks")).toChecks(),
         ),
         news = getString(getColumnIndexOrThrow("news")).toNewsItems(),
         catalysts = getString(getColumnIndexOrThrow("catalysts")).toCatalysts(),
@@ -1485,6 +1507,74 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
             )
         }
     }
+
+    /**
+     * The three spans as an array, and an absent forecast as an empty one.
+     *
+     * An array rather than an object keyed by span because the span travels on the leg either way
+     * and the order is the reading order - which the parser has already fixed, so the row does not
+     * have to be re-sorted on the way back out.
+     */
+    private fun StockOpinion.Forecast?.forecastJson(): JSONArray = JSONArray().also { array ->
+        this?.legs?.forEach { leg ->
+            array.put(
+                JSONObject()
+                    .put("span", leg.span.name)
+                    .put("direction", leg.direction.name)
+                    .put("why", leg.why)
+                    .put("confidence", leg.confidence.name),
+            )
+        }
+    }
+
+    private fun List<StockOpinion.Check>.checksJson(): JSONArray = JSONArray().also { array ->
+        forEach { check ->
+            array.put(
+                JSONObject()
+                    .put("item", check.item.name)
+                    .put("rating", check.rating.name)
+                    .put("note", check.note),
+            )
+        }
+    }
+
+    /**
+     * A stored forecast back, or nothing.
+     *
+     * All-or-nothing on the way out as it is on the way in: a leg written by a later build under a
+     * span or a direction this one does not know costs the whole forecast rather than leaving two
+     * of three spans on screen, which would be this build choosing which reading to hide. The other
+     * judgements survive it, which is the difference from a verdict it cannot read.
+     */
+    private fun String.toForecast(): StockOpinion.Forecast? {
+        val legs = runCatching { JSONArray(this) }.getOrNull().jsonObjects().mapNotNull { leg ->
+            StockOpinion.Forecast.Leg(
+                span = leg.optString("span").asEnum(StockOpinion.Span.entries) ?: return@mapNotNull null,
+                direction = leg.optString("direction").asEnum(StockOpinion.Direction.entries)
+                    ?: return@mapNotNull null,
+                why = leg.optString("why"),
+                confidence = leg.optString("confidence").asEnum(StockOpinion.Confidence.entries)
+                    ?: StockOpinion.Confidence.LOW,
+            )
+        }
+        return if (legs.size == StockOpinion.Span.entries.size) StockOpinion.Forecast(legs) else null
+    }
+
+    /** One unreadable check costs its own row and nothing else, the way one unreadable tone does. */
+    private fun String.toChecks(): List<StockOpinion.Check> =
+        runCatching { JSONArray(this) }.getOrNull().jsonObjects().mapNotNull { check ->
+            StockOpinion.Check(
+                item = check.optString("item").asEnum(StockOpinion.CheckItem.entries)
+                    ?: return@mapNotNull null,
+                rating = check.optString("rating").asEnum(StockOpinion.Rating.entries)
+                    ?: return@mapNotNull null,
+                note = check.optString("note"),
+            )
+        }
+
+    /** A stored token back to its entry, or null where this build no longer knows it. */
+    private fun <T : Enum<T>> String.asEnum(entries: List<T>): T? =
+        entries.firstOrNull { it.name == this }
 
     /**
      * A stored list back into items, forgiving a row this build cannot fully read.
@@ -2453,6 +2543,6 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 22
+        const val DATABASE_VERSION = 23
     }
 }

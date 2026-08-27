@@ -235,6 +235,90 @@ class OpinionPromptTest {
     }
 
     /**
+     * Thirty sessions at one price and twenty at a much higher one.
+     *
+     * A flat run makes every figure below zero, which is the one shape that cannot tell a gap
+     * computed correctly from a gap not computed at all.
+     */
+    private fun stepped(): List<DailySession> = (0 until 50).map { index ->
+        val close = if (index < 30) 60.0 else 80.0
+        DailySession(
+            ticker = "ABUK",
+            date = LocalDate.parse("2026-06-01").plusDays(index.toLong()),
+            high = close + 1,
+            low = close - 1,
+            close = close,
+            volume = 100_000.0,
+            open = close,
+        )
+    }
+
+    /**
+     * Every level is stated twice: as the price, and as the distance from today's close.
+     *
+     * The prompt now *requires* the model to read this section back - an answer naming no figure
+     * fitted every stock on the exchange, which is why every one of them came back the same - so
+     * the gaps it is required to name have to be handed to it. (80 - 68) / 68 is 17.6%, and a model
+     * that answers 15% has just placed the stock somewhere it is not, inside a forecast.
+     */
+    @Test
+    fun `the distance from each average is computed rather than left to be worked out`() {
+        val prompt = build(history = stepped())
+
+        assertTrue(prompt.contains("20-session average close   80, latest close 0% against it"))
+        assertTrue(prompt.contains("50-session average close   68, latest close +17.6% against it"))
+    }
+
+    /**
+     * Which average is on top is the trend, and by how much is whether it is worth saying.
+     */
+    @Test
+    fun `the gap between the two averages is stated as a figure`() {
+        val prompt = build(history = stepped())
+
+        assertTrue(prompt.contains("The 20-session average is +17.6% against the 50-session one."))
+    }
+
+    /**
+     * "Near the top of its range" is the reading, and it needs a close placed between two prices.
+     */
+    @Test
+    fun `where the close sits inside its own range is one number`() {
+        val prompt = build(history = stepped())
+
+        assertTrue(
+            prompt.contains("The latest close sits at 95.5% of that range, measured from the low."),
+        )
+    }
+
+    /**
+     * Measured from where the stock actually is, not from wherever the stored feed happens to end.
+     *
+     * The two differ on every stock whose history was fetched before today's session, which is most
+     * of them for most of the day - and a gap measured from a stale row would be a figure the sheet
+     * printed beside a different price on the card behind it.
+     */
+    @Test
+    fun `the gaps are measured from the latest close rather than the end of the feed`() {
+        val latest = LatestPrice(
+            session = DailySession(
+                ticker = "ABUK",
+                date = LocalDate.parse("2026-08-19"),
+                high = 89.0,
+                low = 87.0,
+                close = 88.0,
+                volume = null,
+                open = 87.5,
+            ),
+            provisional = false,
+        )
+
+        val prompt = build(latest = latest, history = stepped())
+
+        assertTrue(prompt.contains("20-session average close   80, latest close +10% against it"))
+    }
+
+    /**
      * Ten sessions called a fifty-session average is a wrong figure, not a rounded one.
      */
     @Test

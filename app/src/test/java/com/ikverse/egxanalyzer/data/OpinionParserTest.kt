@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.StockOpinion
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -52,6 +53,138 @@ class OpinionParserTest {
         assertEquals("qwen-plus", opinion.model)
         assertEquals(askedOn, opinion.askedOn)
         assertTrue(opinion.searched)
+    }
+
+    /** The same answer as [whole], given under schema 3 - three spans and rated numbers. */
+    private val schema3 = """
+        {
+          "verdict": "WAIT",
+          "confidence": "MEDIUM",
+          "headline": "الفرصة فاتت عند هذه المستويات",
+          "standing": "الإغلاق فوق متوسط 20 جلسة بنحو 3%.",
+          "outlook": "سهم توزيعات محكوم بسعر اليوريا وسعر الغاز.",
+          "forecast": {
+            "short": { "direction": "SIDEWAYS", "why": "نطاق ضيق.", "confidence": "MEDIUM" },
+            "medium": { "direction": "UP", "why": "قسيمة التوزيع.", "confidence": "LOW" },
+            "long": { "direction": "UP", "why": "الطلب على اليوريا.", "confidence": "LOW" }
+          },
+          "on_the_call": {
+            "stance": "OVERTAKEN",
+            "detail": "المستويات كانت معقولة وقت النشر.",
+            "checks": [
+              { "item": "TARGET_1", "rating": "FAIR", "note": "على بعد 4%." },
+              { "item": "RISK_REWARD", "rating": "GOOD", "note": "2.1 إلى 1." }
+            ]
+          }
+        }
+    """.trimIndent()
+
+    @Test
+    fun `a schema 3 answer carries its reading of the price and its three spans`() {
+        val opinion = parse(schema3)
+
+        assertEquals("الإغلاق فوق متوسط 20 جلسة بنحو 3%.", opinion.standing)
+        val forecast = requireNotNull(opinion.forecast)
+        assertEquals(
+            listOf(StockOpinion.Span.SHORT, StockOpinion.Span.MEDIUM, StockOpinion.Span.LONG),
+            forecast.legs.map { it.span },
+        )
+        assertEquals(
+            StockOpinion.Direction.SIDEWAYS,
+            forecast.leg(StockOpinion.Span.SHORT)?.direction,
+        )
+        // Per-leg confidence is the leg's own and not the answer's, which is MEDIUM here.
+        assertEquals(
+            StockOpinion.Confidence.LOW,
+            forecast.leg(StockOpinion.Span.LONG)?.confidence,
+        )
+    }
+
+    /**
+     * The model is no longer asked how long to hold, so the answer had better not be invented.
+     *
+     * The near spans carry a sideways and an up, the long span an up, so both ends have a case -
+     * which is `BOTH`, and nothing in the response says so.
+     */
+    @Test
+    fun `the horizon is derived from the forecast rather than read`() {
+        assertEquals(StockOpinion.Horizon.BOTH, parse(schema3).horizon)
+    }
+
+    /** No holding period on a stock the answer says not to buy, whatever the spans point at. */
+    @Test
+    fun `an avoid has no horizon however the spans read`() {
+        val avoided = schema3.replace("\"verdict\": \"WAIT\"", "\"verdict\": \"AVOID\"")
+
+        assertEquals(StockOpinion.Horizon.NEITHER, parse(avoided).horizon)
+    }
+
+    /**
+     * Two spans is not a smaller forecast - it is the app choosing which reading to hide.
+     *
+     * The rest of the answer survives it, which is the difference from a missing verdict.
+     */
+    @Test
+    fun `a forecast missing a span is no forecast at all`() {
+        val short = schema3.replace(
+            """"long": { "direction": "UP", "why": "الطلب على اليوريا.", "confidence": "LOW" }""",
+            """"long": { "why": "الطلب على اليوريا.", "confidence": "LOW" }""",
+        )
+
+        val opinion = parse(short)
+
+        assertNull(opinion.forecast)
+        assertEquals(StockOpinion.Horizon.NEITHER, opinion.horizon)
+        assertEquals("سهم توزيعات محكوم بسعر اليوريا وسعر الغاز.", opinion.outlook)
+    }
+
+    /**
+     * The five sit in a fixed order beside the levels on the card behind the sheet.
+     *
+     * They arrive here target-first; a reader comparing two answers must not have to find the row
+     * again on each one.
+     */
+    @Test
+    fun `the checks come back in the app's order rather than the model's`() {
+        val checks = parse(schema3).onTheCall.checks
+
+        assertEquals(
+            listOf(StockOpinion.CheckItem.RISK_REWARD, StockOpinion.CheckItem.TARGET_1),
+            checks.map { it.item },
+        )
+        assertEquals(StockOpinion.Rating.GOOD, checks.first().rating)
+        assertEquals("2.1 إلى 1.", checks.first().note)
+    }
+
+    @Test
+    fun `a check naming something this build does not rate is dropped and the rest stay`() {
+        val extra = schema3.replace(
+            """{ "item": "RISK_REWARD", "rating": "GOOD", "note": "2.1 إلى 1." }""",
+            """{ "item": "RISK_REWARD", "rating": "GOOD", "note": "2.1 إلى 1." },
+               { "item": "MOON_PHASE", "rating": "GOOD", "note": "بدر." }""",
+        )
+
+        assertEquals(2, parse(extra).onTheCall.checks.size)
+    }
+
+    /**
+     * Tolerant where `outlook` is not, and the asymmetry is the point.
+     *
+     * An answer with no reading of the stock is not an answer; one that skipped the price section
+     * still carries everything else the request paid for, and throwing it away would cost the user
+     * a billed request over a section the sheet can simply leave out.
+     */
+    @Test
+    fun `an answer with no reading of the price is still an answer`() {
+        val without = schema3.replace(
+            """"standing": "الإغلاق فوق متوسط 20 جلسة بنحو 3%.",""",
+            "",
+        )
+
+        val opinion = parse(without)
+
+        assertEquals("", opinion.standing)
+        assertEquals(StockOpinion.Verdict.WAIT, opinion.verdict)
     }
 
     /** Told to return bare JSON, models return fenced JSON often enough to plan for it. */

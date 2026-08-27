@@ -30,15 +30,19 @@ import com.ikverse.egxanalyzer.ui.theme.extraColors
 /**
  * What the model made of one stock and the call on it.
  *
- * Two judgements, then what they rest on, then a footer. Every figure the reader might otherwise
- * want is on the card this opened from, which is why the prompt forbids the model from repeating
- * them - a sheet that restated the entry band and the sessions elapsed would be a second copy of
- * the card, and the reader pressed the button to get something the card cannot tell them.
+ * Four judgements in the order they are read - what the stock has done, what the business is, where
+ * it goes, what the call is worth - then what they rest on, then a footer.
  *
- * What it can tell them is below the two judgements: the news a searched request actually found,
- * dated and attributed, what is scheduled ahead, and what goes wrong. Those are listed rather than
- * written into the prose on purpose - a headline is only worth anything beside its date, and prose
- * hides the date.
+ * **Three of those four are new, and the sheet is the reason as much as the prompt is.** The answer
+ * used to be one paragraph about the stock and one about the levels, and the reader's complaint was
+ * that every stock came back the same. A single free-text field is what a model fills the same way
+ * twice; four fields with different questions behind them cannot be, and the two laid out as lists
+ * - the three spans, the five printed numbers - are the two the reader can compare across stocks at
+ * a glance without reading a word.
+ *
+ * The lists below them are unchanged: the news a searched request actually found, dated and
+ * attributed, what is scheduled ahead, and what goes wrong. Listed rather than written into the
+ * prose, because a headline is only worth anything beside its date and prose hides the date.
  *
  * The answer is Arabic and reads right to left; the section headings stay English, exactly as an
  * English label already sits over an Arabic company name everywhere else in the app.
@@ -84,11 +88,16 @@ internal fun StockOpinionSheet(
                 }
                 VerdictChip(opinion.verdict)
             }
-            // The horizon and the confidence sit together under the name because neither means much
-            // alone: "short term" from a model that has just called its own confidence low is a
-            // different sentence from the same words at high.
+            // The confidence sits under the name because a verdict does not mean much without it:
+            // "buy" from a model that has just called its own confidence low is a different
+            // sentence from the same word at high. The horizon joins it **only on an answer with no
+            // forecast** - a schema 2 row - because where there is one, three dated spans sit a few
+            // lines below and a single holding period above them is the same claim said worse.
             Text(
-                "${opinion.horizon.arabic} · ${opinion.confidence.arabic}",
+                listOfNotNull(
+                    opinion.horizon.arabic.takeIf { opinion.forecast == null },
+                    opinion.confidence.arabic,
+                ).joinToString(" · "),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -96,9 +105,26 @@ internal fun StockOpinionSheet(
                 ArabicText(opinion.headline, MaterialTheme.typography.titleSmall)
             }
 
+            // Absent rather than empty on an answer that carried none - every opinion saved before
+            // this shipped, and any later one where the model skipped the section. A heading over
+            // nothing would read as the app having lost the paragraph.
+            if (opinion.standing.isNotBlank()) {
+                HorizontalDivider()
+                OpinionSection("How it has traded") {
+                    ArabicText(opinion.standing, MaterialTheme.typography.bodyMedium)
+                }
+            }
+
             HorizontalDivider()
             OpinionSection("The stock") {
                 ArabicText(opinion.outlook, MaterialTheme.typography.bodyMedium)
+            }
+
+            opinion.forecast?.let { forecast ->
+                HorizontalDivider()
+                OpinionSection("Where it goes") {
+                    forecast.legs.forEach { ForecastLegRow(it) }
+                }
             }
 
             HorizontalDivider()
@@ -112,6 +138,9 @@ internal fun StockOpinionSheet(
                 } else {
                     ArabicText(opinion.onTheCall.detail, MaterialTheme.typography.bodyMedium)
                 }
+                // Under the prose rather than instead of it: the paragraph is the reading of the
+                // levels taken together, and these are what each number is worth on its own.
+                opinion.onTheCall.checks.forEach { CheckRow(it) }
             }
 
             // Shown even when it found nothing. An empty list here is a finding - it says the
@@ -243,6 +272,75 @@ private fun NewsRow(item: StockOpinion.NewsItem) {
     }
 }
 
+/**
+ * One span's reading: what it is, how sure, which way, and why.
+ *
+ * The span is named twice - the Arabic label a reader recognises, and the window in English
+ * underneath. "Medium term" is a phrase every market column uses and none of them define, and a
+ * direction over an unstated span is a forecast about nothing.
+ *
+ * The reason goes under the row rather than beside it. Three columns of Arabic prose is what this
+ * looked like first and it does not survive a 411dp cover screen: two sentences in a third of the
+ * width wrap to six lines, and the three legs stop being comparable at a glance, which is the whole
+ * reason they are laid out as a list.
+ */
+@Composable
+private fun ForecastLegRow(leg: StockOpinion.Forecast.Leg) {
+    Column(
+        Modifier.padding(bottom = Space.s),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(leg.span.arabic, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    leg.span.window,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                leg.confidence.arabic,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = Space.s),
+            )
+            DirectionChip(leg.direction)
+        }
+        if (leg.why.isNotBlank()) {
+            ArabicText(leg.why, MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+/**
+ * One of the printed numbers and what it is worth.
+ *
+ * The item's name is English and the note is Arabic, which is the split every other section here
+ * already makes - the heading says what is being judged, the answer is the answer. The note is
+ * where a figure belongs: this is the one part of the sheet the reader opened to have the numbers
+ * on the card behind it read back to them.
+ */
+@Composable
+private fun CheckRow(check: StockOpinion.Check) {
+    Column(
+        Modifier.padding(bottom = Space.s),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                check.item.label,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.weight(1f),
+            )
+            RatingChip(check.rating)
+        }
+        if (check.note.isNotBlank()) {
+            ArabicText(check.note, MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
 @Composable
 private fun CatalystRow(item: StockOpinion.Catalyst) {
     Column(
@@ -343,6 +441,51 @@ private fun StanceChip(stance: StockOpinion.Stance) {
         StockOpinion.Stance.UNSOUND -> MaterialTheme.colorScheme.onErrorContainer
     }
     OutlinePill(stance.arabic, outline = outline, textColor = ink)
+}
+
+/**
+ * Which way one span points.
+ *
+ * The same three colours a news item's tone wears, and deliberately so: both answer "good or bad
+ * for the price", and a fourth palette on one sheet would be three vocabularies to learn. Sideways
+ * takes the outline rather than the amber a waiting verdict wears - amber here means the app is
+ * unsure, and a flat forecast is a definite answer that the price goes nowhere.
+ */
+@Composable
+private fun DirectionChip(direction: StockOpinion.Direction) {
+    val outline = when (direction) {
+        StockOpinion.Direction.UP -> MaterialTheme.colorScheme.tertiary
+        StockOpinion.Direction.DOWN -> MaterialTheme.colorScheme.error
+        StockOpinion.Direction.SIDEWAYS -> MaterialTheme.colorScheme.outline
+    }
+    val ink = when (direction) {
+        StockOpinion.Direction.UP -> MaterialTheme.colorScheme.onTertiaryContainer
+        StockOpinion.Direction.DOWN -> MaterialTheme.colorScheme.onErrorContainer
+        StockOpinion.Direction.SIDEWAYS -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    OutlinePill(direction.arabic, outline = outline, textColor = ink)
+}
+
+/**
+ * What one printed number is worth, in the palette a stance already uses.
+ *
+ * `FAIR` takes the amber a `RISKY` stance takes, for the same reason: neither is a fault and
+ * neither is a recommendation, and the app already means "workable, with something wrong with it"
+ * by that hue.
+ */
+@Composable
+private fun RatingChip(rating: StockOpinion.Rating) {
+    val outline = when (rating) {
+        StockOpinion.Rating.GOOD -> MaterialTheme.colorScheme.tertiary
+        StockOpinion.Rating.FAIR -> extraColors.expired
+        StockOpinion.Rating.POOR -> MaterialTheme.colorScheme.error
+    }
+    val ink = when (rating) {
+        StockOpinion.Rating.GOOD -> MaterialTheme.colorScheme.onTertiaryContainer
+        StockOpinion.Rating.FAIR -> extraColors.onExpiredContainer
+        StockOpinion.Rating.POOR -> MaterialTheme.colorScheme.onErrorContainer
+    }
+    OutlinePill(rating.arabic, outline = outline, textColor = ink)
 }
 
 /** What one item means for the price, in the same three colours the rest of the sheet uses. */

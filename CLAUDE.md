@@ -1038,9 +1038,64 @@ no higher. **The two tabs share the arithmetic and not the scope** — see the f
 
 ## Ask AI
 
-A button on a call card in Insights sends one paid request and asks two questions: what the model
-makes of the stock at today's price, and what it makes of the levels the channel printed. The answer
-comes back in Arabic and is kept on the card.
+A button on a call card in Insights sends one paid request and asks four questions: how the stock
+has actually traded, what the business is, where it goes over three spans of time, and what the
+levels the channel printed are worth. The answer comes back in Arabic and is kept on the card.
+
+- **It asked two questions until 2026-08-27, and every answer read the same.** That was the
+  complaint and the diagnosis is worth keeping, because nothing was broken: search was on, the DATA
+  block was rich, the temperature was 0.4. The prompt was the fault, in two ways at once. Its first
+  two sections were almost entirely prohibitions - do not recite a figure, do not do arithmetic, do
+  not print a level, do not name a fundamental you did not find, do not mention the index or the
+  sector, never more than two figures in a sentence - so on a stock whose news window came back
+  quiet, every concrete thing was forbidden and what was left was hedged Arabic that fitted any
+  ticker on the exchange. And the shape it was pouring into was one free-text field about the stock:
+  one paragraph, asked of a model with little it was permitted to say, converges on one paragraph.
+  Schema **3** answers both. The prohibitions are **scoped** rather than global - `standing` and
+  `on_the_call` now *require* the figures the rest of the prompt keeps out of the prose - and there
+  are four fields where there was one, two of them lists the reader can compare across stocks
+  without reading a word.
+- **`standing` is the field that cannot come out the same twice**, because it is measured rather
+  than recalled: where the close sits against its own averages, where in the range, what the stock
+  has done since the call, what the volume says. It is required to name at least three of those.
+- **`forecast` is three spans asked separately** - short (days to four weeks), medium (one to three
+  months), long (six to twelve). Each carries a direction, a reason and its own confidence, and they
+  are allowed to disagree; a stock can be stretched into next month and sound into next year, and
+  saying both is more useful than averaging them into nothing. The prompt sets what each span may
+  rest on: price and volume are enough for `short`, `medium` needs a catalyst or a sector reason,
+  `long` needs a reason from the business and is `SIDEWAYS` at `LOW` confidence where there is none.
+  A reason that carries all three spans is one reading rather than three, and the prompt says so.
+- **`horizon` is derived from the forecast and no longer asked for.** Two fields answering "how
+  long" is two fields free to contradict each other - a `SHORT` horizon printed beside a short leg
+  pointing down. `Horizon.from` maps three spans onto the four values, counting a medium leg toward
+  `SHORT` because one to three months is a period a reader plans in weeks. The parser still reads a
+  `horizon` token where one arrives anyway: an answer given in the old shape has told us something,
+  and the sheet keeps printing the stored horizon on every opinion saved before this.
+- **`on_the_call.checks` rates the printed numbers one at a time** - risk to reward, the stop, both
+  targets, whether the entry band is still valid - each `GOOD`, `FAIR` or `POOR` with an Arabic note
+  in which a figure is expected rather than forbidden. It was one prose blob covering four questions
+  in three sentences, which averages into the same three sentences: "the ratio is acceptable but the
+  stop is tight" fitted almost every call. The five are **re-ordered into the app's own order by the
+  parser**, not trusted from the model: the sheet draws them as a fixed list beside the levels on
+  the card, and a model that shuffled them would rearrange the reader's screen between answers.
+- **A forecast arrives whole or not at all**, in the parser and again on the way out of the
+  database. Two legs on screen would not be a smaller forecast - it would be the app choosing which
+  span to hide, on a sheet whose whole point is that the three can disagree. `standing` is tolerant
+  where `outlook` is not, and the asymmetry is deliberate: an answer with no reading of the stock is
+  not an answer, while one that skipped the price section still carries everything the request paid
+  for, and the section is simply absent on the sheet - which is itself the signal.
+- **The prompt names the boilerplate it will not accept.** Four Arabic phrases every market column
+  reaches for when it has nothing to say - `يُنصح بالحذر`, `يفضل التريث حتى وضوح الرؤية` and two more - are
+  listed and forbidden by name, alongside the rule they are examples of: a sentence that would still
+  be true with the ticker swapped is a sentence to delete. The escape hatch is honesty rather than
+  padding, and it is stated as such: where the model has nothing specific it says so and returns
+  `LOW` confidence.
+- **General knowledge of the business is now wanted, where it used to be banned.** The old prompt
+  refused sector and index talk unless a news item named it, which is right about invention and left
+  a quiet stock with nothing to say: a fertilizer producer lives on urea prices and the gas it is
+  charged, and a model forbidden from saying so is a model reduced to describing a chart. It is
+  allowed as **background** - no date, no figure, no claim about the current quarter or the last
+  result, all of which still need a source.
 
 - **Its own prompt, and nothing of the analysis reaches it.** `assets/stock_opinion.md`, read by
   `OpinionPromptStore` — a separate class from `PromptStore` on purpose. The analysis prompt carries
@@ -1048,22 +1103,24 @@ comes back in Arabic and is kept on the card.
   the user approves; this one carries none of that, no wording rule is folded into it, and no run's
   `promptId` ever names it. Two stores rather than a second method on one, because sharing a class
   is how a rule about reading a Telegram card eventually reaches an opinion about a stock.
-- **The whole of section 1 exists to stop the model reading the card back.** The DATA block is
-  printed on the card the sheet opens from — entry band, stop, targets, peak, trough, sessions
-  elapsed, return, latest close — so listing them back is not an opinion, and explaining arithmetic
-  the reader can do is worse. It may name a figure where it carries a point and never more than two
-  in a row. The escape hatch is honesty rather than padding: where price history is genuinely all it
-  has, it says so in one sentence and returns `LOW` confidence.
-- **Two figures the card does not carry are supplied rather than left to be worked out**: risk to
-  reward from the middle of the entry band, and the move from that midpoint to the latest close.
-  A language model asked to divide two prices gets it wrong often enough to matter, and it would be
-  wrong *confidently*, inside a verdict.
-- **The answer is Arabic; the four token fields are not.** `verdict`, `horizon`, `confidence` and
-  `stance` come back as English tokens and the screen prints its own Arabic for them
-  (`StockOpinion.Verdict.arabic` and friends). Letting the model answer those in Arabic would put
-  the parser at the mercy of its choice of synonym, and a verdict that fails to parse is a verdict
-  the card cannot colour. Prices and dates stay in Western digits so a figure the answer names
-  matches the one printed beside it.
+- **Which figure may be named depends on which field is being written**, and that scoping is what
+  schema 3 changed. The DATA block is printed on the card the sheet opens from — entry band, stop,
+  targets, peak, trough, sessions elapsed, return, latest close — so in `headline`, `outlook` and a
+  forecast leg's `why` it may name a figure where it carries a point and never more than two in a
+  sentence. In `standing` and `on_the_call` the numbers are the answer, and a reading with no figure
+  in it is an assertion. Explaining arithmetic the reader can do is still forbidden everywhere.
+- **Every figure the model is required to discuss is supplied rather than left to be worked out**:
+  risk to reward from the middle of the entry band, the move from that midpoint to the latest close,
+  the distance from the 20- and 50-session averages, the gap between those two averages, and where
+  the close sits inside the period's range. A language model asked to divide two prices gets it
+  wrong often enough to matter, and it would be wrong *confidently*, inside a verdict. Requiring it
+  to read a gap back while making it derive that gap would have been requiring a wrong number.
+- **The answer is Arabic; the seven token fields are not.** `verdict`, `confidence`, `stance`,
+  `direction`, `item`, `rating` and `tone` come back as English tokens and the screen prints its own
+  Arabic for them (`StockOpinion.Verdict.arabic` and friends). Letting the model answer those in
+  Arabic would put the parser at the mercy of its choice of synonym, and a verdict that fails to
+  parse is a verdict the card cannot colour. Prices and dates stay in Western digits so a figure the
+  answer names matches the one printed beside it.
 - **Live search is on by default**, and that is the point of it: without one the model has nothing
   the app does not already have. DashScope takes `enable_search` in the request body plus
   `search_options.search_strategy` for the deep pass; OpenRouter takes the **`web` plugin** —
@@ -1075,9 +1132,10 @@ comes back in Arabic and is kept on the card.
   `NEWS` block and ended "with no NEWS section, say nothing about recent news either way" — and
   nothing in the app has ever built a `NEWS` block, so on every searched request the provider
   injected results and the prompt told the model to ignore them. That is why a searched answer read
-  like an unsearched one. `stock_opinion.md` is schema **2**: news is required output when a
-  `SEARCH` block is present, and `news`, `catalysts`, `risks` and `unknowns` are always-present
-  lists.
+  like an unsearched one. That was fixed in schema **2**: news is required output when a `SEARCH`
+  block is present, and `news`, `catalysts`, `risks` and `unknowns` are always-present lists. What
+  it did not fix was the register — an answer that had searched and found nothing still read like
+  every other one, which is what schema 3 is for.
 - **`OpinionSearchBrief` is what the search is aimed with, and it produces two texts that are not
   the same text.** `query` goes into the question, naming the company in both scripts plus every
   alias `EgxCatalog` holds — a search on `COMI` alone finds a four-letter string, while the Arabic
@@ -1092,10 +1150,14 @@ comes back in Arabic and is kept on the card.
   enforced by instruction plus by requiring a date on every item. A short window returning nothing
   is the honest result and is printed as one; **upcoming catalysts are not clipped to it**, because
   a lookback is a claim about staleness and a dividend three weeks out is not stale.
-- **The model prints no levels of its own, deliberately.** Section 2 forbids an entry, a stop or a
+- **The model prints no levels of its own, deliberately.** Section 3 forbids an entry, a stop or a
   target: the reader has a call in front of them and asked what to make of it, not for a second set
   of numbers to reconcile with the first. What it may say about price is what it would want to see
-  before paying today's, in words.
+  before paying today's, in words. This survived schema 3 untouched, and it is the one place a
+  forecast might have been read as licence to name a price — a direction over a span is not a
+  target, and `direction` is deliberately separate from `verdict` for the neighbouring reason: a
+  stock can be heading up and still be a poor buy at today's close because the move is already paid
+  for.
 - **The block carries what the app had and never sent.** Volume was in `DailySession` from the
   beginning and never reached the model, so a call was judged with no idea whether the stock could
   be traded at size; `OpinionPrompt` now sends average volume, average value traded, and a
@@ -1110,7 +1172,11 @@ comes back in Arabic and is kept on the card.
 - **Its own model setting**, `SettingsRepository.opinionModel`, defaulting to `qwen-plus`. The
   analysis runs on a vision model because it reads screenshots; this request carries no image, and
   paying vision rates for it buys nothing. Device-local like the analysis model and unlike
-  `AppPreferences`: a model id means nothing on a phone pointed at another provider.
+  `AppPreferences`: a model id means nothing on a phone pointed at another provider. **It is also
+  the next lever if answers still converge** — schema 3 removes the reasons a prompt can make every
+  stock read alike, and what is left after that is how much the model actually knows about an
+  Egyptian mid-cap, which `qwen-plus` is the cheapest answer to. Changing it is the user's spend and
+  therefore the user's call, so the default is unchanged.
 - **`ask()` shares the transport with `analyze()` and nothing else** — endpoint, saved credential,
   timeout, cancel map. A second repository would mean a second copy of the credential zeroing and
   the connection handling, which drift apart the first time either is touched. Temperature is 0.4
@@ -1122,6 +1188,18 @@ comes back in Arabic and is kept on the card.
   request. A confirmation nobody finishes reading has stopped confirming anything. Once answered the
   button reads `AI opinion · <verdict>` and reopens the saved answer for nothing; `Ask again` is the
   only way to pay twice, and a card whose request is already out cannot start a second.
+- **The sheet reads in the order the questions were asked** — what the stock has done, what the
+  business is, where it goes, what the call is worth — then the findings, then the footer. The
+  horizon leaves the line under the ticker on any answer carrying a forecast: three dated spans sit
+  a few lines below, and a single holding period above them is the same claim said worse. It is
+  still printed on a schema 2 answer, which has no forecast to replace it.
+- **Three columns, added the way the findings columns were** — `standing`, `forecast` and `checks`,
+  by `ALTER` with a guard each in `addOpinionDetailColumns`, database version 23. The two lists are
+  JSON in a column apiece for the reason `news` and `catalysts` are: nothing queries inside them,
+  and a column per field would mean a migration every time the prompt learns to ask one more thing.
+  A leg written under a span or a direction this build does not know costs the **forecast** and
+  nothing else around it, which is the same rule an unreadable tone follows and deliberately not the
+  rule an unreadable verdict follows.
 - **An opinion is keyed by ticker, session *and* channel** (`opinionId`), which is deliberately not
   `positionId`. Two channels calling one stock on one session are two cards printing different
   levels, so an opinion on one is not an opinion on the other — where a holding is one holding
@@ -1633,7 +1711,7 @@ at the foot of the screen until 2026-08-25.
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 21. **Bumping the constant is half of it**: `session_events` was added to
+  `onUpgrade`. Currently 23. **Bumping the constant is half of it**: `session_events` was added to
   both hooks and left at 20, so a fresh install had the table and every upgrade silently did not —
   which fails at the first write and nowhere earlier. `SessionEventStoreTest` caught it. Adding it to only one of the two is the mistake that gets made:
   `CallAlertStoreTest` caught exactly that on version 19 before it shipped.
@@ -1646,8 +1724,11 @@ at the foot of the screen until 2026-08-25.
   version 15 has the same case in `StockOpinionStoreTest` for `stock_opinions`, version 16
   has one beside it for the findings columns, version 18 has one in `TradeStatusStoreTest` for
   `position_status_seen`, version 19 has one in `CallAlertStoreTest` for `call_alert_seen`,
-  version 20 has one in `SettledCallStoreTest` for `settled_calls`, and version 21 has one in
-  `SessionEventStoreTest` for `session_events`
+  version 20 has one in `SettledCallStoreTest` for `settled_calls`, version 21 has one in
+  `SessionEventStoreTest` for `session_events`, and version 23 has one in `StockOpinionStoreTest`
+  for the `standing`, `forecast` and `checks` columns — that last one writes the **version 22**
+  table, which is what every phone that has ever pressed Ask AI is actually on, so it is the
+  upgrade that runs on a real device rather than the oldest one that still can
   — added by `ALTER`, one guard per column, so the risk
   is not that the upgrade fails but that it takes the answers already on the phone with it. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it
