@@ -12,10 +12,11 @@ import java.time.Instant
 /**
  * Books the one alarm that wakes the app for whatever is next.
  *
- * One alarm for both the things this phone does on its own - keeping prices fresh through a
- * session, and the analysis before the open - rather than one each: only the nearest fire matters,
- * and the run that answers it books the one after. A pending intent per feature would be state to
- * keep in step for no gain.
+ * One alarm for everything this phone does on its own - keeping prices fresh through a session,
+ * and up to four analyses - rather than one each: only the nearest fire matters, and the run that
+ * answers it books the one after. A pending intent per schedule would be four pieces of state to
+ * keep in step for no gain, and four ways for one of them to be left booked after its schedule
+ * was deleted.
  *
  * WorkManager is not the timekeeper here, deliberately. Its delays are a floor and not a promise -
  * in Doze a fifteen-minute period becomes whenever the system next feels like it - so 11:15 would
@@ -39,17 +40,18 @@ class JobScheduler(private val context: Context) {
     fun canScheduleExact(): Boolean = alarms.canScheduleExactAlarms()
 
     /**
-     * Points the alarm at the earliest fire either feature has left, or takes it down.
+     * Points the alarm at the earliest fire anything here has left, or takes it down.
      *
-     * Called after anything that could move that moment: either switch flipped, the schedule's
-     * time changed, a run served, a reboot, the exact-alarm permission changing, and every launch.
-     * Booking is cheap and idempotent, so the safe thing on all of those is to book again.
+     * Called after anything that could move that moment: any switch flipped, a schedule's time or
+     * days changed, one added or deleted, a run served, a reboot, the exact-alarm permission
+     * changing, and every launch. Booking is cheap and idempotent, so the safe thing on all of
+     * those is to book again.
      */
-    fun rebook(schedule: AnalysisSchedule, marketRefresh: Boolean) {
+    fun rebook(schedules: List<AnalysisSchedule>, marketRefresh: Boolean) {
         val pending = fireIntent()
         val now = Instant.now()
         val at = listOfNotNull(
-            if (schedule.enabled) ScheduleClock.nextFire(schedule.at, now) else null,
+            ScheduleClock.nextFireOf(schedules, now),
             if (marketRefresh) MarketRefresh.nextFire(now) else null,
         ).minOrNull()
         if (at == null) {

@@ -103,10 +103,9 @@ class EgxApplication : Application() {
                 AnalysisService.stop(this)
                 if (reason == null) notifier.cancelled() else notifier.failed(reason)
             },
-            schedulesChanged = { schedule, marketRefresh ->
-                JobScheduler(this).rebook(schedule, marketRefresh)
-            },
-            dailyCheckChanged = { wanted ->
+            schedulesChanged = { schedules, marketRefresh ->
+                JobScheduler(this).rebook(schedules, marketRefresh)
+            },            dailyCheckChanged = { wanted ->
                 if (wanted) OverdueWorker.schedule(this) else OverdueWorker.cancel(this)
             },
             // Wrapped for the reason the analysis announcements are: the trades have already been
@@ -135,8 +134,8 @@ class EgxApplication : Application() {
         // survive a reboot or an app update, and one the system dropped leaves a phone that has
         // silently stopped keeping time. The sweep answers a fire that came due while the phone
         // was off, which is what the grace windows are for.
-        JobScheduler(this).rebook(state.analysisSchedule, state.marketRefreshEnabled)
-        if (state.analysisSchedule.enabled || state.marketRefreshEnabled) {
+        JobScheduler(this).rebook(state.analysisSchedules, state.marketRefreshEnabled)
+        if (state.analysisSchedules.any { it.enabled } || state.marketRefreshEnabled) {
             ScheduledJobWorker.sweep(this)
         }
         state

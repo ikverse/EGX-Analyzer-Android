@@ -17,18 +17,25 @@ import java.time.ZoneId
 class JobSkipped(message: String) : Exception(message)
 
 /**
- * Runs the analysis schedule if it owes a run, and writes down what happened.
+ * Runs whichever schedules owe a run, and writes down what happened to each.
  *
- * Knows nothing about alarms, workers or screens - it is handed the schedule, a clock and a way to
- * do the work, so the decisions that matter (has this fire already been served, is it too late to
- * run it, is this allowed to spend money) can be tested without a device or a wait.
+ * Knows nothing about alarms, workers or screens - it is handed the schedules, a clock and a way
+ * to do the work, so the decisions that matter (has this fire already been served, is it too late
+ * to run it, is this allowed to spend money) can be tested without a device or a wait.
  *
  * Every path records an outcome, including the ones that do nothing. A schedule whose last line
  * says why it stayed quiet is diagnosable; one that is simply blank on a morning it should have
  * run is not, and silence is the failure mode of every scheduler on this platform.
  */
 class JobRunner(
-    private val schedule: () -> AnalysisSchedule,
+    private val schedules: () -> List<AnalysisSchedule>,
+    /**
+     * Writes one schedule back, found by its id.
+     *
+     * By id and not by position, because this is called from a process with no screen in it while
+     * the list on disk may have been edited since it was read. Replacing a slot would file an
+     * outcome against whatever schedule had moved into it.
+     */
     private val record: (AnalysisSchedule) -> Unit,
     /**
      * Whether work that spends cloud credits may start unattended.
@@ -43,44 +50,59 @@ class JobRunner(
 ) {
 
     /**
-     * Serves the fire that has come and gone unanswered, if there is one.
+     * Serves every fire that has come and gone unanswered, oldest first.
      *
      * [perform] is given the schedule and the moment it was due - the scheduled moment, not this
      * one, because a run that starts late still has to reason about the slot it is filling. It
      * returns the line to record, throws [JobSkipped] to say it deliberately did nothing, and
      * throws anything else to fail.
      *
-     * Returns what it wrote, or null where nothing was owed - which is what the tests read and
-     * what the caller re-books from.
+     * One at a time and in the order the fires came due, which matters now that there can be more
+     * than one: two schedules owing the same morning are two paid requests, and the second is
+     * usually the one that finds the first has already read those chats. Running them together
+     * would have both send before either had saved anything.
+     *
+     * A schedule that fails does not stop the ones after it. They are separate promises, and the
+     * one thing worse than a run that failed is a run that never happened because another did.
+     *
+     * Returns what it wrote, empty where nothing was owed - which is what the tests read and what
+     * the caller re-books from.
      */
     suspend fun runDue(
         perform: suspend (AnalysisSchedule, Instant) -> String,
-    ): AnalysisSchedule? {
-        val current = schedule()
+    ): List<AnalysisSchedule> {
         val moment = now()
-        // Only the most recent unserved fire is ever considered, so a phone that was off for a
-        // week comes back owing one run rather than seven. Catching up on a schedule is not the
-        // same thing as honouring it.
-        val due = ScheduleClock.unservedFire(current, moment, zone) ?: return null
-        val served = when {
-            !ScheduleClock.withinGrace(due, moment) -> current.record(
-                due,
-                JobOutcome.MISSED,
-                "Missed by ${lateness(due, moment)}. The next run is the retry.",
-            )
+        val owed = schedules()
+            // Only the most recent unserved fire of each is ever considered, so a phone that was
+            // off for a week comes back owing one run per schedule rather than seven. Catching up
+            // on a schedule is not the same thing as honouring it.
+            .mapNotNull { schedule ->
+                ScheduleClock.unservedFire(schedule, moment, zone)?.let { schedule to it }
+            }
+            .sortedBy { (_, due) -> due }
+        return owed.map { (schedule, due) ->
+            val served = when {
+                !ScheduleClock.withinGrace(due, moment) -> schedule.record(
+                    due,
+                    JobOutcome.MISSED,
+                    "Missed by ${lateness(due, moment)}. The next run is the retry.",
+                )
 
-            // Every schedule left here sends a paid request, so this is the whole of the money
-            // guard: no second switch, no run.
-            !paidWorkAllowed() -> current.record(
-                due,
-                JobOutcome.SKIPPED,
-                "Scheduled runs are not allowed to spend cloud credits on this phone.",
-            )
+                // Every schedule left here sends a paid request, so this is the whole of the money
+                // guard: no second switch, no run.
+                !paidWorkAllowed() -> schedule.record(
+                    due,
+                    JobOutcome.SKIPPED,
+                    "Scheduled runs are not allowed to spend cloud credits on this phone.",
+                )
 
-            else -> runWork(current, due, perform)
+                else -> runWork(schedule, due, perform)
+            }
+            // Written as each one finishes rather than at the end, so a process killed midway
+            // through a list leaves the runs it did manage recorded as done.
+            record(served)
+            served
         }
-        record(served)
-        return served
     }
 
     private suspend fun runWork(

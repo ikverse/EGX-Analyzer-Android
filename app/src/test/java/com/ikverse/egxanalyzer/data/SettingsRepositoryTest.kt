@@ -1,15 +1,23 @@
 package com.ikverse.egxanalyzer.data
 
 import android.content.Context
+import com.ikverse.egxanalyzer.model.AnalysedChannel
+import com.ikverse.egxanalyzer.model.AnalysisContentType
+import com.ikverse.egxanalyzer.model.AnalysisSchedule
 import com.ikverse.egxanalyzer.model.CallOrder
 import com.ikverse.egxanalyzer.model.CloudProvider
+import com.ikverse.egxanalyzer.model.JobOutcome
 import com.ikverse.egxanalyzer.model.PortfolioOrder
+import com.ikverse.egxanalyzer.model.ScheduleClock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalTime
 
 /**
  * That a preference survives the app being closed, and that a stored value the app no longer
@@ -101,6 +109,118 @@ class SettingsRepositoryTest {
 
         assertEquals(5_000L, repository().snapshot().updatedAt)
         assertEquals("tablet", repository().snapshot().updatedBy)
+    }
+
+    // ------------------------------------------------------------------ the analysis schedules
+
+    /**
+     * Four of them, each with its own days, kept whole across a restart. Everything the clock
+     * reads is in here, so a field lost in the round trip is a run that happens at the wrong time
+     * or reads the wrong chats, unattended, with nobody watching.
+     */
+    @Test
+    fun `the schedules survive a restart, days and all`() {
+        assertTrue(repository().analysisSchedules().isEmpty())
+
+        val schedules = (1..4).map { index ->
+            AnalysisSchedule(
+                id = index.toLong(),
+                enabled = index % 2 == 0,
+                at = LocalTime.of(6 + index, 30),
+                days = setOf(DayOfWeek.SUNDAY, DayOfWeek.WEDNESDAY),
+                channels = listOf(AnalysedChannel(index.toLong(), "Signals $index")),
+                contentTypes = setOf(AnalysisContentType.entries.first()),
+                armedAt = Instant.ofEpochMilli(1_000L * index),
+            )
+        }
+        repository().saveAnalysisSchedules(schedules)
+
+        assertEquals(schedules, repository().analysisSchedules())
+    }
+
+    /** The cap is the storage's too: a longer list cannot arrive from a screen that respects it. */
+    @Test
+    fun `no more than four are ever written`() {
+        repository().saveAnalysisSchedules(
+            (1..6).map { AnalysisSchedule(id = it.toLong(), at = LocalTime.of(7, 0)) },
+        )
+
+        assertEquals(AnalysisSchedule.MAX, repository().analysisSchedules().size)
+    }
+
+    /**
+     * What a phone updating from the build that could hold only one schedule is holding. It keeps
+     * its time, its aim and its switch, and gains the whole trading week - which is the only week
+     * that schedule could ever have kept.
+     */
+    @Test
+    fun `the single schedule an older build wrote is read back as a list of one`() {
+        context.getSharedPreferences("egx_android_settings", Context.MODE_PRIVATE)
+            .edit()
+            .putString(
+                "analysis_schedule",
+                """{"enabled":true,"at":"07:00","channels":[{"id":7,"name":"Signals"}],""" +
+                    """"contentTypes":["${AnalysisContentType.entries.first().name}"],""" +
+                    """"armedAt":1000}""",
+            )
+            .commit()
+
+        val carried = repository().analysisSchedules().single()
+        assertTrue(carried.enabled)
+        assertEquals(LocalTime.of(7, 0), carried.at)
+        assertEquals(ScheduleClock.tradingDays, carried.days)
+        assertEquals(listOf(7L), carried.channels.map { it.id })
+    }
+
+    /**
+     * A schedule the app cannot read is one it also cannot spend money on, so the failure is the
+     * safe one - and it must not take the screen that draws it down with it.
+     */
+    @Test
+    fun `a stored list this build cannot parse comes back empty rather than throwing`() {
+        context.getSharedPreferences("egx_android_settings", Context.MODE_PRIVATE)
+            .edit()
+            .putString("analysis_schedules", "not json")
+            .commit()
+
+        assertTrue(repository().analysisSchedules().isEmpty())
+    }
+
+    /**
+     * A run records its outcome from a process with no screen in it, while the list on disk may
+     * have been edited since. Writing back the whole list it was holding would undo that edit.
+     */
+    @Test
+    fun `recording one outcome leaves the schedules beside it alone`() {
+        repository().saveAnalysisSchedules(
+            listOf(
+                AnalysisSchedule(id = 1, at = LocalTime.of(7, 0)),
+                AnalysisSchedule(id = 2, at = LocalTime.of(12, 0)),
+            ),
+        )
+
+        repository().recordAnalysisSchedule(
+            AnalysisSchedule(
+                id = 2,
+                at = LocalTime.of(12, 0),
+                lastOutcome = JobOutcome.SUCCEEDED,
+                lastMessage = "Saved 3 calls",
+            ),
+        )
+
+        val stored = repository().analysisSchedules()
+        assertEquals(JobOutcome.NEVER, stored.first { it.id == 1L }.lastOutcome)
+        assertEquals("Saved 3 calls", stored.first { it.id == 2L }.lastMessage)
+    }
+
+    /** A schedule deleted while its run was going does not come back as that run finishes. */
+    @Test
+    fun `an outcome for a schedule that has gone is dropped`() {
+        repository().saveAnalysisSchedules(listOf(AnalysisSchedule(id = 1, at = LocalTime.of(7, 0))))
+
+        repository().recordAnalysisSchedule(AnalysisSchedule(id = 9, at = LocalTime.of(9, 0)))
+
+        assertEquals(listOf(1L), repository().analysisSchedules().map { it.id })
     }
 
     private class NoCredentials : CredentialStore {

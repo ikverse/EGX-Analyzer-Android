@@ -18,6 +18,7 @@ import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.Scoring
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalTime
 
@@ -328,60 +329,106 @@ class SettingsRepository(
     }
 
     /**
-     * The one analysis this phone runs on its own.
+     * The analyses this phone runs on its own, in the order they were made.
      *
-     * Here rather than in the database, and one rather than a table, for the reason the switch
-     * above is here: it is this device own answer and it is never published. A stored value that
-     * will not parse comes back as the default - switched off - rather than throwing, because an
-     * unreadable schedule must not take the screen that draws it down with it.
+     * Here rather than in the database, for the reason the switch above is: it is this device's
+     * own answer and it is never published. A stored value that will not parse comes back as no
+     * schedules at all rather than throwing - an unreadable list must not take the screen that
+     * draws it down with it, and the failure that leaves is the safe one, since a schedule the
+     * app cannot read is one it also cannot spend money on.
+     *
+     * A phone still holding the single schedule the previous build wrote reads it back as a list
+     * of one, keeping its time, its aim and its switch. Not rewritten here: reading is not the
+     * place to write, and the first save the user makes moves it across on its own.
      */
-    fun analysisSchedule(): AnalysisSchedule = runCatching {
-        val stored = preferences.getString(KEY_ANALYSIS_SCHEDULE, null)
-            ?: return@runCatching AnalysisSchedule()
-        val json = JSONObject(stored)
-        AnalysisSchedule(
-            enabled = json.optBoolean("enabled", false),
-            at = LocalTime.parse(json.getString("at")),
-            channels = json.optJSONArray("channels").objectList().map {
-                AnalysedChannel(it.getLong("id"), it.getString("name"))
-            },
-            contentTypes = json.optJSONArray("contentTypes").stringList()
-                .mapNotNullTo(mutableSetOf()) { name ->
-                    AnalysisContentType.entries.firstOrNull { it.name == name }
-                },
-            lastFiredAt = json.optLong("lastFiredAt", 0L)
-                .takeIf { it > 0L }
-                ?.let(Instant::ofEpochMilli),
-            lastOutcome = JobOutcome.entries
-                .firstOrNull { it.name == json.optString("lastOutcome") }
-                ?: JobOutcome.NEVER,
-            lastMessage = json.optString("lastMessage").takeIf(String::isNotBlank),
-            armedAt = Instant.ofEpochMilli(json.optLong("armedAt", 0L)),
-        )
-    }.getOrDefault(AnalysisSchedule())
+    fun analysisSchedules(): List<AnalysisSchedule> = runCatching {
+        val stored = preferences.getString(KEY_ANALYSIS_SCHEDULES, null)
+        if (stored != null) {
+            JSONArray(stored).objectList().mapIndexed { index, json ->
+                json.toAnalysisSchedule(fallbackId = index + 1L)
+            }
+        } else {
+            // The shape this app wrote before it could hold more than one. It kept every trading
+            // day, which is what an absent day list reads back as.
+            preferences.getString(KEY_ANALYSIS_SCHEDULE, null)
+                ?.let { listOf(JSONObject(it).toAnalysisSchedule(fallbackId = 1L)) }
+                .orEmpty()
+        }
+    }.getOrDefault(emptyList())
 
-    fun saveAnalysisSchedule(schedule: AnalysisSchedule) {
-        val json = JSONObject()
-            .put("enabled", schedule.enabled)
-            .put("at", schedule.at.toString())
-            .put(
-                "channels",
-                JSONArray().apply {
-                    schedule.channels.forEach {
-                        put(JSONObject().put("id", it.id).put("name", it.name))
-                    }
-                },
-            )
-            .put(
-                "contentTypes",
-                JSONArray().apply { schedule.contentTypes.forEach { put(it.name) } },
-            )
-            .put("lastFiredAt", schedule.lastFiredAt?.toEpochMilli() ?: 0L)
-            .put("lastOutcome", schedule.lastOutcome.name)
-            .put("lastMessage", schedule.lastMessage.orEmpty())
-            .put("armedAt", schedule.armedAt.toEpochMilli())
-        preferences.edit().putString(KEY_ANALYSIS_SCHEDULE, json.toString()).apply()
+    fun saveAnalysisSchedules(schedules: List<AnalysisSchedule>) {
+        val array = JSONArray()
+        schedules.take(AnalysisSchedule.MAX).forEach { array.put(it.toJson()) }
+        preferences.edit().putString(KEY_ANALYSIS_SCHEDULES, array.toString()).apply()
     }
+
+    /**
+     * Writes one schedule back into the stored list, found by its id.
+     *
+     * Read, replace, write, rather than saving the whole list the caller happens to be holding:
+     * the caller here is a run in a process with no screen in it, and the list on disk may have
+     * been edited since that run started. Saving its copy would undo the edit. A schedule whose
+     * id is no longer there was deleted while it ran, and its outcome is dropped rather than
+     * bringing it back.
+     */
+    fun recordAnalysisSchedule(schedule: AnalysisSchedule) {
+        val stored = analysisSchedules()
+        if (stored.none { it.id == schedule.id }) return
+        saveAnalysisSchedules(stored.map { if (it.id == schedule.id) schedule else it })
+    }
+
+    private fun JSONObject.toAnalysisSchedule(fallbackId: Long) = AnalysisSchedule(
+        // A list written before ids existed gets its position, once, and keeps it from the next
+        // save onwards.
+        id = optLong("id", 0L).takeIf { it > 0L } ?: fallbackId,
+        enabled = optBoolean("enabled", false),
+        at = LocalTime.parse(getString("at")),
+        // Absent is the single schedule the previous build stored, which ran every trading day.
+        // An empty set that was actually chosen is written as an empty array and read back as one,
+        // so a schedule the user emptied stays empty and says so.
+        days = if (has("days")) {
+            optJSONArray("days").stringList().mapNotNullTo(mutableSetOf()) { name ->
+                DayOfWeek.entries.firstOrNull { it.name == name }
+            }
+        } else {
+            AnalysisSchedule.DEFAULT_DAYS
+        },
+        channels = optJSONArray("channels").objectList().map {
+            AnalysedChannel(it.getLong("id"), it.getString("name"))
+        },
+        contentTypes = optJSONArray("contentTypes").stringList()
+            .mapNotNullTo(mutableSetOf()) { name ->
+                AnalysisContentType.entries.firstOrNull { it.name == name }
+            },
+        lastFiredAt = optLong("lastFiredAt", 0L)
+            .takeIf { it > 0L }
+            ?.let(Instant::ofEpochMilli),
+        lastOutcome = JobOutcome.entries
+            .firstOrNull { it.name == optString("lastOutcome") }
+            ?: JobOutcome.NEVER,
+        lastMessage = optString("lastMessage").takeIf(String::isNotBlank),
+        armedAt = Instant.ofEpochMilli(optLong("armedAt", 0L)),
+    )
+
+    private fun AnalysisSchedule.toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("enabled", enabled)
+        .put("at", at.toString())
+        .put("days", JSONArray().apply { days.forEach { put(it.name) } })
+        .put(
+            "channels",
+            JSONArray().apply {
+                channels.forEach { put(JSONObject().put("id", it.id).put("name", it.name)) }
+            },
+        )
+        .put(
+            "contentTypes",
+            JSONArray().apply { contentTypes.forEach { put(it.name) } },
+        )
+        .put("lastFiredAt", lastFiredAt?.toEpochMilli() ?: 0L)
+        .put("lastOutcome", lastOutcome.name)
+        .put("lastMessage", lastMessage.orEmpty())
+        .put("armedAt", armedAt.toEpochMilli())
 
     /**
      * Whether the one-time move off the old job table has happened.
@@ -608,7 +655,9 @@ class SettingsRepository(
         const val KEY_MARKET_REFRESH = "market_refresh_enabled"
         const val KEY_MARKET_REFRESH_NOTE = "market_refresh_note"
         const val KEY_MARKET_REFRESH_NOTE_AT = "market_refresh_note_at"
+        /** What the build that could hold only one schedule wrote. Read, never written. */
         const val KEY_ANALYSIS_SCHEDULE = "analysis_schedule"
+        const val KEY_ANALYSIS_SCHEDULES = "analysis_schedules"
         const val KEY_SCHEDULES_MIGRATED = "schedules_migrated"
         const val KEY_PAID_SCHEDULES = "paid_schedules_enabled"
         const val KEY_OPINION_SEARCH = "opinion_search_enabled"

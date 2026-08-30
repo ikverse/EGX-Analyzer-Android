@@ -11,6 +11,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -31,32 +32,30 @@ class ScheduleLabelsTest {
     private val now = at("2026-08-20", "06:00")
 
     @Test
-    fun `a schedule with nothing wrong names its next fire`() {
-        assertEquals("Next today 07:00", nextRunLine(schedule(), now))
+    fun `a schedule with nothing wrong says what it covers and when it next runs`() {
         assertEquals(
-            "Next Sun 07:00",
-            nextRunLine(schedule(), at("2026-08-20", "08:00")),
+            "Signals · every trading day · next today 07:00",
+            scheduleDetail(schedule(), now),
+        )
+        assertEquals(
+            "Signals · every trading day · next Sun 07:00",
+            scheduleDetail(schedule(), at("2026-08-20", "08:00")),
         )
     }
 
     @Test
     fun `what is blocking it is said instead of a time it will never reach`() {
-        assertEquals("Switched off", nextRunLine(schedule(enabled = false), now))
-        assertEquals(
-            "No chats chosen yet",
-            nextRunLine(schedule(channels = emptyList()), now),
-        )
-        assertEquals(
-            "Paid runs are switched off",
-            nextRunLine(schedule(), now, paidAllowed = false),
-        )
+        assertEquals("Switched off", blockedReason(schedule(enabled = false)))
+        assertEquals("No days chosen", blockedReason(schedule(days = emptySet())))
+        assertEquals("No chats chosen yet", blockedReason(schedule(channels = emptyList())))
+        assertEquals("Paid runs are switched off", blockedReason(schedule(), paidAllowed = false))
         assertEquals(
             "No provider credential saved",
-            nextRunLine(schedule(), now, hasCredential = false),
+            blockedReason(schedule(), hasCredential = false),
         )
         assertEquals(
             "Its chats are no longer in the app",
-            nextRunLine(schedule(), now, knownChannelIds = setOf(99L)),
+            blockedReason(schedule(), knownChannelIds = setOf(99L)),
         )
     }
 
@@ -69,13 +68,114 @@ class ScheduleLabelsTest {
     fun `the switch is reported before anything the run needs`() {
         assertEquals(
             "Switched off",
-            nextRunLine(
+            blockedReason(
                 schedule(enabled = false),
-                now,
                 paidAllowed = false,
                 hasCredential = false,
             ),
         )
+    }
+
+    /**
+     * The money switch and the credential stop all four schedules at once, so a list of rows would
+     * say the same sentence four times over the switch that answers it. Split so it can be said
+     * once, above them.
+     */
+    @Test
+    fun `the shared reasons are kept apart from the ones a row can fix`() {
+        assertNull(scheduleBlocker(schedule()))
+        assertEquals("Paid runs are switched off", sharedBlocker(false, hasCredential = true))
+        assertEquals("No provider credential saved", sharedBlocker(true, hasCredential = false))
+        assertNull(sharedBlocker(paidAllowed = true, hasCredential = true))
+        assertEquals("No days chosen", scheduleBlocker(schedule(days = emptySet())))
+    }
+
+    /**
+     * Two whole weeks are worth a phrase; anything else is worth naming. "Every trading day" is
+     * the week a schedule starts on, so a reader who sees it knows at once that no weekend day is
+     * being paid for.
+     */
+    @Test
+    fun `a whole week is named and any other is listed, starting on Sunday`() {
+        assertEquals("every trading day", daysLabel(ScheduleClock.tradingDays))
+        assertEquals("every day", daysLabel(DayOfWeek.entries.toSet()))
+        assertEquals("Sun, Tue", daysLabel(setOf(DayOfWeek.TUESDAY, DayOfWeek.SUNDAY)))
+        assertEquals("Sun, Sat", daysLabel(setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)))
+        assertEquals("Fri", daysLabel(setOf(DayOfWeek.FRIDAY)))
+        assertEquals("No days chosen", daysLabel(emptySet()))
+    }
+
+    /**
+     * A weekend schedule is a real one, so nothing about it is reported as broken. The clock aims
+     * it at the Sunday session - see `ScheduleClockTest` - and the row says which day it keeps.
+     */
+    @Test
+    fun `a schedule on a weekend day is not treated as blocked`() {
+        val friday = schedule(days = setOf(DayOfWeek.FRIDAY))
+        assertNull(scheduleBlocker(friday))
+        // Thursday morning, so the Friday fire is tomorrow - and a moment that close is said
+        // relatively, which is `whenLabel` doing its job rather than losing the day.
+        assertEquals("Signals · Fri · next tomorrow 07:00", scheduleDetail(friday, now))
+        // An hour after its own fire the next one is a week out, which is past the range a
+        // weekday name is any use over - so a schedule that keeps one day always names the
+        // date, and "next Fri" never appears on one.
+        assertEquals(
+            "Signals · Fri · next 2026-08-28 07:00",
+            scheduleDetail(friday, at("2026-08-21", "08:00")),
+        )
+    }
+
+    // ------------------------------------------------------------------ the list, in one line
+
+    @Test
+    fun `an empty list and a list that is all off say so`() {
+        assertEquals("Nothing scheduled", schedulesSummary(emptyList(), now).text)
+        assertEquals(
+            "2 scheduled, all switched off",
+            schedulesSummary(
+                listOf(schedule(enabled = false), schedule(enabled = false)),
+                now,
+            ).text,
+        )
+    }
+
+    @Test
+    fun `the summary counts what is on and names the earliest fire any of it reaches`() {
+        val summary = schedulesSummary(
+            listOf(schedule(), schedule().copy(id = 2, at = LocalTime.of(12, 0))),
+            now,
+        )
+        assertEquals("2 on · next today 07:00", summary.text)
+        assertFalse(summary.warning)
+    }
+
+    /**
+     * A count that included a schedule which cannot run would be the summary promising a next run
+     * for something the row underneath reports as blocked - the exact disagreement this one line
+     * exists to prevent.
+     */
+    @Test
+    fun `a blocked schedule is counted separately and read in red`() {
+        val summary = schedulesSummary(
+            listOf(schedule(), schedule().copy(id = 2, at = LocalTime.of(6, 0), channels = emptyList())),
+            now,
+        )
+        assertEquals("1 on · next today 07:00 · 1 blocked", summary.text)
+        assertTrue(summary.warning)
+    }
+
+    @Test
+    fun `a reason that stops all of them is said before any count`() {
+        val summary = schedulesSummary(listOf(schedule(), schedule()), now, paidAllowed = false)
+        assertEquals("Paid runs are switched off", summary.text)
+        assertTrue(summary.warning)
+    }
+
+    @Test
+    fun `with every schedule blocked the summary says why rather than counting`() {
+        val summary = schedulesSummary(listOf(schedule(channels = emptyList())), now)
+        assertEquals("No chats chosen yet", summary.text)
+        assertTrue(summary.warning)
     }
 
     /**
@@ -213,9 +313,11 @@ class ScheduleLabelsTest {
     private fun schedule(
         enabled: Boolean = true,
         channels: List<AnalysedChannel> = listOf(AnalysedChannel(1, "Signals")),
+        days: Set<DayOfWeek> = ScheduleClock.tradingDays,
     ) = AnalysisSchedule(
         enabled = enabled,
         at = morning,
+        days = days,
         channels = channels,
         contentTypes = setOf(AnalysisContentType.entries.first()),
         armedAt = at("2026-08-19", "12:00"),

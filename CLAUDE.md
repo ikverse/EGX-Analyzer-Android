@@ -117,7 +117,7 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/JobScheduler.kt` + `data/ScheduleReceiver.kt` + `data/ScheduledJobWorker.kt` +
   `data/JobRunner.kt` + `data/ScheduleMigration.kt` — the alarm, the things that mean re-book it,
   what runs, and the one-time move off the old job table. See below.
-- `ui/SchedulesSection.kt` — the analysis card on Analyze and the section in Settings.
+- `ui/SchedulesSection.kt` — the schedule summary on Analyze and the editor in Settings.
   `ui/PriceFeedSection.kt` carries the price-refresh checkbox.
 - `data/OpinionPrompt.kt` + `data/OpinionPromptStore.kt` + `data/OpinionSearchBrief.kt` +
   `data/OpinionParser.kt` + `ui/StockOpinionSheet.kt` — Ask AI, on a call card in Insights.
@@ -1515,16 +1515,17 @@ phone only by plugging it into the machine that built it. It reads one public UR
 
 ## What this phone does on its own
 
-Two things, each a checkbox. This is the one feature that reverses a rule the app had held since
-the beginning — that nothing but `OverdueWorker` runs while the app is closed.
+A checkbox for prices, and up to four analyses. This is the one feature that reverses a rule the
+app had held since the beginning — that nothing but `OverdueWorker` runs while the app is closed.
 
 It used to be a general scheduler: a table of jobs, each with a name, a kind of work, and a choice
 of firing once, on chosen weekdays, or repeatedly inside a window, set up through a form of about
-nine hundred lines. Every part of that generality was paid for in a screen nobody got through, and
-it bought exactly two answers — keep prices fresh while the market is trading, and read the chats
-before the open. So the window and the interval of the first became constants, the second became a
-time, and the form went. `ScheduledJob`, `JobTrigger`, `JobWork` and the `scheduled_jobs` table are
-all gone with it.
+nine hundred lines. That was torn out on 2026-08-30, and what came back on the same day was **four
+schedules, each a time and a set of weekdays** — because the shape of the form, not the number of
+schedules, was what nobody could get through. The kind of work is gone (keeping prices fresh is a
+checkbox that needs no configuration at all), the trigger is gone, the name is gone, and the cap
+means the whole of what this phone does unattended fits on one screen. `ScheduledJob`,
+`JobTrigger`, `JobWork` and the `scheduled_jobs` table stay gone.
 
 - **Keeping prices fresh** — `model/MarketRefresh.kt`, switched on in Settings under Price feed.
   Every 15 minutes, Sunday to Thursday, 10:00 to 14:45 Cairo. Free: it reads the same public feed
@@ -1532,8 +1533,9 @@ all gone with it.
   `setExactAndAllowWhileIdle` to roughly one alarm every ten while dozing, so anything shorter is
   not refused, it is quietly stretched — and a schedule that promises a frequency the system will
   not keep is worse than one that promises less.
-- **The scheduled analysis** — `model/AnalysisSchedule.kt`, on the Analyze card and in Settings.
-  One schedule, a time, and the chats it froze. Paid, and see the guards below.
+- **The scheduled analyses** — `model/AnalysisSchedule.kt`, edited in Settings and summarised on
+  the Analyze card. At most `AnalysisSchedule.MAX` of them, each with a time, the weekdays it
+  keeps, and the chats it froze. Paid, and see the guards below.
 
 **The window runs to 14:45, a quarter of an hour past the close.** The exchange stops at 14:30 and
 the day's figures settle over the minutes after it, so a window ending on the bell stores a session
@@ -1542,6 +1544,28 @@ that is very nearly but not quite final.
 - **Cairo time, always.** A schedule belongs to the exchange, not to wherever the phone is: a user
   who books a run for before the open means before the open in Cairo, and one that shifted an hour
   when they landed would read a session that had not happened.
+- **The weekdays are chosen, any of the seven, and the weekend is never a default.** A fire on a
+  Friday or a Saturday is not the dead letter it looks like: `egxTargetSession` maps a shut day to
+  the next session that exists, so the run is aimed at Sunday, and `resolveAnalysisWindow` starts
+  its window at the Thursday that closed the week. A weekend schedule is therefore the one that
+  reads what the chats posted over the weekend and has Sunday's report ready before Sunday opens —
+  and the scheduled run needs no special case for it, because the session-flip guard compares the
+  same two answers and they agree. `ScheduleClockTest` holds that pairing, since a disagreement
+  there would be a schedule that fires every week and skips itself every week.
+  `ScheduleClock.tradingDays` stays Sun–Thu but is no longer a bound on anything: it is what the
+  price refresh's slots are built from, and what "every trading day" means on a row.
+  `DEFAULT_DAYS` is those five, so the weekend costs money only where it was ticked on purpose.
+  An **empty** week is reported as a blocked schedule rather than quietly corrected, because
+  correcting it means choosing days for the user.
+- **Four, and the cap is the point.** Small enough that every schedule fits on one screen, and a
+  bound on the bill: each one that fires is a paid request, so the most a day can cost is four of
+  them. The old table had no cap at all, which is part of why nobody could say what it would do.
+  Enforced in `SettingsRepository.saveAnalysisSchedules` as well as on the screen.
+- **Identity is an id, never a position.** A run records its outcome from a process with no screen
+  in it, while the list on disk may have been edited since it started. `recordAnalysisSchedule`
+  reads, replaces by id and writes; an outcome for an id that has gone is dropped rather than
+  bringing a deleted schedule back. `nextId` is one past the highest ever handed out and is never
+  reused.
 - **`ScheduleClock` and `MarketRefresh` have no Android in them**, because a rule about what
   happens at 07:00 next Sunday cannot be checked by waiting for next Sunday. The zone is a
   parameter only so a test can drive it through a daylight-saving gap on purpose.
@@ -1570,8 +1594,10 @@ that is very nearly but not quite final.
   `EgxApplication`. An alarm survives none of the first three, and one nobody re-booked has
   silently stopped keeping time. Re-booking happens in the receiver, which needs no network — a
   phone that boots into a tunnel still comes out with its alarm set — while the work goes to
-  WorkManager, which waits for one. The receiver sweeps while **either** checkbox is on and
-  cancels only when both are off, the same shape as the daily check and for the same reason.
+  WorkManager, which waits for one. The receiver sweeps while **anything** is on and cancels only
+  when everything is off, the same shape as the daily check and for the same reason.
+  `ScheduleClock.nextFireOf` is what the one alarm is booked from: the earliest fire any enabled
+  schedule has left, beside the price refresh's own.
 - **Device-local, and never synced.** Everything else the app records travels through the sync
   channel; these must not, because three phones keeping one schedule is the same work done three
   times — and for an analysis, three times the bill for one answer. Both live in
@@ -1601,21 +1627,29 @@ overwritten by their own initialisers. It carries an intent across without inven
 
 - An enabled `PRICE_REFRESH` row, whatever its trigger, becomes the checkbox. After the close,
   hourly, through the session — every one of them was a way of asking the same question.
-- A `REPEAT` `ANALYSIS` row keeps its time, its chats and its switch. A `ONCE` or `INTERVAL` one is
-  dropped: a one-shot is a button press with a delay on it and its moment has passed, and an
-  analysis on an interval was paying for the same session several times over.
+- A `REPEAT` `ANALYSIS` row keeps its time, its chats and its switch, and up to four of them are
+  carried rather than only the first, numbered in the order the table held them. Which weekdays
+  each kept is **not** carried — that column went with the table — so every carried schedule gets
+  the whole trading week, which loses no run the owner had booked where guessing narrower would. A
+  `ONCE` or `INTERVAL` one is still dropped: a one-shot is a button press with a delay on it and
+  its moment has passed, and an interval was the shape that paid for the same session over and
+  over. What replaced that shape is a second schedule with its own time and the freshness check
+  below, which is the difference between reading what has been posted since and buying the same
+  answer twice.
 - A carried schedule is **armed at the migration**, so one whose hour has already gone by today
   does not owe a run the moment the app finishes migrating and pay for it through the grace window.
 - Then `scheduled_jobs` is dropped. A table nothing reads is one the next reader of the file has to
   work out the status of.
 
-### The scheduled analysis
+### The scheduled analyses
 
 - **Two switches, and both have to be on.** The schedule's own, and `paidSchedulesEnabled`, which
-  is what stands between the clock and the owner's money. `JobRunner.paidWorkAllowed` **defaults to
-  refusing**, which is the point: a caller that wants paid work has to say so. A run whose switch is
-  off is passed over and says so on the card — it is not hidden, and it is not run. Arming the
-  clock to spend money later is the same act as spending it, so it needs the owner's own hand.
+  is what stands between the clock and the owner's money — one switch for all four schedules, since
+  it is a decision about spending and not about any one of them. `JobRunner.paidWorkAllowed`
+  **defaults to refusing**, which is the point: a caller that wants paid work has to say so. A run
+  whose switch is off is passed over and says so on the card — it is not hidden, and it is not run.
+  Arming the clock to spend money later is the same act as spending it, so it needs the owner's own
+  hand.
 - **`AnalysisPlan` exists because a run can start from two places.** `analyze()` used to read the
   Analyze screen's fields directly, and a scheduled run has its own answer to every one. Two
   functions assembling a request would have been two sets of rules about what gets sent, and the
@@ -1636,8 +1670,16 @@ overwritten by their own initialisers. It carries an intent across without inven
     following day and produce a report that looks entirely ordinary. So the session the fire was
     booked for is compared with the one a run now would cover, and a disagreement stops it. This is
     the subtle one, and `RecommendationDateTest` documents the rule it rests on.
-  - **`duplicateOf`**, the same check the Analyze button uses: a report already covering that
-    session and those chats means skip, not pay twice.
+  - **Nothing new since the last report**, which is what a second schedule in a day turns
+    `duplicateOf` into. The old rule was that a report already covering this session and these
+    chats meant skip, full stop — right while a repeat could only be the same request paid for
+    twice, and wrong the moment a midday schedule exists to pick up what was posted after the
+    morning one. So the sources are collected first (free: it reads Telegram's own store and
+    reaches no provider), and `SourceFreshness.newSources` compares them against the saved
+    report's by Telegram message id. Nothing new means skip; one new message means run. A source
+    with no message id counts as new, because it cannot be shown to have been read before and
+    erring towards running is the right way round for a guard that only exists to stop paying for
+    a repeat of nothing. The Analyze button's own duplicate warning is untouched.
   - **Preconditions** — a credential and model saved, no run already going, and a Telegram session.
   - **No sources** — chats that posted nothing in the window are a skip, not a failure.
 - **A cold start has to wait for TDLib.** The alarm wakes a process that may have been dead, and the
@@ -1660,20 +1702,56 @@ overwritten by their own initialisers. It carries an intent across without inven
   and the update check unstarted, which is the difference between a wake that fetches prices and
   one that connects to Telegram and catches up on four kinds of synced document first. An analysis
   needs all three and starts the app in full.
-- **The schedule names the chats it covers**, two of them and a count. The whole point of freezing
-  the selection is that it stops matching what is ticked on screen, so a line saying only "analyse
-  the next session" cannot be checked without opening it.
-- **`blockedReason` is one list, read by the card and by the Settings summary above it.** They
-  disagreeing is how a summary promises "Next Sun 07:00" for a schedule the card underneath reports
-  as blocked. The order is what the reader has to fix first: the switch, then what it is aimed at,
-  then anything the run needs. A card listing four problems fixes none.
+- **Every row names the chats it covers**, two of them and a count, then its week, then its next
+  fire. The whole point of freezing the selection is that it stops matching what is ticked on
+  screen, so a line saying only "analyse the next session" cannot be checked without opening it —
+  and with four rows the coverage is also how the reader tells which one they are looking at.
+- **One list of reasons, split by who can fix them.** `scheduleBlocker` holds what belongs to one
+  schedule — switched off, no days, no chats, chats gone — and is what a row says in place of its
+  next fire. `sharedBlocker` holds the two that stop all four at once, the money switch and the
+  credential, and is drawn **once** above the rows: on a list, saying "paid runs are switched off"
+  four times over the switch that answers it is noise, not honesty. `blockedReason` composes both
+  in the old order and is what a single-schedule summary reads. The order is what the reader has to
+  fix first: the switch, then what it is aimed at, then anything the run needs. A card listing four
+  problems fixes none.
+- **`schedulesSummary` is the one line both screens read.** The Analyze card and the closed Settings
+  card build it from the same function, because the two disagreeing is exactly how a summary ends
+  up promising a next run over schedules that are all blocked. It reports a shared blocker before
+  any count, then how many are on, the earliest fire any of them will actually reach, and how many
+  are blocked — and it carries a `warning` flag so the same sentence is red where it needs to be.
 - **An empty chat list is not evidence the chats have gone.** On a cold start Telegram has not
   loaded, and "its chats are no longer in the app" would be the wrong alarm at the worst moment. It
   is also only raised when **all** of the chats have gone: losing one of four leaves a run that
   still reads the other three.
-- **Re-aiming is deliberate and never quiet.** `ReaimControl` shows the frozen selection and the
-  current one and offers a button naming which it takes. Freezing is right; a selection that can
-  never be corrected would mean deleting the schedule to fix a typo.
+- **Re-aiming is deliberate and never quiet.** `ReaimControl` draws nothing at all while the frozen
+  aim matches what Analyze has ticked, and otherwise offers one button naming what it would take —
+  the frozen side is already on the line above it. Freezing is right; a selection that can never be
+  corrected would mean deleting the schedule to fix a typo.
+
+### Where they are drawn, and why only in one place
+
+Every control used to be drawn twice — in full on the Analyze card and again in Settings — which is
+two places to edit one thing and, worse, two places that can disagree about it. As of 2026-08-30
+**Settings owns the schedules and Analyze summarises them.**
+
+- **Analyze gets one line and a button.** It is the screen where a run is aimed, so what it owes the
+  reader is the answer to "is anything going to happen without me" — the count, the next fire, and
+  the way to the controls. `editSchedules()` sets `openScheduleSettings`, navigates, and the
+  Settings section opens itself and clears the flag as it takes it, so coming back later finds it
+  closed like every other group.
+- **A row is a switch, a time, seven day chips and a delete.** The time is set by pressing the time
+  itself — the separate "Change" button beside it was a second control for one number — and the
+  days are chips rather than named checkboxes because seven names down a page is the shape of form
+  this feature was rebuilt to get away from, and because a filled-in week is a pattern the eye
+  reads before it reads a letter of it. The chips start on Sunday, as the exchange's week does, and
+  sit on a line of their own: seven of them beside a switch, a time and a delete would overflow the
+  cover panel, and a week with its last days clipped off is worse than a week on its own line.
+- **Under the row, at most two lines, and the second only when there is something to act on.** What
+  it covers and when it next runs — or, in the error colour and in place of it, what is stopping it.
+  Then the last outcome, and the re-aim button when the aim has drifted from the screen.
+- **The four grey paragraphs of prose are gone.** They explained why the feature is shaped as it is,
+  which is what this file and the KDoc are for; on the screen they were four blocks of small text
+  between the reader and one switch.
 
 ## The status line
 
@@ -1796,28 +1874,40 @@ at the foot of the screen until 2026-08-25.
   That has happened here — the ISIN migration — and nothing noticed at the time. Seven days, which
   clears the Friday–Saturday weekend plus a public holiday. Both are now standing state on Insights
   rather than a count in a toast — see **When the feed goes quiet**.
-- **Only a scroll the reader started may name a destination, and the effect that scrolls is keyed on
-  the pager.** The bar and the pager move the same pointer, so each follows the other, and the two
-  ways that link can go wrong have both now been shipped. Keyed on `appState.destination`, the
-  scrolling effect was restarted by the very thing it was meant to serve — a swipe publishes its own
-  arrival — and the restarted copy compared a target read at recomposition against a page read a
-  frame or more later, so a second swipe arriving inside that window scrolled the reader **back to
-  the page they had just left**. One `LaunchedEffect(pager)` owns the whole link now; nothing the
-  pager says can restart it, so no stale target survives to be acted on. The guard against the
-  write-back was the second fault: a flag raised *inside* the scrolling coroutine goes up a frame
-  after the scroll starts and down a frame after it ends, and a page that turned over inside either
-  gap was swallowed and never said again — which is how the bar came to be lit on a tab the reader
-  was not on. It is read from the pager's own `interactionSource` instead, set on
-  `DragInteraction.Start` and cleared when the pager **comes to rest** rather than when the finger
-  lifts, so it covers the fling. That buys one rule, and the rule is what makes the rest fall out:
-  the pages a tap travels over stay silent, and so does **the page a tap is abandoned on when a
-  second tap replaces it** — not an arrival either, and left to speak it wins the race against the
-  tap that cancelled it and takes the reader somewhere neither tap named. Taps run through
-  `collectLatest` so the second of two wins rather than being undone when the first lands, and so a
-  cancelled travel always has a replacement to snap it rather than being left parked between two
-  pages. The `animateScrollToPage` is wrapped: a drag holds the pager at a priority a scroll started
-  in the shell cannot take, so it is refused outright rather than interrupted, and that refusal is
-  swallowed while a real cancellation still passes.
+- **The bar follows every page turn except the ones a travel started in the shell passes over, and
+  the effect that scrolls is keyed on the pager.** The bar and the pager move the same pointer, so
+  each follows the other, and all three ways that link can go wrong have now been shipped. Keyed on
+  `appState.destination`, the scrolling effect was restarted by the very thing it was meant to serve
+  — a swipe publishes its own arrival — and the restarted copy compared a target read at
+  recomposition against a page read a frame or more later, so a second swipe arriving inside that
+  window scrolled the reader **back to the page they had just left**. One `LaunchedEffect(pager)`
+  owns the whole link now; nothing the pager says can restart it, so no stale target survives to be
+  acted on. The guard against the write-back was the other two faults, and both came of the guard
+  naming the **gesture** rather than the travel. Raised *inside* the scrolling coroutine it went up a
+  frame after the scroll started and down a frame after it ended, and a page that turned over inside
+  either gap was swallowed. Read from the pager's own `interactionSource` instead — up on
+  `DragInteraction.Start`, down when the pager reported itself at rest — it was no better, because
+  **Compose runs a swipe as two scroll sessions**, the finger's and the settling fling's, and
+  `isScrollInProgress` reads false in the gap between them: the guard came down in that gap, so a
+  *flick* — where the page is decided by velocity on the fling rather than by crossing the halfway
+  mark under the hand — turned its page with the guard already closed and left the bar lit on the tab
+  the reader had just left. A slow drag past halfway still worked, which is what made it look
+  intermittent, and the same flag silently dropped a tap made while a swipe was still settling. The
+  guard is `travelling` now: the page a travel started here is heading for, `null` otherwise. It is
+  written by the only coroutine that scrolls, before it suspends, so nothing about how Compose splits
+  a gesture into sessions can reach it. Page and guard are read in **one** `snapshotFlow` pair, so a
+  turn is never delivered against a guard that changed after the turn was taken. What falls out of
+  that: every turn the reader causes is an arrival however it turned — under the hand, on the fling,
+  or as the pager settled — while the pages a travel crosses stay silent, and so does **the page a
+  travel is abandoned on when a second send replaces it**, which left to speak wins the race against
+  the send that cancelled it. Sends run through `collectLatest`, which starts each block
+  **undispatched**, so a replacement raises the guard in the same continuation the cancelled block
+  lowered it in and the abandoned page never gets a frame to name itself. A travel is outranked by
+  nothing but a hand, so a tab tapped while the pages are still coasting is answered rather than
+  dropped; a drag refuses it outright, and that refusal is swallowed — the guard comes down, the
+  gesture names where they land, and if it puts the pager back on the page it set out from, turning
+  no page and so naming nothing, the resting page is published so the bar cannot be left on a tab the
+  pager never travelled to.
 - **Pressing the destination already showing takes that page back to the top.** The press every
   bottom bar on this platform answers, and this app answered it with nothing — the way back from a
   session card deep inside Insights was to scroll all of it by hand. `AppState.scrollToTopRequest`
@@ -1945,10 +2035,13 @@ at the foot of the screen until 2026-08-25.
   down to meet it — and right for a pair, where two cards of equal standing ending at two heights
   reads as one of them having failed to load. **It measures rather than asking for an intrinsic, and
   that distinction shipped a crash.** `Modifier.height(IntrinsicSize.Max)` is the obvious way to
-  write it and it throws: intrinsic measurement of a `SubcomposeLayout` is unsupported, and these
-  panes contain an `AdaptiveInline`, which is a `BoxWithConstraints`. Because the Row branch is only
-  taken above `minWidth`, it stood up on the cover screen and died the moment the phone was
-  unfolded — v2.1.31, reported from the device. `ResponsiveRows` carries the identical warning about
+  write it and it throws: intrinsic measurement of a `SubcomposeLayout` is unsupported, and a pane
+  holds whatever the screen puts in one — at the time a `BoxWithConstraints` in the Content types
+  card, since replaced by a `FlowRow`. Because the Row branch is only taken above
+  `minWidth`, it stood up on the cover screen and died the moment the phone was unfolded — v2.1.31,
+  reported from the device. The rule outlived that call site: the next `BoxWithConstraints`,
+  `LazyRow` or `SubcomposeAsyncImage` a pane acquires brings the crash straight back, and nothing
+  about the panes says so. `ResponsiveRows` carries the identical warning about
   `IntrinsicSize.Min` a few hundred lines above, which is the part worth remembering: **the trap was
   already written down and got walked into anyway.** The height is read back with `onSizeChanged`
   and can only grow, so it settles in one pass, and its reset key is the width so a fold cannot
@@ -1961,6 +2054,19 @@ at the foot of the screen until 2026-08-25.
   one job, and it was the reason that card changed height the instant the mode changed, which is the
   one thing a card sitting beside another must not do. The affordance moved into the line already
   there: the date, then `· tap to change`.
+- **The checkboxes wrap rather than switching on a width, and the helper that switched them is
+  gone.** `AdaptiveInline` asked the card how wide it was and laid three checkboxes across above
+  420dp, and it had the fold exactly backwards: the card is at its *narrowest* when there is room to
+  put it beside the date card, so the 379dp cover screen gave it 347 of content and got the compact
+  row, while the unfolded Fold split 638 into two 313 columns, left 281, missed the threshold and
+  stacked three long labels down a column. **The larger screen got the taller layout.** A `FlowRow`
+  asks the labels how wide they actually are instead of guessing from a number written in the
+  source, so one row survives the cover screen, the unfolded Fold and the tablet alike and a large
+  font scale wraps instead of clipping. That left `AdaptiveInline` with no callers and it was
+  deleted rather than kept: a five-line wrapper over `BoxWithConstraints` whose KDoc named the one
+  card it was written for was never a general primitive, and a public helper nobody calls is read as
+  the house answer by whoever needs the next one. Deleting it also takes a `SubcomposeLayout` back
+  out of a pane `alignHeights` has to measure — see the crash above, whose rule stands without it.
 - **The two shells are two call sites, so no page may hold its own state.** `EgxAnalyzerApp` branches
   on `rail` around one `AppContent` for the rail and another for the pill, and again around
   `AnimatedContent` versus `DestinationPager`. Folding the phone flips `rail`, Compose disposes one

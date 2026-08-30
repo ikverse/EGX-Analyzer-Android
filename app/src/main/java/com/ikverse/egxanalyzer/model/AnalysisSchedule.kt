@@ -1,17 +1,18 @@
 package com.ikverse.egxanalyzer.model
 
+import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalTime
-
 /**
- * The one analysis this phone runs on its own, and the time it runs at.
+ * One analysis this phone runs on its own: a time, the days it keeps, and what it reads.
  *
- * One rather than a list, and a time rather than a trigger. What stood here before was a general
- * scheduler - a table of jobs, each with a name, a kind of work, and a choice of firing once, on
- * chosen weekdays, or repeatedly inside a window - and every part of that generality was paid for
- * in a form nobody could get through. The two things it was ever going to be asked for are a price
- * refresh through the session, which is now a checkbox of its own that needs no configuration at
- * all, and one analysis before the open. This is the second of them.
+ * A few of these rather than a table of jobs. What stood here before was a general scheduler -
+ * every job carrying a name, a kind of work, and a choice of firing once, on chosen weekdays, or
+ * repeatedly inside a window - and the shape of that form, not the number of schedules, was what
+ * made it unusable. So the kind of work is gone (a price refresh is a checkbox of its own that
+ * needs no configuration at all), the trigger is gone, the name is gone, and what is left is a
+ * time and a set of weekdays. At most [MAX] of them, which is the cap that keeps a list of
+ * schedules a list rather than a table with a form behind it.
  *
  * Deliberately device-local. Everything else the app records - reports, trades, wording rules -
  * travels between phones through the sync channel, and this must not: three devices holding one
@@ -19,6 +20,16 @@ import java.time.LocalTime
  * for one answer. Nothing here is ever published.
  */
 data class AnalysisSchedule(
+    /**
+     * Which of the few this is, for the whole life of the schedule.
+     *
+     * A list needs identity that survives being reordered, edited and written back: the run that
+     * fires at 07:00 records its outcome from a background process, while the screen may have
+     * been used to change the time of the one beside it. Matching on position would file that
+     * outcome against the wrong schedule; matching on the time would lose it the moment the time
+     * was changed. Handed out by [nextId] and never reused.
+     */
+    val id: Long = 1L,
     /**
      * Whether the clock runs this at all.
      *
@@ -36,6 +47,25 @@ data class AnalysisSchedule(
      * they landed somewhere would read a session that had not happened.
      */
     val at: LocalTime = DEFAULT_TIME,
+    /**
+     * The weekdays it keeps, any of the seven.
+     *
+     * Chosen rather than fixed, because the calls worth reading do not arrive evenly: a schedule
+     * for the Sunday open answers a different question from one on a Wednesday lunchtime, and
+     * before this there was no way to ask either without also paying for the other three days.
+     *
+     * **Friday and Saturday are offered but never default.** The exchange is shut, so it looks at
+     * first like a fire with no session to read - but a run then is aimed at the next session that
+     * exists, which is Sunday's, and the window it reads starts at the previous Thursday. So a
+     * weekend schedule is the one that picks up what the chats posted over the weekend and has the
+     * report ready before Sunday opens. Off by default because most weeks it is the same answer as
+     * the Sunday morning run for a second charge; on where the owner decides otherwise, which is
+     * a judgement about their own chats and not one this app can make for them.
+     *
+     * An empty set is a schedule that never fires. It is reported as a blocked schedule rather
+     * than silently corrected: correcting it would mean choosing days on the user's behalf.
+     */
+    val days: Set<DayOfWeek> = DEFAULT_DAYS,
     /**
      * The chats this covers, frozen when the schedule was aimed.
      *
@@ -72,6 +102,7 @@ data class AnalysisSchedule(
     /** Whether there is anything to run: an analysis of no chats is a paid request for nothing. */
     val configured: Boolean get() = channels.isNotEmpty() && contentTypes.isNotEmpty()
 
+
     /**
      * What this sends, always for the next session and never for a historical date.
      *
@@ -84,6 +115,37 @@ data class AnalysisSchedule(
     )
 
     companion object {
+        /**
+         * Four, which is what keeps this a list rather than a table.
+         *
+         * A number small enough that every schedule fits on the screen at once, and that the whole
+         * of what this phone does unattended can be read without scrolling or opening anything.
+         * It is also a bound on the bill: each schedule that fires sends a paid request, so the
+         * most this can cost in a day is four of them, and that is a number the owner can hold in
+         * their head. The old table had no cap at all, which is part of why nobody could say what
+         * it was going to do.
+         */
+        const val MAX = 4
+
+        /**
+         * Every trading day, which is what a new schedule starts as.
+         *
+         * The whole week the exchange is open, and neither weekend day. Narrowing it is a
+         * deliberate act - a schedule that quietly started on Sundays only would be a run the
+         * owner never asked to lose - and so is widening it, since a weekend run is a charge on a
+         * day most weeks have nothing new to say.
+         */
+        val DEFAULT_DAYS: Set<DayOfWeek> = ScheduleClock.tradingDays
+
+        /**
+         * The next unused id, which is one past the highest ever handed out in this list.
+         *
+         * Never reused, and not a count: deleting the second of three and adding another must not
+         * hand the new one an id the outcome of a run is still on its way back to.
+         */
+        fun nextId(existing: List<AnalysisSchedule>): Long =
+            (existing.maxOfOrNull(AnalysisSchedule::id) ?: 0L) + 1L
+
         /**
          * Before the open, which is the only time an analysis is worth having.
          *

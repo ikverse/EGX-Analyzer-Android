@@ -24,8 +24,8 @@ import java.time.LocalTime
  */
 object ScheduleMigration {
 
-    /** What to write in place of the table. A null [schedule] leaves the analysis side untouched. */
-    data class Result(val marketRefresh: Boolean, val schedule: AnalysisSchedule?)
+    /** What to write in place of the table. An empty [schedules] leaves that side untouched. */
+    data class Result(val marketRefresh: Boolean, val schedules: List<AnalysisSchedule>)
 
     /**
      * Reads the old rows.
@@ -39,16 +39,22 @@ object ScheduleMigration {
      * on it and its moment has almost certainly passed; an analysis on an interval would have been
      * paying for the same session several times over. Neither is worth reconstructing, and both
      * are dropped with the schedule left switched off rather than guessed at.
+     *
+     * Up to [AnalysisSchedule.MAX] of them, oldest first, since the new shape can hold more than
+     * one. Which days each kept is not carried: the column that held them went with the table, and
+     * every trading day is the safe reading - it loses no run the owner had booked, where guessing
+     * narrower would.
      */
     fun from(rows: List<LegacyScheduleRow>, armedAt: Instant = Instant.now()): Result {
         val marketRefresh = rows.any { it.workKind == PRICE_REFRESH && it.enabled }
-        val analysis = rows.asSequence()
+        val analyses = rows.asSequence()
             .filter { it.workKind == ANALYSIS && it.triggerKind == REPEAT }
             .mapNotNull { it.toSchedule(armedAt) }
-            // The first, because a table holding two analyses is a phone whose owner set up more
-            // than the new shape can hold, and the earliest one is the one they made first.
-            .firstOrNull()
-        return Result(marketRefresh, analysis)
+            .take(AnalysisSchedule.MAX)
+            .toList()
+            // Numbered in the order the table held them, which is the order they were made.
+            .mapIndexed { index, schedule -> schedule.copy(id = index + 1L) }
+        return Result(marketRefresh, analyses)
     }
 
     /**

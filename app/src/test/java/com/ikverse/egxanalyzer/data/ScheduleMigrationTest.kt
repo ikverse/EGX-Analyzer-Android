@@ -1,6 +1,8 @@
 package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.AnalysisContentType
+import com.ikverse.egxanalyzer.model.AnalysisSchedule
+import com.ikverse.egxanalyzer.model.ScheduleClock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -46,7 +48,10 @@ class ScheduleMigrationTest {
 
     @Test
     fun `a repeating analysis keeps its time, its chats and its switch`() {
-        val schedule = ScheduleMigration.from(listOf(analysisRow(enabled = true)), armedAt).schedule
+        val schedule = ScheduleMigration
+            .from(listOf(analysisRow(enabled = true)), armedAt)
+            .schedules
+            .single()
         assertEquals(LocalTime.of(8, 30), schedule?.at)
         assertEquals(listOf(7L), schedule?.channels?.map { it.id })
         assertEquals(setOf(contentType), schedule?.contentTypes)
@@ -59,7 +64,10 @@ class ScheduleMigrationTest {
      */
     @Test
     fun `a carried schedule is armed at the migration, not at its old creation`() {
-        val schedule = ScheduleMigration.from(listOf(analysisRow(enabled = true)), armedAt).schedule
+        val schedule = ScheduleMigration
+            .from(listOf(analysisRow(enabled = true)), armedAt)
+            .schedules
+            .single()
         assertEquals(armedAt, schedule?.armedAt)
     }
 
@@ -69,13 +77,13 @@ class ScheduleMigrationTest {
             ScheduleMigration.from(
                 listOf(analysisRow(enabled = true, triggerKind = "ONCE")),
                 armedAt,
-            ).schedule,
+            ).schedules.firstOrNull(),
         )
         assertNull(
             ScheduleMigration.from(
                 listOf(analysisRow(enabled = true, triggerKind = "INTERVAL")),
                 armedAt,
-            ).schedule,
+            ).schedules.firstOrNull(),
         )
     }
 
@@ -89,7 +97,7 @@ class ScheduleMigrationTest {
             ScheduleMigration.from(
                 listOf(analysisRow(enabled = true, workConfig = "not json")),
                 armedAt,
-            ).schedule,
+            ).schedules.firstOrNull(),
         )
         assertNull(
             ScheduleMigration.from(
@@ -100,7 +108,7 @@ class ScheduleMigrationTest {
                     ),
                 ),
                 armedAt,
-            ).schedule,
+            ).schedules.firstOrNull(),
         )
     }
 
@@ -108,7 +116,30 @@ class ScheduleMigrationTest {
     fun `a phone with no schedules gets none`() {
         val result = ScheduleMigration.from(emptyList(), armedAt)
         assertFalse(result.marketRefresh)
-        assertNull(result.schedule)
+        assertTrue(result.schedules.isEmpty())
+    }
+
+    /**
+     * The table could hold any number and the new shape holds four, so more than one repeating
+     * analysis is carried rather than only the first. Numbered in the order the table held them,
+     * which is the order they were made.
+     */
+    @Test
+    fun `several repeating analyses are carried, up to the cap`() {
+        val rows = (1..6).map { analysisRow(enabled = true) }
+        val carried = ScheduleMigration.from(rows, armedAt).schedules
+        assertEquals(AnalysisSchedule.MAX, carried.size)
+        assertEquals(listOf(1L, 2L, 3L, 4L), carried.map { it.id })
+    }
+
+    /**
+     * Which days each kept went with the table. Every trading day is the safe reading: it loses no
+     * run the owner had booked, where guessing narrower would.
+     */
+    @Test
+    fun `a carried schedule keeps every trading day`() {
+        val carried = ScheduleMigration.from(listOf(analysisRow(enabled = true)), armedAt)
+        assertEquals(ScheduleClock.tradingDays, carried.schedules.single().days)
     }
 
     @Test
@@ -118,7 +149,7 @@ class ScheduleMigrationTest {
             armedAt,
         )
         assertTrue(result.marketRefresh)
-        assertEquals(LocalTime.of(8, 30), result.schedule?.at)
+        assertEquals(LocalTime.of(8, 30), result.schedules.single().at)
     }
 
     private fun priceRow(

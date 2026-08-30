@@ -37,13 +37,15 @@ class ScheduleReceiver : BroadcastReceiver() {
                     application,
                     AndroidKeystoreCredentialStore(application),
                 )
-                val schedule = settings.analysisSchedule()
+                val schedules = settings.analysisSchedules()
                 val marketRefresh = settings.marketRefreshEnabled()
-                JobScheduler(application).rebook(schedule, marketRefresh)
-                // Swept while either is on, and cancelled only when both are off - the same shape
-                // as the daily check, and for the same reason. Reading only the analysis switch
-                // here would take the price refresh down with it silently.
-                if (schedule.enabled || marketRefresh) ScheduledJobWorker.sweep(application)
+                JobScheduler(application).rebook(schedules, marketRefresh)
+                // Swept while anything is on, and cancelled only when everything is off - the same
+                // shape as the daily check, and for the same reason. Reading only the analysis
+                // side here would take the price refresh down with it silently.
+                if (schedules.any { it.enabled } || marketRefresh) {
+                    ScheduledJobWorker.sweep(application)
+                }
             } finally {
                 finish.finish()
             }

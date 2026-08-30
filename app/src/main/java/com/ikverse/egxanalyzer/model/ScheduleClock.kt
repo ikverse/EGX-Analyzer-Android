@@ -22,10 +22,13 @@ object ScheduleClock {
     val ZONE: ZoneId = ZoneId.of("Africa/Cairo")
 
     /**
-     * The days the exchange is open, which is the only set anything here fires on.
+     * The days the exchange is open.
      *
-     * Fixed rather than chosen. A schedule that reads a trading session has nothing to say about
-     * Friday, and every day-picker this app ever drew was a way of getting that wrong.
+     * What the price refresh's slots are built from, and what a schedule keeping exactly these
+     * days is called on screen. It is deliberately **not** a bound on what an analysis may be
+     * booked for: a run on a Friday reads what the chats posted over the weekend and files it
+     * against the Sunday session, which is a real question and not a wasted request. See
+     * [AnalysisSchedule.days].
      */
     val tradingDays: Set<DayOfWeek> = setOf(
         DayOfWeek.SUNDAY,
@@ -49,34 +52,64 @@ object ScheduleClock {
     val sessionEnd: LocalTime = LocalTime.of(14, 45)
 
     /**
-     * The first fire of [at] on a trading day strictly after [after].
+     * The first fire of [at] on one of [days] strictly after [after].
      *
-     * Strictly after, so asking again the instant a schedule fires gives tomorrow's slot rather
-     * than the one just served. Never null: there is always another trading day.
+     * Strictly after, so asking again the instant a schedule fires gives its next day rather than
+     * the slot just served. Null only where [days] is empty, which is a schedule the user has
+     * emptied: there is no honest time to name for it, and naming one anyway is how a card ends up
+     * promising a run that will never come.
      */
-    fun nextFire(at: LocalTime, after: Instant, zone: ZoneId = ZONE): Instant {
+    fun nextFire(
+        at: LocalTime,
+        days: Set<DayOfWeek>,
+        after: Instant,
+        zone: ZoneId = ZONE,
+    ): Instant? {
+        if (days.isEmpty()) return null
         val from = after.atZone(zone).toLocalDate()
-        // Eight candidates, not seven: today's own slot may already be past, so a Thursday has to
-        // be able to reach the Sunday that follows the weekend.
+        // Eight candidates, not seven: today's own slot may already be past, so a schedule that
+        // keeps only Thursdays has to be able to reach the Thursday of the following week.
         return (0..7).asSequence()
             .map { from.plusDays(it.toLong()) }
-            .filter { it.dayOfWeek in tradingDays }
+            .filter { it.dayOfWeek in days }
             // A local time that daylight saving skipped does not exist, and atZone moves it
             // forward across the gap rather than throwing. That is the right answer for a
             // schedule: the run happens once, an hour later than it reads.
             .map { it.atTime(at).atZone(zone).toInstant() }
-            .first { it.isAfter(after) }
+            .firstOrNull { it.isAfter(after) }
     }
 
-    /** The most recent fire of [at] at or before [moment], whether or not it was served. */
-    fun previousFire(at: LocalTime, moment: Instant, zone: ZoneId = ZONE): Instant? {
+    /** The most recent fire of [at] on one of [days] at or before [moment], served or not. */
+    fun previousFire(
+        at: LocalTime,
+        days: Set<DayOfWeek>,
+        moment: Instant,
+        zone: ZoneId = ZONE,
+    ): Instant? {
+        if (days.isEmpty()) return null
         val from = moment.atZone(zone).toLocalDate()
         return (0..7).asSequence()
             .map { from.minusDays(it.toLong()) }
-            .filter { it.dayOfWeek in tradingDays }
+            .filter { it.dayOfWeek in days }
             .map { it.atTime(at).atZone(zone).toInstant() }
             .firstOrNull { !it.isAfter(moment) }
     }
+
+    /**
+     * The earliest fire any of [schedules] has left, or null where none of them has one.
+     *
+     * The alarm books one moment for the whole list, so this is the question it asks. A schedule
+     * that is switched off has no next fire at all, which is what takes it out of the answer
+     * without taking down the ones beside it.
+     */
+    fun nextFireOf(
+        schedules: List<AnalysisSchedule>,
+        now: Instant,
+        zone: ZoneId = ZONE,
+    ): Instant? = schedules
+        .filter { it.enabled }
+        .mapNotNull { nextFire(it.at, it.days, now, zone) }
+        .minOrNull()
 
     /**
      * The fire this schedule owes a run for, or null where it owes none.
@@ -94,7 +127,7 @@ object ScheduleClock {
         zone: ZoneId = ZONE,
     ): Instant? {
         if (!schedule.enabled) return null
-        val due = previousFire(schedule.at, now, zone) ?: return null
+        val due = previousFire(schedule.at, schedule.days, now, zone) ?: return null
         // A fire from before this schedule was armed was never its to serve: switching it on at
         // 07:30 for 07:00 must not run it on the spot through the grace window.
         if (!due.isAfter(schedule.armedAt)) return null

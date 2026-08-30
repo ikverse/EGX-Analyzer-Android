@@ -89,6 +89,8 @@ import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.Scoring
+import com.ikverse.egxanalyzer.model.ScheduleClock
+import com.ikverse.egxanalyzer.model.SourceFreshness
 import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.TelegramAuthState
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
@@ -225,8 +227,10 @@ class AppState(
     /**
      * Books or cancels this phone's schedule alarm; supplied by the app so this class stays testable.
      */
-    private val schedulesChanged: (schedule: AnalysisSchedule, marketRefresh: Boolean) -> Unit =
-        { _, _ -> },
+    private val schedulesChanged: (
+        schedules: List<AnalysisSchedule>,
+        marketRefresh: Boolean,
+    ) -> Unit = { _, _ -> },
     /**
      * Whether this process was started by the clock rather than by its owner.
      *
@@ -645,10 +649,17 @@ class AppState(
     }
 
     /**
-     * A saved analysis of the same session with the same chats.
+     * The most recent saved analysis of the same session with the same chats.
      *
      * Only an exact match counts. A run over different chats answers a different question even on
      * the same day, so warning about it would train the user to dismiss the warning.
+     *
+     * The **most recent** matters now that a day can hold several reports of one session: a
+     * scheduled run compares what it just read against this one to decide whether anything has been
+     * posted since, and comparing against the oldest would find every later message new and pay
+     * every time. It is the first match because [LocalDataStore.results] is ordered
+     * `completed_at DESC` - which is a dependency worth naming, since reordering that query would
+     * quietly turn a money guard into a rubber stamp.
      */
     private fun duplicateOf(targetDate: LocalDate, chosen: Set<Long>): SavedAnalysis? =
         savedResults.firstOrNull { saved ->
@@ -1999,14 +2010,29 @@ class AppState(
     }
 
     /**
-     * The one analysis this phone runs on its own.
+     * The analyses this phone runs on its own, at most [AnalysisSchedule.MAX] of them.
      *
-     * Held here so a screen can show it, and read back from storage after every change rather than
-     * edited in memory: the alarm that fires it can wake a process with no screen in it, and the
-     * schedule the runner works from has to be the one the card is showing.
+     * Held here so a screen can show them, and read back from storage after every change rather
+     * than edited in memory: the alarm that fires them can wake a process with no screen in it,
+     * and the schedules the runner works from have to be the ones the card is showing.
      */
-    var analysisSchedule by mutableStateOf(settingsRepository.analysisSchedule())
+    var analysisSchedules by mutableStateOf(settingsRepository.analysisSchedules())
         private set
+
+    /**
+     * Asks Settings to open its schedule section, set by the summary on Analyze.
+     *
+     * A one-shot request rather than a piece of state: the section that consumes it clears it, so
+     * coming back to Settings later finds it closed like every other group. Analyze reports on the
+     * schedules and Settings owns them, which is the whole reason this has to travel.
+     */
+    var openScheduleSettings by mutableStateOf(false)
+
+    /** Sends the reader from the summary on Analyze to the controls in Settings. */
+    fun editSchedules() {
+        openScheduleSettings = true
+        navigate(AppDestination.SETTINGS)
+    }
 
     /**
      * Whether this phone keeps prices fresh while the market is trading.
@@ -2060,19 +2086,59 @@ class AppState(
     }
 
     /**
-     * Saves the analysis schedule, re-arming it where the fire it promises has moved.
+     * Saves one schedule, re-arming it where the fire it promises has moved.
      *
-     * Re-armed on a changed time, and on being switched on, because both make the last fire a
-     * promise under a rule that no longer applies: switching on at 07:30 for 07:00 must not owe a
-     * run on the spot and have the grace window pay for it.
+     * Re-armed on a changed time, on a changed set of days, and on being switched on, because each
+     * makes the last fire a promise under a rule that no longer applies: switching on at 07:30 for
+     * 07:00, or ticking a Wednesday at noon, must not owe a run on the spot and have the grace
+     * window pay for it. Ticking a day is a decision about the weeks ahead, never about this
+     * morning.
+     *
+     * Matched by id, and a schedule whose id is gone is not re-added: the only way that happens is
+     * a screen holding a row that has since been deleted.
      */
     fun saveAnalysisSchedule(schedule: AnalysisSchedule) {
-        val moved = schedule.at != analysisSchedule.at ||
-            (schedule.enabled && !analysisSchedule.enabled)
-        settingsRepository.saveAnalysisSchedule(
-            if (moved) schedule.copy(armedAt = Instant.now()) else schedule,
+        val before = analysisSchedules.firstOrNull { it.id == schedule.id } ?: return
+        val moved = schedule.at != before.at ||
+            schedule.days != before.days ||
+            (schedule.enabled && !before.enabled)
+        val saved = if (moved) schedule.copy(armedAt = Instant.now()) else schedule
+        settingsRepository.saveAnalysisSchedules(
+            analysisSchedules.map { if (it.id == saved.id) saved else it },
         )
-        analysisSchedule = settingsRepository.analysisSchedule()
+        analysisSchedules = settingsRepository.analysisSchedules()
+        rebookSchedules()
+    }
+
+    /**
+     * Adds a schedule, switched off and aimed at whatever Analyze has ticked.
+     *
+     * Off, because a new row that started keeping time would be the app booking a paid run nobody
+     * asked for - the same reason nothing here ships switched on. Aimed at the screen's current
+     * selection because that is how a schedule is made: set a run up the way you always do, then
+     * put a time on it. An empty selection leaves it unaimed, and the card says so.
+     */
+    fun addAnalysisSchedule() {
+        if (analysisSchedules.size >= AnalysisSchedule.MAX) return
+        val aim = scheduledAnalysisFromScreen()
+        settingsRepository.saveAnalysisSchedules(
+            analysisSchedules + AnalysisSchedule(
+                id = AnalysisSchedule.nextId(analysisSchedules),
+                channels = aim?.channels.orEmpty(),
+                contentTypes = aim?.contentTypes.orEmpty(),
+            ),
+        )
+        analysisSchedules = settingsRepository.analysisSchedules()
+        // Nothing to re-book: a schedule that is switched off has no next fire. Booked anyway,
+        // because the cost is one comparison and the alternative is a rule about which edits move
+        // the alarm.
+        rebookSchedules()
+    }
+
+    /** Removes a schedule. The alarm is re-booked because the one it was set for may have gone. */
+    fun deleteAnalysisSchedule(id: Long) {
+        settingsRepository.saveAnalysisSchedules(analysisSchedules.filterNot { it.id == id })
+        analysisSchedules = settingsRepository.analysisSchedules()
         rebookSchedules()
     }
 
@@ -2088,7 +2154,9 @@ class AppState(
         if (settingsRepository.schedulesMigrated()) return
         val carried = ScheduleMigration.from(localDataStore.legacyScheduleRows())
         if (carried.marketRefresh) settingsRepository.saveMarketRefreshEnabled(true)
-        carried.schedule?.let(settingsRepository::saveAnalysisSchedule)
+        if (carried.schedules.isNotEmpty()) {
+            settingsRepository.saveAnalysisSchedules(carried.schedules)
+        }
         localDataStore.dropScheduledJobs()
         settingsRepository.markSchedulesMigrated()
         // Nothing to re-book from here: this runs before the state that would be read, and the
@@ -2096,7 +2164,7 @@ class AppState(
     }
 
     /** Books the alarm for whatever is now nearest, after anything that could have moved it. */
-    private fun rebookSchedules() = schedulesChanged(analysisSchedule, marketRefreshEnabled)
+    private fun rebookSchedules() = schedulesChanged(analysisSchedules, marketRefreshEnabled)
 
     /**
      * Does whatever the clock owes, then books the next alarm.
@@ -2109,11 +2177,11 @@ class AppState(
     suspend fun runDueScheduledJobs() {
         runDueMarketRefresh()
         JobRunner(
-            schedule = settingsRepository::analysisSchedule,
-            record = settingsRepository::saveAnalysisSchedule,
+            schedules = settingsRepository::analysisSchedules,
+            record = settingsRepository::recordAnalysisSchedule,
             paidWorkAllowed = settingsRepository::paidSchedulesEnabled,
         ).runDue(::runScheduledAnalysis)
-        analysisSchedule = settingsRepository.analysisSchedule()
+        analysisSchedules = settingsRepository.analysisSchedules()
         marketRefreshEnabled = settingsRepository.marketRefreshEnabled()
         rebookSchedules()
     }
@@ -2188,9 +2256,10 @@ class AppState(
                     "${window.targetDate}. Skipped rather than pay to analyse a different day.",
             )
         }
-        duplicateOf(window.targetDate, plan.channelIds.toSet())?.let {
-            throw JobSkipped("The $intended session is already analysed for these chats.")
-        }
+        // Read first, decided after. A report of this session already exists on any day a second
+        // schedule fires, and the question is not whether it exists but whether the chats have
+        // said anything since - which is exactly what more than one schedule a day is for.
+        val already = duplicateOf(window.targetDate, plan.channelIds.toSet())
         val batch = telegramRepository.collectSources(
             channelIds = plan.channelIds,
             start = window.start,
@@ -2199,6 +2268,20 @@ class AppState(
         )
         if (batch.inputs.isEmpty()) {
             throw JobSkipped("The chats posted nothing in the window for the $intended session.")
+        }
+        // Collecting is free - it reads Telegram's own store - so this is checked after the read
+        // and before the one expensive thing in the whole path. Paying to re-extract the same
+        // messages is the mistake the old interval trigger made, and the reason it was dropped.
+        already?.let { report ->
+            val fresh = SourceFreshness.newSources(report.result.sources, batch.traces)
+            if (fresh.isEmpty()) {
+                val at = ScheduleClock.clock(
+                    report.result.completedAt.atZone(ScheduleClock.ZONE).toLocalTime(),
+                )
+                throw JobSkipped(
+                    "Nothing new since the $at report of the $intended session.",
+                )
+            }
         }
         val sources = LoadedSources(
             inputs = batch.inputs,

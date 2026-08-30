@@ -68,7 +68,10 @@ class ScheduledJobWorker(
             AndroidKeystoreCredentialStore(applicationContext),
         )
         if (!settings.paidSchedulesEnabled()) return false
-        return ScheduleClock.unservedFire(settings.analysisSchedule(), Instant.now()) != null
+        val now = Instant.now()
+        return settings.analysisSchedules().any {
+            ScheduleClock.unservedFire(it, now) != null
+        }
     }
 
     /**

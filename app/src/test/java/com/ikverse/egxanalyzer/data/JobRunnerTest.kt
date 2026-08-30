@@ -8,7 +8,6 @@ import com.ikverse.egxanalyzer.model.ScheduleClock
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -22,6 +21,10 @@ import java.time.LocalTime
  * says so. Each case below ends in a line a reader could find the next morning, and the two that
  * must never reach the work at all - a fire past its grace, and a paid run nobody allowed - are
  * checked by watching whether the work was called rather than by reading the outcome afterwards.
+ *
+ * Now that a phone can keep four of these, the cases that matter most are the ones about a list:
+ * that two schedules owing the same morning both get served, in the order they came due, and that
+ * one of them failing does not quietly take the others with it.
  */
 class JobRunnerTest {
 
@@ -32,9 +35,9 @@ class JobRunnerTest {
         val written = mutableListOf<AnalysisSchedule>()
         val served = runBlocking {
             runner(written, now = at("2026-08-20", "07:01")).runDue { _, _ -> "Saved 12 calls" }
-        }
-        assertEquals(JobOutcome.SUCCEEDED, served?.lastOutcome)
-        assertEquals("Saved 12 calls", served?.lastMessage)
+        }.single()
+        assertEquals(JobOutcome.SUCCEEDED, served.lastOutcome)
+        assertEquals("Saved 12 calls", served.lastMessage)
         assertEquals(listOf(served), written)
     }
 
@@ -48,8 +51,8 @@ class JobRunnerTest {
         val written = mutableListOf<AnalysisSchedule>()
         val served = runBlocking {
             runner(written, now = at("2026-08-20", "07:20")).runDue { _, _ -> "ran" }
-        }
-        assertEquals(at("2026-08-20", "07:00"), served?.lastFiredAt)
+        }.single()
+        assertEquals(at("2026-08-20", "07:00"), served.lastFiredAt)
     }
 
     @Test
@@ -57,11 +60,14 @@ class JobRunnerTest {
         val written = mutableListOf<AnalysisSchedule>()
         val served = runBlocking {
             runner(written, now = at("2026-08-20", "07:01")).runDue { _, _ ->
-                throw JobSkipped("The session is already analysed for these chats.")
+                throw JobSkipped("Nothing new since the 07:00 report of the 2026-08-20 session.")
             }
-        }
-        assertEquals(JobOutcome.SKIPPED, served?.lastOutcome)
-        assertEquals("The session is already analysed for these chats.", served?.lastMessage)
+        }.single()
+        assertEquals(JobOutcome.SKIPPED, served.lastOutcome)
+        assertEquals(
+            "Nothing new since the 07:00 report of the 2026-08-20 session.",
+            served.lastMessage,
+        )
     }
 
     @Test
@@ -71,9 +77,9 @@ class JobRunnerTest {
             runner(written, now = at("2026-08-20", "07:01")).runDue { _, _ ->
                 error("the provider refused")
             }
-        }
-        assertEquals(JobOutcome.FAILED, served?.lastOutcome)
-        assertEquals("the provider refused", served?.lastMessage)
+        }.single()
+        assertEquals(JobOutcome.FAILED, served.lastOutcome)
+        assertEquals("the provider refused", served.lastMessage)
     }
 
     @Test
@@ -85,10 +91,10 @@ class JobRunnerTest {
                 ran = true
                 "ran"
             }
-        }
+        }.single()
         assertFalse(ran)
-        assertEquals(JobOutcome.MISSED, served?.lastOutcome)
-        assertTrue(served?.lastMessage.orEmpty().startsWith("Missed by 4 h"))
+        assertEquals(JobOutcome.MISSED, served.lastOutcome)
+        assertTrue(served.lastMessage.orEmpty().startsWith("Missed by 4 h"))
     }
 
     /**
@@ -105,12 +111,12 @@ class JobRunnerTest {
                 ran = true
                 "ran"
             }
-        }
+        }.single()
         assertFalse(ran)
-        assertEquals(JobOutcome.SKIPPED, served?.lastOutcome)
+        assertEquals(JobOutcome.SKIPPED, served.lastOutcome)
         assertEquals(
             "Scheduled runs are not allowed to spend cloud credits on this phone.",
-            served?.lastMessage,
+            served.lastMessage,
         )
     }
 
@@ -118,12 +124,12 @@ class JobRunnerTest {
     fun `refusing to spend is the default`() {
         val written = mutableListOf<AnalysisSchedule>()
         val runner = JobRunner(
-            schedule = { schedule() },
+            schedules = { listOf(schedule()) },
             record = { written += it },
             now = { at("2026-08-20", "07:01") },
         )
-        val served = runBlocking { runner.runDue { _, _ -> "ran" } }
-        assertEquals(JobOutcome.SKIPPED, served?.lastOutcome)
+        val served = runBlocking { runner.runDue { _, _ -> "ran" } }.single()
+        assertEquals(JobOutcome.SKIPPED, served.lastOutcome)
     }
 
     @Test
@@ -132,17 +138,83 @@ class JobRunnerTest {
         val served = runBlocking {
             runner(written, now = at("2026-08-20", "06:00")).runDue { _, _ -> "ran" }
         }
-        assertNull(served)
+        assertTrue(served.isEmpty())
         assertTrue(written.isEmpty())
+    }
+
+    /**
+     * Two schedules owing the same morning are two promises, and both are kept. In the order the
+     * fires came due, because the later one is usually the one that finds the earlier has already
+     * read those chats - and it can only find that if the earlier one has finished.
+     */
+    @Test
+    fun `every schedule that owes a fire is served, oldest first`() {
+        val written = mutableListOf<AnalysisSchedule>()
+        val order = mutableListOf<Instant>()
+        val served = runBlocking {
+            runner(
+                written,
+                now = at("2026-08-20", "12:30"),
+                schedules = listOf(
+                    schedule().copy(id = 1, at = LocalTime.of(12, 0)),
+                    schedule().copy(id = 2, at = LocalTime.of(11, 0)),
+                ),
+            ).runDue { _, due ->
+                order += due
+                "ran"
+            }
+        }
+        assertEquals(listOf(at("2026-08-20", "11:00"), at("2026-08-20", "12:00")), order)
+        assertEquals(listOf(2L, 1L), served.map { it.id })
+        assertEquals(served, written)
+    }
+
+    /**
+     * They are separate promises. The one thing worse than a run that failed is a run that never
+     * happened because another one did.
+     */
+    @Test
+    fun `one schedule failing does not stop the next`() {
+        val written = mutableListOf<AnalysisSchedule>()
+        val served = runBlocking {
+            runner(
+                written,
+                now = at("2026-08-20", "12:30"),
+                schedules = listOf(
+                    schedule().copy(id = 1, at = LocalTime.of(11, 0)),
+                    schedule().copy(id = 2, at = LocalTime.of(12, 0)),
+                ),
+            ).runDue { schedule, _ ->
+                if (schedule.id == 1L) error("the provider refused") else "Saved 3 calls"
+            }
+        }
+        assertEquals(listOf(JobOutcome.FAILED, JobOutcome.SUCCEEDED), served.map { it.lastOutcome })
+    }
+
+    /** A schedule owing nothing is left alone by a sweep that served the one beside it. */
+    @Test
+    fun `only the schedules that owe a fire are written`() {
+        val written = mutableListOf<AnalysisSchedule>()
+        runBlocking {
+            runner(
+                written,
+                now = at("2026-08-20", "07:01"),
+                schedules = listOf(
+                    schedule().copy(id = 1, at = morning),
+                    schedule().copy(id = 2, at = LocalTime.of(12, 0)),
+                ),
+            ).runDue { _, _ -> "ran" }
+        }
+        assertEquals(listOf(1L), written.map { it.id })
     }
 
     private fun runner(
         written: MutableList<AnalysisSchedule>,
         now: Instant,
         paidAllowed: Boolean = true,
-        schedule: AnalysisSchedule = schedule(),
+        schedules: List<AnalysisSchedule> = listOf(schedule()),
     ) = JobRunner(
-        schedule = { schedule },
+        schedules = { schedules },
         record = { written += it },
         paidWorkAllowed = { paidAllowed },
         now = { now },
