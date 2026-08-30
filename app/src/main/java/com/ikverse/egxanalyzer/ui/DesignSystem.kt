@@ -472,10 +472,13 @@ fun AdaptivePanes(
      *
      * **Measured, not intrinsic, and that distinction crashed the Analyze screen once.**
      * `Modifier.height(IntrinsicSize.Max)` is the obvious way to write this and it throws here:
-     * intrinsic measurement of a `SubcomposeLayout` is unsupported, and the panes on Analyze contain
-     * an [AdaptiveInline], which is a `BoxWithConstraints`. It only ever took that path above
-     * [minWidth], so it stood up on a cover screen and died the moment the phone was unfolded.
-     * `ResponsiveRows` carries the same warning about `IntrinsicSize.Min` a few hundred lines up.
+     * intrinsic measurement of a `SubcomposeLayout` is unsupported, and a pane holds whatever the
+     * screen puts in one. At the time that was a `BoxWithConstraints` inside Analyze's Content
+     * types card, since replaced by a `FlowRow` - but the rule outlived that call site, because the
+     * Row branch is only ever taken above [minWidth]. An intrinsic here stands up on a cover screen
+     * and dies the moment the phone is unfolded, and the next `BoxWithConstraints`, `LazyRow` or
+     * `SubcomposeAsyncImage` a pane acquires brings it straight back. `ResponsiveRows` carries the
+     * same warning about `IntrinsicSize.Min` a few hundred lines up.
      *
      * So the height is read back from what the columns actually measured and applied to both. It
      * can only ever grow, which is what stops it oscillating; the reset key is the width, so a fold
@@ -520,22 +523,6 @@ fun AdaptivePanes(
                 side()
             }
         }
-    }
-}
-
-/**
- * Lays a handful of small controls across the width instead of stacking them.
- *
- * Three checkboxes in a column is a phone layout; on anything wider it is three rows of mostly
- * nothing.
- */
-@Composable
-fun AdaptiveInline(
-    minWidth: Dp = 420.dp,
-    content: @Composable (horizontal: Boolean) -> Unit,
-) {
-    BoxWithConstraints {
-        content(maxWidth >= minWidth)
     }
 }
 

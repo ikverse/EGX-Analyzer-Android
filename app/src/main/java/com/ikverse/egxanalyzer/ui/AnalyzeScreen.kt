@@ -18,6 +18,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -304,24 +305,26 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                     icon = Icons.Outlined.TextFields,
                     modifier = Modifier.fillMaxHeight(),
                 ) {
-                    // Three checkboxes stacked is a phone layout; anywhere wider it is three rows of
-                    // empty space. Measured against the card's own content width, so beside the date
-                    // card - 281dp of content at 313 - it correctly keeps the long labels stacked
-                    // rather than cramming three across at ninety points apiece.
-                    AdaptiveInline(minWidth = 340.dp) { horizontal ->
-                        if (horizontal) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(Space.l)) {
-                                ContentTypeToggle("Text", AnalysisContentType.TEXT, appState)
-                                ContentTypeToggle("Images", AnalysisContentType.IMAGES, appState)
-                                ContentTypeToggle("Voice", AnalysisContentType.AUDIO, appState)
-                            }
-                        } else {
-                            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                                ContentTypeToggle("Text messages", AnalysisContentType.TEXT, appState)
-                                ContentTypeToggle("Images / photos", AnalysisContentType.IMAGES, appState)
-                                ContentTypeToggle("Voice messages", AnalysisContentType.AUDIO, appState)
-                            }
-                        }
+                    // Wraps rather than switching, because the threshold it replaces had the fold
+                    // exactly backwards. It was measured against the card's own content width, and
+                    // the card is only narrow when there is room to put it *beside* the date card:
+                    // the cover screen gets the full 379 and so 347 of content, clears 340 and lays
+                    // three across, while the unfolded Fold splits 638 into two 313 columns, leaves
+                    // 281 of content, misses the threshold and stacks three long labels down a
+                    // column. The larger screen was getting the taller layout.
+                    //
+                    // A FlowRow asks the labels how wide they are instead of guessing from a number
+                    // written here, so one row survives the cover screen, the unfolded Fold and the
+                    // tablet alike, and a large font scale wraps rather than clips. It also takes a
+                    // BoxWithConstraints back out of a pane that `alignHeights` has to measure,
+                    // which is the nesting AdaptivePanes carries a warning about.
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(Space.l),
+                        verticalArrangement = Arrangement.spacedBy(Space.xs),
+                    ) {
+                        ContentTypeToggle("Text", AnalysisContentType.TEXT, appState)
+                        ContentTypeToggle("Images", AnalysisContentType.IMAGES, appState)
+                        ContentTypeToggle("Voice", AnalysisContentType.AUDIO, appState)
                     }
                     // Drawn where the boxes are, for the same reason the model card carries its own.
                     if (blocker == AnalyzeBlocker.NO_CONTENT_TYPE) {
@@ -432,8 +435,22 @@ private fun RecommendationDateOption(
                 role = Role.RadioButton,
                 onClick = onClick,
             )
+            // Spelled out because the null `onClick` below gives it up. Material reserves the 48dp
+            // target inside the control only on the interactive path, so this row was as tall as
+            // whatever text happened to be in it. Two lines gets close enough to 48 on its own to
+            // have hidden that, which is exactly why it is worth stating: the height was a property
+            // of the copy rather than a decision, and a one-line detail would have lost it.
+            .heightIn(min = 48.dp)
             .padding(vertical = Space.xs),
-        verticalAlignment = Alignment.CenterVertically,
+        // The same gap the checkbox card uses, and for the same reason it has to be stated at all:
+        // a RadioButton drawn on the null path is 20dp of ring in 2dp of padding, so without this
+        // the title started 2dp from the ring. Everywhere else in the app the control keeps its
+        // callback, Material centres those 24dp in 48, and the label inherits 14dp of air for free.
+        horizontalArrangement = Arrangement.spacedBy(Space.m),
+        // Against the title rather than the middle of both lines. Centring put the ring halfway
+        // down a two-line column, which is the seam between the title and the date under it - so it
+        // pointed at neither. Topped, it sits on the title's line, which is the line it is about.
+        verticalAlignment = Alignment.Top,
     ) {
         // Null: the row owns the click now, and a button with its own would be a second target
         // sitting inside the first.
@@ -481,10 +498,15 @@ private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState
     // The gap beside the label is spelled out rather than trimmed off what the box brings, because
     // the box brings almost nothing. A Material checkbox reserves its 48dp target only on the
     // interactive path, and this one is passed a null `onCheckedChange` - the row is the target, so
-    // the box is a drawing. That leaves it about 20dp wide with 2dp of padding rather than the 48dp
-    // square the trim was measured against, and pulling the label a further 4dp in on top of that
-    // ran it into the box: `Text` read as one word on the phone, three boxes with no space after
-    // them. Space.s is what the row already leaves on its other side.
+    // the box is a drawing. That leaves it 20dp wide in 2dp of padding rather than the 48dp square
+    // the trim was measured against, and pulling the label a further 4dp in on top of that ran it
+    // into the box: `Text` read as one word on the phone, three boxes with no space after them.
+    //
+    // Space.m rather than the Space.s that fixed the collision, because clearing the box was only
+    // half of it. Every other checkbox in the app - Settings, the schedule, the price feed - keeps
+    // its callback and so gets Material's 48dp slot, which centres those 24dp and hands the label
+    // 14dp. At 8 these two cards read as the tight ones on a screen of otherwise even rows; 12
+    // puts them back on the same measure as everything around them.
     Row(
         modifier = Modifier
             .clip(MaterialTheme.shapes.medium)
@@ -493,7 +515,11 @@ private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState
                 role = Role.Checkbox,
                 onValueChange = { appState.toggleContentType(type) },
             )
+            // The other half of what the null callback gives up. Three of these were 24dp tall and
+            // 4dp apart: half the minimum target, close enough together to catch the wrong one.
+            .heightIn(min = 48.dp)
             .padding(end = Space.s),
+        horizontalArrangement = Arrangement.spacedBy(Space.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Null for the same reason the date rows pass it: the row is the target.
@@ -501,7 +527,6 @@ private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState
             checked = type in appState.selectedContentTypes,
             onCheckedChange = null,
         )
-        Spacer(Modifier.width(Space.s))
         Text(label)
     }
 }
