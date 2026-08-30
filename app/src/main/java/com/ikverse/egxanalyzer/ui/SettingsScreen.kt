@@ -31,7 +31,6 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.DropdownMenuItem
@@ -284,26 +283,28 @@ internal fun SettingsScreen(appState: AppState) {
                         }
                     }
                 }
-                Text("Default Telegram content")
+                SettingLabel("Default Telegram content")
                 AnalysisContentType.entries.forEach { type ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(
-                            checked = type in appState.appPreferences.defaultContentTypes,
-                            onCheckedChange = { appState.toggleDefaultContentType(type) },
-                        )
-                        Text(
-                            when (type) {
-                                AnalysisContentType.TEXT -> "Text messages"
-                                AnalysisContentType.IMAGES -> "Images and photos"
-                                AnalysisContentType.AUDIO -> "Voice messages"
-                            },
-                        )
-                    }
+                    SettingToggle(
+                        label = when (type) {
+                            AnalysisContentType.TEXT -> "Text messages"
+                            AnalysisContentType.IMAGES -> "Images and photos"
+                            AnalysisContentType.AUDIO -> "Voice messages"
+                        },
+                        checked = type in appState.appPreferences.defaultContentTypes,
+                        onCheckedChange = { appState.toggleDefaultContentType(type) },
+                    )
                 }
-                Text("Cloud response timeout: ${appState.appPreferences.responseTimeoutSeconds} seconds")
+                SettingLabel(
+                    "Cloud response timeout: ${appState.appPreferences.responseTimeoutSeconds} seconds",
+                    infoNote(
+                        "Cloud response timeout",
+                        "How long the model may think about one batch of images. It sends nothing " +
+                            "until it has finished, so a batch that needs longer than this is hung " +
+                            "up on.",
+                    ),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
                 Slider(
                     value = appState.appPreferences.responseTimeoutSeconds.toFloat(),
                     onValueChange = {
@@ -313,12 +314,6 @@ internal fun SettingsScreen(appState: AppState) {
                     valueRange = ResponseTimeout.MIN.toFloat()..ResponseTimeout.MAX.toFloat(),
                     steps = (ResponseTimeout.MAX - ResponseTimeout.MIN) / 30 - 1,
                 )
-                Text(
-                    "How long the model may think about one batch of images. It sends nothing until " +
-                        "it has finished, so a batch that needs longer than this is hung up on.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
             }
 
@@ -327,12 +322,14 @@ internal fun SettingsScreen(appState: AppState) {
                 summary = appState.ruleSet.all.count { it.origin == RuleOrigin.USER }.let { mine ->
                     if (mine == 0) "Built-in wording only" else "$mine added"
                 },
+                about = WordingFlowNote,
             ) {
             AnalysisRulesSection(appState)
             }
 
             SubSection(
                 "Prompt",
+                about = GeneratedPromptNote,
                 summary = if (appState.useDefaultPromptOnly) {
                     "Default only"
                 } else {
@@ -351,20 +348,21 @@ internal fun SettingsScreen(appState: AppState) {
                     if (appState.appPreferences.correctionRetries == 1) "retry" else "retries",
             ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Text("Correction retries: ${appState.appPreferences.correctionRetries}")
+                SettingLabel(
+                    "Correction retries: ${appState.appPreferences.correctionRetries}",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
                 Slider(
                     value = appState.appPreferences.correctionRetries.toFloat(),
                     onValueChange = { appState.updateCorrectionRetries(it.roundToInt()) },
                     valueRange = 0f..2f,
                     steps = 1,
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = appState.appPreferences.catalogEnrichmentEnabled,
-                        onCheckedChange = appState::updateCatalogEnrichment,
-                    )
-                    Text("Enrich results with the on-device EGX catalog")
-                }
+                SettingToggle(
+                    label = "Enrich results with the on-device EGX catalog",
+                    checked = appState.appPreferences.catalogEnrichmentEnabled,
+                    onCheckedChange = appState::updateCatalogEnrichment,
+                )
                 OutlinedButton(onClick = {
                     scope.launch { appState.refreshEgxCatalog() }
                 }) {
@@ -386,21 +384,33 @@ internal fun SettingsScreen(appState: AppState) {
             SubSection(
                 "Ask AI",
                 summary = askAiSummary,
+                about = infoNote(
+                    "Ask AI",
+                    "The button on a call card in Insights. It asks what the model makes of the " +
+                        "stock at today's price and what it makes of the levels the channel " +
+                        "printed, and it answers in Arabic.",
+                    "Each press is one paid request, confirmed first, and the answer is kept on " +
+                        "the card - opening it again costs nothing.",
+                ),
             ) {
-            Text(
-                "The button on a call card in Insights. It asks what the model makes of the stock " +
-                    "at today's price and what it makes of the levels the channel printed, and it " +
-                    "answers in Arabic. Each press is one paid request, confirmed first, and the " +
-                    "answer is kept on the card - opening it again costs nothing.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             OutlinedTextField(
                 value = askModel,
                 onValueChange = appState::updateOpinionModel,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Model") },
                 singleLine = true,
+                // Inside the field rather than on a line of its own: the note is about what to type
+                // here, and a row above the field would put a heading between the label and it.
+                trailingIcon = {
+                    InfoButton(
+                        infoNote(
+                            "Which model to name",
+                            "A text model, not the vision one a run needs. The analysis reads " +
+                                "screenshots; this request carries no image, and paying vision " +
+                                "rates for it buys nothing.",
+                        ),
+                    )
+                },
             )
             if (appState.availableModels.isNotEmpty()) {
                 Box {
@@ -424,34 +434,35 @@ internal fun SettingsScreen(appState: AppState) {
                     }
                 }
             }
-            Text(
-                "A text model, not the vision one a run needs. The analysis reads screenshots; this " +
-                    "request carries no image, and paying vision rates for it buys nothing.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = askSearching,
-                    onCheckedChange = appState::updateOpinionSearch,
-                )
-                Text("Let it search the web")
-            }
-            Text(
-                "Without a search the model has nothing this app does not already have, so its view " +
-                    "rests on the call's own figures and on whatever it learned before it was " +
-                    "trained. With one it can find real news, and can also repeat something " +
-                    "unverified it found. It costs more per press and takes longer. Only Qwen and " +
-                    "OpenRouter are asked to search; other providers ignore it.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            SettingToggle(
+                label = "Let it search the web",
+                checked = askSearching,
+                onCheckedChange = appState::updateOpinionSearch,
+                about = infoNote(
+                    "Let it search the web",
+                    "Without a search the model has nothing this app does not already have, so its " +
+                        "view rests on the call's own figures and on whatever it learned before it " +
+                        "was trained. With one it can find real news, and can also repeat " +
+                        "something unverified it found.",
+                    "It costs more per press and takes longer. Only Qwen and OpenRouter are asked " +
+                        "to search; other providers ignore it.",
+                ),
             )
             // Everything below only bears on a searched request, so it is hidden with the search
             // rather than left greyed out under an unticked box.
             if (askSearching) {
-                Text(
+                SettingLabel(
                     "How far back it looks for news",
-                    style = MaterialTheme.typography.labelLarge,
+                    infoNote(
+                        "How far back it looks for news",
+                        "The window is a lookback, and a shorter one is not a worse one: anything " +
+                            "it brings back from a fortnight is genuinely current, and on most " +
+                            "days most stocks will have nothing in it. An empty list is reported " +
+                            "as an empty list rather than filled from further back.",
+                        "Widen it when you want to know why a stock has moved rather than what " +
+                            "happened this week. What is already scheduled ahead - results, " +
+                            "coupons, assemblies - is reported whatever this is set to.",
+                    ),
                 )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     NEWS_WINDOWS.forEach { days ->
@@ -462,20 +473,17 @@ internal fun SettingsScreen(appState: AppState) {
                         )
                     }
                 }
-                Text(
-                    "The window is a lookback, and a shorter one is not a worse one: anything it " +
-                        "brings back from a fortnight is genuinely current, and on most days most " +
-                        "stocks will have nothing in it. An empty list is reported as an empty " +
-                        "list rather than filled from further back. Widen it when you want to " +
-                        "know why a stock has moved rather than what happened this week. What is " +
-                        "already scheduled ahead - results, coupons, assemblies - is reported " +
-                        "whatever this is set to.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
+                SettingLabel(
                     "How many results it reads",
-                    style = MaterialTheme.typography.labelLarge,
+                    infoNote(
+                        "How many results it reads",
+                        "This is what the search costs. Every result is put into the request " +
+                            "whole, so twelve of them is several thousand characters the model is " +
+                            "charged for reading before it answers.",
+                        "Five is the provider's own default and was finding one usable Arabic item " +
+                            "per press; twelve is why it now finds several. Turn it down when the " +
+                            "bill matters more than the second source.",
+                    ),
                 )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     SEARCH_RESULTS.forEach { count ->
@@ -486,29 +494,18 @@ internal fun SettingsScreen(appState: AppState) {
                         )
                     }
                 }
-                Text(
-                    "This is what the search costs. Every result is put into the request whole, so " +
-                        "twelve of them is several thousand characters the model is charged for " +
-                        "reading before it answers. Five is the provider's own default and was " +
-                        "finding one usable Arabic item per press; twelve is why it now finds " +
-                        "several. Turn it down when the bill matters more than the second source.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = askDeep,
-                        onCheckedChange = appState::updateOpinionDeepSearch,
-                    )
-                    Text("Search deeply")
-                }
-                Text(
-                    "One pass finds that the company exists. This asks the model to read what it " +
-                        "found and search again on it, which is what turns up a disclosure nobody " +
-                        "wrote a headline about. It costs more and takes longer, and a model that " +
-                        "will not accept it is asked again without it rather than failing.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                SettingToggle(
+                    label = "Search deeply",
+                    checked = askDeep,
+                    onCheckedChange = appState::updateOpinionDeepSearch,
+                    about = infoNote(
+                        "Search deeply",
+                        "One pass finds that the company exists. This asks the model to read what " +
+                            "it found and search again on it, which is what turns up a disclosure " +
+                            "nobody wrote a headline about.",
+                        "It costs more and takes longer, and a model that will not accept it is " +
+                            "asked again without it rather than failing.",
+                    ),
                 )
             }
             }
@@ -521,6 +518,10 @@ internal fun SettingsScreen(appState: AppState) {
             icon = Icons.Outlined.Palette,
             summary = appState.appPreferences.themeMode.displayName,
             contentMaxWidth = FormWidth,
+            about = infoNote(
+                "Appearance",
+                "The choice is applied immediately on outer and inner displays.",
+            ),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Box {
@@ -542,10 +543,6 @@ internal fun SettingsScreen(appState: AppState) {
                         }
                     }
                 }
-                Text(
-                    "The choice is applied immediately on outer and inner displays.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
 
@@ -554,14 +551,14 @@ internal fun SettingsScreen(appState: AppState) {
             icon = Icons.Outlined.CloudSync,
             summary = "${appState.savedResults.size} reports on this device",
             contentMaxWidth = FormWidth,
+            about = infoNote(
+                "Sync",
+                "Reports are kept in a private Telegram channel of your own, so every device " +
+                    "signed in to your account sees the same history.",
+                "A saved report never changes, so syncing only ever adds - nothing is overwritten " +
+                    "and nothing is deleted.",
+            ),
         ) {
-            Text(
-                "Reports are kept in a private Telegram channel of your own, so every device signed " +
-                    "in to your account sees the same history. A saved report never changes, so " +
-                    "syncing only ever adds - nothing is overwritten and nothing is deleted.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Button(
                 onClick = { scope.launch { appState.syncReports() } },
                 enabled = appState.telegramAuthState.step == TelegramAuthStep.READY &&
@@ -594,6 +591,17 @@ internal fun SettingsScreen(appState: AppState) {
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
+                InfoButton(
+                    infoNote(
+                        "Default trade window",
+                        "What a new trade's deadline is offered as when you press Bought, counted " +
+                            "from the session the call was made for. You can type over it there, " +
+                            "or later from Edit trade.",
+                        "It changes nothing already recorded, and it does not affect how the " +
+                            "sources are scored - a call is followed until it reaches a target or " +
+                            "the stop, which is what Insights reports the timings of.",
+                    ),
+                )
             }
             Slider(
                 value = window.toFloat(),
@@ -602,57 +610,41 @@ internal fun SettingsScreen(appState: AppState) {
                     Scoring.MAX_WINDOW_SESSIONS.toFloat(),
                 steps = Scoring.MAX_WINDOW_SESSIONS - Scoring.MIN_WINDOW_SESSIONS - 1,
             )
-            Text(
-                "What a new trade's deadline is offered as when you press Bought, counted from " +
-                    "the session the call was made for. You can type over it there, or later from " +
-                    "Edit trade. It changes nothing already recorded, and it does not affect how " +
-                    "the sources are scored - a call is followed until it reaches a target or the " +
-                    "stop, which is what Insights reports the timings of.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            SettingToggle(
+                label = "Tell me when a trade goes past its deadline",
+                checked = appState.appPreferences.overdueRemindersEnabled,
+                onCheckedChange = appState::updateOverdueReminders,
+                about = infoNote(
+                    "Tell me when a trade goes past its deadline",
+                    "Once a day, and only when something is actually overdue - a trade whose " +
+                        "deadline has passed with no sale recorded. Nothing is analyzed and " +
+                        "nothing is fetched.",
+                ),
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = appState.appPreferences.overdueRemindersEnabled,
-                    onCheckedChange = appState::updateOverdueReminders,
-                )
-                Text("Tell me when a trade goes past its deadline")
-            }
-            Text(
-                "Once a day, and only when something is actually overdue - a trade whose deadline " +
-                    "has passed with no sale recorded. Nothing is analyzed and nothing is fetched.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            SettingToggle(
+                label = "Tell me when the market changes a trade",
+                checked = appState.appPreferences.tradeAlertsEnabled,
+                onCheckedChange = appState::updateTradeAlerts,
+                about = infoNote(
+                    "Tell me when the market changes a trade",
+                    "A target reached, the stop taken, the deadline passed - whenever a price " +
+                        "refresh or the calendar moves one of your trades.",
+                    "Not for anything you do yourself: recording a sale or closing a trade says " +
+                        "nothing back to you.",
+                ),
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = appState.appPreferences.tradeAlertsEnabled,
-                    onCheckedChange = appState::updateTradeAlerts,
-                )
-                Text("Tell me when the market changes a trade")
-            }
-            Text(
-                "A target reached, the stop taken, the deadline passed - whenever a price refresh " +
-                    "or the calendar moves one of your trades. Not for anything you do yourself: " +
-                    "recording a sale or closing a trade says nothing back to you.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = appState.appPreferences.callAlertsEnabled,
-                    onCheckedChange = appState::updateCallAlerts,
-                )
-                Text("Tell me when a stock reaches a buy zone")
-            }
-            Text(
-                "For calls you have not taken: the price has traded into the entry band a channel " +
-                    "printed. Off unless you switch it on - it is the one notification here about " +
-                    "something you have not committed to. It says what the market did and never " +
-                    "what to do about it, and it books no extra work: the check rides a price " +
-                    "refresh that was happening anyway.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            SettingToggle(
+                label = "Tell me when a stock reaches a buy zone",
+                checked = appState.appPreferences.callAlertsEnabled,
+                onCheckedChange = appState::updateCallAlerts,
+                about = infoNote(
+                    "Tell me when a stock reaches a buy zone",
+                    "For calls you have not taken: the price has traded into the entry band a " +
+                        "channel printed. Off unless you switch it on - it is the one notification " +
+                        "here about something you have not committed to.",
+                    "It says what the market did and never what to do about it, and it books no " +
+                        "extra work: the check rides a price refresh that was happening anyway.",
+                ),
             )
         }
 
@@ -718,13 +710,14 @@ internal fun SettingsScreen(appState: AppState) {
             contentMaxWidth = FormWidth,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-                    Text(
+                SettingLabel(
+                    "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                    infoNote(
+                        "Version",
                         "Shown so a device can be asked which build it is running.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                    ),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
                 UpdateControls(appState)
                 DiagnosticsControl(appState)
             }
@@ -735,14 +728,14 @@ internal fun SettingsScreen(appState: AppState) {
             icon = Icons.Outlined.Shield,
             summary = "${appState.savedResults.size} saved analyses",
             contentMaxWidth = FormWidth,
+            about = infoNote(
+                "Saved data and privacy",
+                "Provider keys and the Telegram database key are encrypted using Android " +
+                    "Keystore. App backup is disabled and cloud requests use HTTPS.",
+            ),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Text("${appState.savedResults.size} analyses saved on this device")
-                Text(
-                    "Provider keys and the Telegram database key are encrypted using Android Keystore. " +
-                        "App backup is disabled and cloud requests use HTTPS.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 // Here rather than beside Save diagnostics in About, which is the other thing that
                 // writes the record to a file. That one is for whoever is chasing a bug; this is
                 // about the record itself, and it belongs with the section that says how much of it
@@ -775,7 +768,9 @@ private fun DiagnosticsControl(appState: AppState) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+    // A row rather than a column, now that what sat under the button is behind the question mark
+    // beside it: one line where there were four.
+    Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedButton(
             enabled = !saving,
             onClick = {
@@ -807,12 +802,13 @@ private fun DiagnosticsControl(appState: AppState) {
         ) {
             Text(if (saving) "Saving…" else "Save diagnostics")
         }
-        Text(
-            "Copies this device's saved record into Downloads. No provider key and no Telegram " +
-                "key travels in it - those are encrypted separately by Android Keystore and have " +
-                "never been part of it.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        InfoButton(
+            infoNote(
+                "Save diagnostics",
+                "Copies this device's saved record into Downloads.",
+                "No provider key and no Telegram key travels in it - those are encrypted " +
+                    "separately by Android Keystore and have never been part of it.",
+            ),
         )
     }
 }
@@ -946,18 +942,15 @@ private fun UpdateControls(appState: AppState) {
             }
         }
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(
-                checked = appState.appPreferences.updateChecksEnabled,
-                onCheckedChange = appState::updateAutomaticUpdateChecks,
-            )
-            Text("Check for updates when the app opens")
-        }
-        Text(
-            "One request to GitHub, and it says nothing unless there is a newer build. Nothing is " +
-                "downloaded or installed without you pressing for it.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        SettingToggle(
+            label = "Check for updates when the app opens",
+            checked = appState.appPreferences.updateChecksEnabled,
+            onCheckedChange = appState::updateAutomaticUpdateChecks,
+            about = infoNote(
+                "Check for updates when the app opens",
+                "One request to GitHub, and it says nothing unless there is a newer build. " +
+                    "Nothing is downloaded or installed without you pressing for it.",
+            ),
         )
     }
 }

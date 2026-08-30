@@ -122,6 +122,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/OpinionPrompt.kt` + `data/OpinionPromptStore.kt` + `data/OpinionSearchBrief.kt` +
   `data/OpinionParser.kt` + `ui/StockOpinionSheet.kt` — Ask AI, on a call card in Insights.
   See below.
+- `ui/InfoSheet.kt` — `InfoNote`, the question mark that opens one, and the `SettingToggle` /
+  `SettingLabel` rows every explained control is built from. See **Where an explanation lives**.
 - `ui/` — one file per screen, plus `CommonUi.kt` and `DesignSystem.kt` for shared pieces.
 
 ## Scoring, and why each rule is there
@@ -1799,6 +1801,45 @@ at the foot of the screen until 2026-08-25.
   `Key verified · 8 models` was using it to join a clause to a count. One event gets one wording:
   the chat count is `N chats` from both the launch collector and the Analyze refresh, which used to
   say "loaded" and "found".
+
+## Where an explanation lives
+
+Every screen used to say all of it at once. A checkbox was one line of control under four lines of
+grey prose, three times in a row, and Settings was mostly prose — so the settings were what you had
+to hunt for, between the explanations of them. The words are good words and none of them were cut;
+they moved one tap off, next to the thing they are about. This is the rule the schedules already
+followed when their four grey paragraphs went (see **Where they are drawn**) and it is now the whole
+app's.
+
+- **One affordance, and it is `Icons.AutoMirrored.Outlined.HelpOutline`.** A question mark rather
+  than an ⓘ, because `Icons.Outlined.Info` is already the About card's own icon and one glyph cannot
+  mean both "the version number" and "explain this". The question mark was already doing this job on
+  the channel ranking and on "Does it matter?"; this makes it the rule rather than those two
+  screens' habit. Auto-mirrored, since half the content here is Arabic. Muted rather than `primary`:
+  it sits beside dozens of controls, and a page of coloured glyphs is the same clutter in a smaller
+  font.
+- **It opens a `ModalBottomSheet` on `ChannelScoreSheet`'s terms** — same padding, same scroll, same
+  skipped partial state. A reader who has opened one explanation in this app has opened all of them.
+- **The note goes on the smallest thing it is true of.** A rule about one checkbox rides that
+  checkbox (`SettingToggle`'s `about`); one about a group rides the group's heading
+  (`ExpandableSection`, `SectionCard` and `SubSection` all take an `about`), where it is reachable
+  without opening the card at all. `WordingFlowNote` and `GeneratedPromptNote` are exported for
+  exactly that — the words belong to the section that owns them, the heading belongs to Settings.
+- **`SettingToggle` leads with its control, switch or checkbox alike.** Fifteen hand-built rows had
+  drifted into a checkbox leading here, a switch trailing there, and two gaps between control and
+  label. Which control is used says how heavy the setting is — a switch arms the phone to act
+  unattended — never where it sits.
+- **`SettingLabel` defaults to `labelLarge` and takes `bodyLarge` for a value.** A version number and
+  a slider's current reading were body type before they gained a question mark; shrinking a figure to
+  make room for the affordance beside it is the affordance changing what it was added to explain.
+- **Five kinds of text deliberately stayed on the page**, and the distinction is what stops this
+  becoming a way to hide things: an `AlertDialog`'s body, because a confirmation *is* its
+  explanation; live status and error lines, which report a state rather than a rule; empty states,
+  which say what to do next; a per-item warning like the screenshot-sanity caveat, which is about
+  that one call; and any line with a button attached, like the notifications-off prompt on Analyze.
+- **`InfoNoteTest` reads the sources rather than composing.** A note that has lost its prose draws an
+  icon and opens an empty sheet, which looks like an unfinished feature rather than a deleted
+  paragraph — silent everywhere else, so it is checked where the words are written.
 
 ## Gotchas
 

@@ -169,12 +169,14 @@ private fun ColumnScope.PortfolioSummary(stats: PortfolioStats) {
 @Composable
 private fun OverdueCard(overdue: List<PositionView>, onOpen: (String) -> Unit) {
     if (overdue.isEmpty()) return
-    SectionCard(title = "Overdue", icon = Icons.Outlined.HourglassEmpty) {
-        Text(
+    SectionCard(
+        title = "Overdue",
+        icon = Icons.Outlined.HourglassEmpty,
+        about = infoNote(
+            "Overdue",
             "Still running past their deadline because you chose to keep them open.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        ),
+    ) {
         BoxWithConstraints {
             // Tiles rather than full-width rows, through the same helper the position cards use:
             // two across on the cover screen, four on the Fold and the tablet. A trade that is late

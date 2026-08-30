@@ -397,12 +397,6 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                     Text("Turn on notifications")
                 }
             }
-            if (blocker == null && appState.inputs.isEmpty()) {
-                Text(
-                    "Selected Telegram chats will be collected automatically for the resolved source window.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
         appState.analysisMessage?.let {
             Text(
@@ -550,7 +544,15 @@ private fun MessagesPreview(
     val selected = appState.channels.count(ChannelSelection::selected)
     val sources = appState.telegramSources
     val loading = appState.busyLabel != null
-    SectionCard(title = "Messages preview", icon = Icons.Outlined.Preview) {
+    SectionCard(
+        title = "Messages preview",
+        icon = Icons.Outlined.Preview,
+        about = infoNote(
+            "Messages preview",
+            "Selected Telegram chats are collected automatically for the resolved source window.",
+            "This is exactly which messages a run will send.",
+        ),
+    ) {
         // With messages on screen the standing line only restates the list, so it gives way to the
         // count. With none, telegramSyncMessage is the only thing that can say why - read forty and
         // none fell in the window, Telegram refused - and none of that is anywhere else.

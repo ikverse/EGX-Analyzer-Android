@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -15,8 +14,6 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,7 +30,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.data.RuleRejection
 import com.ikverse.egxanalyzer.model.RuleKind
@@ -58,8 +54,6 @@ internal fun AnalysisRulesSection(appState: AppState) {
     val rules = appState.ruleSet.all
 
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-        FlowExplainer()
-
         RuleKind.entries.forEach { kind ->
             WordingList(
                 kind = kind,
@@ -120,31 +114,22 @@ private fun blank(kind: RuleKind) = WordingRule(
     scope = RuleScope.BOTH,
 )
 
-@Composable
-private fun FlowExplainer() {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
-    ) {
-        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-            Text("How a message is judged", fontWeight = FontWeight.Bold)
-            Text(
-                "A message's text is read on this device first: an excluded phrase drops it before " +
-                    "anything is sent, an included phrase keeps it whatever else it says. What is " +
-                    "left goes to the model, and your wording goes with it.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                "Matching ignores diacritics, emoji and the spelling variants of ا, ي and ة, so one " +
-                    "phrase covers the ways a channel writes it.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
+/**
+ * How the filter works, for the heading above whatever draws these lists.
+ *
+ * It was a card of its own at the top of this section - a tinted block of prose that every visit to
+ * the wording lists had to be scrolled past, to say something that is true once. Exported rather
+ * than drawn here because the heading it belongs under is Settings' "Wording" group, and a section
+ * explaining itself from inside its own content is the shape being removed.
+ */
+internal val WordingFlowNote = infoNote(
+    "How a message is judged",
+    "A message's text is read on this device first: an excluded phrase drops it before anything " +
+        "is sent, an included phrase keeps it whatever else it says. What is left goes to the " +
+        "model, and your wording goes with it.",
+    "Matching ignores diacritics, emoji and the spelling variants of ا, ي and ة, so one phrase " +
+        "covers the ways a channel writes it.",
+)
 
 @Composable
 private fun WordingList(
@@ -159,8 +144,11 @@ private fun WordingList(
     val shipped = rules.filter { it.origin == RuleOrigin.BUILT_IN }
     var showShipped by remember { mutableStateOf(false) }
 
-    SectionCard(title = if (kind == RuleKind.INCLUDE) "Included wordings" else "Excluded wordings") {
-        Text(
+    val title = if (kind == RuleKind.INCLUDE) "Included wordings" else "Excluded wordings"
+    SectionCard(
+        title = title,
+        about = infoNote(
+            title,
             if (kind == RuleKind.INCLUDE) {
                 "A message carrying one of these is analysed whatever else it says, and the model " +
                     "is told to prioritise it."
@@ -168,10 +156,8 @@ private fun WordingList(
                 "A message carrying one of these is dropped before anything is sent, and the model " +
                     "is told to exclude it."
             },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
+        ),
+    ) {
         if (mine.isEmpty()) {
             Text(
                 "Nothing added yet.",

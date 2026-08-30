@@ -3,14 +3,10 @@ package com.ikverse.egxanalyzer.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -21,12 +17,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.PromptVersion
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+
+/**
+ * Where the prompt comes from, for the heading this section is drawn under.
+ *
+ * Exported for the same reason `WordingFlowNote` is: the group's own explanation belongs on the
+ * group's heading, not as the first paragraph inside it.
+ */
+internal val GeneratedPromptNote = infoNote(
+    "Prompt",
+    "Generated from the prompt this app version ships, plus the wording you switched on in " +
+        "Analysis rules.",
+    "Editing a rule generates a new version; the old ones stay readable.",
+)
 
 /**
  * The prompt the app will actually send, and every one it has sent before.
@@ -42,28 +50,21 @@ internal fun GeneratedPromptSection(appState: AppState) {
     val current = appState.promptVersions.firstOrNull { it.id == active.id }
 
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-        Text(
-            "Generated from the prompt this app version ships, plus the wording you switched on in " +
-                "Analysis rules. Editing a rule generates a new version; the old ones stay readable.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        // The switch leads its label here, as every other one in the app now does. It trailed, on
+        // a row whose label was bold and two lines deep - which is why this group and the ones
+        // around it never quite read as one page of settings.
+        SettingToggle(
+            label = "Use the default prompt only",
+            checked = appState.useDefaultPromptOnly,
+            onCheckedChange = appState::usePromptDefaultOnly,
+            switch = true,
+            about = infoNote(
+                "Use the default prompt only",
+                "Sends the shipped prompt untouched.",
+                "Your wording stays saved and the rules that work on this device keep working - " +
+                    "only the prompt stops carrying them.",
+            ),
         )
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Use the default prompt only", fontWeight = FontWeight.Bold)
-                Text(
-                    "Sends the shipped prompt untouched. Your wording stays saved and the rules " +
-                        "that work on this device keep working - only the prompt stops carrying them.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
-                checked = appState.useDefaultPromptOnly,
-                onCheckedChange = appState::usePromptDefaultOnly,
-            )
-        }
 
         HorizontalDivider()
 

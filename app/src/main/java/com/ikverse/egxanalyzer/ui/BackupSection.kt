@@ -124,6 +124,16 @@ fun BackupControls(appState: AppState) {
             OutlinedButton(enabled = !busy, onClick = { pickBackup.launch(arrayOf("*/*")) }) {
                 Text("Restore from a backup")
             }
+            // In the row with the buttons it describes. It was a second grey paragraph under the
+            // status line, so the card said what a backup is every time somebody came to read
+            // whether one had been written.
+            InfoButton(
+                infoNote(
+                    "What a backup holds",
+                    "Every report, trade, rule and setting.",
+                    "Your provider API key is not in it and never leaves this phone.",
+                ),
+            )
         }
 
         Text(
@@ -143,12 +153,6 @@ fun BackupControls(appState: AppState) {
                     "Backups go to Downloads. Choose a folder your cloud app syncs - OneDrive, " +
                         "Dropbox, Nextcloud, an SD card - and a copy is written there once a day."
             },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            "A backup holds every report, trade, rule and setting. Your provider API key is not in " +
-                "it and never leaves this phone.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

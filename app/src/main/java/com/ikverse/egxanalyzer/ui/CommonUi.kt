@@ -247,6 +247,8 @@ internal fun SubSection(
     title: String,
     /** One line saying what is inside, so a closed group still informs. */
     summary: String? = null,
+    /** The group's own explanation, on the same terms as [ExpandableSection]'s. */
+    about: InfoNote? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -268,6 +270,7 @@ internal fun SubSection(
                     )
                 }
             }
+            about?.let { InfoButton(it) }
             Icon(
                 if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                 contentDescription = null,
@@ -286,12 +289,18 @@ internal fun SubSection(
     }
 }
 
-/** A titled group of related controls, replacing the loose outlined boxes used before. */
+/**
+ * A titled group of related controls, replacing the loose outlined boxes used before.
+ *
+ * @param about what the group is for, behind the heading's question mark rather than in a paragraph
+ *   under it. Ignored without a [title]: there is no heading to hang it on.
+ */
 @Composable
 internal fun SectionCard(
     title: String? = null,
     icon: ImageVector? = null,
     modifier: Modifier = Modifier,
+    about: InfoNote? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Card(
@@ -312,7 +321,14 @@ internal fun SectionCard(
                         )
                         Spacer(Modifier.width(Space.s))
                     }
-                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        title,
+                        // Weighted only when something sits after it, so a card without an
+                        // explanation keeps a heading that is as wide as its own words.
+                        modifier = if (about == null) Modifier else Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    about?.let { InfoButton(it) }
                 }
                 // The same hairline the chrome uses to separate the app header from the page, so a
                 // card says where its heading ends the way the app does. Only with a title: there is
@@ -359,6 +375,14 @@ internal fun ExpandableSection(
     summaryContent: (@Composable () -> Unit)? = null,
     /** Caps the content, for groups of form controls: a text field the width of a desk is unusable. */
     contentMaxWidth: Dp? = null,
+    /**
+     * What the whole group is for, behind a question mark in the header.
+     *
+     * Beside the chevron rather than inside the card, on purpose: a section-wide explanation used to
+     * be the first thing under the fold, so it was read once and then stood between the reader and
+     * the controls on every later visit. Here it is reachable without opening the card at all.
+     */
+    about: InfoNote? = null,
     /** Hoisted when the layout around it needs to know: an open card claims the whole row. */
     expandedState: Boolean? = null,
     onExpandedChange: ((Boolean) -> Unit)? = null,
@@ -413,6 +437,7 @@ internal fun ExpandableSection(
                         )
                     }
                 }
+                about?.let { InfoButton(it) }
                 Icon(
                     if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                     contentDescription = if (expanded) "Collapse $title" else "Expand $title",

@@ -154,37 +154,50 @@ internal fun SchedulesSettingsSection(appState: AppState, contentMaxWidth: Dp) {
             ScheduleRow(appState, schedule, now, knownChannelIds)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        // The cap is worth saying wherever the reader is - one short of it as much as at it - so it
+        // sits beside the button as well as in place of it.
+        val cap = infoNote(
+            "Why only ${AnalysisSchedule.MAX}",
+            "Four is the most this phone keeps. Each one that fires is a paid request, so the cap " +
+                "is also what the most expensive day can cost.",
+        )
         if (schedules.size < AnalysisSchedule.MAX) {
-            TextButton(onClick = appState::addAnalysisSchedule) {
-                Icon(Icons.Outlined.Add, contentDescription = null, Modifier.padding(end = Space.s))
-                Text("Add a schedule")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = appState::addAnalysisSchedule) {
+                    Icon(
+                        Icons.Outlined.Add,
+                        contentDescription = null,
+                        Modifier.padding(end = Space.s),
+                    )
+                    Text("Add a schedule")
+                }
+                InfoButton(cap)
             }
         } else {
-            Text(
-                "Four is the most this phone keeps. Each one that fires is a paid request, so " +
-                    "the cap is also what the most expensive day can cost.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "All ${AnalysisSchedule.MAX} schedules are in use",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                InfoButton(cap)
+            }
         }
         // A switch rather than a checkbox, and deliberately last: letting the phone keep a time
         // says nothing about letting it spend money at that time, and arming the clock to spend
         // later is the same act as spending.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(
-                checked = appState.paidSchedulesEnabled,
-                onCheckedChange = appState::updatePaidSchedulesEnabled,
-            )
-            Column(Modifier.padding(start = Space.m)) {
-                Text("Allow runs that spend cloud credits")
-                Text(
-                    "Off, a run that came due is passed over and says so rather than being made " +
-                        "quietly. Kept on this phone only and never synced.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+        SettingToggle(
+            label = "Allow runs that spend cloud credits",
+            checked = appState.paidSchedulesEnabled,
+            onCheckedChange = appState::updatePaidSchedulesEnabled,
+            switch = true,
+            about = infoNote(
+                "Allow runs that spend cloud credits",
+                "Off, a run that came due is passed over and says so rather than being made " +
+                    "quietly.",
+                "Kept on this phone only and never synced.",
+            ),
+        )
         SystemPermissions()
     }
 }

@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -73,7 +72,18 @@ internal fun PriceFeedSettingsSection(appState: AppState, contentMaxWidth: Dp) {
         },
         summaryTone = if (held > 0) MaterialTheme.colorScheme.error else null,
         contentMaxWidth = contentMaxWidth,
+        about = infoNote(
+            "Price feed",
+            "A stock the feed has gone quiet about is not being judged wrongly - it is not being " +
+                "judged at all. Any call on one of them sits outside every rate on the Insights " +
+                "tab until its prices come back.",
+            "The list below is present even when nothing is wrong. A diagnostic that vanishes " +
+                "when it is working leaves you unable to tell \"everything is fine\" from \"the " +
+                "app forgot to check\".",
+        ),
     ) {
+        // The state itself stays on the page: it is what somebody opened this card to read. What
+        // moved behind the question mark is the standing explanation of what a fault costs.
         if (health.clean) {
             Text(
                 if (health.stocksNamed == 0) {
@@ -85,13 +95,6 @@ internal fun PriceFeedSettingsSection(appState: AppState, contentMaxWidth: Dp) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            Text(
-                "These stocks are not being judged wrongly - they are not being judged at all. " +
-                    "Any call on one of them sits outside every rate on the Insights tab until " +
-                    "its prices come back.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             health.faults.forEach { stock ->
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 FeedFaultRow(stock)
@@ -102,21 +105,19 @@ internal fun PriceFeedSettingsSection(appState: AppState, contentMaxWidth: Dp) {
         // The whole of the configuration. What this replaced was a job in a schedule table, set up
         // through a form with a trigger kind, a day picker, a window and an interval - for the one
         // answer everybody was going to give it.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(
-                checked = appState.marketRefreshEnabled,
-                onCheckedChange = appState::updateMarketRefreshEnabled,
-            )
-            Text("Keep prices fresh while the market is open")
-        }
-        Text(
-            "Every ${MarketRefresh.EVERY_MINUTES} minutes, Sunday to Thursday, " +
-                "${ScheduleClock.clock(ScheduleClock.sessionStart)} to " +
-                "${ScheduleClock.clock(ScheduleClock.sessionEnd)} Cairo time. It reads the same " +
-                "free public feed the button below does, so it costs nothing and sends nothing " +
-                "to the AI provider. Off, prices are fetched once a day when you open the app.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        SettingToggle(
+            label = "Keep prices fresh while the market is open",
+            checked = appState.marketRefreshEnabled,
+            onCheckedChange = appState::updateMarketRefreshEnabled,
+            about = infoNote(
+                "Keep prices fresh while the market is open",
+                "Every ${MarketRefresh.EVERY_MINUTES} minutes, Sunday to Thursday, " +
+                    "${ScheduleClock.clock(ScheduleClock.sessionStart)} to " +
+                    "${ScheduleClock.clock(ScheduleClock.sessionEnd)} Cairo time.",
+                "It reads the same free public feed the Fetch prices button does, so it costs " +
+                    "nothing and sends nothing to the AI provider.",
+                "Off, prices are fetched once a day when you open the app.",
+            ),
         )
         // Never blank, which is the point of it. The failure mode of everything that runs while
         // the app is closed is silence - the phone puts it to sleep, nothing fires, and nothing
@@ -146,18 +147,21 @@ internal fun PriceFeedSettingsSection(appState: AppState, contentMaxWidth: Dp) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         // Offered whatever the state, because it is also how a reader confirms nothing has changed.
         // A price fetch costs nothing: it reads a free public feed and sends nothing to the model.
-        OutlinedButton(
-            onClick = { scope.launch { appState.refreshPrices() } },
-            enabled = !appState.pricesRefreshing,
-        ) {
-            Text(if (appState.pricesRefreshing) "Fetching…" else "Fetch prices now")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(
+                onClick = { scope.launch { appState.refreshPrices() } },
+                enabled = !appState.pricesRefreshing,
+            ) {
+                Text(if (appState.pricesRefreshing) "Fetching…" else "Fetch prices now")
+            }
+            InfoButton(
+                infoNote(
+                    "Fetch prices now",
+                    "Prices come from a free public feed and nothing is sent to the AI provider, " +
+                        "so fetching them costs nothing.",
+                ),
+            )
         }
-        Text(
-            "Prices come from a free public feed and nothing is sent to the AI provider, so " +
-                "fetching them costs nothing.",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

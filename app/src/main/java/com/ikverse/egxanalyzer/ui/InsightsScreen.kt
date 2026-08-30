@@ -585,6 +585,12 @@ private fun ColumnScope.RecordSplits(splits: List<RecordSplit>) {
         icon = Icons.Outlined.HelpOutline,
         summary = "${stateable.size} ${if (stateable.size == 1) "question" else "questions"} " +
             "the record can answer about itself",
+        about = infoNote(
+            "Does it matter?",
+            "Two figures, not a finding. At these numbers of calls the gap between two averages is " +
+                "smaller than the spread inside either of them, so read the counts as carefully " +
+                "as the percentages.",
+        ),
     ) {
         stateable.forEachIndexed { index, split ->
             if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -618,13 +624,6 @@ private fun ColumnScope.RecordSplits(splits: List<RecordSplit>) {
                 ),
             )
         }
-        Text(
-            "Two figures, not a finding. At these numbers of calls the gap between two averages " +
-                "is smaller than the spread inside either of them, so read the counts as carefully " +
-                "as the percentages.",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

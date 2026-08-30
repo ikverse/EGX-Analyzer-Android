@@ -29,7 +29,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -47,8 +46,6 @@ import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.Icons
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.selection.selectable
 
 /** The Telegram half of the Analyze screen: the chat list once signed in, the way in before that. */
@@ -91,11 +88,6 @@ internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = tru
     when (step) {
         TelegramAuthStep.API_CONFIGURATION -> {
             AuthCard("Telegram application", boxed, appState) {
-                Text(
-                    "This build has no application credentials of its own, so it needs a pair " +
-                        "from my.telegram.org. They are encrypted on this device.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 AuthField(firstValue, { firstValue = it }, "API ID")
                 AuthField(secondValue, { secondValue = it }, "API hash", secret = true)
                 Button(onClick = {
@@ -240,35 +232,38 @@ private fun TelegramChats(appState: AppState) {
  */
 @Composable
 private fun ApiCredentialsHelp() {
-    SubSection("Where do the API ID and hash come from?") {
-        HelpStep("1", "Open my.telegram.org and sign in with the phone number on your Telegram account.")
-        HelpStep("2", "Enter the code Telegram sends. It arrives in the Telegram app, not by SMS.")
-        HelpStep("3", "Choose API development tools.")
-        HelpStep("4", "Give the app a title and a short name. Platform and description do not matter.")
-        HelpStep("5", "It shows App api_id, a number, and App api_hash, 32 characters. Those are the two fields.")
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
-            "They identify the application, not you - every third-party Telegram client registers " +
-                "a pair and ships it, which is why a release of this app already has its own and " +
-                "never asks. Treat the hash like a password: anyone holding both can act as this app.",
+            "Where do the API ID and hash come from?",
+            Modifier.weight(1f),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        InfoButton(ApiCredentialsNote)
     }
 }
 
-@Composable
-private fun HelpStep(number: String, text: String) {
-    Row {
-        Text(
-            number,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(Modifier.width(Space.s))
-        Text(text, style = MaterialTheme.typography.bodySmall)
-    }
-}
+/**
+ * The five steps and the caveat, as one sheet rather than a collapsing group of its own.
+ *
+ * It was a `SubSection`, which is already folded away and was therefore not the crowding this pass
+ * was about - but it was a second thing on the screen that opens to explain something, on a screen
+ * that now has one. Two affordances meaning "there is more to say here" is the drift a single
+ * pattern exists to stop.
+ */
+private val ApiCredentialsNote = infoNote(
+    "Where do the API ID and hash come from?",
+    "This build has no application credentials of its own, so it needs a pair from " +
+        "my.telegram.org. They are encrypted on this device.",
+    "1. Open my.telegram.org and sign in with the phone number on your Telegram account.",
+    "2. Enter the code Telegram sends. It arrives in the Telegram app, not by SMS.",
+    "3. Choose API development tools.",
+    "4. Give the app a title and a short name. Platform and description do not matter.",
+    "5. It shows App api_id, a number, and App api_hash, 32 characters. Those are the two fields.",
+    "They identify the application, not you - every third-party Telegram client registers a pair " +
+        "and ships it, which is why a release of this app already has its own and never asks. " +
+        "Treat the hash like a password: anyone holding both can act as this app.",
+)
 
 /**
  * One step of the sign-in flow.
