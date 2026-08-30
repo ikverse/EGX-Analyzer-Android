@@ -5,384 +5,122 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.DayOfWeek
 import java.time.Instant
-import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
-import java.time.ZoneId
 
 /**
- * When a schedule fires, which is the one part of this feature nobody can check by hand.
+ * When the scheduled analysis fires, and when it is owed one.
  *
- * A rule about what happens at 18:00 next Sunday cannot be tested by waiting for next Sunday, and
- * a scheduler that is wrong is wrong silently - it simply does nothing on a morning it should have
- * run, which looks exactly like a phone that was asleep. Everything below drives the clock instead.
+ * A rule about what happens at 07:00 next Sunday cannot be checked by waiting for next Sunday,
+ * which is the whole reason this arithmetic lives away from Android. The cases below are the ones
+ * that cost something: the weekend the exchange is shut for, a schedule switched on after its own
+ * hour has gone by, and a slot that has already been served.
+ *
+ * 2026-08-20 is a Thursday - the last trading day of its week.
  */
 class ScheduleClockTest {
 
-    private val cairo: ZoneId = ScheduleClock.ZONE
-
-    /** Cairo wall-clock, which is what every schedule in this app is set in. */
-    private fun at(date: String, time: String): Instant =
-        LocalDate.parse(date).atTime(LocalTime.parse(time)).atZone(cairo).toInstant()
-
-    private fun job(
-        trigger: JobTrigger,
-        enabled: Boolean = true,
-        lastFiredAt: Instant? = null,
-        graceMinutes: Int = ScheduledJob.DEFAULT_GRACE_MINUTES,
-        work: JobWork = JobWork.PriceRefresh,
-    ) = ScheduledJob(
-        id = "job",
-        name = "Evening prices",
-        enabled = enabled,
-        trigger = trigger,
-        work = work,
-        graceMinutes = graceMinutes,
-        lastFiredAt = lastFiredAt,
-        createdAt = Instant.EPOCH,
-    )
-
-    /** Sunday through Thursday at 18:00, which is the shape almost every job here has. */
-    private val evenings = JobTrigger.Repeat(ScheduleClock.tradingDays, LocalTime.of(18, 0))
+    private val morning = LocalTime.of(7, 0)
 
     @Test
-    fun `the dates the rest of this file leans on are the days it says they are`() {
-        assertEquals(DayOfWeek.THURSDAY, LocalDate.parse("2026-08-20").dayOfWeek)
-        assertEquals(DayOfWeek.SUNDAY, LocalDate.parse("2026-08-23").dayOfWeek)
-        assertEquals(DayOfWeek.MONDAY, LocalDate.parse("2026-08-24").dayOfWeek)
-    }
-
-    @Test
-    fun `today's own slot is the next one until it has passed`() {
+    fun `the next fire is today when its hour is still ahead`() {
         assertEquals(
-            at("2026-08-20", "18:00"),
-            ScheduleClock.nextFire(job(evenings), at("2026-08-20", "09:00")),
+            at("2026-08-20", "07:00"),
+            ScheduleClock.nextFire(morning, at("2026-08-20", "06:00")),
         )
     }
 
     @Test
-    fun `the fire just served is never offered again`() {
-        // Strictly after, or re-booking the alarm the moment a job finishes would book the fire it
-        // has this second finished serving, and the phone would spin on one slot forever.
-        assertEquals(
-            at("2026-08-23", "18:00"),
-            ScheduleClock.nextFire(job(evenings), at("2026-08-20", "18:00")),
-        )
-    }
-
-    @Test
-    fun `the weekend is stepped over rather than run through`() {
-        // Thursday evening, past the fire. Friday and Saturday are not trading days, so the next
-        // one is Sunday - three days later, not one.
-        assertEquals(
-            at("2026-08-23", "18:00"),
-            ScheduleClock.nextFire(job(evenings), at("2026-08-20", "19:00")),
-        )
-    }
-
-    @Test
-    fun `a job that runs on one weekday reaches the same day next week`() {
-        val mondays = JobTrigger.Repeat(setOf(DayOfWeek.MONDAY), LocalTime.of(7, 30))
-        assertEquals(
-            at("2026-08-31", "07:30"),
-            ScheduleClock.nextFire(job(mondays), at("2026-08-24", "07:30")),
-        )
-    }
-
-    @Test
-    fun `a schedule with no days chosen never fires`() {
-        val nothing = JobTrigger.Repeat(emptySet(), LocalTime.of(18, 0))
-        assertNull(ScheduleClock.nextFire(job(nothing), at("2026-08-20", "09:00")))
-        assertNull(ScheduleClock.previousFire(job(nothing), at("2026-08-20", "09:00")))
-    }
-
-    @Test
-    fun `a one-shot fires once and then has nothing left`() {
-        val once = job(JobTrigger.Once(LocalDateTime.parse("2026-08-21T06:00")))
-        assertEquals(
-            at("2026-08-21", "06:00"),
-            ScheduleClock.nextFire(once, at("2026-08-20", "23:00")),
-        )
-        val served = once.copy(lastFiredAt = at("2026-08-21", "06:00"))
-        assertNull(ScheduleClock.nextFire(served, at("2026-08-21", "07:00")))
-        assertTrue(served.spent)
-    }
-
-    @Test
-    fun `a job owes a run for a fire it has not served`() {
-        assertEquals(
-            at("2026-08-20", "18:00"),
-            ScheduleClock.unservedFire(job(evenings), at("2026-08-20", "18:05")),
-        )
-    }
-
-    @Test
-    fun `a job owes nothing for the fire it has already served`() {
-        val served = job(evenings, lastFiredAt = at("2026-08-20", "18:00"))
-        assertNull(ScheduleClock.unservedFire(served, at("2026-08-20", "18:05")))
-        // The next day's fire is a different slot and is owed on its own.
-        assertEquals(
-            at("2026-08-23", "18:00"),
-            ScheduleClock.unservedFire(served, at("2026-08-23", "18:01")),
-        )
-    }
-
-    @Test
-    fun `a week with the phone off comes back owing one run, not seven`() {
-        val stale = job(evenings, lastFiredAt = at("2026-08-13", "18:00"))
-        // Six fires went by between those two dates. Only the last is owed: catching up on a
-        // schedule is not the same thing as keeping it.
-        assertEquals(
-            at("2026-08-23", "18:00"),
-            ScheduleClock.unservedFire(stale, at("2026-08-23", "20:00")),
-        )
-    }
-
-    @Test
-    fun `a schedule created after today's fire waits for the next one`() {
-        // Saved at 19:00 for 18:00 on trading days. Today's fire is an hour past and well inside a
-        // two-hour grace, so without an armed-at the schedule would run the moment it was created -
-        // and creating a schedule is not a way of asking for it to happen now.
-        val justSaved = job(evenings).copy(armedAt = at("2026-08-20", "19:00"))
-        assertNull(ScheduleClock.unservedFire(justSaved, at("2026-08-20", "19:01")))
-        assertEquals(
-            at("2026-08-23", "18:00"),
-            ScheduleClock.nextFire(justSaved, at("2026-08-20", "19:01")),
-        )
-    }
-
-    @Test
-    fun `a schedule armed before its fire still runs on it`() {
-        val armedThisMorning = job(evenings).copy(armedAt = at("2026-08-20", "08:00"))
-        assertEquals(
-            at("2026-08-20", "18:00"),
-            ScheduleClock.unservedFire(armedThisMorning, at("2026-08-20", "18:30")),
-        )
-    }
-
-    @Test
-    fun `a switched-off job owes nothing`() {
-        assertNull(
-            ScheduleClock.unservedFire(job(evenings, enabled = false), at("2026-08-20", "18:05")),
-        )
-    }
-
-    @Test
-    fun `a job this build cannot run owes nothing`() {
-        val foreign = job(evenings, work = JobWork.Unsupported("ANALYSIS"))
-        assertNull(ScheduleClock.unservedFire(foreign, at("2026-08-20", "18:05")))
-        assertFalse(foreign.runnable)
-    }
-
-    @Test
-    fun `grace is what makes a late phone still keep its schedule`() {
-        val late = job(evenings, graceMinutes = 120)
-        val due = at("2026-08-20", "18:00")
-        assertTrue(ScheduleClock.withinGrace(late, due, at("2026-08-20", "19:59")))
-        assertTrue(ScheduleClock.withinGrace(late, due, at("2026-08-20", "20:00")))
-        assertFalse(ScheduleClock.withinGrace(late, due, at("2026-08-20", "20:01")))
-    }
-
-    @Test
-    fun `the alarm is booked for the nearest fire any job still has`() {
-        val evening = job(evenings).copy(id = "evening")
-        val morning = job(JobTrigger.Repeat(ScheduleClock.tradingDays, LocalTime.of(7, 0)))
-            .copy(id = "morning")
-        val off = job(
-            JobTrigger.Repeat(ScheduleClock.tradingDays, LocalTime.of(3, 0)),
-            enabled = false,
-        ).copy(id = "off")
-        val all = listOf(evening, morning, off)
-        assertEquals(
-            at("2026-08-20", "18:00"),
-            ScheduleClock.earliestFire(all, at("2026-08-20", "09:00")),
-        )
-        // Past the evening one the nearest is Sunday morning, and the 03:00 job never counts:
-        // a switched-off schedule must not be the thing that wakes the phone.
+    fun `a fire just served gives the next trading day, not the same slot again`() {
         assertEquals(
             at("2026-08-23", "07:00"),
-            ScheduleClock.earliestFire(all, at("2026-08-20", "19:00")),
+            ScheduleClock.nextFire(morning, at("2026-08-20", "07:00")),
         )
     }
 
     @Test
-    fun `a clock time daylight saving skipped still fires exactly once`() {
-        // Driven through New York rather than Cairo on purpose: the gap there - 02:00 to 03:00 on
-        // the second Sunday of March - is the most stable one in the world's time zone data, and a
-        // test of this rule must not start failing because Egypt moved its own dates again.
-        val newYork = ZoneId.of("America/New_York")
-        val inTheGap = job(JobTrigger.Repeat(setOf(DayOfWeek.SUNDAY), LocalTime.of(2, 30)))
-        val fire = ScheduleClock.nextFire(
-            inTheGap,
-            LocalDate.parse("2026-03-07").atStartOfDay(newYork).toInstant(),
-            newYork,
-        )
-        // 02:30 did not exist that morning, so the job runs at 03:30 rather than being dropped for
-        // the week or throwing on a date nobody would have thought to try.
+    fun `the weekend is stepped over`() {
         assertEquals(
-            LocalDateTime.parse("2026-03-08T03:30"),
-            fire!!.atZone(newYork).toLocalDateTime(),
+            at("2026-08-23", "07:00"),
+            ScheduleClock.nextFire(morning, at("2026-08-21", "09:00")),
+        )
+        assertEquals(
+            at("2026-08-20", "07:00"),
+            ScheduleClock.previousFire(morning, at("2026-08-22", "12:00")),
         )
     }
 
     @Test
-    fun `the days read the way the exchange's week does`() {
-        assertEquals("Trading days", ScheduleClock.describeDays(ScheduleClock.tradingDays))
-        assertEquals("Every day", ScheduleClock.describeDays(DayOfWeek.entries.toSet()))
+    fun `an enabled schedule owes the fire that has gone unanswered`() {
+        val schedule = schedule(armedAt = at("2026-08-19", "12:00"))
         assertEquals(
-            "Sun-Tue",
-            ScheduleClock.describeDays(setOf(DayOfWeek.SUNDAY, DayOfWeek.MONDAY, DayOfWeek.TUESDAY)),
+            at("2026-08-20", "07:00"),
+            ScheduleClock.unservedFire(schedule, at("2026-08-20", "07:20")),
         )
-        // Not contiguous in a week that starts on Sunday, so each one is named.
-        assertEquals(
-            "Sun, Wed",
-            ScheduleClock.describeDays(setOf(DayOfWeek.WEDNESDAY, DayOfWeek.SUNDAY)),
-        )
-        assertEquals("No days", ScheduleClock.describeDays(emptySet()))
     }
 
     @Test
-    fun `a trigger says when it runs in one line`() {
-        assertEquals("Trading days 18:00", ScheduleClock.describe(evenings))
-        assertEquals(
-            "Once, 2026-08-21 at 06:00",
-            ScheduleClock.describe(JobTrigger.Once(LocalDateTime.parse("2026-08-21T06:00"))),
-        )
-        assertEquals(
-            "Trading days, every 15 min 10:00-14:45",
-            ScheduleClock.describe(session),
-        )
-        assertEquals(
-            "Trading days, every 2 h 10:00-14:45",
-            ScheduleClock.describe(session.copy(everyMinutes = 120)),
-        )
+    fun `a schedule that is off owes nothing`() {
+        val schedule = schedule(armedAt = at("2026-08-19", "12:00"), enabled = false)
+        assertNull(ScheduleClock.unservedFire(schedule, at("2026-08-20", "07:20")))
     }
 
     /**
-     * Every quarter of an hour from the open to just past the close, on the days it trades.
-     *
-     * The shape the whole interval trigger exists for: prices that keep up with a session and then
-     * stop, rather than a refresh that runs all night for a feed with nothing to say.
+     * Switching a schedule on at 07:30 for 07:00 must not run it on the spot. The grace window is
+     * there to forgive a sleeping phone, not to turn saving a setting into starting a paid run.
      */
-    private val session = JobTrigger.Interval(
-        days = ScheduleClock.tradingDays,
-        everyMinutes = 15,
-        from = ScheduleClock.sessionStart,
-        until = ScheduleClock.sessionEnd,
+    @Test
+    fun `a fire from before the schedule was armed was never its to serve`() {
+        val schedule = schedule(armedAt = at("2026-08-20", "07:30"))
+        assertNull(ScheduleClock.unservedFire(schedule, at("2026-08-20", "07:40")))
+    }
+
+    @Test
+    fun `a fire already served is not owed twice`() {
+        val schedule = schedule(
+            armedAt = at("2026-08-19", "12:00"),
+            lastFiredAt = at("2026-08-20", "07:00"),
+        )
+        assertNull(ScheduleClock.unservedFire(schedule, at("2026-08-20", "09:00")))
+    }
+
+    @Test
+    fun `grace forgives a late phone and then stops`() {
+        val due = at("2026-08-20", "07:00")
+        assertTrue(ScheduleClock.withinGrace(due, at("2026-08-20", "08:59")))
+        assertFalse(ScheduleClock.withinGrace(due, at("2026-08-20", "09:01")))
+    }
+
+    /**
+     * A fire keeps the clock time it reads whatever the offset underneath it is doing: a run that
+     * shifted by an hour would read the chats over the wrong window.
+     */
+    @Test
+    fun `fires keep Cairo clock time across a daylight saving change`() {
+        val fire = ScheduleClock.nextFire(morning, at("2026-11-01", "06:00"))
+        assertEquals(morning, fire.atZone(ScheduleClock.ZONE).toLocalTime())
+    }
+
+    @Test
+    fun `times read as 24 hour`() {
+        assertEquals("07:00", ScheduleClock.clock(LocalTime.of(7, 0)))
+        assertEquals("18:05", ScheduleClock.clock(LocalTime.of(18, 5)))
+    }
+
+    private fun schedule(
+        armedAt: Instant,
+        enabled: Boolean = true,
+        lastFiredAt: Instant? = null,
+    ) = AnalysisSchedule(
+        enabled = enabled,
+        at = morning,
+        channels = listOf(AnalysedChannel(1, "Signals")),
+        contentTypes = setOf(AnalysisContentType.entries.first()),
+        lastFiredAt = lastFiredAt,
+        armedAt = armedAt,
     )
 
-    @Test
-    fun `an interval steps through the session from the open`() {
-        assertEquals(
-            at("2026-08-20", "10:00"),
-            ScheduleClock.nextFire(job(session), at("2026-08-20", "09:00")),
-        )
-        assertEquals(
-            at("2026-08-20", "10:15"),
-            ScheduleClock.nextFire(job(session), at("2026-08-20", "10:00")),
-        )
-        assertEquals(
-            at("2026-08-20", "12:15"),
-            ScheduleClock.nextFire(job(session), at("2026-08-20", "12:07")),
-        )
-    }
-
-    @Test
-    fun `the end of the window is itself a fire`() {
-        // Inclusive on purpose: the exchange stops at 14:30 and the figures settle over the
-        // minutes after it, so the last fire is the one that leaves the day's row final.
-        assertEquals(
-            at("2026-08-20", "14:45"),
-            ScheduleClock.nextFire(job(session), at("2026-08-20", "14:31")),
-        )
-    }
-
-    @Test
-    fun `nothing fires between the close and the next session`() {
-        // The requirement this trigger was added for. Thursday's last fire is 14:45; the next one
-        // is Sunday's open, with the whole weekend in between and not a single fire in it.
-        assertEquals(
-            at("2026-08-23", "10:00"),
-            ScheduleClock.nextFire(job(session), at("2026-08-20", "14:45")),
-        )
-        assertEquals(
-            at("2026-08-23", "10:00"),
-            ScheduleClock.nextFire(job(session), at("2026-08-21", "12:00")),
-        )
-        // And looking backwards from the middle of the shut weekend reaches Thursday's close
-        // rather than inventing a fire on a day the market never opened.
-        assertEquals(
-            at("2026-08-20", "14:45"),
-            ScheduleClock.previousFire(job(session), at("2026-08-22", "12:00")),
-        )
-    }
-
-    @Test
-    fun `a step that does not divide the window stops inside it`() {
-        // 10:00 by half-hours reaches 14:30; the next would be 15:00, which is past the end, so
-        // the day stops at 14:30 rather than overshooting the window it was given.
-        val halfHourly = session.copy(everyMinutes = 30)
-        assertEquals(
-            at("2026-08-20", "14:30"),
-            ScheduleClock.previousFire(job(halfHourly), at("2026-08-20", "16:00")),
-        )
-        assertEquals(
-            at("2026-08-23", "10:00"),
-            ScheduleClock.nextFire(job(halfHourly), at("2026-08-20", "14:31")),
-        )
-    }
-
-    @Test
-    fun `a phone that missed most of a session owes the last slot, not the first`() {
-        // The same rule the daily schedules have, and it matters far more here: a session has
-        // nineteen fires in it, and a phone that woke at noon must fetch prices once and not
-        // nine times in a row for a feed that would answer all nine identically.
-        assertEquals(
-            at("2026-08-20", "12:00"),
-            ScheduleClock.unservedFire(job(session), at("2026-08-20", "12:07")),
-        )
-        val served = job(session, lastFiredAt = at("2026-08-20", "12:00"))
-        assertNull(ScheduleClock.unservedFire(served, at("2026-08-20", "12:07")))
-        assertEquals(
-            at("2026-08-20", "12:15"),
-            ScheduleClock.unservedFire(served, at("2026-08-20", "12:20")),
-        )
-    }
-
-    @Test
-    fun `an interval with no days chosen never fires`() {
-        val nothing = session.copy(days = emptySet())
-        assertNull(ScheduleClock.nextFire(job(nothing), at("2026-08-20", "09:00")))
-        assertNull(ScheduleClock.previousFire(job(nothing), at("2026-08-20", "09:00")))
-    }
-
-    @Test
-    fun `a window that runs up to midnight does not wrap into the next day`() {
-        // The bug an hour-by-hour walk over LocalTime would have: 23:00 plus an hour is 00:00,
-        // which is before the end of the window, so the day would generate fires forever.
-        val lateEvening = JobTrigger.Interval(
-            days = ScheduleClock.tradingDays,
-            everyMinutes = 60,
-            from = LocalTime.of(22, 0),
-            until = LocalTime.of(23, 59),
-        )
-        assertEquals(
-            listOf(LocalTime.of(22, 0), LocalTime.of(23, 0)),
-            ScheduleClock.slotTimes(lateEvening),
-        )
-    }
-
-    @Test
-    fun `a window stored back to front still answers with one fire`() {
-        // The form refuses to save one, so this is about a row that arrived some other way: it has
-        // to terminate, and one fire at the start is the least surprising answer.
-        val backwards = session.copy(from = LocalTime.of(14, 0), until = LocalTime.of(10, 0))
-        assertEquals(listOf(LocalTime.of(14, 0)), ScheduleClock.slotTimes(backwards))
-        assertEquals(
-            at("2026-08-20", "14:00"),
-            ScheduleClock.nextFire(job(backwards), at("2026-08-20", "09:00")),
-        )
-    }
+    private fun at(date: String, time: String): Instant =
+        LocalDateTime.parse("${date}T$time").atZone(ScheduleClock.ZONE).toInstant()
 }

@@ -22,15 +22,11 @@ import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.cleanChannelName
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.IntradayBar
-import com.ikverse.egxanalyzer.model.JobOutcome
-import com.ikverse.egxanalyzer.model.JobTrigger
-import com.ikverse.egxanalyzer.model.JobWork
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.Quote
 import com.ikverse.egxanalyzer.model.CallState
 import com.ikverse.egxanalyzer.model.TradeState
-import com.ikverse.egxanalyzer.model.ScheduledJob
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.ExcludedSource
 import com.ikverse.egxanalyzer.model.SavedAnalysis
@@ -95,7 +91,6 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         db.createWordingRules()
         db.createPromptVersions()
         db.createPositions()
-        db.createScheduledJobs()
         db.createPositionStatusSeen()
         db.createStockOpinions()
         db.createCallAlertSeen()
@@ -119,9 +114,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         db.createWordingRules()
         db.createPromptVersions()
         db.createPositions()
-        db.createScheduledJobs()
         db.createPositionStatusSeen()
-        db.addScheduleIntervalColumns()
         db.addPositionRevisionColumns()
         db.addPositionWindowColumns()
         db.addOpenColumn()
@@ -1837,125 +1830,41 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
     }
 
     /**
-     * Brings a schedule table written before a job could repeat inside a window up to date.
+     * The rows of the job table this app used to keep, for the one migration that reads them.
      *
-     * One column at a time and guarded by what is actually there, in the same shape as
-     * [addOpinionDetailColumns] and for the same reason: a build that shipped one of the two
-     * leaves phones holding one, and a single guard over the first would decide the second had
-     * arrived with it. The defaults are what every schedule written before this existed meant -
-     * no interval, no window - which is exactly a `ONCE` or `REPEAT` row.
+     * Raw columns rather than a parsed job: the types they parsed into are gone, and reviving them
+     * so that a one-time read can throw them away again would keep the whole vocabulary alive for
+     * a single function. Tolerant of the table being absent, which on a fresh install it is.
      */
-    private fun SQLiteDatabase.addScheduleIntervalColumns() {
-        val columns = rawQuery("PRAGMA table_info(scheduled_jobs)", null).use { cursor ->
-            generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }.toSet()
-        }
-        if ("trigger_every_minutes" !in columns) {
-            execSQL(
-                "ALTER TABLE scheduled_jobs ADD COLUMN trigger_every_minutes INTEGER NOT NULL " +
-                    "DEFAULT 0",
-            )
-        }
-        if ("trigger_until" !in columns) {
-            execSQL("ALTER TABLE scheduled_jobs ADD COLUMN trigger_until TEXT NOT NULL DEFAULT ''")
-        }
-    }
-
-    /**
-     * The jobs this phone runs on its own.
-     *
-     * Local to the device and never published, unlike positions or wording rules: a schedule
-     * copied onto three phones is three runs of one piece of work. Nothing in `*Sync` reads this
-     * table, and that absence is the feature.
-     *
-     * The work is stored as a kind plus a JSON blob rather than as columns, so a later version
-     * that schedules something with settings of its own adds fields inside the blob instead of
-     * migrating the table again - the same reason positions carry an `unknown` column.
-     */
-    private fun SQLiteDatabase.createScheduledJobs() = execSQL(
-        """CREATE TABLE IF NOT EXISTS scheduled_jobs (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            trigger_kind TEXT NOT NULL,
-            trigger_at TEXT NOT NULL,
-            trigger_days TEXT NOT NULL DEFAULT '',
-            trigger_every_minutes INTEGER NOT NULL DEFAULT 0,
-            trigger_until TEXT NOT NULL DEFAULT '',
-            work_kind TEXT NOT NULL,
-            work_config TEXT NOT NULL DEFAULT '{}',
-            grace_minutes INTEGER NOT NULL,
-            last_fired_at INTEGER,
-            last_outcome TEXT NOT NULL DEFAULT 'NEVER',
-            last_message TEXT,
-            created_at INTEGER NOT NULL DEFAULT 0,
-            armed_at INTEGER NOT NULL DEFAULT 0
-        )""",
-    )
-
-    /**
-     * Every schedule, oldest first, including any this build cannot run.
-     *
-     * A row whose kind or trigger will not parse is dropped rather than crashing the read: one
-     * unreadable schedule must not take the rest of them - or the screen that lists them - down
-     * with it. A row written by a newer build parses fine and comes back as
-     * [JobWork.Unsupported], which is shown and never run.
-     */
-    fun scheduledJobs(): List<ScheduledJob> = readableDatabase
-        .query("scheduled_jobs", null, null, null, null, null, "created_at ASC")
-        .use { cursor ->
-            buildList {
-                while (cursor.moveToNext()) {
-                    runCatching { cursor.toScheduledJob() }.getOrNull()?.let(::add)
+    fun legacyScheduleRows(): List<LegacyScheduleRow> = runCatching {
+        readableDatabase
+            .query("scheduled_jobs", null, null, null, null, null, "created_at ASC")
+            .use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) {
+                        runCatching {
+                            LegacyScheduleRow(
+                                enabled = cursor.getInt(cursor.getColumnIndexOrThrow("enabled")) == 1,
+                                workKind = cursor.getString(cursor.getColumnIndexOrThrow("work_kind")),
+                                triggerKind = cursor.getString(cursor.getColumnIndexOrThrow("trigger_kind")),
+                                triggerAt = cursor.getString(cursor.getColumnIndexOrThrow("trigger_at")),
+                                workConfig = cursor.getString(cursor.getColumnIndexOrThrow("work_config")),
+                            )
+                        }.getOrNull()?.let(::add)
+                    }
                 }
             }
-        }
+    }.getOrDefault(emptyList())
 
-    fun saveScheduledJob(job: ScheduledJob) {
-        writableDatabase.insertWithOnConflict(
-            "scheduled_jobs",
-            null,
-            ContentValues().apply {
-                put("id", job.id)
-                put("name", job.name)
-                put("enabled", if (job.enabled) 1 else 0)
-                when (val trigger = job.trigger) {
-                    is JobTrigger.Once -> {
-                        put("trigger_kind", "ONCE")
-                        put("trigger_at", trigger.at.toString())
-                        put("trigger_days", "")
-                    }
-
-                    is JobTrigger.Repeat -> {
-                        put("trigger_kind", "REPEAT")
-                        put("trigger_at", trigger.at.toString())
-                        put("trigger_days", trigger.days.joinToString(",", transform = DayOfWeek::name))
-                    }
-
-                    is JobTrigger.Interval -> {
-                        put("trigger_kind", "INTERVAL")
-                        // The window start, so `trigger_at` means the same thing for all three
-                        // kinds: the first fire of a day.
-                        put("trigger_at", trigger.from.toString())
-                        put("trigger_days", trigger.days.joinToString(",", transform = DayOfWeek::name))
-                        put("trigger_every_minutes", trigger.everyMinutes)
-                        put("trigger_until", trigger.until.toString())
-                    }
-                }
-                put("work_kind", job.work.storedKind())
-                put("work_config", job.work.storedConfig())
-                put("grace_minutes", job.graceMinutes)
-                put("last_fired_at", job.lastFiredAt?.toEpochMilli())
-                put("last_outcome", job.lastOutcome.name)
-                put("last_message", job.lastMessage)
-                put("created_at", job.createdAt.toEpochMilli())
-                put("armed_at", job.armedAt.toEpochMilli())
-            },
-            SQLiteDatabase.CONFLICT_REPLACE,
-        )
-    }
-
-    fun deleteScheduledJob(id: String) {
-        writableDatabase.delete("scheduled_jobs", "id = ?", arrayOf(id))
+    /**
+     * Takes the old job table away for good, once what was in it has been carried across.
+     *
+     * Dropped rather than left sitting unused: a table nothing reads is a table the next reader of
+     * this file has to work out the status of, and the migration that empties it is the only thing
+     * that ever knew the answer.
+     */
+    fun dropScheduledJobs() {
+        runCatching { writableDatabase.execSQL("DROP TABLE IF EXISTS scheduled_jobs") }
     }
 
     /**
@@ -2397,114 +2306,6 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         }
     }
 
-    /**
-     * The settings a work kind carries, as JSON in one column.
-     *
-     * A column per field would mean migrating the table for every job type ever added; this way a
-     * new one is a new key. The shape is this app's own and is never read by anything but the
-     * function below it.
-     */
-    private fun JobWork.storedConfig(): String = when (this) {
-        JobWork.PriceRefresh -> "{}"
-        is JobWork.Analysis -> JSONObject()
-            .put(
-                "channels",
-                JSONArray().apply {
-                    channels.forEach { put(JSONObject().put("id", it.id).put("name", it.name)) }
-                },
-            )
-            .put("contentTypes", JSONArray().apply { contentTypes.forEach { put(it.name) } })
-            .toString()
-        // Written back exactly as it arrived. This build cannot read the settings of a job it does
-        // not understand, and rewriting them as an empty object would quietly gut the schedule for
-        // the version that can.
-        is JobWork.Unsupported -> config
-    }
-
-    /**
-     * A work kind and its settings, or [JobWork.Unsupported] where this build cannot read them.
-     *
-     * An `ANALYSIS` row whose JSON will not parse is treated as unsupported rather than as an
-     * analysis of nothing: a run over no chats would be a paid request for an empty answer.
-     */
-    private fun workFrom(kind: String, config: String): JobWork = when (kind) {
-        "PRICE_REFRESH" -> JobWork.PriceRefresh
-        "ANALYSIS" -> runCatching {
-            val json = JSONObject(config)
-            val channels = json.getJSONArray("channels").objects().map {
-                AnalysedChannel(it.getLong("id"), it.getString("name"))
-            }
-            val types = json.getJSONArray("contentTypes").strings()
-                .mapNotNullTo(mutableSetOf()) { name ->
-                    AnalysisContentType.entries.firstOrNull { it.name == name }
-                }
-            require(channels.isNotEmpty() && types.isNotEmpty())
-            JobWork.Analysis(channels, types)
-        }.getOrElse { JobWork.Unsupported(kind, config) }
-
-        else -> JobWork.Unsupported(kind, config)
-    }
-
-    /**
-     * The name a work kind is filed under.
-     *
-     * An unsupported job keeps the name the build that wrote it used, so re-saving a row this
-     * version cannot run - which is what toggling it off does - does not rewrite it into
-     * something the build that can run it will no longer recognise.
-     */
-    private fun JobWork.storedKind(): String = when (this) {
-        JobWork.PriceRefresh -> "PRICE_REFRESH"
-        is JobWork.Analysis -> "ANALYSIS"
-        is JobWork.Unsupported -> kind
-    }
-
-    private fun Cursor.triggerDays(): Set<DayOfWeek> =
-        getString(getColumnIndexOrThrow("trigger_days"))
-            .split(",")
-            .filter(String::isNotBlank)
-            .mapTo(mutableSetOf(), DayOfWeek::valueOf)
-
-    private fun Cursor.toScheduledJob(): ScheduledJob {
-        val at = getString(getColumnIndexOrThrow("trigger_at"))
-        val trigger = when (getString(getColumnIndexOrThrow("trigger_kind"))) {
-            "ONCE" -> JobTrigger.Once(LocalDateTime.parse(at))
-            "REPEAT" -> JobTrigger.Repeat(
-                days = triggerDays(),
-                at = LocalTime.parse(at),
-            )
-
-            "INTERVAL" -> JobTrigger.Interval(
-                days = triggerDays(),
-                everyMinutes = getInt(getColumnIndexOrThrow("trigger_every_minutes")),
-                from = LocalTime.parse(at),
-                until = LocalTime.parse(getString(getColumnIndexOrThrow("trigger_until"))),
-            )
-
-            else -> error("Unknown trigger")
-        }
-        val kind = getString(getColumnIndexOrThrow("work_kind"))
-        return ScheduledJob(
-            id = getString(getColumnIndexOrThrow("id")),
-            name = getString(getColumnIndexOrThrow("name")),
-            enabled = getInt(getColumnIndexOrThrow("enabled")) == 1,
-            trigger = trigger,
-            work = workFrom(kind, getString(getColumnIndexOrThrow("work_config"))),
-            graceMinutes = getInt(getColumnIndexOrThrow("grace_minutes")),
-            lastFiredAt = nullableLong("last_fired_at")?.let(Instant::ofEpochMilli),
-            lastOutcome = runCatching {
-                JobOutcome.valueOf(getString(getColumnIndexOrThrow("last_outcome")))
-            }.getOrDefault(JobOutcome.NEVER),
-            lastMessage = nullableString("last_message"),
-            createdAt = Instant.ofEpochMilli(getLong(getColumnIndexOrThrow("created_at"))),
-            // A row written before schedules could be armed separately dates from its creation,
-            // which is exactly what armedAt meant for every one of them.
-            armedAt = Instant.ofEpochMilli(
-                getLong(getColumnIndexOrThrow("armed_at"))
-                    .takeIf { it > 0L }
-                    ?: getLong(getColumnIndexOrThrow("created_at")),
-            ),
-        )
-    }
 
     private fun Cursor.nullableLong(column: String): Long? =
         getColumnIndexOrThrow(column).let { if (isNull(it)) null else getLong(it) }
@@ -2530,8 +2331,9 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
          * 18 is `position_status_seen`, what the user has already been told about each trade -
          * the one thing a notification about a *change* needs and the prices cannot supply.
          * 17 for a schedule that repeats inside a window - `trigger_every_minutes` and
-         * `trigger_until` on `scheduled_jobs`, which is what lets one job fetch prices through a
-         * session rather than once after it. 16 was the findings an opinion carries - the news it found, what is scheduled ahead, and
+         * `trigger_until` on `scheduled_jobs`. Both are gone: the table was dropped when the
+         * job list collapsed into one analysis schedule and a checkbox, and fetching prices
+         * through a session became a rule rather than something assembled out of a form. 16 was the findings an opinion carries - the news it found, what is scheduled ahead, and
          * what it thinks goes wrong - which are columns on `stock_opinions` rather than a table of
          * their own. 15 was `stock_opinions` itself, what Ask AI said about a call. 14 was
          * `scheduled_jobs`, the work
@@ -2546,3 +2348,18 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         const val DATABASE_VERSION = 23
     }
 }
+
+/**
+ * One row of the retired job table, exactly as it was stored.
+ *
+ * Only the fields the migration needs to decide what a row meant: whether it was on, what it did,
+ * and when. The name, the grace window and the outcome of its last fire are deliberately not here
+ * - none of them survives into what replaced it.
+ */
+data class LegacyScheduleRow(
+    val enabled: Boolean,
+    val workKind: String,
+    val triggerKind: String,
+    val triggerAt: String,
+    val workConfig: String,
+)

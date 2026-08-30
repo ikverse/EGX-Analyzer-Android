@@ -82,6 +82,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -332,6 +333,10 @@ private val StatusLineGap = 6.dp
  * in one place is what stops the header saying "Fetching prices" above a page while a tick sits
  * beside it reporting the previous fetch.
  *
+ * A run started with `announce = false` says neither, and the line stays empty from the press until
+ * whatever it opens arrives. What it does not suppress is a failure: an action that produced nothing
+ * has to say why somewhere, and there is nowhere else.
+ *
  * Whether it worked is carried by one tinted glyph, exactly as the toast carried it. Colouring the
  * text would make every routine confirmation the loudest thing on a screen that raises one after
  * almost every tap - and this line now sits beside the app's own name, which is the last place that
@@ -344,7 +349,9 @@ private fun AppStatusLine(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val busy = appState.busyLabel
+    // A quiet run is running with nothing to say: the screen that started it is already saying it,
+    // and the bar under this header is still drawn from `busyLabel` itself.
+    val busy = appState.busyLabel?.takeIf { appState.busyAnnounced }
     val message = appState.statusMessage
     val text = busy ?: message?.text
     val stage = when {
@@ -733,10 +740,35 @@ private fun DestinationPager(activity: Activity, appState: AppState) {
             if (pager.currentPage == target && pager.currentPageOffsetFraction == 0f) {
                 return@collectLatest
             }
-            // The pager is already moving under a hand or a fling, which outranks anything started
-            // here and would refuse it anyway. Where it comes to rest is what the destination will
-            // read a moment later.
-            if (pager.isScrollInProgress) return@collectLatest
+            // The pager is already moving, and who is moving it decides whether this travel is
+            // still wanted.
+            //
+            // Under a hand or a fling it is not: a drag outranks anything started here and would
+            // refuse it anyway, and where it comes to rest is what the destination will read a
+            // moment later. Dropping the travel there costs nothing, because the arrival that
+            // follows leaves the bar and the pager naming the same page.
+            //
+            // Anything else moving it is this coroutine's own predecessor, cancelled a frame ago and
+            // still settling - and dropping the travel there was how the bar came to be lit on a tab
+            // the reader was not on. Nothing publishes a destination that no reader scrolled to, so a
+            // target abandoned here was never asked for again: `destination` kept the page it had
+            // been sent to, the pager kept the page it was on, and the two stayed that way for as
+            // long as the app was open. Two sends arriving together is all it takes - a run finishing
+            // while a notification is being opened, both of them travelling to RESULTS.
+            //
+            // So wait it out instead, and read the pager again on the other side. `collectLatest`
+            // still cancels the wait the moment a newer target arrives, so this holds nothing up and
+            // the one-coroutine rule above is untouched.
+            if (pager.isScrollInProgress) {
+                if (readerScroll.value) return@collectLatest
+                snapshotFlow { pager.isScrollInProgress }.first { !it }
+                // The reader took hold while this was waiting, or the settling came to rest on the
+                // target anyway. Either way the travel is no longer this coroutine's to make.
+                if (readerScroll.value) return@collectLatest
+                if (pager.currentPage == target && pager.currentPageOffsetFraction == 0f) {
+                    return@collectLatest
+                }
+            }
             try {
                 pager.animateScrollToPage(target)
             } catch (_: CancellationException) {

@@ -42,6 +42,7 @@ import com.ikverse.egxanalyzer.data.AnalysisPolicy
 import com.ikverse.egxanalyzer.data.EndpointPolicy
 import com.ikverse.egxanalyzer.data.EgxCatalog
 import com.ikverse.egxanalyzer.data.JobRunner
+import com.ikverse.egxanalyzer.data.ScheduleMigration
 import com.ikverse.egxanalyzer.data.JobSkipped
 import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.PerformanceCalculator
@@ -59,7 +60,10 @@ import com.ikverse.egxanalyzer.data.recommendedTickers
 import com.ikverse.egxanalyzer.data.TelegramRepository
 import com.ikverse.egxanalyzer.model.AnalysedChannel
 import com.ikverse.egxanalyzer.model.AnalysisPlan
+import com.ikverse.egxanalyzer.model.AnalysisAim
 import com.ikverse.egxanalyzer.model.AnalysisContentType
+import com.ikverse.egxanalyzer.model.AnalysisSchedule
+import com.ikverse.egxanalyzer.model.MarketRefresh
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisMode
@@ -80,9 +84,7 @@ import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.Portfolio
 import com.ikverse.egxanalyzer.model.PortfolioOrder
-import com.ikverse.egxanalyzer.model.JobWork
 import com.ikverse.egxanalyzer.model.Position
-import com.ikverse.egxanalyzer.model.ScheduledJob
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.SavedAnalysis
@@ -223,7 +225,8 @@ class AppState(
     /**
      * Books or cancels this phone's schedule alarm; supplied by the app so this class stays testable.
      */
-    private val schedulesChanged: (jobs: List<ScheduledJob>, enabled: Boolean) -> Unit = { _, _ -> },
+    private val schedulesChanged: (schedule: AnalysisSchedule, marketRefresh: Boolean) -> Unit =
+        { _, _ -> },
     /**
      * Whether this process was started by the clock rather than by its owner.
      *
@@ -293,6 +296,17 @@ class AppState(
     var busyLabel by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * Whether the running action names itself in the header.
+     *
+     * False where the screen the press came from already says it. An Ask AI card sits under the
+     * reader's thumb reading "Asking…" for as long as the request is out, and the header repeating
+     * that a few lines above is the same sentence twice. The bar under the header still runs -
+     * it is the one part of the announcement a card cannot carry.
+     */
+    var busyAnnounced by mutableStateOf(true)
+        private set
+
     fun consumeStatusMessage() {
         statusMessage = null
     }
@@ -306,13 +320,21 @@ class AppState(
     suspend fun <T> runAction(
         label: String,
         success: (T) -> String,
+        /**
+         * Whether the header carries this run at all. A quiet run keeps its progress bar and its
+         * failure - what it gives up is the working line and the confirmation, which are the two
+         * the screen that pressed can say better. A failure is never quiet: it is the only account
+         * of why a press produced nothing.
+         */
+        announce: Boolean = true,
         block: suspend () -> T,
     ) {
         busyLabel = label
+        busyAnnounced = announce
         statusMessage = null
         try {
             val outcome = block()
-            statusMessage = StatusMessage(success(outcome), succeeded = true)
+            if (announce) statusMessage = StatusMessage(success(outcome), succeeded = true)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -322,6 +344,7 @@ class AppState(
             )
         } finally {
             busyLabel = null
+            busyAnnounced = true
         }
     }
     var inputs by mutableStateOf<List<AnalysisInput>>(emptyList())
@@ -805,6 +828,10 @@ class AppState(
                 runAction(
                     label = "Asking about ${call.ticker}",
                     success = { "${call.ticker}: ${it.verdict.arabic}" },
+                    // The card says "Asking…" while this is out and the sheet opens itself with the
+                    // answer the moment it lands, so a working line and a verdict in the header are
+                    // both said twice. Only a failure is left for the header to carry.
+                    announce = false,
                 ) {
                     // Built once and used twice: it goes into the question, where it aims what the
                     // provider searches for, and its preamble goes to OpenRouter, where it decides
@@ -1959,41 +1986,67 @@ class AppState(
         get() = appPreferences.overdueRemindersEnabled || appPreferences.tradeAlertsEnabled
 
     /**
-     * The jobs this phone runs on its own.
+     * The move off the old job table, before anything below reads what it writes.
      *
-     * Held here so a screen can list them, and read back from disk after every change rather than
-     * edited in memory: the alarm that fires them can wake a process with no screen in it, and the
-     * list the runner works from has to be the same list the card is showing.
+     * An init block rather than a line in the one further up, and its position is the whole point:
+     * Kotlin runs initialisers in source order, so a migration placed above these two properties
+     * is a migration whose writes their own initialisers then read - and one placed below them
+     * would be overwritten by exactly those initialisers instead. The same trap `foregroundStarted`
+     * is declared above `init` to avoid.
      */
-    var scheduledJobs by mutableStateOf(localDataStore.scheduledJobs())
+    init {
+        migrateSchedules()
+    }
+
+    /**
+     * The one analysis this phone runs on its own.
+     *
+     * Held here so a screen can show it, and read back from storage after every change rather than
+     * edited in memory: the alarm that fires it can wake a process with no screen in it, and the
+     * schedule the runner works from has to be the one the card is showing.
+     */
+    var analysisSchedule by mutableStateOf(settingsRepository.analysisSchedule())
         private set
 
     /**
-     * Whether this phone keeps its schedules at all.
+     * Whether this phone keeps prices fresh while the market is trading.
      *
-     * Off until it is switched on, unlike the overdue reminder beside it. That one reads a date
-     * already on disk; this one wakes the phone to do work, and a feature that starts doing things
-     * unattended because it shipped is not one the user agreed to. Stored outside [AppPreferences]
-     * so it stays this device's own answer - see `SettingsRepository.schedulesEnabled`.
+     * Off until it is switched on, unlike the daily catch-up beside it. That one runs on a launch
+     * the user made; this wakes the phone on its own, and a feature that starts doing things
+     * unattended because it shipped is not one anybody agreed to. Stored outside [AppPreferences]
+     * so it stays this device's own answer - see `SettingsRepository.marketRefreshEnabled`.
      */
-    var schedulesEnabled by mutableStateOf(settingsRepository.schedulesEnabled())
+    var marketRefreshEnabled by mutableStateOf(settingsRepository.marketRefreshEnabled())
         private set
 
     /**
-     * Whether a schedule here may start work that spends cloud credits.
+     * What the last market-hours fetch did, and when.
      *
-     * A second switch behind [schedulesEnabled], off until it is turned on, and the only thing
+     * On screen rather than in a log, because the failure mode of everything on this page is
+     * silence and the only cure for it is a line that always says something. Mirrored into state
+     * so the checkbox's own line moves the moment a run writes one.
+     */
+    var marketRefreshNote by mutableStateOf(settingsRepository.marketRefreshNote())
+        private set
+
+    var marketRefreshNoteAt by mutableStateOf(settingsRepository.marketRefreshNoteAt())
+        private set
+
+    /**
+     * Whether the clock here may start work that spends cloud credits.
+     *
+     * A second switch behind the schedule's own, off until it is turned on, and the only thing
      * standing between the clock and the owner's money. Separate because the two decisions are
-     * separate: letting the phone refresh prices while it is asleep says nothing about letting it
-     * send a paid request.
+     * separate: letting the phone keep a time says nothing about letting it spend money at that
+     * time.
      */
     var paidSchedulesEnabled by mutableStateOf(settingsRepository.paidSchedulesEnabled())
         private set
 
-    fun updateSchedulesEnabled(enabled: Boolean) {
-        if (enabled == schedulesEnabled) return
-        settingsRepository.saveSchedulesEnabled(enabled)
-        schedulesEnabled = enabled
+    fun updateMarketRefreshEnabled(enabled: Boolean) {
+        if (enabled == marketRefreshEnabled) return
+        settingsRepository.saveMarketRefreshEnabled(enabled)
+        marketRefreshEnabled = enabled
         rebookSchedules()
     }
 
@@ -2001,71 +2054,103 @@ class AppState(
         if (enabled == paidSchedulesEnabled) return
         settingsRepository.savePaidSchedulesEnabled(enabled)
         paidSchedulesEnabled = enabled
-        // Nothing to re-book: the alarm is booked for a paid job either way, and the runner is
-        // what refuses it. Booking on the switch would mean a job that vanished from the schedule
-        // rather than one that says why it was passed over.
+        // Nothing to re-book: the alarm is booked for the schedule either way, and the runner is
+        // what refuses to spend. Booking on this switch would mean a schedule that vanished from
+        // the screen rather than one that says why it was passed over.
     }
 
-    fun saveScheduledJob(job: ScheduledJob) {
-        localDataStore.saveScheduledJob(job)
-        scheduledJobs = localDataStore.scheduledJobs()
+    /**
+     * Saves the analysis schedule, re-arming it where the fire it promises has moved.
+     *
+     * Re-armed on a changed time, and on being switched on, because both make the last fire a
+     * promise under a rule that no longer applies: switching on at 07:30 for 07:00 must not owe a
+     * run on the spot and have the grace window pay for it.
+     */
+    fun saveAnalysisSchedule(schedule: AnalysisSchedule) {
+        val moved = schedule.at != analysisSchedule.at ||
+            (schedule.enabled && !analysisSchedule.enabled)
+        settingsRepository.saveAnalysisSchedule(
+            if (moved) schedule.copy(armedAt = Instant.now()) else schedule,
+        )
+        analysisSchedule = settingsRepository.analysisSchedule()
         rebookSchedules()
     }
 
-    fun deleteScheduledJob(id: String) {
-        localDataStore.deleteScheduledJob(id)
-        scheduledJobs = localDataStore.scheduledJobs()
-        rebookSchedules()
+    /**
+     * Moves what is on disk to what replaced it, once, on the first start of the build that did it.
+     *
+     * The rows this reads belonged to a job table that could hold any number of schedules of two
+     * kinds. What is left is a checkbox and one analysis, so what a phone was already asking for is
+     * carried across rather than lost - and then the table goes, because a table nothing reads is
+     * one the next reader of this file has to work out the status of.
+     */
+    private fun migrateSchedules() {
+        if (settingsRepository.schedulesMigrated()) return
+        val carried = ScheduleMigration.from(localDataStore.legacyScheduleRows())
+        if (carried.marketRefresh) settingsRepository.saveMarketRefreshEnabled(true)
+        carried.schedule?.let(settingsRepository::saveAnalysisSchedule)
+        localDataStore.dropScheduledJobs()
+        settingsRepository.markSchedulesMigrated()
+        // Nothing to re-book from here: this runs before the state that would be read, and the
+        // application books the alarm on every launch once the state is built.
     }
 
     /** Books the alarm for whatever is now nearest, after anything that could have moved it. */
-    private fun rebookSchedules() = schedulesChanged(scheduledJobs, schedulesEnabled)
+    private fun rebookSchedules() = schedulesChanged(analysisSchedule, marketRefreshEnabled)
 
     /**
-     * Serves every schedule whose fire has come and gone unanswered, then books the next alarm.
+     * Does whatever the clock owes, then books the next alarm.
      *
      * The entry point for the worker the alarm wakes, and the only one: re-booking from in here
-     * means a run can never leave the phone without an alarm for the fire after it.
+     * means a run can never leave the phone without an alarm for the fire after it. Prices first,
+     * because that is the free half and it finishes in seconds - an analysis that goes on to take
+     * a quarter of an hour must not hold up a fetch the market is moving underneath.
      */
     suspend fun runDueScheduledJobs() {
+        runDueMarketRefresh()
         JobRunner(
-            jobs = localDataStore::scheduledJobs,
-            record = localDataStore::saveScheduledJob,
-            schedulesEnabled = settingsRepository::schedulesEnabled,
+            schedule = settingsRepository::analysisSchedule,
+            record = settingsRepository::saveAnalysisSchedule,
             paidWorkAllowed = settingsRepository::paidSchedulesEnabled,
-        ).runDue(::performScheduledWork)
-        scheduledJobs = localDataStore.scheduledJobs()
-        schedulesEnabled = settingsRepository.schedulesEnabled()
+        ).runDue(::runScheduledAnalysis)
+        analysisSchedule = settingsRepository.analysisSchedule()
+        marketRefreshEnabled = settingsRepository.marketRefreshEnabled()
         rebookSchedules()
     }
 
     /**
-     * Does one job's work, through exactly the path a press on screen would take.
+     * The market-hours price fetch, through exactly the path the button on screen takes.
      *
-     * Given the moment the job came due rather than the moment it actually started, because a run
-     * that is late still has to reason about the slot it is filling.
+     * A second implementation of a refresh would be a second set of rules about what is fetched,
+     * what is re-scored and what the record then says - and the one that drifted would be this
+     * one, because nobody is watching it.
+     *
+     * Every fire that gets this far writes a line, including the ones that did nothing. A run
+     * recorded as "Skipped - a refresh was already running" is diagnosable; a blank screen on an
+     * afternoon it should have fetched is not, and silence is how this feature fails.
      */
-    private suspend fun performScheduledWork(work: JobWork, due: Instant): String = when (work) {
-        JobWork.PriceRefresh -> {
-            // A session's prices settle once and stay settled, so a refresh that already happened
-            // after this fire came due has done this job's work for it. Without the check, opening
-            // the app inside a missed job's grace window fetches every stock twice within seconds -
-            // once for the launch, once for the job - from a public feed the app is a guest on.
-            if (settingsRepository.lastPriceRefreshAt() >= due.toEpochMilli()) {
-                throw JobSkipped("Prices had already been fetched since this run came due.")
-            }
+    private suspend fun runDueMarketRefresh() {
+        if (!settingsRepository.marketRefreshEnabled()) return
+        val last = settingsRepository.lastPriceRefreshAt()
+            .takeIf { it > 0L }
+            ?.let(Instant::ofEpochMilli)
+        // Null covers all three ways to owe nothing: outside a session, past the slot's grace, or
+        // already fetched since it came due - the last of which is what stops opening the app
+        // inside a missed slot fetching every stock twice within seconds.
+        MarketRefresh.dueFire(Instant.now(), last) ?: return
+        val note = try {
             val outcome = refreshPrices(announce = false)
-            if (outcome.busy) throw JobSkipped(outcome.summary)
-            // A partial answer is still an answer and is recorded as one; only a refresh that threw
-            // or found nothing to fetch is worth a reader's attention the next morning.
-            if (!outcome.succeeded) error(outcome.summary)
-            outcome.summary
+            if (outcome.busy) "Skipped - a refresh was already running." else outcome.summary
+        } catch (cancelled: CancellationException) {
+            // The process is going away underneath us. Nothing to record: the slot was not served,
+            // and the next one is a quarter of an hour off.
+            throw cancelled
+        } catch (error: Exception) {
+            error.message ?: "The fetch failed."
         }
-
-        is JobWork.Analysis -> runScheduledAnalysis(work, due)
-
-        // Never reached: the runner refuses a job this build cannot run before it gets this far.
-        is JobWork.Unsupported -> error("This version cannot run ${work.kind}.")
+        settingsRepository.recordMarketRefreshNote(note)
+        marketRefreshNote = note
+        marketRefreshNoteAt = settingsRepository.marketRefreshNoteAt()
     }
 
     /**
@@ -2076,7 +2161,7 @@ class AppState(
      * separate way of being wrong that costs a real request, and every one of them ends in
      * [JobSkipped] - written down, not charged, and tried again at the next fire.
      */
-    private suspend fun runScheduledAnalysis(work: JobWork.Analysis, due: Instant): String {
+    private suspend fun runScheduledAnalysis(schedule: AnalysisSchedule, due: Instant): String {
         if (analysisStatus == AnalysisStatus.RUNNING) {
             throw JobSkipped("A run was already going when this one came due.")
         }
@@ -2089,7 +2174,7 @@ class AppState(
         if (!awaitTelegramReady()) {
             throw JobSkipped("Telegram was not ready in time to read the chats.")
         }
-        val plan = work.plan()
+        val plan = schedule.plan()
         val window = resolveAnalysisWindow(plan.mode, plan.targetDate)
         // The session a run is for flips at 14:30 Cairo. A fire delayed across that line - by Doze,
         // by a phone that was off, by the grace window doing its job - would quietly analyse the
@@ -2340,10 +2425,13 @@ class AppState(
                 summary = "Priced ${refresh.priced}/${refresh.requested}" +
                     if (notes.isEmpty()) "" else " · ${notes.joinToString(" · ")}",
                 succeeded = true,
-                clean = notes.isEmpty(),
             )
+            // A partial answer is still an answer, which is what a scheduled run files as well.
+            // The notes are in the text and the Price feed card names the stocks behind them, so
+            // reporting the run itself as a failure said nothing extra and said it in red - on
+            // every ordinary refresh, because a feed with stocks it cannot serve is the normal day.
             if (announce) {
-                statusMessage = StatusMessage(outcome.summary, succeeded = outcome.clean)
+                statusMessage = StatusMessage(outcome.summary, succeeded = true)
             }
             return outcome
         } catch (error: CancellationException) {
@@ -2971,9 +3059,9 @@ class AppState(
      * to choose them would be a second answer to what a run covers. Null when the screen has
      * nothing selected, which is a schedule there is no point offering.
      */
-    fun scheduledAnalysisFromScreen(): JobWork.Analysis? {
+    fun scheduledAnalysisFromScreen(): AnalysisAim? {
         val plan = screenPlan()
-        return if (plan.isEmpty) null else JobWork.Analysis(plan.channels, plan.contentTypes)
+        return if (plan.isEmpty) null else AnalysisAim(plan.channels, plan.contentTypes)
     }
 
     /** What the Analyze screen is currently set to run. */
@@ -3305,16 +3393,15 @@ internal fun String.sanitizedCredential(): String =
 /**
  * What a price refresh did, in one line.
  *
- * Two verdicts rather than one, because two readers want different answers from the same run.
- * [clean] colours the status line: a refresh that came back with three stocks unpriced worked, and
- * painting that red would be wrong. [succeeded] is what a scheduled job files, and there a partial
- * answer is still an answer - only a refresh that threw, or found nothing to fetch, is worth
- * anyone's attention the next morning.
+ * One verdict, read the same way by both its readers: a partial answer is still an answer. A
+ * refresh that came back with three stocks unpriced worked, and neither the status line nor the
+ * record a scheduled job leaves behind should call it anything else - only a refresh that threw, or
+ * found nothing to fetch, is worth anyone's attention the next morning. What was imperfect about it
+ * is in [summary], and which stocks and why is on the Price feed card in Settings.
  */
 data class PriceRefreshOutcome(
     val summary: String,
     val succeeded: Boolean,
-    val clean: Boolean = false,
     /**
      * True where nothing was fetched because a refresh was already under way.
      *

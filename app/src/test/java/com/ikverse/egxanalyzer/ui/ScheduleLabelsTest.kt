@@ -1,318 +1,230 @@
 package com.ikverse.egxanalyzer.ui
 
 import com.ikverse.egxanalyzer.model.AnalysedChannel
+import com.ikverse.egxanalyzer.model.AnalysisAim
 import com.ikverse.egxanalyzer.model.AnalysisContentType
+import com.ikverse.egxanalyzer.model.AnalysisSchedule
 import com.ikverse.egxanalyzer.model.JobOutcome
-import com.ikverse.egxanalyzer.model.JobTrigger
-import com.ikverse.egxanalyzer.model.JobWork
 import com.ikverse.egxanalyzer.model.ScheduleClock
-import com.ikverse.egxanalyzer.model.ScheduledJob
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.DayOfWeek
 import java.time.Instant
-import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 
 /**
- * The lines that say whether a schedule is alive.
+ * The sentences this feature is judged by.
  *
- * Worth testing for the same reason the schedule exists at all: the failure mode here is silence.
- * Nothing fires, nothing says so, and the only way to notice from the outside is a card claiming a
- * next run. A card that says "next Sunday 18:00" over a switch that is off, or over a job this
- * build cannot run, is worse than one that says nothing - it is the app reporting a promise it has
- * no intention of keeping.
+ * Nothing here computes anything the app depends on; all of it is what the reader is told, which
+ * on a feature whose failure mode is silence is the part that decides whether a broken phone is
+ * ever noticed. A line promising "Next Sun 07:00" over a run that is going to be passed over is
+ * the app misleading the one person who could fix it.
+ *
+ * 2026-08-20 is a Thursday.
  */
 class ScheduleLabelsTest {
 
-    private val cairo = ScheduleClock.ZONE
-
-    private fun at(date: String, time: String): Instant =
-        LocalDate.parse(date).atTime(LocalTime.parse(time)).atZone(cairo).toInstant()
-
-    /** Thursday 20 August 2026, mid-morning. */
-    private val now = at("2026-08-20", "09:00")
-
-    private val evenings = JobTrigger.Repeat(ScheduleClock.tradingDays, LocalTime.of(18, 0))
-
-    private fun job(
-        name: String = "Evening prices",
-        enabled: Boolean = true,
-        trigger: JobTrigger = evenings,
-        work: JobWork = JobWork.PriceRefresh,
-        lastFiredAt: Instant? = null,
-        lastOutcome: JobOutcome = JobOutcome.NEVER,
-        lastMessage: String? = null,
-    ) = ScheduledJob(
-        id = name,
-        name = name,
-        enabled = enabled,
-        trigger = trigger,
-        work = work,
-        lastFiredAt = lastFiredAt,
-        lastOutcome = lastOutcome,
-        lastMessage = lastMessage,
-        createdAt = Instant.EPOCH,
-    )
+    private val morning = LocalTime.of(7, 0)
+    private val now = at("2026-08-20", "06:00")
 
     @Test
-    fun `a moment near today is said the way a reader would say it`() {
-        assertEquals("today 18:00", whenLabel(at("2026-08-20", "18:00"), now))
-        assertEquals("tomorrow 07:30", whenLabel(at("2026-08-21", "07:30"), now))
-        assertEquals("yesterday 18:00", whenLabel(at("2026-08-19", "18:00"), now))
-    }
-
-    @Test
-    fun `a moment inside the week is named by its day`() {
-        assertEquals("Sun 18:00", whenLabel(at("2026-08-23", "18:00"), now))
-        assertEquals("last Sun 18:00", whenLabel(at("2026-08-16", "18:00"), now))
-    }
-
-    @Test
-    fun `past a week the reader needs the date, not the weekday`() {
-        // Seven days out, "Thu" would be true of today as well and says nothing about which one.
-        assertEquals("2026-08-27 18:00", whenLabel(at("2026-08-27", "18:00"), now))
-        assertEquals("2026-08-06 18:00", whenLabel(at("2026-08-06", "18:00"), now))
-    }
-
-    @Test
-    fun `the time is read off the exchange's clock, not the phone's`() {
-        // The same instant, asked for in Cairo. A phone in another zone must not shift the hour a
-        // schedule reports, or the card disagrees with the alarm that is actually booked.
-        val eighteenCairo = at("2026-08-20", "18:00")
-        assertEquals("today 18:00", whenLabel(eighteenCairo, now, cairo))
-    }
-
-    @Test
-    fun `the summary leads with whatever is actually stopping the schedules`() {
-        val one = listOf(job())
-        assertEquals("Nothing scheduled.", scheduleSummary(emptyList(), true, now))
-        assertEquals("Schedules are switched off on this phone.", scheduleSummary(one, false, now))
-        // Not just "nothing will run" - the reason, because it is the thing the reader has to
-        // undo, and the card is the only place they would see it.
+    fun `a schedule with nothing wrong names its next fire`() {
+        assertEquals("Next today 07:00", nextRunLine(schedule(), now))
         assertEquals(
-            "Nothing will run - Switched off.",
-            scheduleSummary(listOf(job(enabled = false)), true, now),
+            "Next Sun 07:00",
+            nextRunLine(schedule(), at("2026-08-20", "08:00")),
         )
     }
 
     @Test
-    fun `the card and the row never disagree about one job`() {
-        val paid = job("Morning analysis", work = analysisWork("Signals"))
-        // The row says the paid switch is off. The card used to promise a next run for the same
-        // job, because it only looked at whether the job was enabled - so the app said two
-        // different things about one schedule on one screen.
+    fun `what is blocking it is said instead of a time it will never reach`() {
+        assertEquals("Switched off", nextRunLine(schedule(enabled = false), now))
+        assertEquals(
+            "No chats chosen yet",
+            nextRunLine(schedule(channels = emptyList()), now),
+        )
         assertEquals(
             "Paid runs are switched off",
-            nextRunLine(paid, true, now, paidAllowed = false),
+            nextRunLine(schedule(), now, paidAllowed = false),
         )
-        assertEquals(
-            "Nothing will run - Paid runs are switched off.",
-            scheduleSummary(listOf(paid), true, now, paidAllowed = false),
-        )
-    }
-
-    @Test
-    fun `the summary names the job that runs next, not just the time`() {
-        val evening = job("Evening prices")
-        val morning = job("Morning prices", trigger = JobTrigger.Repeat(ScheduleClock.tradingDays, LocalTime.of(7, 0)))
-        // 07:00 is already past at 09:00, so the evening one leads even though it is listed second.
-        assertEquals(
-            "Next: Evening prices today 18:00",
-            scheduleSummary(listOf(morning, evening), true, now),
-        )
-    }
-
-    @Test
-    fun `a job this build cannot run is never counted as the next one`() {
-        val foreign = job("Morning analysis", work = JobWork.Unsupported("ANALYSIS"))
-        assertEquals(
-            "Nothing will run - This version cannot run it.",
-            scheduleSummary(listOf(foreign), true, now),
-        )
-    }
-
-    @Test
-    fun `a spent one-shot leaves nothing to promise`() {
-        val once = job(
-            trigger = JobTrigger.Once(LocalDateTime.parse("2026-08-19T06:00")),
-            lastFiredAt = at("2026-08-19", "06:00"),
-        )
-        assertEquals("Nothing left to run.", scheduleSummary(listOf(once), true, now))
-        assertEquals("Done - it only ran once", nextRunLine(once, true, now))
-    }
-
-    @Test
-    fun `a job says why it will not run rather than when it would have`() {
-        assertEquals(
-            "This version cannot run it",
-            nextRunLine(job(work = JobWork.Unsupported("ANALYSIS")), true, now),
-        )
-        assertEquals("Schedules are off on this phone", nextRunLine(job(), false, now))
-        assertEquals("Switched off", nextRunLine(job(enabled = false), true, now))
-        assertEquals("Next today 18:00", nextRunLine(job(), true, now))
-    }
-
-    @Test
-    fun `the last run line says which schedule, when, and what came of it`() {
-        val ran = job(
-            lastFiredAt = at("2026-08-19", "18:00"),
-            lastOutcome = JobOutcome.SUCCEEDED,
-            lastMessage = "Priced 42/45",
-        )
-        assertEquals("Evening prices · yesterday 18:00 · Priced 42/45", lastRunLine(ran, now))
-    }
-
-    @Test
-    fun `a schedule that cannot work is refused before it is saved`() {
-        val cairoNow = LocalDateTime.parse("2026-08-20T09:00")
-        assertEquals("Give the schedule a name.", triggerProblem(evenings, "  ", cairoNow))
-        assertEquals(
-            "Choose at least one day.",
-            triggerProblem(JobTrigger.Repeat(emptySet(), LocalTime.of(18, 0)), "Prices", cairoNow),
-        )
-        assertEquals(
-            "That moment has passed. Choose a date and time still ahead.",
-            triggerProblem(
-                JobTrigger.Once(LocalDateTime.parse("2026-08-20T08:00")),
-                "One off",
-                cairoNow,
-            ),
-        )
-        assertNull(triggerProblem(evenings, "Evening prices", cairoNow))
-        assertNull(
-            triggerProblem(
-                JobTrigger.Once(LocalDateTime.parse("2026-08-20T18:00")),
-                "One off",
-                cairoNow,
-            ),
-        )
-    }
-
-    @Test
-    fun `an outcome is coloured by whether anyone needs to do something about it`() {
-        assertEquals(StatusTone.GOOD, JobOutcome.SUCCEEDED.tone())
-        assertEquals(StatusTone.BAD, JobOutcome.FAILED.tone())
-        // Missed is red too: it means the phone was asleep when it mattered, which is the one
-        // thing about a schedule the owner would want to know.
-        assertEquals(StatusTone.BAD, JobOutcome.MISSED.tone())
-        // Skipped is not. The job looked, there was nothing to do, and that is it working.
-        assertEquals(StatusTone.NEUTRAL, JobOutcome.SKIPPED.tone())
-        assertEquals(StatusTone.NEUTRAL, JobOutcome.NEVER.tone())
-    }
-
-    @Test
-    fun `a job named for one weekday still reads as that weekday`() {
-        val mondays = job(trigger = JobTrigger.Repeat(setOf(DayOfWeek.MONDAY), LocalTime.of(7, 30)))
-        assertEquals("Next Mon 07:30", nextRunLine(mondays, true, now))
-    }
-
-    private fun analysisWork(vararg names: String) = JobWork.Analysis(
-        channels = names.mapIndexed { index, name -> AnalysedChannel(index.toLong(), name) },
-        contentTypes = setOf(AnalysisContentType.IMAGES),
-    )
-
-    @Test
-    fun `a schedule names the chats it covers, so it can be checked without opening it`() {
-        assertEquals("Signals", coverageLine(analysisWork("Signals")))
-        assertEquals("Signals, Calls", coverageLine(analysisWork("Signals", "Calls")))
-        assertEquals(
-            "Signals, Calls +2 more",
-            coverageLine(analysisWork("Signals", "Calls", "Picks", "Alerts")),
-        )
-    }
-
-    @Test
-    fun `a price refresh has no chats to name`() {
-        // It reads every stock the record already knows about, which is not a list worth printing
-        // on a row - and a line saying nothing is worse than no line.
-        assertNull(coverageLine(JobWork.PriceRefresh))
-        assertNull(coverageLine(JobWork.Unsupported("ANALYSIS")))
-    }
-
-    @Test
-    fun `a paid job says the switch is off rather than promising a run`() {
-        val paid = job(work = analysisWork("Signals"))
-        assertEquals(
-            "Paid runs are switched off",
-            nextRunLine(paid, true, now, paidAllowed = false),
-        )
-    }
-
-    @Test
-    fun `a paid job with no credential says that instead`() {
-        val paid = job(work = analysisWork("Signals"))
         assertEquals(
             "No provider credential saved",
-            nextRunLine(paid, true, now, paidAllowed = true, hasCredential = false),
+            nextRunLine(schedule(), now, hasCredential = false),
         )
-    }
-
-    @Test
-    fun `a job whose chats have all gone says so`() {
-        val paid = job(work = analysisWork("Signals"))
-        // The frozen chat is id 0; the app now knows about 7 and 8 only.
         assertEquals(
             "Its chats are no longer in the app",
-            nextRunLine(paid, true, now, knownChannelIds = setOf(7L, 8L)),
+            nextRunLine(schedule(), now, knownChannelIds = setOf(99L)),
         )
     }
 
+    /**
+     * The order is what the reader has to fix first. A line listing four problems at once fixes
+     * none of them, and telling someone their credential is missing on a schedule that is switched
+     * off is answering a question they have not asked yet.
+     */
     @Test
-    fun `losing one chat of several is not worth a warning`() {
-        val paid = job(work = analysisWork("Signals", "Calls"))
-        // Ids 0 and 1 were frozen; only 1 survives. The run still reads that one, so the card goes
-        // on saying when it happens rather than crying about a schedule that works.
+    fun `the switch is reported before anything the run needs`() {
         assertEquals(
-            "Next today 18:00",
-            nextRunLine(paid, true, now, knownChannelIds = setOf(1L)),
-        )
-    }
-
-    @Test
-    fun `an empty chat list is not evidence that the chats have gone`() {
-        val paid = job(work = analysisWork("Signals"))
-        // Exactly the state of a cold start: the alarm woke the app and Telegram has not loaded
-        // yet. Claiming the schedule is broken here would be the wrong alarm at the worst moment.
-        assertEquals("Next today 18:00", nextRunLine(paid, true, now, knownChannelIds = emptySet()))
-    }
-
-    @Test
-    fun `the switches are reported before anything a job could be waiting on`() {
-        val paid = job(work = analysisWork("Signals"))
-        // Everything is wrong at once. The master switch is what the reader has to fix first, and
-        // a card listing four problems fixes none of them.
-        assertEquals(
-            "Schedules are off on this phone",
-            nextRunLine(paid, false, now, paidAllowed = false, hasCredential = false),
-        )
-    }
-
-    @Test
-    fun `a periodic job names its next slot rather than its window`() {
-        // Mid-morning on a Thursday, so the session is running and the next fire is minutes away.
-        // A card that read "10:00-14:45" would be describing the schedule; the reader wants to
-        // know whether it is about to do something.
-        val periodic = job(
-            name = "Session prices",
-            trigger = JobTrigger.Interval(
-                days = ScheduleClock.tradingDays,
-                everyMinutes = 15,
-                from = ScheduleClock.sessionStart,
-                until = ScheduleClock.sessionEnd,
+            "Switched off",
+            nextRunLine(
+                schedule(enabled = false),
+                now,
+                paidAllowed = false,
+                hasCredential = false,
             ),
         )
-        assertEquals(
-            "Next today 11:15",
-            nextRunLine(periodic, schedulesEnabled = true, now = at("2026-08-20", "11:07")),
-        )
-        // After the close it names the next session's open, three days out over the weekend, which
-        // is the line that shows the market being shut is a thing the schedule knows about.
-        assertEquals(
-            "Next Sun 10:00",
-            nextRunLine(periodic, schedulesEnabled = true, now = at("2026-08-20", "15:00")),
-        )
     }
+
+    /**
+     * An empty chat list is a cold start, not evidence the chats have gone - Telegram has not
+     * loaded yet, and the wrong alarm at the worst moment is worse than none.
+     */
+    @Test
+    fun `a chat list that has not loaded is no opinion`() {
+        assertNull(blockedReason(schedule(), knownChannelIds = emptySet()))
+    }
+
+    @Test
+    fun `losing one chat of several is not losing the schedule`() {
+        val many = schedule(
+            channels = listOf(AnalysedChannel(1, "Signals"), AnalysedChannel(2, "Calls")),
+        )
+        assertNull(blockedReason(many, knownChannelIds = setOf(2L)))
+    }
+
+    @Test
+    fun `the chats are named, and counted past two`() {
+        assertEquals("Signals", coverageLine(schedule()))
+        assertEquals(
+            "Signals, Calls",
+            coverageLine(schedule(channels = channels("Signals", "Calls"))),
+        )
+        assertEquals(
+            "Signals, Calls +2 more",
+            coverageLine(schedule(channels = channels("Signals", "Calls", "Picks", "Alerts"))),
+        )
+        assertNull(coverageLine(schedule(channels = emptyList())))
+    }
+
+    @Test
+    fun `a moment reads relatively near the present and absolutely past it`() {
+        assertEquals("today 07:00", whenLabel(at("2026-08-20", "07:00"), now))
+        assertEquals("tomorrow 07:00", whenLabel(at("2026-08-21", "07:00"), now))
+        assertEquals("yesterday 07:00", whenLabel(at("2026-08-19", "07:00"), now))
+        assertEquals("Sun 07:00", whenLabel(at("2026-08-23", "07:00"), now))
+        assertEquals("2026-09-30 07:00", whenLabel(at("2026-09-30", "07:00"), now))
+    }
+
+    @Test
+    fun `the last run says when and what`() {
+        val ran = schedule().copy(
+            lastFiredAt = at("2026-08-19", "07:00"),
+            lastOutcome = JobOutcome.SUCCEEDED,
+            lastMessage = "Saved 12 calls",
+        )
+        assertEquals("yesterday 07:00 · Saved 12 calls", lastRunLine(ran, now))
+    }
+
+    // ------------------------------------------------------------------ the price checkbox
+
+    @Test
+    fun `switched off, the refresh line says what happens instead`() {
+        val line = marketRefreshLine(enabled = false, note = null, noteAt = 0L, now = now)
+        assertEquals(
+            "Off. Prices are fetched once a day, the first time you open the app.",
+            line.text,
+        )
+        assertFalse(line.warning)
+    }
+
+    /**
+     * The two ways the system can stop this working are said first and in the error colour. A line
+     * reporting a cheerful last fetch over a phone that is going to sleep between them is a line
+     * that lies quietly.
+     */
+    @Test
+    fun `a phone that cannot keep the promise says so before anything else`() {
+        val alarms = marketRefreshLine(
+            enabled = true,
+            note = "Priced 92/92",
+            noteAt = at("2026-08-20", "05:45").toEpochMilli(),
+            now = now,
+            exactAlarms = false,
+        )
+        assertTrue(alarms.warning)
+        assertTrue(alarms.text.startsWith("On, but exact alarms are off"))
+
+        val battery = marketRefreshLine(
+            enabled = true,
+            note = "Priced 92/92",
+            noteAt = at("2026-08-20", "05:45").toEpochMilli(),
+            now = now,
+            batteryExempt = false,
+        )
+        assertTrue(battery.warning)
+        assertTrue(battery.text.contains("put this app to sleep"))
+    }
+
+    /**
+     * Never blank. On the day this is switched on there is nothing to report yet, and an empty
+     * line reads exactly like one that has stopped working.
+     */
+    @Test
+    fun `with nothing fetched yet it still names the next fetch`() {
+        val line = marketRefreshLine(enabled = true, note = null, noteAt = 0L, now = now)
+        assertEquals("On. Nothing fetched yet - next today 10:00.", line.text)
+        assertFalse(line.warning)
+    }
+
+    @Test
+    fun `once it has run it reports the last fetch and the next`() {
+        val line = marketRefreshLine(
+            enabled = true,
+            note = "Priced 92/92",
+            noteAt = at("2026-08-20", "10:15").toEpochMilli(),
+            now = at("2026-08-20", "10:20"),
+        )
+        assertEquals("Last today 10:15 · Priced 92/92 · next today 10:30", line.text)
+        assertFalse(line.warning)
+    }
+
+    /**
+     * A run that did nothing still writes a line, which is the whole point of keeping one: a
+     * schedule whose last word is "Skipped" is diagnosable, and a blank one is not.
+     */
+    @Test
+    fun `a run that did nothing is still reported`() {
+        val line = marketRefreshLine(
+            enabled = true,
+            note = "Skipped - a refresh was already running.",
+            noteAt = at("2026-08-20", "10:15").toEpochMilli(),
+            now = at("2026-08-20", "10:20"),
+        )
+        assertTrue(line.text.contains("Skipped - a refresh was already running."))
+        assertFalse(line.warning)
+    }
+
+    private fun channels(vararg names: String) =
+        names.mapIndexed { index, name -> AnalysedChannel(index + 1L, name) }
+
+    private fun schedule(
+        enabled: Boolean = true,
+        channels: List<AnalysedChannel> = listOf(AnalysedChannel(1, "Signals")),
+    ) = AnalysisSchedule(
+        enabled = enabled,
+        at = morning,
+        channels = channels,
+        contentTypes = setOf(AnalysisContentType.entries.first()),
+        armedAt = at("2026-08-19", "12:00"),
+    )
+
+    @Suppress("unused")
+    private fun aim(vararg names: String) =
+        AnalysisAim(channels(*names), setOf(AnalysisContentType.entries.first()))
+
+    private fun at(date: String, time: String): Instant =
+        LocalDateTime.parse("${date}T$time").atZone(ScheduleClock.ZONE).toInstant()
 }

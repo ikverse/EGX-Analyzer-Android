@@ -1,7 +1,11 @@
 package com.ikverse.egxanalyzer.data
 
 import android.content.Context
+import com.ikverse.egxanalyzer.model.AnalysedChannel
 import com.ikverse.egxanalyzer.model.AnalysisContentType
+import com.ikverse.egxanalyzer.model.AnalysisSchedule
+import com.ikverse.egxanalyzer.model.JobOutcome
+import com.ikverse.egxanalyzer.model.MarketRefresh
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.CallOrder
@@ -14,6 +18,8 @@ import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.Scoring
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Instant
+import java.time.LocalTime
 
 class SettingsRepository(
     context: Context,
@@ -255,7 +261,7 @@ class SettingsRepository(
     /**
      * The folder the user picked for backups, as the tree URI they granted.
      *
-     * Device-local and never published, for the reason [schedulesEnabled] is not in
+     * Device-local and never published, for the reason [marketRefreshEnabled] is not in
      * [AppPreferences]: a grant belongs to one Android install and means nothing on another phone.
      * Synced, it would point a tablet at a folder it has no permission to write and leave it
      * reporting a backup destination it can do nothing with.
@@ -282,26 +288,133 @@ class SettingsRepository(
     }
 
     /**
-     * Whether this phone runs its schedules.
+     * Whether this phone keeps prices fresh while the market is trading.
+     *
+     * The whole of the configuration: the window and the interval are constants in
+     * [MarketRefresh], because there is one shape of this worth having and the form that let a
+     * user assemble it out of days, windows and intervals was the entire complexity of the
+     * feature it replaced.
      *
      * Deliberately not in [AppPreferences]: everything in there is published to the other devices,
-     * and a schedule that travelled would have every phone doing the same work. This is one
-     * device's own answer, kept beside the settings rather than among them.
+     * and a refresh that travelled would have every phone fetching the same prices from a public
+     * feed the app is a guest on. This is one device own answer, kept beside the settings rather
+     * than among them.
      */
-    fun schedulesEnabled(): Boolean = preferences.getBoolean(KEY_SCHEDULES_ENABLED, false)
+    fun marketRefreshEnabled(): Boolean = preferences.getBoolean(KEY_MARKET_REFRESH, false)
 
-    fun saveSchedulesEnabled(value: Boolean) {
-        preferences.edit().putBoolean(KEY_SCHEDULES_ENABLED, value).apply()
+    fun saveMarketRefreshEnabled(value: Boolean) {
+        preferences.edit().putBoolean(KEY_MARKET_REFRESH, value).apply()
+    }
+
+    /**
+     * What the last market-hours fetch did, and when it said so.
+     *
+     * Written on every fire including the ones that did nothing, which is the point of it. The
+     * failure mode of every scheduler on this platform is silence - the phone puts the app to
+     * sleep, nothing fires, and nothing says so - and the only way to tell that from the outside
+     * is a line that is never blank. [lastPriceRefreshAt] cannot serve: it moves only when prices
+     * were actually fetched, so a run that skipped or failed would leave the screen reporting the
+     * last success as though it had just happened.
+     */
+    fun marketRefreshNote(): String? = preferences.getString(KEY_MARKET_REFRESH_NOTE, null)
+
+    fun marketRefreshNoteAt(): Long = preferences.getLong(KEY_MARKET_REFRESH_NOTE_AT, 0L)
+
+    fun recordMarketRefreshNote(note: String) {
+        preferences.edit()
+            .putString(KEY_MARKET_REFRESH_NOTE, note)
+            .putLong(KEY_MARKET_REFRESH_NOTE_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+    /**
+     * The one analysis this phone runs on its own.
+     *
+     * Here rather than in the database, and one rather than a table, for the reason the switch
+     * above is here: it is this device own answer and it is never published. A stored value that
+     * will not parse comes back as the default - switched off - rather than throwing, because an
+     * unreadable schedule must not take the screen that draws it down with it.
+     */
+    fun analysisSchedule(): AnalysisSchedule = runCatching {
+        val stored = preferences.getString(KEY_ANALYSIS_SCHEDULE, null)
+            ?: return@runCatching AnalysisSchedule()
+        val json = JSONObject(stored)
+        AnalysisSchedule(
+            enabled = json.optBoolean("enabled", false),
+            at = LocalTime.parse(json.getString("at")),
+            channels = json.optJSONArray("channels").objectList().map {
+                AnalysedChannel(it.getLong("id"), it.getString("name"))
+            },
+            contentTypes = json.optJSONArray("contentTypes").stringList()
+                .mapNotNullTo(mutableSetOf()) { name ->
+                    AnalysisContentType.entries.firstOrNull { it.name == name }
+                },
+            lastFiredAt = json.optLong("lastFiredAt", 0L)
+                .takeIf { it > 0L }
+                ?.let(Instant::ofEpochMilli),
+            lastOutcome = JobOutcome.entries
+                .firstOrNull { it.name == json.optString("lastOutcome") }
+                ?: JobOutcome.NEVER,
+            lastMessage = json.optString("lastMessage").takeIf(String::isNotBlank),
+            armedAt = Instant.ofEpochMilli(json.optLong("armedAt", 0L)),
+        )
+    }.getOrDefault(AnalysisSchedule())
+
+    fun saveAnalysisSchedule(schedule: AnalysisSchedule) {
+        val json = JSONObject()
+            .put("enabled", schedule.enabled)
+            .put("at", schedule.at.toString())
+            .put(
+                "channels",
+                JSONArray().apply {
+                    schedule.channels.forEach {
+                        put(JSONObject().put("id", it.id).put("name", it.name))
+                    }
+                },
+            )
+            .put(
+                "contentTypes",
+                JSONArray().apply { schedule.contentTypes.forEach { put(it.name) } },
+            )
+            .put("lastFiredAt", schedule.lastFiredAt?.toEpochMilli() ?: 0L)
+            .put("lastOutcome", schedule.lastOutcome.name)
+            .put("lastMessage", schedule.lastMessage.orEmpty())
+            .put("armedAt", schedule.armedAt.toEpochMilli())
+        preferences.edit().putString(KEY_ANALYSIS_SCHEDULE, json.toString()).apply()
+    }
+
+    /**
+     * Whether the one-time move off the old job table has happened.
+     *
+     * A flag rather than a look at the table, because the migration job is to leave that table
+     * gone: asking whether there are rows would answer no both before it has run on a phone that
+     * never had any and after it has run on one that did, and the difference matters exactly once.
+     */
+    fun schedulesMigrated(): Boolean = preferences.getBoolean(KEY_SCHEDULES_MIGRATED, false)
+
+    fun markSchedulesMigrated() {
+        preferences.edit().putBoolean(KEY_SCHEDULES_MIGRATED, true).apply()
+    }
+
+    private fun JSONArray?.objectList(): List<JSONObject> {
+        val array = this ?: return emptyList()
+        return (0 until array.length()).map(array::getJSONObject)
+    }
+
+    private fun JSONArray?.stringList(): List<String> {
+        val array = this ?: return emptyList()
+        return (0 until array.length()).map(array::getString)
     }
 
     /**
      * Whether a schedule on this phone may start work that spends cloud credits.
      *
-     * A second switch behind [schedulesEnabled] rather than a property of the job, and off until it
-     * is turned on. Free work proves the alarms, the reboots and whatever the phone's battery
-     * manager does to a sleeping app; only once that is believable is it reasonable to let the same
-     * machinery send a paid request while nobody is watching. Device-local for the same reason
-     * every other schedule setting is - see [schedulesEnabled].
+     * A second switch behind the schedule own one, and off until it is turned on. The free
+     * market-hours refresh proves the alarms, the reboots and whatever the phone battery
+     * manager does to a sleeping app; only once that is believable is it reasonable to let the
+     * same machinery send a paid request while nobody is watching. Arming the clock to spend
+     * money later is the same act as spending it, so it needs the owner own hand. Device-local
+     * for the same reason [marketRefreshEnabled] is.
      */
     fun paidSchedulesEnabled(): Boolean = preferences.getBoolean(KEY_PAID_SCHEDULES, false)
 
@@ -492,7 +605,11 @@ class SettingsRepository(
         const val KEY_LAST_PRICE_REFRESH_AT = "last_price_refresh_at"
         const val KEY_BACKUP_FOLDER = "backup_folder"
         const val KEY_LAST_BACKUP_DAY = "last_backup_day"
-        const val KEY_SCHEDULES_ENABLED = "schedules_enabled"
+        const val KEY_MARKET_REFRESH = "market_refresh_enabled"
+        const val KEY_MARKET_REFRESH_NOTE = "market_refresh_note"
+        const val KEY_MARKET_REFRESH_NOTE_AT = "market_refresh_note_at"
+        const val KEY_ANALYSIS_SCHEDULE = "analysis_schedule"
+        const val KEY_SCHEDULES_MIGRATED = "schedules_migrated"
         const val KEY_PAID_SCHEDULES = "paid_schedules_enabled"
         const val KEY_OPINION_SEARCH = "opinion_search_enabled"
         const val KEY_OPINION_NEWS_WINDOW = "opinion_news_window_days"

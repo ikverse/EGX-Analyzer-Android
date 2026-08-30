@@ -17,12 +17,12 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 
 /**
- * Runs whatever the schedules owe, once the alarm has woken the phone.
+ * Runs whatever the clock owes, once the alarm has woken the phone.
  *
  * Goes through the app's own AppState rather than reaching for the repositories directly, which is
  * the opposite of what OverdueWorker does and is deliberate. That worker answers a question out of
  * the database and touches nothing else, so borrowing the whole app would have dragged a Telegram
- * session up for an arithmetic comparison. A scheduled job does the same work a button on screen
+ * session up for an arithmetic comparison. A scheduled run does the same work a button on screen
  * does - and a second implementation of a price refresh is a second set of rules about what gets
  * fetched, what gets re-scored afterwards and what the record then says. One of the two would
  * eventually be wrong, and it would be this one, because nobody is watching it.
@@ -40,27 +40,26 @@ class ScheduledJobWorker(
             ?: return@runCatching Result.success()
         val paid = paidWorkIsDue()
         // Said before the state is first touched, because that is when it is read and the state is
-        // built by whoever asks for it first. Free work - which is every price refresh - brings up
-        // no Telegram session, no sync and no update check; an analysis needs all three, so a wake
-        // that owes one starts the app in full exactly as it always did. Asked of the same
-        // question that decides the foreground notification, so the two can never disagree about
-        // what this wake is for.
+        // built by whoever asks for it first. A price refresh brings up no Telegram session, no
+        // sync and no update check; an analysis needs all three, so a wake that owes one starts
+        // the app in full exactly as it always did. Asked of the same question that decides the
+        // foreground notification, so the two can never disagree about what this wake is for.
         if (!paid) application.startedForSchedule = true
         if (paid) goForeground()
         // AppState is Compose state driven from the main thread; the run itself suspends onto IO
         // inside the repositories, exactly as it does when a screen starts it.
         withContext(Dispatchers.Main) { application.appState.runDueScheduledJobs() }
         Result.success()
-        // Never retried. Each job has already written down what happened to it, a retry ten
-        // minutes later would be answering a fire that has passed, and the schedule's own next
-        // run is the only retry that makes sense.
+        // Never retried. Whatever ran has already written down what happened to it, a retry ten
+        // minutes later would be answering a fire that has passed, and the next fire is the only
+        // retry that makes sense.
     }.getOrDefault(Result.success())
 
     /**
-     * Whether anything owed right now is going to send a paid request.
+     * Whether what is owed right now is going to send a paid request.
      *
      * Asked before the run rather than during it, because what it decides - going foreground - has
-     * to be settled before the long part starts. A free refresh finishes well inside WorkManager's
+     * to be settled before the long part starts. A price refresh finishes well inside WorkManager's
      * ordinary window and has no business putting a notification on the phone.
      */
     private fun paidWorkIsDue(): Boolean {
@@ -68,11 +67,8 @@ class ScheduledJobWorker(
             applicationContext,
             AndroidKeystoreCredentialStore(applicationContext),
         )
-        if (!settings.schedulesEnabled() || !settings.paidSchedulesEnabled()) return false
-        val now = Instant.now()
-        return LocalDataStore(applicationContext).scheduledJobs().any { job ->
-            job.work.spendsCredits && ScheduleClock.unservedFire(job, now) != null
-        }
+        if (!settings.paidSchedulesEnabled()) return false
+        return ScheduleClock.unservedFire(settings.analysisSchedule(), Instant.now()) != null
     }
 
     /**
@@ -105,7 +101,7 @@ class ScheduledJobWorker(
         private const val NAME = "scheduled-jobs"
 
         /**
-         * Asks for the owed jobs to be run.
+         * Asks for whatever is owed to be run.
          *
          * KEEP, so an alarm landing on top of a boot does not queue the same sweep twice. It would
          * be harmless - a fire already served is skipped by the runner - but the second one would
@@ -116,7 +112,7 @@ class ScheduledJobWorker(
                 NAME,
                 ExistingWorkPolicy.KEEP,
                 OneTimeWorkRequestBuilder<ScheduledJobWorker>()
-                    // Everything schedulable so far reaches the network. Waiting for one beats
+                    // Both things the clock can owe reach the network. Waiting for one beats
                     // recording a failure against a phone that was simply out of signal.
                     .setConstraints(
                         Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build(),

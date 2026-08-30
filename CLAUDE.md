@@ -110,13 +110,15 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   the one figure layout and the one set of date patterns, for every screen that draws either.
 - `ui/EgxAnalyzerApp.kt` holds `AppHeader` and `AppStatusLine` — the app's name, and the one line
   that says what it is doing or has just done. See **The status line** below.
-- `model/ScheduleClock.kt` + `model/ScheduledJob.kt` — when a scheduled job fires, and what one is.
-- `model/AnalysisPlan.kt` — what a run covers, said explicitly, so the screen and the scheduler
-  build the same request. See **Schedules** below.
+- `model/ScheduleClock.kt` + `model/MarketRefresh.kt` + `model/AnalysisSchedule.kt` — when the
+  two things this phone does on its own fire, and what the analysis one is.
+- `model/AnalysisPlan.kt` — what a run covers, said explicitly, so the screen and the clock build
+  the same request. See **What this phone does on its own** below.
 - `data/JobScheduler.kt` + `data/ScheduleReceiver.kt` + `data/ScheduledJobWorker.kt` +
-  `data/JobRunner.kt` — the alarm, the four things that mean re-book it, and what runs. See below.
-- `ui/SchedulesSection.kt` + `ui/SchedulesSheet.kt` — the card on Analyze, the section in Settings,
-  and the sheet both open.
+  `data/JobRunner.kt` + `data/ScheduleMigration.kt` — the alarm, the things that mean re-book it,
+  what runs, and the one-time move off the old job table. See below.
+- `ui/SchedulesSection.kt` — the analysis card on Analyze and the section in Settings.
+  `ui/PriceFeedSection.kt` carries the price-refresh checkbox.
 - `data/OpinionPrompt.kt` + `data/OpinionPromptStore.kt` + `data/OpinionSearchBrief.kt` +
   `data/OpinionParser.kt` + `ui/StockOpinionSheet.kt` — Ask AI, on a call card in Insights.
   See below.
@@ -832,7 +834,8 @@ trade is then managed, in whatever state it has reached.
 - `OverdueWorker` runs once a day while the app is closed: no network, no Telegram, and it must
   never start an analysis. It reads `LocalDataStore` directly rather than through `AppState`, which
   would drag a Telegram session up with it. It is no longer the only thing that runs
-  while the app is closed — see **Schedules** below, which reverses that rule deliberately. It now
+  while the app is closed — see **What this phone does on its own** below, which reverses that
+  rule deliberately. It now
   answers **two** questions off the one portfolio it builds: what is overdue, and what the calendar
   has quietly closed since yesterday — a window runs out because a date passed, and on a phone that
   opened nothing and refreshed nothing there is no other moment at which anyone would notice. So it
@@ -852,7 +855,8 @@ trade is then managed, in whatever state it has reached.
 
 The Portfolio has always known — it re-derives every status from the prices on disk — and that was
 exactly the gap, because it only knew it to someone who opened it. Prices now refresh through the
-session on their own (see **Schedules**), so a target reached at eleven in the morning was being
+session on their own (see **What this phone does on its own**), so a target reached at eleven
+in the morning was being
 answered correctly by a screen nobody was looking at.
 
 - **The one thing that had to be stored is what the user has already been told.** A status is a
@@ -1506,110 +1510,129 @@ phone only by plugging it into the machine that built it. It reads one public UR
 - **The launch check speaks only when there is something new**, exactly like the launch sync. It is
   independent of Telegram, so it does not wait for a session. Failures are silent: being offline is
   not news. Switchable off in Settings, and the switch travels with the rest.
-- **The updater adds nothing to the background.** The one thing that does is **Schedules** below.
+- **The updater adds nothing to the background.** The one thing that does is **What this phone
+  does on its own** below.
 
-## Schedules
+## What this phone does on its own
 
-Work this phone does on its own, at a time the user chose. This is the one feature that reverses a
-rule the app had held since the beginning — that nothing but `OverdueWorker` runs while the app is
-closed. It was built free-first on purpose — the whole machinery shipped carrying nothing but a
-price refresh, so alarms, reboots and whatever the phone's battery manager does to a sleeping app
-were proved on work that costs nothing before any of it was trusted with work that bills.
+Two things, each a checkbox. This is the one feature that reverses a rule the app had held since
+the beginning — that nothing but `OverdueWorker` runs while the app is closed.
 
-**Two switches, and both have to be on.** `schedulesEnabled` runs schedules at all;
-`paidSchedulesEnabled` lets one send a paid request, and is what stands between the clock and the
-owner's money. `JobRunner.paidWorkAllowed` **defaults to refusing**, which is the point: a paid job
-type cannot arm itself by existing, and a caller that wants one has to say so. A paid job whose
-switch is off is passed over and says so on its card - it is not hidden, and it is not run.
+It used to be a general scheduler: a table of jobs, each with a name, a kind of work, and a choice
+of firing once, on chosen weekdays, or repeatedly inside a window, set up through a form of about
+nine hundred lines. Every part of that generality was paid for in a screen nobody got through, and
+it bought exactly two answers — keep prices fresh while the market is trading, and read the chats
+before the open. So the window and the interval of the first became constants, the second became a
+time, and the form went. `ScheduledJob`, `JobTrigger`, `JobWork` and the `scheduled_jobs` table are
+all gone with it.
 
-- **A job is a saved configuration plus a trigger.** `ScheduledJob` in `model/ScheduledJob.kt`:
-  a `JobTrigger` (`Once` at a date and time, or `Repeat` over a set of days at a clock time), a
-  `JobWork` (`PriceRefresh`, free; `Analysis`, paid), a grace window, and what became of the last
-  fire. The work's own settings live in a JSON column rather than columns of their own, so the next
-  job type is a new key and not another migration.
-- **Device-local, and never synced.** Everything else the app records travels through the sync
-  channel; a schedule must not, because three phones keeping one schedule is the same work done
-  three times — and once analyses can be scheduled, three times the bill for one answer. Nothing in
-  `*Sync.kt` reads `scheduled_jobs`, and the master switch is deliberately **outside**
-  `AppPreferences` (which is published) as `SettingsRepository.schedulesEnabled`.
+- **Keeping prices fresh** — `model/MarketRefresh.kt`, switched on in Settings under Price feed.
+  Every 15 minutes, Sunday to Thursday, 10:00 to 14:45 Cairo. Free: it reads the same public feed
+  the Fetch prices button does. Fifteen minutes because Android holds
+  `setExactAndAllowWhileIdle` to roughly one alarm every ten while dozing, so anything shorter is
+  not refused, it is quietly stretched — and a schedule that promises a frequency the system will
+  not keep is worse than one that promises less.
+- **The scheduled analysis** — `model/AnalysisSchedule.kt`, on the Analyze card and in Settings.
+  One schedule, a time, and the chats it froze. Paid, and see the guards below.
+
+**The window runs to 14:45, a quarter of an hour past the close.** The exchange stops at 14:30 and
+the day's figures settle over the minutes after it, so a window ending on the bell stores a session
+that is very nearly but not quite final.
+
 - **Cairo time, always.** A schedule belongs to the exchange, not to wherever the phone is: a user
-  who books a run for after the close means after the close in Cairo, and a job that shifted an hour
-  when they landed somewhere would read a session that had not happened.
-- **`ScheduleClock` is the whole of the timekeeping and has no Android in it**, because a rule about
-  what happens at 18:00 next Sunday cannot be checked by waiting for next Sunday. `nextFire` books
-  the alarm, `previousFire`/`unservedFire` decide what is owed, and the zone is a parameter only so
-  a test can drive it through a daylight-saving gap on purpose.
+  who books a run for before the open means before the open in Cairo, and one that shifted an hour
+  when they landed would read a session that had not happened.
+- **`ScheduleClock` and `MarketRefresh` have no Android in them**, because a rule about what
+  happens at 07:00 next Sunday cannot be checked by waiting for next Sunday. The zone is a
+  parameter only so a test can drive it through a daylight-saving gap on purpose.
 - **A fire is compared against the fire last served, never against the wall clock.** `lastFiredAt`
-  stores the *scheduled* moment, so a run that started 20 minutes late still counts as having filled
-  its 18:00 slot — comparing real start times would let one slot fire twice on a phone whose clock
-  moved.
-- **Grace is what makes a schedule work at all**, default two hours. A phone that was off, in Doze
-  or out of signal at the appointed minute is the normal case, and a schedule that fires punctually
-  or not at all mostly does not fire. Past the grace the run is recorded as **missed** rather than
-  started late. Only the most recent unserved fire is ever considered: a week with the phone off
-  comes back owing one run, not seven.
-- **AlarmManager is the clock; WorkManager does the work.** WorkManager's delays are a floor and not
-  a promise — in Doze "18:00" becomes "some time that evening" — so `JobScheduler` books one exact
-  alarm at the earliest fire across every enabled job, and the run that answers it books the next.
-  One alarm rather than one per job: only the nearest matters. `setExactAndAllowWhileIdle` where the
-  user has granted `SCHEDULE_EXACT_ALARM`, falling back to the inexact form where they have not —
-  the app asks rather than declaring `USE_EXACT_ALARM`, which is meant for alarm clocks.
+  stores the *scheduled* moment, so a run that started 20 minutes late still counts as having
+  filled its 07:00 slot — comparing real start times would let one slot fire twice on a phone whose
+  clock moved.
+- **Grace is what makes a schedule work at all.** Two hours for the analysis, which covers a phone
+  left face-down through a night in Doze; one slot for the price refresh, because the next one is
+  never more than a quarter of an hour away and fetching for a slot about to be superseded is a
+  wasted pass over a public feed. Past the grace the analysis records itself as **missed** rather
+  than running late. Only the most recent unserved fire is ever considered: a week with the phone
+  off comes back owing one run, not seven.
+- **A price refresh skips when one has already happened since its fire came due.** Without it,
+  opening the app inside a missed slot's window fetches every stock twice within seconds.
+  Hence `lastPriceRefreshAt` beside `lastPriceRefreshDay` — the day cannot answer "since this fire".
+- **AlarmManager is the clock; WorkManager does the work.** WorkManager's delays are a floor and
+  not a promise — in Doze a fifteen-minute period becomes whenever the system next feels like it —
+  so `JobScheduler` books one exact alarm at the earlier of the two next fires, and the run that
+  answers it books the next. One alarm rather than one each: only the nearest matters.
+  `setExactAndAllowWhileIdle` where the user has granted `SCHEDULE_EXACT_ALARM`, falling back to
+  the inexact form where they have not — the app asks rather than declaring `USE_EXACT_ALARM`,
+  which is meant for alarm clocks.
 - **Four things mean re-book**, all handled by `ScheduleReceiver`: the alarm firing, a reboot, an
-  update replacing the app, and the exact-alarm permission changing. An alarm survives none of the
-  last three, and a schedule nobody re-booked has silently stopped keeping time. Re-booking happens
-  in the receiver, which needs no network — a phone that boots into a tunnel still comes out with
-  its alarm set — while the work goes to WorkManager, which waits for one.
+  update replacing the app, and the exact-alarm permission changing — plus every launch, from
+  `EgxApplication`. An alarm survives none of the first three, and one nobody re-booked has
+  silently stopped keeping time. Re-booking happens in the receiver, which needs no network — a
+  phone that boots into a tunnel still comes out with its alarm set — while the work goes to
+  WorkManager, which waits for one. The receiver sweeps while **either** checkbox is on and
+  cancels only when both are off, the same shape as the daily check and for the same reason.
+- **Device-local, and never synced.** Everything else the app records travels through the sync
+  channel; these must not, because three phones keeping one schedule is the same work done three
+  times — and for an analysis, three times the bill for one answer. Both live in
+  `SettingsRepository` rather than `AppPreferences`, which is published.
 - **`ScheduledJobWorker` goes through `AppState`, which is the opposite of what `OverdueWorker`
   does, and is deliberate.** That worker answers a question out of the database and touches nothing
-  else. A scheduled job does the same work a button on screen does, and a second implementation of a
-  price refresh would be a second set of rules about what is fetched, what is re-scored and what the
-  record then says — one of the two would eventually be wrong, and it would be the one nobody is
-  watching. The cost is that waking the process brings the catalog, the stale-price check and a sync
-  catch-up with it; none of them is paid.
-- **A price refresh skips when one has already happened since its fire came due.** Without it,
-  opening the app inside a missed job's grace window fetches every stock twice within seconds, and
-  the price feed is a public one the app is a guest on. Hence `lastPriceRefreshAt` beside
-  `lastPriceRefreshDay` — the day cannot answer "since this fire".
-- **Every path records an outcome, including the ones that do nothing.** Silence is the failure mode
-  of every scheduler on this platform: the phone puts the app to sleep, nothing fires, and nothing
-  says so. A schedule whose last line reads "Skipped · prices had already been fetched" is
-  diagnosable; a blank one on a morning it should have run is not.
-- **The UI is a sheet, not a sixth tab.** This app has no back stack — five destinations and modal
-  surfaces for everything else — and a screen set up once does not earn permanent navigation weight
-  at 411dp. `SchedulesSection` puts the card on **Analyze**, which is where a run is configured and
-  therefore where a run-with-a-time-on-it belongs; `SchedulesSettingsSection` puts the same sheet in
-  Settings beside the two system permissions that decide whether any of it works.
-- **The two system permissions are shown whether or not they are granted.** Exact alarms, and
-  Samsung's battery optimization, which puts an app it considers unused to sleep and takes every
-  schedule with it. A page that goes quiet once something is right leaves the reader unable to tell
-  "granted" from "the app forgot to check".
-- **A job from a newer build is kept, shown, and never run.** `JobWork.Unsupported` carries the kind
-  **and the raw settings** it could not read, and both are written back unchanged, so a downgrade
-  does not lose a schedule and does not rewrite it into something the build that understands it
-  would no longer recognise. An `ANALYSIS` row whose settings will not parse lands here too, rather
-  than being read as an analysis of no chats — which is a paid request for an empty answer.
+  else. A scheduled run does the same work a button on screen does, and a second implementation of
+  a price refresh would be a second set of rules about what is fetched, what is re-scored and what
+  the record then says — one of the two would eventually be wrong, and it would be the one nobody
+  is watching. The cost is that waking the process brings the catalog, the stale-price check and a
+  sync catch-up with it; none of them is paid.
+- **The status line is never blank.** Silence is the failure mode of every scheduler on this
+  platform: the phone puts the app to sleep, nothing fires, and nothing says so. So every price
+  refresh writes a note including the ones that did nothing, and the two system permissions that
+  would stop it working — exact alarms, and Samsung's battery optimization — are reported in the
+  error colour *ahead of* any cheerful line about the last fetch. `marketRefreshLine` ranks them,
+  and it is unit-tested, because these are the sentences that will be read on the morning somebody
+  wonders why the prices have not moved.
+- **The two system permissions are shown whether or not they are granted.** A page that goes quiet
+  once something is right leaves the reader unable to tell "granted" from "the app forgot to check".
+
+### Moving off the old job table
+
+`ScheduleMigration` runs once, from an `init` block placed deliberately **above** the state it
+writes — Kotlin runs initialisers in source order, and a migration below those properties would be
+overwritten by their own initialisers. It carries an intent across without inventing one:
+
+- An enabled `PRICE_REFRESH` row, whatever its trigger, becomes the checkbox. After the close,
+  hourly, through the session — every one of them was a way of asking the same question.
+- A `REPEAT` `ANALYSIS` row keeps its time, its chats and its switch. A `ONCE` or `INTERVAL` one is
+  dropped: a one-shot is a button press with a delay on it and its moment has passed, and an
+  analysis on an interval was paying for the same session several times over.
+- A carried schedule is **armed at the migration**, so one whose hour has already gone by today
+  does not owe a run the moment the app finishes migrating and pay for it through the grace window.
+- Then `scheduled_jobs` is dropped. A table nothing reads is one the next reader of the file has to
+  work out the status of.
 
 ### The scheduled analysis
 
-- **`AnalysisPlan` exists because a run can now start from two places.** `analyze()` used to read
-  the Analyze screen's fields directly — which chats are ticked, which content types, which target
-  date — and a scheduled run has its own answer to every one. Two functions assembling a request
-  would have been two sets of rules about what gets sent and what the report then claims to cover,
-  and the one that drifted would have been the unattended one. Both paths build a plan and hand it
-  to `executeRun`. Its `onScreen` flag changes **nothing about what is run or saved** — only
-  whether the reader is thrown onto Results and whether the report they had open is swapped. The
-  run state itself is set either way, so the Analyze button shows a scheduled run and cancels it.
+- **Two switches, and both have to be on.** The schedule's own, and `paidSchedulesEnabled`, which
+  is what stands between the clock and the owner's money. `JobRunner.paidWorkAllowed` **defaults to
+  refusing**, which is the point: a caller that wants paid work has to say so. A run whose switch is
+  off is passed over and says so on the card — it is not hidden, and it is not run. Arming the
+  clock to spend money later is the same act as spending it, so it needs the owner's own hand.
+- **`AnalysisPlan` exists because a run can start from two places.** `analyze()` used to read the
+  Analyze screen's fields directly, and a scheduled run has its own answer to every one. Two
+  functions assembling a request would have been two sets of rules about what gets sent, and the
+  one that drifted would have been the unattended one. Both paths build a plan and hand it to
+  `executeRun`. Its `onScreen` flag changes **nothing about what is run or saved** — only whether
+  the reader is thrown onto Results.
 - The plan deliberately **does not carry the provider, model or key**. Those follow Settings at the
   moment the run starts: a schedule that pinned a model would go on sending to one the user had
-  moved off. The **chats and content types are frozen** when the job is made, for the opposite
-  reason — the same reason a position snapshots its levels. Re-ticking chats on Analyze months
+  moved off. The **chats and content types are frozen** when the schedule is aimed, for the opposite
+  reason, and the same one a position snapshots its levels: re-ticking chats on Analyze months
   later must not silently re-aim a run that happens while nobody is watching.
 - Always the **next session**, never a historical date. A repeating schedule re-reading one fixed
   day would pay for the same answer every week.
 - **Four guards, and each is a way of being wrong that costs a real request.** All of them end in
   `JobSkipped` — written down, not charged, tried again at the next fire.
-  - **The session flips at 14:30 Cairo.** A fire delayed across that line — by Doze, by a phone that
-    was off, by the grace window doing exactly what it is for — would buy an analysis of the
+  - **The session flips at 14:30 Cairo.** A fire delayed across that line — by Doze, by a phone
+    that was off, by the grace window doing exactly what it is for — would buy an analysis of the
     following day and produce a report that looks entirely ordinary. So the session the fire was
     booked for is compared with the one a run now would cover, and a disagreement stops it. This is
     the subtle one, and `RecommendationDateTest` documents the rule it rests on.
@@ -1633,30 +1656,24 @@ switch is off is passed over and says so on its card - it is not hidden, and it 
   notification would be the worst possible trade.
 - WorkManager declares `SystemForegroundService` **without a foreground service type**, and from
   Android 14 one without a type is refused outright. The manifest merges `dataSync` onto it.
-- **A schedule names the chats it covers**, two of them and a count. The whole point of freezing the
-  selection is that it stops matching what is ticked on screen, so a row saying only "Analyse the
-  next session" cannot be checked without opening it.
-- **`blockedReason` is one list, read by the row and the card above it.** They disagreeing is how a
-  card promises "Next Sun 07:00" for a job the row underneath reports as blocked, which happened:
-  the summary only looked at whether a job was enabled, so a paid job with the paid switch off was
-  counted as the next run. The order is what the reader has to fix first — the master switch before
-  the job's own, both before anything the work needs. A card listing four problems fixes none.
+- **A price refresh wake brings nothing else up.** `startedForSchedule` leaves Telegram, the sync
+  and the update check unstarted, which is the difference between a wake that fetches prices and
+  one that connects to Telegram and catches up on four kinds of synced document first. An analysis
+  needs all three and starts the app in full.
+- **The schedule names the chats it covers**, two of them and a count. The whole point of freezing
+  the selection is that it stops matching what is ticked on screen, so a line saying only "analyse
+  the next session" cannot be checked without opening it.
+- **`blockedReason` is one list, read by the card and by the Settings summary above it.** They
+  disagreeing is how a summary promises "Next Sun 07:00" for a schedule the card underneath reports
+  as blocked. The order is what the reader has to fix first: the switch, then what it is aimed at,
+  then anything the run needs. A card listing four problems fixes none.
 - **An empty chat list is not evidence the chats have gone.** On a cold start Telegram has not
   loaded, and "its chats are no longer in the app" would be the wrong alarm at the worst moment. It
-  is also only raised when **all** of a job's chats have gone: losing one of four leaves a run that
+  is also only raised when **all** of the chats have gone: losing one of four leaves a run that
   still reads the other three.
 - **Re-aiming is deliberate and never quiet.** `ReaimControl` shows the frozen selection and the
   current one and offers a button naming which it takes. Freezing is right; a selection that can
-  never be corrected would mean deleting the job to fix a typo.
-- **Defaults differ by work type, and both are about the session.** A price refresh goes at 18:00,
-  after the 14:30 close, when there is a settled session to fetch. An analysis goes at 08:00, before
-  the 10:00 open, while the levels can still be acted on — the same run at six in the evening is a
-  post-mortem. Switching the work type in the editor moves the time and the name **only while they
-  are still the ones the form filled in**; what the user typed is theirs.
-- The scheduler is in `src/main`, so the **`next` build type inherits it** — its own applicationId
-  means its own preferences, where both switches start off. The claim that `next` cannot start an
-  analysis even by accident still holds and now rests on a second thing as well: a scheduled run
-  refuses without a saved credential, and the API key has never synced.
+  never be corrected would mean deleting the schedule to fix a typo.
 
 ## The status line
 

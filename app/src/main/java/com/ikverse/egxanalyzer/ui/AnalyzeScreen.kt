@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -477,8 +476,15 @@ private fun showRecommendationDatePicker(activity: Activity, appState: AppState)
 private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState: AppState) {
     // The label toggles as well as the box, for the reason the date rows beside this card do: two
     // cards side by side, one answering a tap on its text and the other not, reads as one of them
-    // being broken. The checkbox keeps its own 48dp target inside the row; only the gap it leaves
-    // beside the label is pulled in, so three of these stop reading as three separate paragraphs.
+    // being broken.
+    //
+    // The gap beside the label is spelled out rather than trimmed off what the box brings, because
+    // the box brings almost nothing. A Material checkbox reserves its 48dp target only on the
+    // interactive path, and this one is passed a null `onCheckedChange` - the row is the target, so
+    // the box is a drawing. That leaves it about 20dp wide with 2dp of padding rather than the 48dp
+    // square the trim was measured against, and pulling the label a further 4dp in on top of that
+    // ran it into the box: `Text` read as one word on the phone, three boxes with no space after
+    // them. Space.s is what the row already leaves on its other side.
     Row(
         modifier = Modifier
             .clip(MaterialTheme.shapes.medium)
@@ -495,7 +501,8 @@ private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState
             checked = type in appState.selectedContentTypes,
             onCheckedChange = null,
         )
-        Text(label, modifier = Modifier.offset(x = (-4).dp))
+        Spacer(Modifier.width(Space.s))
+        Text(label)
     }
 }
 
