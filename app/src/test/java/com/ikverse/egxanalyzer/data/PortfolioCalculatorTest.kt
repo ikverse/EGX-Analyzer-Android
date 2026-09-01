@@ -252,6 +252,7 @@ class PortfolioCalculatorTest {
             sessions = sessions,
             currentPrice = 10.0,
             today = called.plusDays(14),
+            finalThrough = called.plusDays(13),
         )
 
         assertEquals(called.plusDays(4), view.deadlineDate)
@@ -266,6 +267,7 @@ class PortfolioCalculatorTest {
             sessions = listOf(session(called, high = 10.2, low = 9.8)),
             currentPrice = 10.0,
             today = called.plusDays(3),
+            finalThrough = called.plusDays(2),
         )
 
         // Nine sessions still owed, so there is no deadline yet to be late against.
@@ -289,6 +291,7 @@ class PortfolioCalculatorTest {
             sessions = sessions,
             currentPrice = 10.0,
             today = called.plusDays(90),
+            finalThrough = called.plusDays(89),
         )
 
         assertEquals(0L, view.overdueDays)
@@ -309,6 +312,7 @@ class PortfolioCalculatorTest {
             sessions = sessions,
             currentPrice = 10.0,
             today = called.plusDays(11),
+            finalThrough = called.plusDays(10),
         )
 
         assertFalse(view.open)
@@ -338,6 +342,7 @@ class PortfolioCalculatorTest {
             sessions = sessions,
             currentPrice = 10.4,
             today = called.plusDays(6),
+            finalThrough = called.plusDays(5),
         )
 
         assertTrue(view.open)
@@ -372,6 +377,7 @@ class PortfolioCalculatorTest {
             sessions = sessions,
             currentPrice = 11.8,
             today = called.plusDays(30),
+            finalThrough = called.plusDays(29),
         )
 
         assertFalse(view.open)
@@ -393,12 +399,14 @@ class PortfolioCalculatorTest {
             sessions = (0 until 3).map { session(called.plusDays(it.toLong()), high = 12.5, low = 9.9) },
             currentPrice = 12.4,
             today = called.plusDays(90),
+            finalThrough = called.plusDays(89),
         )
         val stopped = PortfolioCalculator.evaluate(
             position = position(entryPrice = 10.0, stopLoss = 9.5, target2 = 99.0, windowSessions = 3),
             sessions = (0 until 3).map { session(called.plusDays(it.toLong()), high = 10.1, low = 9.0) },
             currentPrice = 9.1,
             today = called.plusDays(90),
+            finalThrough = called.plusDays(89),
         )
 
         assertEquals(PositionStatus.FULL_TARGET_HIT, hit.status)
@@ -426,6 +434,7 @@ class PortfolioCalculatorTest {
             sessions = sessions,
             currentPrice = 10.9,
             today = called.plusDays(9),
+            finalThrough = called.plusDays(8),
         )
 
         assertEquals(PositionStatus.PARTIAL_TARGET_HIT, view.status)
@@ -448,6 +457,7 @@ class PortfolioCalculatorTest {
             // third session itself it was still trading, and a window is not spent by a session
             // that has merely opened.
             today = called.plusDays(3),
+            finalThrough = called.plusDays(2),
         )
 
         // It belongs in the expired section from the moment the window closes. What makes a trade
@@ -479,6 +489,7 @@ class PortfolioCalculatorTest {
             sessionsFor = { _, _ -> sessions },
             latestQuoteFor = { quote(10.0) },
             today = called.plusDays(8),
+            finalThrough = called.plusDays(7),
         )
 
         val group = portfolio.groups.single()
@@ -507,6 +518,7 @@ class PortfolioCalculatorTest {
             sessions = sessions,
             currentPrice = 9.8,
             today = called.plusDays(2),
+            finalThrough = called.plusDays(1),
         )
 
         assertTrue(view.open)
@@ -531,6 +543,7 @@ class PortfolioCalculatorTest {
             sessions = sessions,
             currentPrice = 10.2,
             today = called.plusDays(21),
+            finalThrough = called.plusDays(20),
         )
 
         // Keep Open defeats every automatic close; a recorded sale is not one.
@@ -550,12 +563,19 @@ class PortfolioCalculatorTest {
         val trade = position(windowSessions = 5, target1 = 20.0, target2 = 22.0, stopLoss = 1.0)
         val today = called.plusDays(9)
 
-        val before = PortfolioCalculator.evaluate(trade, sessions, currentPrice = 10.0, today = today)
+        val before = PortfolioCalculator.evaluate(
+            trade,
+            sessions,
+            currentPrice = 10.0,
+            today = today,
+            finalThrough = today.minusDays(1),
+        )
         val after = PortfolioCalculator.evaluate(
             position = trade.copy(windowSessions = 10, windowCustom = true),
             sessions = sessions,
             currentPrice = 10.0,
             today = today,
+            finalThrough = today.minusDays(1),
         )
         // The clock only runs on a trade the user is holding on purpose, so the days being cleared
         // are read off a kept-open copy of the same call, judged over the same two windows.
@@ -564,12 +584,14 @@ class PortfolioCalculatorTest {
             sessions = sessions,
             currentPrice = 10.0,
             today = today,
+            finalThrough = today.minusDays(1),
         )
         val heldLonger = PortfolioCalculator.evaluate(
             position = trade.copy(windowSessions = 10, windowCustom = true, keepOpen = true),
             sessions = sessions,
             currentPrice = 10.0,
             today = today,
+            finalThrough = today.minusDays(1),
         )
 
         assertFalse(before.open)
@@ -607,6 +629,7 @@ class PortfolioCalculatorTest {
             sessionsFor = { _, from -> traded(from, if (from == old) 5 else 1) },
             latestQuoteFor = { quote(10.0) },
             today = recent.plusDays(5),
+            finalThrough = recent.plusDays(4),
         )
 
         assertEquals(listOf(old, recent), portfolio.groups.map { it.recommendationDate })
@@ -627,6 +650,7 @@ class PortfolioCalculatorTest {
             sessionsFor = { _, _ -> sessions },
             latestQuoteFor = { quote(10.0) },
             today = called.plusDays(10),
+            finalThrough = called.plusDays(9),
         )
 
         // Ticker order would have put AMOC first; being overdue outranks it. Both are kept open, so
@@ -665,6 +689,7 @@ class PortfolioCalculatorTest {
             },
             latestQuoteFor = { quote(10.0) },
             today = recent.plusDays(10),
+            finalThrough = recent.plusDays(9),
         )
 
         // What the calculator hands back, and what the screen opens on.
@@ -703,6 +728,7 @@ class PortfolioCalculatorTest {
             },
             latestQuoteFor = { quote(10.0) },
             today = recent.plusDays(30),
+            finalThrough = recent.plusDays(29),
         )
 
         // The record is a record: newest first, and nothing jumps the queue. A sale recorded long
@@ -788,6 +814,7 @@ class PortfolioCalculatorTest {
             sessions = sessions,
             currentPrice = 5.1,
             today = called.plusDays(30),
+            finalThrough = called.plusDays(29),
             priceBreaks = setOf(called.plusDays(2)),
         )
 
@@ -895,6 +922,7 @@ class PortfolioCalculatorTest {
             sessionsFor = { _, _ -> flat(10.5) },
             latestQuoteFor = { quote(10.5, called.plusDays(9)) },
             today = called.plusDays(12),
+            finalThrough = called.plusDays(11),
         )
 
         val view = portfolio.positions.single()
@@ -935,12 +963,14 @@ class PortfolioCalculatorTest {
             sessions = prices,
             currentPrice = 10.3,
             today = called.plusDays(1),
+            finalThrough = called,
         )
         val closed = PortfolioCalculator.evaluate(
             position = trade,
             sessions = prices,
             currentPrice = 10.3,
             today = called.plusDays(2),
+            finalThrough = called.plusDays(1),
         )
 
         assertEquals(PositionStatus.OPEN, stillTrading.status)
@@ -988,17 +1018,22 @@ class PortfolioCalculatorTest {
             windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
         )
 
+        // The morning of the sell session: the same calendar day, and the exchange has finished
+        // with nothing later than the 25th.
         val onTheSellSession = PortfolioCalculator.evaluate(
             position = trade,
             sessions = prices,
             currentPrice = 75.63,
             today = LocalDate.of(2026, 8, 26),
+            finalThrough = LocalDate.of(2026, 8, 25),
         )
-        val theMorningAfter = PortfolioCalculator.evaluate(
+        // The same afternoon, from 14:45, with that session closed and its figures settled.
+        val atTheClose = PortfolioCalculator.evaluate(
             position = trade,
             sessions = prices,
             currentPrice = 75.63,
-            today = LocalDate.of(2026, 8, 27),
+            today = LocalDate.of(2026, 8, 26),
+            finalThrough = LocalDate.of(2026, 8, 26),
         )
 
         assertEquals(PositionStatus.OPEN, onTheSellSession.status)
@@ -1007,9 +1042,13 @@ class PortfolioCalculatorTest {
         assertNull(onTheSellSession.deadlineDate)
         assertEquals(1, onTheSellSession.sessionsRemaining)
 
-        // And it does expire, on the morning after the session it was to be sold in.
-        assertEquals(PositionStatus.EXPIRED, theMorningAfter.status)
-        assertTrue(theMorningAfter.ranOutOfTime)
-        assertEquals(LocalDate.of(2026, 8, 26), theMorningAfter.deadlineDate)
+        // And it expires on the afternoon of the session it was to be sold in, not at midnight and
+        // not the next morning: the market has finished with it, so the app says so.
+        assertEquals(PositionStatus.EXPIRED, atTheClose.status)
+        assertTrue(atTheClose.ranOutOfTime)
+        assertEquals(LocalDate.of(2026, 8, 26), atTheClose.deadlineDate)
+        // Nothing is late yet, though. The deadline landed today, and the overdue clock counts
+        // whole days past it.
+        assertEquals(0L, atTheClose.overdueDays)
     }
 }

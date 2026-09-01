@@ -1,6 +1,7 @@
 package com.ikverse.egxanalyzer.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
@@ -153,5 +154,79 @@ class CallSanityTest {
             ),
             found,
         )
+    }
+
+    // Whether a fault reaches the one figure it is allowed to reach. Every level set below was
+    // taken off a device, from the three calls whose returns were found driving a channel's
+    // published average twenty times above where it belonged.
+
+    private fun invalidates(
+        faults: Set<CallFault>,
+        outcome: Outcome,
+        stoppedAfterPartial: Boolean = false,
+    ) = CallSanity.invalidatesReturn(faults, outcome, stoppedAfterPartial)
+
+    @Test
+    fun `a clean call keeps its return`() {
+        assertFalse(invalidates(emptySet(), Outcome.STOPPED))
+        assertFalse(invalidates(emptySet(), Outcome.FULL_HIT))
+    }
+
+    @Test
+    fun `a stop above the entry withholds the return of a call the stop ended`() {
+        // GGCC, 30 August: a stop read as 30 on a stock trading near 1. The call scored STOPPED
+        // and the return was measured at that stop, which put a stopped-out call at +2900%.
+        val misread = faults(entryLow = 1.0, entryHigh = 1.0, target1 = 1.1, target2 = 1.15, stopLoss = 30.0)
+
+        assertTrue(CallFault.STOP_ABOVE_ENTRY in misread)
+        assertTrue(invalidates(misread, Outcome.STOPPED))
+    }
+
+    @Test
+    fun `a stop read above target 1 withholds it too`() {
+        // EXPA, 24 August. Subtler than GGCC and wrong the same way: the stop sits between the
+        // entry and the first target, so the call "stopped out" at a profit of +3.43%.
+        val misread = faults(entryLow = 20.4, entryHigh = 20.4, target1 = 21.0, target2 = 21.5, stopLoss = 21.1)
+
+        assertTrue(invalidates(misread, Outcome.STOPPED))
+    }
+
+    @Test
+    fun `targets in the wrong order withhold the return of a call a target ended`() {
+        // TAQA, 9 August: a second target beneath the first and beneath the entry, so the call
+        // scored a FULL_HIT worth -20.26%. A full hit is measured at target 2.
+        val misread = faults(entryLow = 15.3, entryHigh = 15.3, target1 = 15.8, target2 = 12.2, stopLoss = 15.05)
+
+        assertTrue(CallFault.TARGETS_OUT_OF_ORDER in misread)
+        assertTrue(invalidates(misread, Outcome.FULL_HIT))
+    }
+
+    @Test
+    fun `a fault only reaches the level the return was measured at`() {
+        // The whole point of naming the outcome. A misread stop says nothing about a call that
+        // reached its second target, and a misread target says nothing about one the stop took.
+        val badStop = faults(stopLoss = 10.5)
+        val badTargets = faults(target1 = 11.5, target2 = 11.0)
+
+        assertFalse(invalidates(badStop, Outcome.FULL_HIT))
+        assertFalse(invalidates(badTargets, Outcome.STOPPED))
+    }
+
+    @Test
+    fun `an expired call keeps its return whatever the stop says`() {
+        // Measured from the entry to the last close, touching neither the stop nor a target, so
+        // there is nothing here for a misread level to invalidate.
+        assertFalse(invalidates(faults(stopLoss = 10.5), Outcome.EXPIRED))
+    }
+
+    @Test
+    fun `a partial hit is measured at both levels and answers to both`() {
+        // Its return is to target 1 - so a misread target reaches it - and once the stop has taken
+        // the un-sold half back the stop is where that half ended, so a misread stop reaches it too.
+        assertTrue(invalidates(faults(target1 = 11.5, target2 = 11.0), Outcome.PARTIAL_HIT))
+        assertTrue(
+            invalidates(faults(stopLoss = 10.5), Outcome.PARTIAL_HIT, stoppedAfterPartial = true),
+        )
+        assertFalse(invalidates(faults(stopLoss = 10.5), Outcome.PARTIAL_HIT))
     }
 }

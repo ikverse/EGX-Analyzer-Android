@@ -53,6 +53,12 @@ enum class CallFault(val label: String, val detail: String) {
  * channel's record on the other 5%. Reporting is recoverable and reversible; a rate that quietly
  * dropped calls is neither.
  *
+ * The one exception is [invalidatesReturn], and it is an exception to *what a figure is worth*
+ * rather than to which calls are counted. No call is ever dropped from a rate here. A return
+ * measured at a level the same levels say is impossible is withheld, exactly as `riskReward`
+ * already withholds itself on the same contradiction; the call keeps its outcome and its place in
+ * every count it was ever in.
+ *
  * Pure and with no Android in it, like [Scoring] and `PriceSanity`, and for the same reason: what
  * counts as an impossible set of levels is a rule about trading, and it should be checkable without
  * a device. Derived on every recompute and never stored - a fault is a reading of the levels, and
@@ -103,6 +109,42 @@ object CallSanity {
         if (entry != null && session != null && farFromTraded(entry, session)) {
             add(CallFault.LEVELS_OFF_THE_CHART)
         }
+    }
+
+    /**
+     * Whether these faults land on the very level the call's return was measured at.
+     *
+     * The one place a fault is allowed to reach a figure, and it reaches it by withholding rather
+     * than by correcting. [faults] marks and never excludes, because a heuristic must not quietly
+     * rewrite a channel's record - but a return is not an opinion about a call, it is arithmetic
+     * performed *on one of these levels*, and where that level is one the reader can see is
+     * impossible the arithmetic has no meaning to defend. A stop above the entry does not make a
+     * stopped-out call a 2900% winner; it makes its return unanswerable, which is a different thing
+     * from unknown and a very different thing from positive.
+     *
+     * `riskReward` already draws this line - "a stop above the entry is not a call risking nothing,
+     * it is a call this cannot describe" - and returns null there. This is the same line drawn for
+     * the same reason one field along.
+     *
+     * Only the level the return was actually measured at counts. A stop read into the target row
+     * says nothing about a call that expired, whose return runs from the entry to the last close
+     * and touches neither. And the call itself stays in every rate it was ever in: it is still
+     * judged, still a stop-out, still counted for whoever printed it. Only the number goes.
+     */
+    fun invalidatesReturn(
+        faults: Set<CallFault>,
+        outcome: Outcome,
+        stoppedAfterPartial: Boolean,
+    ): Boolean {
+        if (faults.isEmpty()) return false
+        // Where the return was measured. A partial hit is measured at its target, and at the stop
+        // as well once the stop has taken the un-sold half back.
+        val atStop = outcome == Outcome.STOPPED ||
+            (outcome == Outcome.PARTIAL_HIT && stoppedAfterPartial)
+        val atTarget = outcome == Outcome.FULL_HIT || outcome == Outcome.PARTIAL_HIT
+        return (atStop && CallFault.STOP_ABOVE_ENTRY in faults) ||
+            (atTarget && (CallFault.TARGET_BELOW_ENTRY in faults ||
+                CallFault.TARGETS_OUT_OF_ORDER in faults))
     }
 
     private fun midpoint(low: Double?, high: Double?): Double? {

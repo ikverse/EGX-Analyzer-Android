@@ -306,6 +306,29 @@ val ScoredCall.riskReward: Double?
     }
 
 /**
+ * [ScoredCall.returnPct], where the level it was measured at can be believed.
+ *
+ * The scored return is measured at whichever level ended the call - the stop, a target, the last
+ * close - so a call whose levels were misread out of a screenshot carries a return computed from a
+ * number nobody printed. One stop read as `30` on a stock trading near `1` scored a stopped-out
+ * call at **+2900%**, and a plain mean of returns put the channel that posted it twenty times
+ * above the one beside it.
+ *
+ * Null rather than corrected: what the card meant is not recoverable from what was read off it, and
+ * a guess at the real stop would be a made-up number wearing a measured one's clothes. Every
+ * consumer of this already handles a call with no return, because plenty of calls genuinely have
+ * none.
+ *
+ * Use this for anything that **aggregates** returns. [ScoredCall.returnPct] stays the measurement
+ * and is what gets frozen into `settled_calls`, so the arithmetic survives on disk and a later
+ * change to what counts as a misread can still see it.
+ */
+val ScoredCall.believableReturn: Double?
+    get() = returnPct?.takeUnless {
+        CallSanity.invalidatesReturn(faults, outcome, stoppedAfterPartial)
+    }
+
+/**
  * How the calls inside one session card are laid out.
  *
  * A **view**, never the record: every option orders the same calls and none of them hides one, so

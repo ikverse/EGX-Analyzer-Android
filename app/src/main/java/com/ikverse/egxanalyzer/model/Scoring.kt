@@ -138,24 +138,29 @@ object Scoring {
          */
         intradayFor: (LocalDate) -> List<IntradayBar> = { emptyList() },
         /**
-         * The exchange's own date, against which a stored session is judged finished or still open.
+         * The newest session the exchange has finished with; anything after it is still moving.
          *
          * The scorer counts sessions, and a session dated today is in the table from the opening
          * bell onward - the feed is re-asked for the last three days on every refresh precisely so
          * a half-traded session overwrites itself. Counting it as one the window has spent closed a
          * T+1 call at the open of the very session it was to be sold in. See [walk].
          *
-         * Defaulted to the exchange's date rather than left to the caller: a caller who forgets it
-         * gets the right answer, where a null default would hand back the bug. Both callers in the
-         * app pass it anyway, so the whole recompute reads one date rather than a clock per call.
+         * A date rather than a moment because everything below counts sessions, and
+         * [ScheduleClock.lastFinalSession] is the one place that turns the clock into one - so the
+         * scorer and the flag that has a card say a price is still moving can never disagree about
+         * the same session.
+         *
+         * Defaulted from that clock rather than left to the caller: a caller who forgets it gets
+         * the right answer, where a null default would hand back the bug. Every caller in the app
+         * passes it anyway, so a whole recompute reads one date rather than a clock per call.
          */
-        today: LocalDate = LocalDate.now(ScheduleClock.ZONE),
+        finalThrough: LocalDate = ScheduleClock.lastFinalSession(),
     ): Scored {
         val fullTargetLevel = target2 ?: target1
         val partialTargetLevel = target1.takeIf { target2 != null }
         val plain = walk(
             sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, entrySessions,
-            priceBreaks, today,
+            priceBreaks, finalThrough,
         ) { day ->
             resolveFromBars(
                 intradayFor(day.date), entryLow, entryHigh, partialTargetLevel, fullTargetLevel,
@@ -170,11 +175,11 @@ object Scoring {
         // is nothing left to be ambiguous about.
         val entryFirst = walk(
             sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, entrySessions,
-            priceBreaks, today,
+            priceBreaks, finalThrough,
         ) { Ordering.ENTRY_FIRST }
         val targetFirst = walk(
             sessions, entryLow, entryHigh, target1, target2, stopLoss, windowSessions, entrySessions,
-            priceBreaks, today,
+            priceBreaks, finalThrough,
         ) { Ordering.TARGET_FIRST }
         // The pessimistic run is the one reported. Where the two agree it is also the later of the
         // two, since it never credits the unproven target - so this is the conservative settlement
@@ -198,7 +203,7 @@ object Scoring {
         windowSessions: Int,
         entrySessions: Int,
         priceBreaks: Set<LocalDate>,
-        today: LocalDate,
+        finalThrough: LocalDate,
         ordering: (DailySession) -> Ordering,
     ): Scored {
         // Not [clampWindow]: its ceiling belongs to the trade window, which is a deadline a user
@@ -353,7 +358,7 @@ object Scoring {
             }
         }
 
-        // Enough sessions, and the last of them finished trading.
+        // Enough sessions, and the exchange has finished with the last of them.
         //
         // The count alone was the whole of this, and on the general horizon the difference is
         // invisible: one session early out of thirty moves nothing. On a T+1 card it is half the
@@ -363,14 +368,18 @@ object Scoring {
         // second one opened, and the call was reported Expired at the bell of the session it was
         // meant to be sold in, priced to whatever the first trade of the morning had printed.
         //
-        // Dated rather than timed, and to the exchange's calendar rather than the phone's. It is
-        // the same test [LatestPrice] already applies to decide a stored price is provisional, and
-        // one definition of "that session is not final yet" is worth more here than the nine hours
-        // of precision an instant would buy: this way a call can settle late, never early, and the
-        // two never disagree about the same session. A target reached or a stop broken inside the
-        // live session still settles it on the spot - only running out of time waits for the close,
-        // because that is the one verdict the rest of the session can still overturn.
-        val complete = considered.size >= window && considered.last().date < today
+        // Answered by [ScheduleClock.lastFinalSession], which is the same test [LatestPrice]
+        // applies to decide a stored price is provisional: one definition of "that session is not
+        // final yet", so a card calling a price still moving is never one the scorer has already
+        // run a call out of time on. That definition is the close and not midnight. Waiting for the
+        // date to turn over was the first fix for the bug above and it overshot by nine hours - the
+        // market finished with the session at 14:30, and a call left open until 00:00 is announced
+        // whenever something next happens to look, which on most phones is the next morning.
+        //
+        // A target reached or a stop broken inside the live session still settles it on the spot -
+        // only running out of time waits for the close, because that is the one verdict the rest of
+        // the session can still overturn.
+        val complete = considered.size >= window && considered.last().date <= finalThrough
         // Where a call that ran out of time actually ended up.
         //
         // The window closed with the reader still holding, so the last close is where they stand,

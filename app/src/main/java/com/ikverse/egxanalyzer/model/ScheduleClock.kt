@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.model
 
 import java.time.DayOfWeek
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 
@@ -50,6 +51,31 @@ object ScheduleClock {
      * opens, which is the whole promise of keeping prices fresh while the market is trading.
      */
     val sessionEnd: LocalTime = LocalTime.of(14, 45)
+
+    /**
+     * The newest session the exchange has finished with.
+     *
+     * Today's date once the day's figures have settled - [sessionEnd], a quarter of an hour past
+     * the close - and yesterday's until then. A session dated on or before this is final; one
+     * dated after it is still moving, whatever the price table already holds about it.
+     *
+     * **One definition, for the two questions that ask it.** The scorer may not run a window out
+     * on a session that is still trading, and a card may not call a price settled while it is. Read
+     * from two definitions they disagreed for the nine hours between the close and midnight - which
+     * is the whole of this: the date alone answers "is that session still trading" only at
+     * midnight, so a trade whose last session ended at 14:30 stayed open until 00:00 and was
+     * announced whenever something next happened to look. The close is when the market finished
+     * with it, and the close is when the app should say so.
+     *
+     * Nothing here asks whether the exchange was open on either date. A weekend or a holiday has no
+     * row in the price table to be final about, so a date naming no session answers no question -
+     * and the comparison downstream is against the sessions that exist.
+     */
+    fun lastFinalSession(now: Instant = Instant.now(), zone: ZoneId = ZONE): LocalDate {
+        val here = now.atZone(zone)
+        val date = here.toLocalDate()
+        return if (here.toLocalTime() < sessionEnd) date.minusDays(1) else date
+    }
 
     /**
      * The first fire of [at] on one of [days] strictly after [after].

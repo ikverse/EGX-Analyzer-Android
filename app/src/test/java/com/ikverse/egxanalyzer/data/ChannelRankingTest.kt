@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.data
 
+import com.ikverse.egxanalyzer.model.CallSanity
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.ScoredCall
 import org.junit.Assert.assertEquals
@@ -24,6 +25,7 @@ class ChannelRankingTest {
         // decided by what the calls were worth rather than by how many of them worked.
         returnPct: Double = if (outcome == Outcome.STOPPED) -5.0 else 5.0,
         target1: Double = 11.0,
+        target2: Double = 12.0,
         stopLoss: Double = 9.5,
         repeatOf: LocalDate? = null,
     ) = ScoredCall(
@@ -36,7 +38,7 @@ class ChannelRankingTest {
         entryLow = 10.0,
         entryHigh = 10.2,
         target1 = target1,
-        target2 = 12.0,
+        target2 = target2,
         stopLoss = stopLoss,
         outcome = outcome,
         settledOn = called,
@@ -45,6 +47,10 @@ class ChannelRankingTest {
         returnPct = returnPct,
         sessionsElapsed = 1,
         repeatOf = repeatOf,
+        // Read off the levels exactly as the scorer reads them, rather than passed in: a fixture
+        // that could name its own faults would be free to describe a call the app would judge
+        // differently. No session here, so the structural checks run and the distance one does not.
+        faults = CallSanity.faults(10.0, 10.2, target1, target2, stopLoss, session = null),
     )
 
     /** Two settled calls, both good: a real 100%, and no evidence at all. */
@@ -241,6 +247,59 @@ class ChannelRankingTest {
         )
 
         assertEquals(1.5, scores.single().averageRiskReward!!, 0.01)
+    }
+
+    /**
+     * A misread level cannot be allowed to carry a channel's average return.
+     *
+     * Found on a device: a stop read as `30` off a screenshot of a stock trading near `1` scored a
+     * stopped-out call at **+2900%**, and CFI Egypt's published figure read +61.65% a call against
+     * the +2.99% its other forty-eight were worth. The channel beside it, on twice as many calls,
+     * was at +2.92% - so the one number a reader would have chosen between them on was decided
+     * entirely by a number nobody printed.
+     *
+     * The call is **not** dropped. It is still judged, still a stop-out, still counted for whoever
+     * posted it; only the figure measured at the impossible level goes.
+     */
+    @Test
+    fun `a return measured at a misread stop is left out of the average`() {
+        val misread = call(
+            "Source",
+            "GGCC",
+            Outcome.STOPPED,
+            returnPct = 2900.0,
+            stopLoss = 300.0,
+        )
+        val score = PerformanceCalculator.channelScores(
+            List(4) { call("Source", "AAA$it", Outcome.PARTIAL_HIT) } + misread,
+        ).single()
+
+        // +5.0 from the four clean calls, and not the +584.0 that averaging all five would give.
+        assertEquals(5.0, score.averageReturn!!, 0.001)
+        assertEquals(5, score.judged)
+        assertEquals(1, score.stopped)
+    }
+
+    /** The same, for a second target read in beneath the first. */
+    @Test
+    fun `a return measured at a misordered target is left out of the average`() {
+        // TAQA, 9 August: target 2 beneath target 1 and beneath the entry, so a call that scored a
+        // full hit was worth -20.26%.
+        val misread = call(
+            "Source",
+            "TAQA",
+            Outcome.FULL_HIT,
+            returnPct = -20.26,
+            target1 = 11.0,
+            target2 = 8.0,
+        )
+        val score = PerformanceCalculator.channelScores(
+            List(4) { call("Source", "AAA$it", Outcome.PARTIAL_HIT) } + misread,
+        ).single()
+
+        assertEquals(5.0, score.averageReturn!!, 0.001)
+        assertEquals(5, score.judged)
+        assertEquals(1, score.fullHits)
     }
 
     /** One bet, however many mornings it was printed on. */

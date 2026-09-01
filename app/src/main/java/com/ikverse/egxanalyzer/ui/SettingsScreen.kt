@@ -617,8 +617,10 @@ internal fun SettingsScreen(appState: AppState) {
                 about = infoNote(
                     "Tell me when a trade goes past its deadline",
                     "Once a day, and only when something is actually overdue - a trade whose " +
-                        "deadline has passed with no sale recorded. Nothing is analyzed and " +
-                        "nothing is fetched.",
+                        "deadline has passed with no sale recorded.",
+                    "Nothing is analyzed, so this never spends anything on the cloud. With either " +
+                        "of these two switches on, the phone does fetch prices once after the " +
+                        "exchange closes, so it knows what the session did before it says anything.",
                 ),
             )
             SettingToggle(
@@ -627,8 +629,12 @@ internal fun SettingsScreen(appState: AppState) {
                 onCheckedChange = appState::updateTradeAlerts,
                 about = infoNote(
                     "Tell me when the market changes a trade",
-                    "A target reached, the stop taken, the deadline passed - whenever a price " +
-                        "refresh or the calendar moves one of your trades.",
+                    "A target reached, the stop taken, the deadline passed - whenever the market " +
+                        "moves one of your trades.",
+                    "The phone looks once at 14:45, after the exchange has closed and its figures " +
+                        "have settled, so a deadline that ran out this afternoon is said this " +
+                        "afternoon. It looks again on every price refresh, and once more each day " +
+                        "in case the alarm was dropped.",
                     "Not for anything you do yourself: recording a sale or closing a trade says " +
                         "nothing back to you.",
                 ),

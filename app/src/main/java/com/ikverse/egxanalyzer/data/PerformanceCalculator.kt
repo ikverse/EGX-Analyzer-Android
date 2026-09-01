@@ -21,6 +21,7 @@ import com.ikverse.egxanalyzer.model.SettledCall
 import com.ikverse.egxanalyzer.model.isFinal
 import com.ikverse.egxanalyzer.model.settledKey
 import com.ikverse.egxanalyzer.model.StockScore
+import com.ikverse.egxanalyzer.model.believableReturn
 import com.ikverse.egxanalyzer.model.callDate
 import com.ikverse.egxanalyzer.model.judgingWindow
 import com.ikverse.egxanalyzer.model.riskReward
@@ -89,14 +90,15 @@ object PerformanceCalculator {
          */
         onSettled: (List<SettledCall>) -> Unit = {},
         /**
-         * The exchange's date, so a window is only called spent once its last session has closed.
+         * The newest session the exchange has finished with, so a window is only called spent once
+         * its last session has actually closed.
          *
          * Read once for the whole recompute and handed down rather than taken from the clock inside
-         * [Scoring.score]: a report is one reading of the record, and a recompute that crossed
-         * midnight partway would otherwise judge the calls at its end against a different day from
-         * the ones at its start.
+         * [Scoring.score]: a report is one reading of the record, and a recompute that crossed the
+         * close - or midnight - partway would otherwise judge the calls at its end against a
+         * different session from the ones at its start.
          */
-        today: LocalDate = LocalDate.now(ScheduleClock.ZONE),
+        finalThrough: LocalDate = ScheduleClock.lastFinalSession(),
     ): PerformanceReport {
         if (pricesFrom == null) return PerformanceReport()
         // Whichever starting line is later. Prices reaching further back than [ANALYSIS_START] are
@@ -132,7 +134,7 @@ object PerformanceCalculator {
                         entrySessions = call.entrySessions,
                         priceBreaks = priceBreaksFor(call.ticker),
                         intradayFor = { date -> intradayFor(call.ticker, date) },
-                        today = today,
+                        finalThrough = finalThrough,
                     )
                     call.copy(
                         outcome = scored.outcome,
@@ -535,7 +537,11 @@ object PerformanceCalculator {
         val judged = rows.filter { it.outcome.judged }
         val full = judged.filter { it.outcome.isFullHit }
         val any = judged.filter { it.outcome.reachedATarget }
-        val returns = judged.mapNotNull(ScoredCall::returnPct)
+        // The believable return rather than the scored one: a call whose stop was misread out of
+        // the screenshot scores a return measured at a level nobody printed, and a mean has no
+        // defence against one. The call stays in `judged` and in every rate above and below this
+        // line - only its number is withheld. See CallSanity.invalidatesReturn.
+        val returns = judged.mapNotNull(ScoredCall::believableReturn)
         // Every call made, not only the judged ones: this describes the levels that were printed,
         // which were printed whatever the market then did about them.
         val riskRewards = rows.mapNotNull(ScoredCall::riskReward)
@@ -613,6 +619,13 @@ object PerformanceCalculator {
      * figure into a return conditional on winning, which is not what following a source pays.
      */
     private fun policyPairs(judged: List<ScoredCall>): List<PolicyPair> = judged.mapNotNull { call ->
+        // Every figure below is priced at one of the call's own levels, so a level that was misread
+        // makes the pair as unanswerable as the return beside it - and here it cannot be withheld
+        // one number at a time, because both rules are priced from the same targets. Set aside
+        // whole. See CallSanity.invalidatesReturn.
+        if (CallSanity.invalidatesReturn(call.faults, call.outcome, call.stoppedAfterPartial)) {
+            return@mapNotNull null
+        }
         val t1 = call.target1
         val t2 = call.target2
         if (t1 == null || t2 == null) return@mapNotNull null

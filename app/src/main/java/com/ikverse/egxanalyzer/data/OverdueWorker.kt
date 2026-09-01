@@ -8,6 +8,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.TradeAlerts
 import java.time.LocalDate
 import java.time.ZoneId
@@ -27,9 +28,15 @@ import java.util.concurrent.TimeUnit
  *
  * **Two questions, one wake.** The trade status notifications are mostly raised by a price refresh,
  * which is where the market moves a trade - but one ending has no prices behind it at all. A window
- * runs out because a date passed, and on a phone that opened nothing and refreshed nothing there is
- * no other moment at which anyone would notice. Sweeping here costs the portfolio this worker had
- * already built.
+ * runs out because a session closed, and somebody has to look for that to be noticed. [CloseSweep]
+ * is what does the looking on the afternoon it happens; this is the backstop behind it, for a phone
+ * whose alarm the system dropped or whose exact-alarm permission was taken away. Sweeping here
+ * costs the portfolio this worker had already built.
+ *
+ * It is a backstop and not the answer, because WorkManager books a period and not a time: this runs
+ * somewhere inside each rolling twenty-four hours, starting from wherever it was first enqueued.
+ * That is the right shape for "this trade is three days overdue" and the wrong one for "this trade
+ * ended this afternoon".
  */
 class OverdueWorker(
     context: Context,
@@ -55,6 +62,10 @@ class OverdueWorker(
             // The exchange's calendar, matching what the Portfolio tab counts with, so a
             // notification never disagrees with the screen it is pointing at.
             today = LocalDate.now(ZoneId.of(EGX_ZONE)),
+            // And its close, for the same reason: this worker is the backstop behind the sweep at
+            // the close, and a backstop that judged a window by a different rule would announce a
+            // trade as ending on a different afternoon from the one the screen shows.
+            finalThrough = ScheduleClock.lastFinalSession(),
         )
 
         val overdue = portfolio.positions.filter(PositionView::overdue)

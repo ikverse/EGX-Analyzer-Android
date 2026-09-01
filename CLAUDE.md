@@ -110,8 +110,10 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   the one figure layout and the one set of date patterns, for every screen that draws either.
 - `ui/EgxAnalyzerApp.kt` holds `AppHeader` and `AppStatusLine` — the app's name, and the one line
   that says what it is doing or has just done. See **The status line** below.
-- `model/ScheduleClock.kt` + `model/MarketRefresh.kt` + `model/AnalysisSchedule.kt` — when the
-  two things this phone does on its own fire, and what the analysis one is.
+- `model/ScheduleClock.kt` + `model/MarketRefresh.kt` + `model/CloseSweep.kt` +
+  `model/AnalysisSchedule.kt` — when the three things this phone does on its own fire, and what the
+  analysis one is. `ScheduleClock.lastFinalSession` is also the one answer to "has that session
+  closed", which the scorer and the still-trading flag both read. See below.
 - `model/AnalysisPlan.kt` — what a run covers, said explicitly, so the screen and the clock build
   the same request. See **What this phone does on its own** below.
 - `data/JobScheduler.kt` + `data/ScheduleReceiver.kt` + `data/ScheduledJobWorker.kt` +
@@ -184,21 +186,27 @@ name `scoringWindowSessions` because renaming a persisted key resets it on every
   data here separates from a real open. Dropping `buyableAtOpen` altogether was tried and costs far
   more than it buys: every call reaching its target on the session it was made for would need
   intraday bars, and would be unjudged wherever the feed no longer has them.
-- **A window is spent when its last session closes, not when that session appears.** `Scoring.score`
-  takes the exchange's date and a window only counts complete once its final session is behind it.
-  Today's session is in `daily_prices` from the opening bell - the daily feed is re-asked for the
-  last three days on every refresh, so a half-traded session overwrites itself as it goes - and
-  counting it the moment it arrived reported a **T+1 call as Expired at 10:00 on the session the
-  card said to sell in**, priced to the first trade of the morning. On the thirty-session horizon
-  the same bug is invisible; on a two-session window it is half the trade. Dated against
-  `ScheduleClock.ZONE` rather than timed, which is the same test `LatestPrice.provisional` already
-  applies to a stored price: one definition of "that session is not final yet", and a call that can
-  settle late but never early. **Only running out of time waits** - a target reached or a stop
-  broken inside the live session still settles it on the spot, because those are facts about the
-  session whether or not it has finished, and expiry is the one verdict the rest of the day can
-  still overturn. `PerformanceCalculator.report` and `PortfolioCalculator` each read the date once
-  for a whole recompute, so a rebuild that crossed midnight cannot judge its first calls against a
-  different day from its last.
+- **A window is spent when its last session closes, not when that session appears - and the close
+  means 14:45, not midnight.** `Scoring.score` and `PortfolioCalculator` both take a `finalThrough`
+  date: the newest session the exchange has finished with, which is what
+  `ScheduleClock.lastFinalSession` turns the clock into. Today's session is in `daily_prices` from
+  the opening bell - the daily feed is re-asked for the last three days on every refresh, so a
+  half-traded session overwrites itself as it goes - and counting it the moment it arrived reported
+  a **T+1 call as Expired at 10:00 on the session the card said to sell in**, priced to the first
+  trade of the morning. On the thirty-session horizon the same bug is invisible; on a two-session
+  window it is half the trade. The first fix for it waited for the *date* to turn over, which
+  overshot by nine hours: a trade whose last session ended at 14:30 stayed open until 00:00 and was
+  then announced whenever the phone next happened to look, which on most phones was the following
+  morning. `lastFinalSession` is one definition for both this and `LatestPrice.provisional` - a card
+  that calls a price still moving can never be one the scorer has already run a call out of time on
+  - and a call can still settle late but never early. **Only running out of time waits** - a target
+  reached or a stop broken inside the live session still settles it on the spot, because those are
+  facts about the session whether or not it has finished, and expiry is the one verdict the rest of
+  the day can still overturn. `PerformanceCalculator.report` and `PortfolioCalculator` each read the
+  date once for a whole recompute, so a rebuild that crossed the close cannot judge its first calls
+  against a different session from its last. `today` survives beside it in `PortfolioCalculator` for
+  the one question that really is about the calendar: how many whole days past its deadline a trade
+  the user is holding on purpose has run.
 - **Judged** outcomes are full hit, partial hit, stopped, expired. Still open, entry never traded,
   ambiguous, not priced and **prices changed scale** say nothing about the channel and are excluded
   from every rate.
@@ -837,14 +845,19 @@ trade is then managed, in whatever state it has reached.
   never start an analysis. It reads `LocalDataStore` directly rather than through `AppState`, which
   would drag a Telegram session up with it. It is no longer the only thing that runs
   while the app is closed — see **What this phone does on its own** below, which reverses that
-  rule deliberately. It now
+  rule deliberately. It
   answers **two** questions off the one portfolio it builds: what is overdue, and what the calendar
-  has quietly closed since yesterday — a window runs out because a date passed, and on a phone that
-  opened nothing and refreshed nothing there is no other moment at which anyone would notice. So it
-  is booked while **either** notification is on and cancelled only when both are off, which is why
-  `AppState`'s callback is `dailyCheckChanged` and not the old `overdueRemindersChanged`. Turning
-  the overdue reminder off used to cancel the work outright, and doing that now would take the
-  deadline notifications with it silently.
+  has quietly closed. It is booked while **either** notification is on and cancelled only when both
+  are off, which is why `AppState`'s callback is `dailyCheckChanged` and not the old
+  `overdueRemindersChanged`. Turning the overdue reminder off used to cancel the work outright, and
+  doing that now would take the deadline notifications with it silently.
+  **It is the backstop and not the answer**, because WorkManager books a period and not a time: it
+  runs somewhere inside each rolling 24 hours, starting wherever it was first enqueued, so the daily
+  look landed at an hour nobody chose — one phone had it at 11:59 — and drifts under Doze. That is
+  the right shape for "this trade is three days overdue" and the wrong one for "this trade ended
+  this afternoon", which is `CloseSweep`'s job. Both are booked on the same question,
+  `AppState.tradeWatchWanted`, so the two can never be left disagreeing about whether anyone is
+  listening.
 - Positions **travel as revisions**, like wording rules and unlike reports. A position's id is
   derived from the call - `AMOC@2026-07-20` - so the same trade recorded on two devices is one
   holding rather than two that can never be reconciled. A delete is a revision too, so a later edit
@@ -860,6 +873,12 @@ exactly the gap, because it only knew it to someone who opened it. Prices now re
 session on their own (see **What this phone does on its own**), so a target reached at eleven
 in the morning was being
 answered correctly by a screen nobody was looking at.
+
+**Three things raise these, and each covers what the others cannot.** A price refresh catches what
+the market did while it was trading, and only while the refresh checkbox is on. The **sweep at the
+close** catches the ending the market brings about by stopping: a window runs out because a session
+finished, not because a price moved, and 14:45 is the first moment anything can honestly say so.
+The daily worker is behind both for the phone whose alarm the system dropped.
 
 - **The one thing that had to be stored is what the user has already been told.** A status is a
   reading of the prices and the calendar and goes on being derived every time; `position_status_seen`
@@ -1517,8 +1536,9 @@ phone only by plugging it into the machine that built it. It reads one public UR
 
 ## What this phone does on its own
 
-A checkbox for prices, and up to four analyses. This is the one feature that reverses a rule the
-app had held since the beginning — that nothing but `OverdueWorker` runs while the app is closed.
+A checkbox for prices, one sweep at the close, and up to four analyses. This is the one feature that
+reverses a rule the app had held since the beginning — that nothing but `OverdueWorker` runs while
+the app is closed.
 
 It used to be a general scheduler: a table of jobs, each with a name, a kind of work, and a choice
 of firing once, on chosen weekdays, or repeatedly inside a window, set up through a form of about
@@ -1535,6 +1555,18 @@ means the whole of what this phone does unattended fits on one screen. `Schedule
   `setExactAndAllowWhileIdle` to roughly one alarm every ten while dozing, so anything shorter is
   not refused, it is quietly stretched — and a schedule that promises a frequency the system will
   not keep is worse than one that promises less.
+- **The sweep at the close** — `model/CloseSweep.kt`, booked while **either** trade notification is
+  on and configured by nothing. One fire at 14:45 Cairo on a trading day: it fetches the day's
+  prices once, re-scores the record off them, and announces what the session did — which is what
+  makes a window that ran out this afternoon a notification this afternoon. Free, the same public
+  feed. It fetches rather than only sweeping because a sweep can only judge the rows on disk: with
+  the price checkbox off there may be no row for today's session at all, so nothing would have
+  expired and the wake would announce nothing. Nothing is fetched twice — `CloseSweep.dueFire` is
+  answered against `lastPriceRefreshAt`, so the 14:45 refresh slot on a phone that keeps prices
+  fresh has already done this fire's work and it stands down. **Deliberately without a grace
+  window**, unlike the other two: a refresh slot that is late has been superseded fifteen minutes
+  later, while this fire has no successor for a day, so a phone that was asleep at 14:45 still owes
+  it at nine that evening.
 - **The scheduled analyses** — `model/AnalysisSchedule.kt`, edited in Settings and summarised on
   the Analyze card. At most `AnalysisSchedule.MAX` of them, each with a time, the weekdays it
   keeps, and the chats it froze. Paid, and see the guards below.
@@ -1586,8 +1618,9 @@ that is very nearly but not quite final.
   Hence `lastPriceRefreshAt` beside `lastPriceRefreshDay` — the day cannot answer "since this fire".
 - **AlarmManager is the clock; WorkManager does the work.** WorkManager's delays are a floor and
   not a promise — in Doze a fifteen-minute period becomes whenever the system next feels like it —
-  so `JobScheduler` books one exact alarm at the earlier of the two next fires, and the run that
-  answers it books the next. One alarm rather than one each: only the nearest matters.
+  so `JobScheduler` books one exact alarm at the earliest of the three next fires — a refresh slot,
+  the sweep at the close, or a schedule — and the run that answers it books the next. One alarm
+  rather than one each: only the nearest matters.
   `setExactAndAllowWhileIdle` where the user has granted `SCHEDULE_EXACT_ALARM`, falling back to
   the inexact form where they have not — the app asks rather than declaring `USE_EXACT_ALARM`,
   which is meant for alarm clocks.
@@ -1599,7 +1632,7 @@ that is very nearly but not quite final.
   WorkManager, which waits for one. The receiver sweeps while **anything** is on and cancels only
   when everything is off, the same shape as the daily check and for the same reason.
   `ScheduleClock.nextFireOf` is what the one alarm is booked from: the earliest fire any enabled
-  schedule has left, beside the price refresh's own.
+  schedule has left, beside the price refresh's own and the close sweep's.
 - **Device-local, and never synced.** Everything else the app records travels through the sync
   channel; these must not, because three phones keeping one schedule is the same work done three
   times — and for an analysis, three times the bill for one answer. Both live in

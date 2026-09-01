@@ -588,7 +588,7 @@ class PerformanceCalculatorTest {
             // Behind every session these paths lay down, so what the wall clock happens to read
             // reaches none of them. A window is only spent once its last session has closed, and
             // the longest path here runs a month out from a date fixed in the test.
-            today = called.plusYears(1),
+            finalThrough = called.plusYears(1),
         )
         return report.channels.single()
     }

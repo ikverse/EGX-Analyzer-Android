@@ -39,11 +39,16 @@ class ScheduleReceiver : BroadcastReceiver() {
                 )
                 val schedules = settings.analysisSchedules()
                 val marketRefresh = settings.marketRefreshEnabled()
-                JobScheduler(application).rebook(schedules, marketRefresh)
+                // The same question the daily check is booked on: either notification about a
+                // trade needs the sweep at the close, so either one wants the alarm.
+                val preferences = settings.loadPreferences()
+                val closeSweep = preferences.overdueRemindersEnabled ||
+                    preferences.tradeAlertsEnabled
+                JobScheduler(application).rebook(schedules, marketRefresh, closeSweep)
                 // Swept while anything is on, and cancelled only when everything is off - the same
                 // shape as the daily check, and for the same reason. Reading only the analysis
                 // side here would take the price refresh down with it silently.
-                if (schedules.any { it.enabled } || marketRefresh) {
+                if (schedules.any { it.enabled } || marketRefresh || closeSweep) {
                     ScheduledJobWorker.sweep(application)
                 }
             } finally {

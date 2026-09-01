@@ -40,14 +40,23 @@ object PortfolioCalculator {
          */
         latestQuoteFor: (ticker: String) -> Quote?,
         /**
-         * Passed in rather than read here, so how overdue a trade is can be tested at all.
+         * The exchange's calendar date, and only for how late a trade is running.
          *
-         * The exchange's zone in the default, not the device's. It was the device's while this only
-         * decided how late a trade looked; it now decides when one expires, and a phone an hour
-         * ahead of Cairo would run a window out before the session it belongs to had closed - which
-         * is the bug [Scoring.score] takes this date to avoid, arriving by another door.
+         * Passed in rather than read here, so that can be tested at all. The exchange's zone in the
+         * default, not the device's: how many days past its deadline a trade has run is counted in
+         * Cairo's days, whatever day it happens to be where the phone is.
          */
         today: LocalDate = LocalDate.now(ScheduleClock.ZONE),
+        /**
+         * The newest session the exchange has finished with, and what decides a window is spent.
+         *
+         * Separate from [today] because they answer different questions, and the difference between
+         * them is the afternoon: a window whose last session ended at 14:30 is spent from the close,
+         * while the trade it retires only becomes a day overdue when the date turns over. Both are
+         * read once for a whole recompute - see [PerformanceCalculator.report] - so nothing here
+         * can judge two trades against two different afternoons.
+         */
+        finalThrough: LocalDate = ScheduleClock.lastFinalSession(),
         /** The sessions on which each stock's prices changed scale - a split, a bonus issue. */
         priceBreaksFor: (ticker: String) -> Set<LocalDate> = { emptySet() },
     ): Portfolio {
@@ -59,6 +68,7 @@ object PortfolioCalculator {
                 currentPrice = quote?.price,
                 currentPriceOn = quote?.on,
                 today = today,
+                finalThrough = finalThrough,
                 priceBreaks = priceBreaksFor(position.ticker),
             )
         }
@@ -79,6 +89,7 @@ object PortfolioCalculator {
         /** Defaulted rather than required: a caller with no feed date still has a price to score. */
         currentPriceOn: LocalDate? = null,
         today: LocalDate = LocalDate.now(ScheduleClock.ZONE),
+        finalThrough: LocalDate = ScheduleClock.lastFinalSession(),
         priceBreaks: Set<LocalDate> = emptySet(),
     ): PositionView {
         // The deadline set: the recommendation's own window, counted from its own session.
@@ -89,8 +100,10 @@ object PortfolioCalculator {
         // trading, so counting it spent retired the trade at the open of the session it was meant
         // to be sold in - and on a two-session T+1 window that is the whole of the sell side. The
         // same test [Scoring.score] applies to the call this trade was taken on, so the Portfolio
-        // and Insights can never disagree about whether one session's window has run out.
-        val spent = window.count { it.date < today }
+        // and Insights can never disagree about whether one session's window has run out - and
+        // both now turn over at the close rather than at midnight, so a trade whose last session
+        // ended this afternoon is expired this afternoon.
+        val spent = window.count { it.date <= finalThrough }
         val remaining = (position.windowSessions - spent).coerceAtLeast(0)
         val deadlineDate = window.lastOrNull()?.date?.takeIf { remaining == 0 }
 
@@ -109,7 +122,7 @@ object PortfolioCalculator {
             // scorer calls the window complete exactly when the recommendation's deadline passes.
             windowSessions = (position.windowSessions - skipped).coerceAtLeast(1),
             priceBreaks = priceBreaks,
-            today = today,
+            finalThrough = finalThrough,
         )
 
         // The prices moved scale under this trade. Every figure on the card would be measured

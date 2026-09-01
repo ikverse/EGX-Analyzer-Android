@@ -10,6 +10,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.ZoneId
 
 /**
  * When the scheduled analysis fires, and when it is owed one.
@@ -202,6 +203,68 @@ class ScheduleClockTest {
     fun `fires keep Cairo clock time across a daylight saving change`() {
         val fire = ScheduleClock.nextFire(morning, everyDay, at("2026-11-01", "06:00"))!!
         assertEquals(morning, fire.atZone(ScheduleClock.ZONE).toLocalTime())
+    }
+
+    @Test
+    fun `a session is final from the close, not from midnight`() {
+        // The whole of the bug this was written for. At 14:44 the exchange has finished with
+        // yesterday; a minute later the day's own figures have settled and it has finished with
+        // today - which is when a window that ended today runs out, and when the phone can say so.
+        assertEquals(
+            LocalDate.parse("2026-08-19"),
+            ScheduleClock.lastFinalSession(at("2026-08-20", "14:44")),
+        )
+        assertEquals(
+            LocalDate.parse("2026-08-20"),
+            ScheduleClock.lastFinalSession(at("2026-08-20", "14:45")),
+        )
+    }
+
+    @Test
+    fun `the morning belongs to the session before it`() {
+        // A session is in the price table from the opening bell and overwrites itself as it trades,
+        // so nothing it says about itself may be believed until it has closed.
+        assertEquals(
+            LocalDate.parse("2026-08-19"),
+            ScheduleClock.lastFinalSession(at("2026-08-20", "10:00")),
+        )
+        // And the evening still belongs to the session that closed in it, right up to midnight.
+        assertEquals(
+            LocalDate.parse("2026-08-20"),
+            ScheduleClock.lastFinalSession(at("2026-08-20", "23:59")),
+        )
+        assertEquals(
+            LocalDate.parse("2026-08-20"),
+            ScheduleClock.lastFinalSession(at("2026-08-21", "00:01")),
+        )
+    }
+
+    @Test
+    fun `a day the exchange never opened is still answered with`() {
+        // Saturday afternoon answers with Saturday, which named no session at all. That is the
+        // honest answer and it costs nothing: the comparison downstream is against the sessions the
+        // price table actually holds, and the newest of those is Thursday's.
+        assertEquals(
+            LocalDate.parse("2026-08-22"),
+            ScheduleClock.lastFinalSession(at("2026-08-22", "18:00")),
+        )
+    }
+
+    @Test
+    fun `it is read in Cairo, wherever the phone is`() {
+        // One instant, two zones. Half past three in Cairo is half past one in London, so a phone
+        // reading its own clock would still be calling the session unfinished two hours after the
+        // exchange had shut. The zone is a parameter only so this can be shown; nothing in the app
+        // passes anything but Cairo.
+        val afterTheClose = at("2026-08-20", "15:30")
+        assertEquals(
+            LocalDate.parse("2026-08-20"),
+            ScheduleClock.lastFinalSession(afterTheClose),
+        )
+        assertEquals(
+            LocalDate.parse("2026-08-19"),
+            ScheduleClock.lastFinalSession(afterTheClose, ZoneId.of("Europe/London")),
+        )
     }
 
     @Test

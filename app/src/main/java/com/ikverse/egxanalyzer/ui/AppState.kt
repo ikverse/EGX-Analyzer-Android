@@ -76,6 +76,7 @@ import com.ikverse.egxanalyzer.model.CallChange
 import com.ikverse.egxanalyzer.model.CallOrder
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.ChatKind
+import com.ikverse.egxanalyzer.model.CloseSweep
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.LatestPrice
@@ -230,7 +231,8 @@ class AppState(
     private val schedulesChanged: (
         schedules: List<AnalysisSchedule>,
         marketRefresh: Boolean,
-    ) -> Unit = { _, _ -> },
+        closeSweep: Boolean,
+    ) -> Unit = { _, _, _ -> },
     /**
      * Whether this process was started by the clock rather than by its owner.
      *
@@ -1232,6 +1234,10 @@ class AppState(
         // The exchange's own calendar, not the phone's: a user abroad must not see a trade fall
         // a day further behind simply for having crossed a time zone.
         val today = LocalDate.now(ZoneId.of(EGX_ZONE))
+        // And the exchange's own close, which is a different question from the date: a window whose
+        // last session ended at 14:30 is spent this afternoon, while the trade it retires only
+        // starts counting days overdue tomorrow. Read once for the whole rebuild, like the date.
+        val finalThrough = ScheduleClock.lastFinalSession()
         val rebuilt = withContext(Dispatchers.IO) {
             // Read once for the whole rebuild rather than per position: it is one small table, and
             // a trade must be judged on the same reading of the feed as the call it came from.
@@ -1241,6 +1247,7 @@ class AppState(
                 sessionsFor = localDataStore::sessionsFrom,
                 latestQuoteFor = localDataStore::latestQuote,
                 today = today,
+                finalThrough = finalThrough,
                 priceBreaksFor = { ticker -> breaks[ticker].orEmpty() },
             )
         }
@@ -1953,7 +1960,10 @@ class AppState(
     fun updateOverdueReminders(enabled: Boolean) {
         if (enabled == appPreferences.overdueRemindersEnabled) return
         persistPreferences(appPreferences.copy(overdueRemindersEnabled = enabled))
-        dailyCheckChanged(dailyCheckWanted)
+        dailyCheckChanged(tradeWatchWanted)
+        // And the alarm, which carries the sweep at the close. Booked on the same question as the
+        // worker so the two can never be left disagreeing about whether anyone is listening.
+        rebookSchedules()
     }
 
     /**
@@ -1961,16 +1971,17 @@ class AppState(
      *
      * Most of what these report rides on work the app was doing anyway - a price refresh re-scores
      * every trade whether or not anyone is told - so this mostly decides whether the phone speaks.
-     * The daily wake is the exception and is why [dailyCheckWanted] is re-asked here: a window
-     * running out has no prices behind it, and that ending is only ever noticed by the once-a-day
-     * look at the record. The sweep that records where each trade stands goes on running either
-     * way, so switching this back on reports what happens next rather than reciting everything
-     * that happened while it was off.
+     * The wakes are the exception and are why [tradeWatchWanted] is re-asked here: a window running
+     * out is brought about by the close and not by a price, so somebody has to look at the record
+     * for it to be noticed at all. The sweep that records where each trade stands goes on running
+     * either way, so switching this back on reports what happens next rather than reciting
+     * everything that happened while it was off.
      */
     fun updateTradeAlerts(enabled: Boolean) {
         if (enabled == appPreferences.tradeAlertsEnabled) return
         persistPreferences(appPreferences.copy(tradeAlertsEnabled = enabled))
-        dailyCheckChanged(dailyCheckWanted)
+        dailyCheckChanged(tradeWatchWanted)
+        rebookSchedules()
     }
 
     /**
@@ -1986,14 +1997,21 @@ class AppState(
     }
 
     /**
-     * Whether the daily wake is worth booking at all.
+     * Whether anything here wants to be told what became of a trade.
      *
-     * One run answers both questions off one reading of the record, so the work is wanted while
-     * either notification is on. Turning the overdue reminder off used to be enough to cancel it;
-     * doing that now would take the deadline notifications with it silently, which is the shape of
-     * bug that only shows up as "it stopped telling me" weeks later.
+     * One question for both background wakes, because one reading of the record answers both of
+     * theirs: the overdue reminder and the trade status notifications each need somebody to look
+     * while nobody is holding the phone. The sweep at the close does the looking on the afternoon a
+     * window runs out; the daily worker is the backstop behind it, for a phone whose alarm the
+     * system dropped.
+     *
+     * Wanted while *either* notification is on. Turning the overdue reminder off used to be enough
+     * to cancel the work; doing that now would take the deadline notifications with it silently,
+     * which is the shape of bug that only shows up as "it stopped telling me" weeks later. And
+     * nothing here is booked once at startup - a user who turns both off wants the phone to stop
+     * waking, not to keep waking and decide each time that it has nothing to say.
      */
-    private val dailyCheckWanted: Boolean
+    val tradeWatchWanted: Boolean
         get() = appPreferences.overdueRemindersEnabled || appPreferences.tradeAlertsEnabled
 
     /**
@@ -2164,7 +2182,8 @@ class AppState(
     }
 
     /** Books the alarm for whatever is now nearest, after anything that could have moved it. */
-    private fun rebookSchedules() = schedulesChanged(analysisSchedules, marketRefreshEnabled)
+    private fun rebookSchedules() =
+        schedulesChanged(analysisSchedules, marketRefreshEnabled, tradeWatchWanted)
 
     /**
      * Does whatever the clock owes, then books the next alarm.
@@ -2176,6 +2195,7 @@ class AppState(
      */
     suspend fun runDueScheduledJobs() {
         runDueMarketRefresh()
+        runDueCloseSweep()
         JobRunner(
             schedules = settingsRepository::analysisSchedules,
             record = settingsRepository::recordAnalysisSchedule,
@@ -2219,6 +2239,39 @@ class AppState(
         settingsRepository.recordMarketRefreshNote(note)
         marketRefreshNote = note
         marketRefreshNoteAt = settingsRepository.marketRefreshNoteAt()
+    }
+
+    /**
+     * The one fetch after the exchange has shut, and the notifications that come out of it.
+     *
+     * This is what makes an ending land on the day it happened. A window runs out because a session
+     * closed, not because a price moved, and until something looks at the record nothing knows: the
+     * trade sat open until midnight turned the date over, and was announced whenever the phone next
+     * happened to wake - which on a phone that keeps no prices fresh is the daily worker, at an hour
+     * WorkManager picked and nobody chose.
+     *
+     * It fetches rather than only sweeping, because a sweep can only judge the rows on disk: with
+     * the refresh checkbox off there may be no row for today's session at all, so the window would
+     * not be spent, nothing would expire, and the wake would announce nothing. One pass over a free
+     * public feed, once a trading day, for a phone whose owner asked to be told about their trades.
+     *
+     * Nothing is fetched twice. [CloseSweep.dueFire] is answered against the moment prices were
+     * last actually fetched, so the 14:45 refresh slot on a phone that keeps prices fresh - or the
+     * user pressing the button at four o'clock - has already done this fire's work, and it stands
+     * down. Ordered after [runDueMarketRefresh] for exactly that reason.
+     *
+     * [refreshPrices] does the rest: it re-scores the record and announces what moved, which is the
+     * same path the button on screen takes. A failure is left alone - the fetch was not recorded,
+     * so the next wake still owes it, and there is nothing here worth stopping the analyses behind
+     * it for.
+     */
+    private suspend fun runDueCloseSweep() {
+        if (!tradeWatchWanted) return
+        val last = settingsRepository.lastPriceRefreshAt()
+            .takeIf { it > 0L }
+            ?.let(Instant::ofEpochMilli)
+        CloseSweep.dueFire(Instant.now(), last) ?: return
+        runCatching { refreshPrices(announce = false) }
     }
 
     /**
@@ -2569,13 +2622,19 @@ class AppState(
             // Read once for the whole recompute. Only the sessions a call could not order on daily
             // figures have bars at all, so this is a short table however long the record grows.
             val bars = localDataStore.intradayBars()
-            // The exchange's calendar, not the phone's: a session dated today is still trading, so
-            // nothing it reports about itself is final.
+            // The exchange's own clock, not the phone's, and the close rather than midnight: a
+            // session is still trading until 14:30 and its figures settle over the quarter of an
+            // hour after it, so nothing it reports about itself is final before then - and
+            // everything it reports is final after it.
+            val finalThrough = ScheduleClock.lastFinalSession()
+            // Beside it and not instead of it: how many days old a stock's newest price is, which
+            // is what [PriceHealth] reports below, is a question about the calendar and not about
+            // whether this afternoon's session has closed.
             val today = LocalDate.now(ZoneId.of(EGX_ZONE))
             val latest = localDataStore.latestSessions().mapValues { (_, session) ->
                 LatestPrice(
                     session = session,
-                    provisional = !session.date.isBefore(today) || session.inconsistent,
+                    provisional = session.date > finalThrough || session.inconsistent,
                 )
             }
             // The calls the market has finished with, read in one go like the bars and the breaks.
@@ -2596,7 +2655,7 @@ class AppState(
                 onSettled = localDataStore::saveSettledCalls,
                 // The same date the provisional flag above is set from, so a session the card calls
                 // still trading is never one the scorer has already run a call out of time on.
-                today = today,
+                finalThrough = finalThrough,
             )
             // On the same thread and from the same read: the breaks and the latest sessions are
             // already in hand here, and asking for them again on the main thread would be a second
@@ -2675,7 +2734,7 @@ class AppState(
     }
 
     private fun adoptSettings(snapshot: SettingsSnapshot) {
-        val dailyCheckWas = dailyCheckWanted
+        val tradeWatchWas = tradeWatchWanted
         settingsRepository.adopt(snapshot)
         appPreferences = settingsRepository.loadPreferences()
         // The Analyze screen seeds its content types from the preference at launch, which on a
@@ -2688,7 +2747,12 @@ class AppState(
         promptHistory = settingsRepository.promptHistory()
         // The daily check is booked with the system, not with this class: a device that adopts
         // "off" has to have the work cancelled, or it goes on waking up to say nothing.
-        if (dailyCheckWanted != dailyCheckWas) dailyCheckChanged(dailyCheckWanted)
+        if (tradeWatchWanted != tradeWatchWas) {
+            dailyCheckChanged(tradeWatchWanted)
+            // The alarm follows it for the same reason: a device that adopts "off" has to stop
+            // waking at the close too, and one that adopts "on" has to start.
+            rebookSchedules()
+        }
         regeneratePrompt("Settings arrived from another device")
     }
 

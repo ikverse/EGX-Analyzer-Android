@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import com.ikverse.egxanalyzer.model.AnalysisSchedule
+import com.ikverse.egxanalyzer.model.CloseSweep
 import com.ikverse.egxanalyzer.model.MarketRefresh
 import com.ikverse.egxanalyzer.model.ScheduleClock
 import java.time.Instant
@@ -12,11 +13,11 @@ import java.time.Instant
 /**
  * Books the one alarm that wakes the app for whatever is next.
  *
- * One alarm for everything this phone does on its own - keeping prices fresh through a session,
- * and up to four analyses - rather than one each: only the nearest fire matters, and the run that
- * answers it books the one after. A pending intent per schedule would be four pieces of state to
- * keep in step for no gain, and four ways for one of them to be left booked after its schedule
- * was deleted.
+ * One alarm for everything this phone does on its own - keeping prices fresh through a session, one
+ * sweep at the close, and up to four analyses - rather than one each: only the nearest fire matters,
+ * and the run that answers it books the one after. A pending intent per schedule would be four
+ * pieces of state to keep in step for no gain, and four ways for one of them to be left booked
+ * after its schedule was deleted.
  *
  * WorkManager is not the timekeeper here, deliberately. Its delays are a floor and not a promise -
  * in Doze a fifteen-minute period becomes whenever the system next feels like it - so 11:15 would
@@ -47,12 +48,25 @@ class JobScheduler(private val context: Context) {
      * changing, and every launch. Booking is cheap and idempotent, so the safe thing on all of
      * those is to book again.
      */
-    fun rebook(schedules: List<AnalysisSchedule>, marketRefresh: Boolean) {
+    fun rebook(
+        schedules: List<AnalysisSchedule>,
+        marketRefresh: Boolean,
+        /**
+         * Whether anyone here wants to be told what the session did to their trades.
+         *
+         * Its own flag rather than [marketRefresh]'s, because the two are different promises: that
+         * one keeps up with a market while it moves and is off until it is asked for, this one is a
+         * single fetch after the exchange has shut so an ending can be announced on the day it
+         * happened. See [CloseSweep].
+         */
+        closeSweep: Boolean,
+    ) {
         val pending = fireIntent()
         val now = Instant.now()
         val at = listOfNotNull(
             ScheduleClock.nextFireOf(schedules, now),
             if (marketRefresh) MarketRefresh.nextFire(now) else null,
+            if (closeSweep) CloseSweep.nextFire(now) else null,
         ).minOrNull()
         if (at == null) {
             alarms.cancel(pending)

@@ -746,7 +746,7 @@ class ScoringTest {
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
             entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
-            today = start.plusDays(2),
+            finalThrough = start.plusDays(1),
         )
 
         assertEquals(Outcome.EXPIRED, scored.outcome)
@@ -763,7 +763,7 @@ class ScoringTest {
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
             entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
-            today = start.plusDays(2),
+            finalThrough = start.plusDays(1),
         )
 
         assertEquals(Outcome.ENTRY_NOT_REACHED, scored.outcome)
@@ -805,7 +805,7 @@ class ScoringTest {
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
             entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
-            today = start.plusDays(1),
+            finalThrough = start,
         )
         val closed = Scoring.score(
             sessions = prices,
@@ -813,7 +813,7 @@ class ScoringTest {
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
             entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
-            today = start.plusDays(2),
+            finalThrough = start.plusDays(1),
         )
 
         assertEquals(Outcome.OPEN, stillTrading.outcome)
@@ -833,7 +833,7 @@ class ScoringTest {
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
             entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
-            today = start.plusDays(1),
+            finalThrough = start,
         )
 
         assertEquals(Outcome.FULL_HIT, scored.outcome)
@@ -852,7 +852,7 @@ class ScoringTest {
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
             entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
-            today = start.plusDays(1),
+            finalThrough = start,
         )
         val closed = Scoring.score(
             sessions = prices,
@@ -860,7 +860,7 @@ class ScoringTest {
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
             entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
-            today = start.plusDays(2),
+            finalThrough = start.plusDays(1),
         )
 
         assertEquals(Outcome.PARTIAL_HIT, stillTrading.outcome)
@@ -880,14 +880,14 @@ class ScoringTest {
             entryLow = 9.8, entryHigh = 10.0,
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = 10,
-            today = start.plusDays(9),
+            finalThrough = start.plusDays(8),
         )
         val closed = Scoring.score(
             sessions = prices,
             entryLow = 9.8, entryHigh = 10.0,
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = 10,
-            today = start.plusDays(10),
+            finalThrough = start.plusDays(9),
         )
 
         assertEquals(Outcome.OPEN, stillTrading.outcome)
@@ -905,7 +905,7 @@ class ScoringTest {
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
             entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
-            today = start.plusDays(30),
+            finalThrough = start.plusDays(29),
         )
         val farLater = Scoring.score(
             sessions = prices,
@@ -913,7 +913,7 @@ class ScoringTest {
             target1 = 12.0, target2 = 14.0, stopLoss = 9.0,
             windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
             entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
-            today = start.plusYears(1),
+            finalThrough = start.plusYears(1),
         )
 
         assertEquals(explicit, farLater)
@@ -926,7 +926,8 @@ class ScoringTest {
         // targets 79.50 and 81.00, stop 75.00. The band traded on the buy session, and neither a
         // target nor the stop was reached on either session - so this genuinely is an expiry, and
         // that is the point. The verdict was right and its timing was not: it was reported at the
-        // opening bell of the 26th, taking the morning's first print for where the trade ended.
+        // opening bell of the 26th, taking the morning's first print for where the trade ended -
+        // and then, once that was fixed by waiting for the date to turn over, not until midnight.
         val prices = listOf(
             DailySession(
                 ticker = "ARCC", date = LocalDate.of(2026, 8, 25),
@@ -937,20 +938,22 @@ class ScoringTest {
                 high = 77.30, low = 75.30, close = 75.63, volume = 271_863.0, open = 77.00,
             ),
         )
-        fun scored(today: LocalDate) = Scoring.score(
+        fun scored(finalThrough: LocalDate) = Scoring.score(
             sessions = prices,
             entryLow = 76.50, entryHigh = 77.00,
             target1 = 79.50, target2 = 81.00, stopLoss = 75.00,
             windowSessions = Scoring.T_PLUS_ONE_WINDOW_SESSIONS,
             entrySessions = Scoring.T_PLUS_ONE_ENTRY_SESSIONS,
-            today = today,
+            finalThrough = finalThrough,
         )
 
-        // The session it was to be sold in, still trading. This read Expired.
-        assertEquals(Outcome.OPEN, scored(LocalDate.of(2026, 8, 26)).outcome)
-        // The morning after, with that session closed: the same verdict, now earned. Measured from
-        // the 76.75 midpoint of the band to the 75.63 it actually closed at.
-        val settled = scored(LocalDate.of(2026, 8, 27))
+        // Through the morning of the 26th: the session it was to be sold in is still trading, and
+        // the exchange has finished with nothing later than the 25th. This read Expired.
+        assertEquals(Outcome.OPEN, scored(LocalDate.of(2026, 8, 25)).outcome)
+        // From 14:45 on the 26th, with that session closed: the same verdict, now earned, and on
+        // the afternoon it was earned rather than at midnight. Measured from the 76.75 midpoint of
+        // the band to the 75.63 it actually closed at.
+        val settled = scored(LocalDate.of(2026, 8, 26))
         assertEquals(Outcome.EXPIRED, settled.outcome)
         assertEquals(-1.46, settled.returnPct!!, 0.01)
         assertEquals(2, settled.sessionsElapsed)

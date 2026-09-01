@@ -77,6 +77,7 @@ import com.ikverse.egxanalyzer.model.RecordSplit
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.StockOpinion
+import com.ikverse.egxanalyzer.model.believableReturn
 import com.ikverse.egxanalyzer.model.opinionId
 import com.ikverse.egxanalyzer.model.positionId
 import com.ikverse.egxanalyzer.model.reachedTarget1
@@ -1332,7 +1333,11 @@ private fun ScoredCallRow(
                     {
                         Figure(
                             "Return",
-                            call.returnPct.signedPercent(),
+                            // Withheld, not corrected, where the level it was measured at is one
+                            // the fault chip above already says cannot be right - a dash beside
+                            // "Stop sits above the buy zone" is the honest pair. See
+                            // CallSanity.invalidatesReturn.
+                            call.believableReturn.signedPercent(),
                             Modifier.weight(1f),
                             // Amber, not green. The figure is the return to target 1 and it is
                             // correct, but the trade gave it back - and drawn in the target's own
@@ -1341,13 +1346,14 @@ private fun ScoredCallRow(
                             tone = if (call.stoppedAfterPartial) {
                                 extraColors.expired
                             } else {
-                                PriceRole.forReturn(call.returnPct)
+                                PriceRole.forReturn(call.believableReturn)
                             },
                             // A call that ran out of time reached no level it named, so its return
                             // is measured to wherever the horizon left it. Said on the card,
                             // because that is a different kind of figure from a return to a target
                             // the market actually got to.
                             caption = when {
+                                call.believableReturn == null -> "not measurable from these levels"
                                 call.stoppedAfterPartial -> "to target 1, then stopped"
                                 call.outcome == Outcome.EXPIRED -> "to the last close"
                                 else -> null
