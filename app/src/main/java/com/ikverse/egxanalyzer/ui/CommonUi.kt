@@ -32,7 +32,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.res.painterResource
+import com.ikverse.egxanalyzer.R
+import com.ikverse.egxanalyzer.data.EgxCatalog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
@@ -628,6 +632,57 @@ private val PillOutline = 1.dp
  * separate marks rather than one column saying three things about the same trade.
  */
 internal val PillStackGap: Dp = 3.dp
+
+/**
+ * The mark a stock carries when the exchange counts it in the EGX 33 Shariah index.
+ *
+ * Draws nothing for a stock outside the index, so the three places that show it each cost one line
+ * rather than one line and a condition. The ticker is the whole input: membership is a property of
+ * the company, not of the call, the trade, or the run being looked at.
+ *
+ * A glyph with no wording, which is the one pill in the app that carries none. Every other pill is
+ * a sentence about what happened to a call - reached target 1, expired, still open - and is read.
+ * This is a standing fact about the company, repeated on every card that names it, and spelling
+ * "EGX33" out beside a ticker on all of them adds a third thing to a line that already holds a
+ * logo and a name. The reader learns one mark once; a screen reader still hears the whole phrase.
+ *
+ * Square rather than the round ring the other pills use, and that is not a free choice. Round, its
+ * outline sat concentric with the eight-pointed star inside it, and two rings around a small dark
+ * shape is the shape of a settings cog - which is what it read as. The corner is the theme's own
+ * `extraSmall`, so no new radius enters the shape scale.
+ */
+@Composable
+internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
+    if (!EgxCatalog.isEgx33(ticker)) return
+    Box(
+        modifier
+            .size(Egx33BadgeSize)
+            .border(PillOutline, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.extraSmall),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painterResource(R.drawable.ic_egx33),
+            // Said in full, because nothing on screen says it. The glyph is the only place this
+            // fact appears, so a reader who cannot see it would otherwise not be told at all.
+            contentDescription = "EGX 33 Shariah index",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(Egx33GlyphSize),
+        )
+    }
+}
+
+/**
+ * 24dp, which is [LogoSize.Row].
+ *
+ * One size on all three screens rather than one per ticker style. It shares a line with a 27dp
+ * headline on Results and a titleSmall on Insights, and sized to each it was two different marks;
+ * sized to the row logo it is the same object wherever the reader meets it, and never the tallest
+ * thing on its line.
+ */
+private val Egx33BadgeSize: Dp = 24.dp
+
+/** 14dp of glyph, which leaves 5dp of air on every side of it inside the hairline. */
+private val Egx33GlyphSize: Dp = 14.dp
 
 
 /** Placeholder for a screen with nothing to show yet, so empty states explain themselves. */

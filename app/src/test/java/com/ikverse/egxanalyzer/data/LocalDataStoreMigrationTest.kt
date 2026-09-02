@@ -4,6 +4,9 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.ikverse.egxanalyzer.model.ApproachAlerts
+import com.ikverse.egxanalyzer.model.ApproachLevel
+import com.ikverse.egxanalyzer.model.ApproachState
 import com.ikverse.egxanalyzer.model.IntradayBar
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -293,6 +296,93 @@ class LocalDataStoreMigrationTest {
         assertFalse(LocalDataStore(context).priceBreakDates().containsKey("AMOC"))
     }
 
+    @Test
+    fun `a phone on schema 23 gains the T+1 column and keeps the trade under it`() {
+        // The upgrade that actually runs on a real device: 23 is where every phone holding trades
+        // is, so this is the case worth writing out rather than the oldest one that still upgrades.
+        Version23(context).writableDatabase.use { old ->
+            old.insert("positions", null, version23Position())
+        }
+
+        val restored = LocalDataStore(context).positions().single()
+
+        assertEquals("AMOC@2026-07-20", restored.id)
+        assertEquals(10.5, restored.entryPrice, 0.0001)
+        assertEquals(2, restored.windowSessions)
+        assertEquals("Holding for T2", restored.keepOpenNote)
+        // False even on a trade carrying the two sessions a T+1 is offered, and that is the whole
+        // reason the column exists: two sessions is also what a reader whose default is two takes
+        // on every call they record, and the migration cannot tell those apart. What can is the
+        // record, so the flag arrives from the backfill rather than from a guess made here.
+        assertFalse(restored.isTPlusOne)
+    }
+
+    @Test
+    fun `the upgraded table takes a trade that says it was a T+1`() {
+        Version23(context).writableDatabase.use { old ->
+            old.insert("positions", null, version23Position())
+        }
+
+        val store = LocalDataStore(context)
+        store.savePosition(store.positions().single().copy(isTPlusOne = true))
+
+        assertTrue(LocalDataStore(context).positions().single().isTPlusOne)
+    }
+
+    @Test
+    fun `a phone on schema 23 gains the two tables version 25 added and keeps its trade`() {
+        // The trap this file exists for, and the one the codebase notes call out by name: a table
+        // added to onCreate and not to onUpgrade gives every fresh install the table and no
+        // upgraded phone one - which fails at the first write and nowhere earlier.
+        Version23(context).writableDatabase.use { old ->
+            old.insert("positions", null, version23Position())
+        }
+
+        val store = LocalDataStore(context)
+
+        // Both readable, which is what says the upgrade actually ran them.
+        assertTrue(store.approachSeen().isEmpty())
+        assertFalse(store.sessionDigestAnnounced(called))
+        // And the trade that was already on the phone is still there.
+        assertEquals("AMOC@2026-07-20", store.positions().single().id)
+    }
+
+    @Test
+    fun `what the phone has said about a level survives being written and read back`() {
+        val store = LocalDataStore(context)
+        val key = ApproachAlerts.alertKey("AMOC@2026-07-20", ApproachLevel.STOP)
+
+        store.saveApproachSeen(mapOf(key to ApproachState(near = true)))
+
+        assertEquals(mapOf(key to ApproachState(near = true)), LocalDataStore(context).approachSeen())
+    }
+
+    @Test
+    fun `a level the trade no longer has is forgotten rather than left behind`() {
+        val store = LocalDataStore(context)
+        val key = ApproachAlerts.alertKey("AMOC@2026-07-20", ApproachLevel.TARGET2)
+        store.saveApproachSeen(mapOf(key to ApproachState(near = true)))
+
+        store.saveApproachSeen(emptyMap(), forgotten = setOf(key))
+
+        assertTrue(LocalDataStore(context).approachSeen().isEmpty())
+    }
+
+    @Test
+    fun `a session digest is announced once and remembered as announced`() {
+        val store = LocalDataStore(context)
+        assertFalse(store.sessionDigestAnnounced(called))
+
+        store.recordSessionDigestAnnounced(called)
+
+        // Read through a second instance, because the point of the row is that it outlives the
+        // process: an alarm wakes a new one several times a day.
+        assertTrue(LocalDataStore(context).sessionDigestAnnounced(called))
+        // And it is per session, not a high-water mark - a phone that was off across a session must
+        // not have that session counted as already said.
+        assertFalse(LocalDataStore(context).sessionDigestAnnounced(called.plusDays(1)))
+    }
+
     private fun storedSession() = ContentValues().apply {
         put("ticker", "AMOC")
         put("session_date", called.toString())
@@ -302,6 +392,15 @@ class LocalDataStoreMigrationTest {
         put("close", 10.2)
         put("volume", 1_000.0)
         put("source", "Yahoo Finance")
+    }
+
+    private fun version23Position() = ContentValues().apply {
+        putAll(version9Position())
+        put("window_sessions", 2)
+        put("window_custom", 0)
+        put("keep_open", 1)
+        put("keep_open_note", "Holding for T2")
+        put("unknown", "{}")
     }
 
     private fun version9Position() = ContentValues().apply {
@@ -612,6 +711,50 @@ class LocalDataStoreMigrationTest {
                     sessions_elapsed INTEGER NOT NULL,
                     sessions TEXT NOT NULL,
                     settled_at INTEGER NOT NULL
+                )""",
+            )
+        }
+
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    }
+    /**
+     * The positions table as version 23 shipped it - the schema every phone holding trades is on.
+     *
+     * Written out in full like [Version9] and for the same reason. Building it from today's columns
+     * would move both sides of the test together, so the one upgrade that actually runs on a real
+     * device is the one the test would quietly stop covering.
+     */
+    private class Version23(context: Context) :
+        SQLiteOpenHelper(context, LocalDataStore.DATABASE_NAME, null, 23) {
+
+        override fun onCreate(db: SQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS positions (
+                    id TEXT PRIMARY KEY,
+                    ticker TEXT NOT NULL,
+                    name_en TEXT,
+                    name_ar TEXT,
+                    channel TEXT,
+                    recommendation_date TEXT NOT NULL,
+                    entry_price REAL NOT NULL,
+                    entry_date TEXT NOT NULL,
+                    exit_price REAL,
+                    exit_date TEXT,
+                    closed_manually INTEGER NOT NULL DEFAULT 0,
+                    entry_low REAL,
+                    entry_high REAL,
+                    target1 REAL,
+                    target2 REAL,
+                    stop_loss REAL,
+                    window_sessions INTEGER NOT NULL,
+                    window_custom INTEGER NOT NULL DEFAULT 0,
+                    keep_open INTEGER NOT NULL DEFAULT 0,
+                    keep_open_note TEXT,
+                    unknown TEXT NOT NULL DEFAULT '{}',
+                    opened_at INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL DEFAULT 0,
+                    updated_by TEXT NOT NULL DEFAULT '',
+                    deleted INTEGER NOT NULL DEFAULT 0
                 )""",
             )
         }

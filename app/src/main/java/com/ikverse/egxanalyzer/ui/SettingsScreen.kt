@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ikverse.egxanalyzer.BuildConfig
 import com.ikverse.egxanalyzer.data.UpdateState
+import com.ikverse.egxanalyzer.model.ApproachAlerts
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.CloudProvider
@@ -650,6 +651,94 @@ internal fun SettingsScreen(appState: AppState) {
                         "here about something you have not committed to.",
                     "It says what the market did and never what to do about it, and it books no " +
                         "extra work: the check rides a price refresh that was happening anyway.",
+                ),
+            )
+            SettingToggle(
+                label = "Warn me before a trade reaches a level",
+                checked = appState.appPreferences.approachAlertsEnabled,
+                onCheckedChange = appState::updateApproachAlerts,
+                about = infoNote(
+                    "Warn me before a trade reaches a level",
+                    "Everything else here tells you after the fact - a stop announced is a stop " +
+                        "already taken. This is the one that arrives while you can still decide " +
+                        "something: a trade of yours has come within reach of its stop, or of " +
+                        "target 2.",
+                    "It says the distance and never what to do about it. Off unless you switch it " +
+                        "on, because a price near a level goes on being near it, and this is the " +
+                        "noisiest thing the app can say.",
+                    "It books no extra work: the check rides a recompute that was happening anyway.",
+                ),
+            )
+            if (appState.appPreferences.approachAlertsEnabled) {
+                val threshold = appState.appPreferences.approachThresholdPercent
+                SettingLabel(
+                    "Close enough to warn about: $threshold%",
+                    style = MaterialTheme.typography.bodyLarge,
+                    about = infoNote(
+                        "Close enough to warn about",
+                        "How near the price has to get before the warning above is raised, as a " +
+                            "percentage of the price itself.",
+                        "There is no right answer for everybody: a tight stop on a liquid large " +
+                            "cap and a wide one on a thin mid cap mean different things by close.",
+                    ),
+                )
+                Slider(
+                    value = threshold.toFloat(),
+                    onValueChange = { appState.updateApproachThreshold(it.roundToInt()) },
+                    valueRange = ApproachAlerts.MIN_THRESHOLD_PERCENT.toFloat()..
+                        ApproachAlerts.MAX_THRESHOLD_PERCENT.toFloat(),
+                    steps = ApproachAlerts.MAX_THRESHOLD_PERCENT -
+                        ApproachAlerts.MIN_THRESHOLD_PERCENT - 1,
+                )
+            }
+            SettingToggle(
+                label = "Tell me what the session did",
+                checked = appState.appPreferences.sessionDigestEnabled,
+                onCheckedChange = appState::updateSessionDigest,
+                about = infoNote(
+                    "Tell me what the session did",
+                    "One line after the close: how many calls reached targets, how many were " +
+                        "stopped out, how many ran out of time, and how many of them were yours.",
+                    "The gap it fills is the session where nothing of yours moved. Everything " +
+                        "else here is about one trade or one call, so an afternoon when three " +
+                        "calls from the channels you read hit targets and you held none of them " +
+                        "passed in silence.",
+                    "Off unless you switch it on: it arrives on a rhythm rather than because " +
+                        "something happened, which is the kind of notification that wears out " +
+                        "fastest. Said once per session, whatever else happens that evening.",
+                ),
+            )
+            SettingToggle(
+                label = "Tell me when the price feed goes quiet",
+                checked = appState.appPreferences.feedAlertsEnabled,
+                onCheckedChange = appState::updateFeedAlerts,
+                about = infoNote(
+                    "Tell me when the price feed goes quiet",
+                    "A stock whose prices have stopped arriving looks exactly like a stock that " +
+                        "has not moved - the feed answers every request and its newest session " +
+                        "stays put. Meanwhile every rate on the record quietly rests on fewer " +
+                        "calls than it looks like.",
+                    "This has happened here once already and nothing noticed at the time.",
+                    "On by default, because it reports the app being unable to do its job rather " +
+                        "than something the market did. Said once when it starts, and not again " +
+                        "until the feed comes back and goes quiet a second time. The Price feed " +
+                        "card names every affected stock and what can be done about each.",
+                ),
+            )
+            SettingToggle(
+                label = "Tell me when a scheduled run did not happen",
+                checked = appState.appPreferences.scheduleAlertsEnabled,
+                onCheckedChange = appState::updateScheduleAlerts,
+                about = infoNote(
+                    "Tell me when a scheduled run did not happen",
+                    "A schedule that was due and was missed, or one that failed - with the reason " +
+                        "it gives. The way a schedule breaks on this platform is silence: nothing " +
+                        "fires and nothing says so, and the two permissions that stop one working " +
+                        "are named only on this screen.",
+                    "It never mentions a run that was deliberately skipped, so it cannot become a " +
+                        "daily reminder that paid runs are switched off.",
+                    "It offers no way to start a run: that would be a way to spend from the lock " +
+                        "screen, and starting one is always your own decision.",
                 ),
             )
         }

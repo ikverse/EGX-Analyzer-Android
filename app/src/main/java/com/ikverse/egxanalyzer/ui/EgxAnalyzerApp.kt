@@ -1,6 +1,7 @@
 package com.ikverse.egxanalyzer.ui
 
 import android.app.Activity
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -65,6 +66,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldLayout
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
@@ -148,11 +151,43 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
     // Held here rather than inside the pages: the bar is drawn over them, and it has to survive a
     // change of destination.
     val navBarVisible = remember { mutableStateOf(true) }
+    // Above the shells and not inside either of them: back means the same thing whichever one is
+    // drawn, and a handler in each would be one rule written twice. Enabled only when there is
+    // something to undo, so a reader with nothing outstanding gets the system's own behaviour -
+    // the app closes - rather than a handler that swallows the press and leaves them pressing it
+    // again. What it undoes, and in what order, is AppState.goBack. A modal sheet is not in that
+    // list: Compose's own ModalBottomSheet takes back before this ever sees it.
+    BackHandler(enabled = appState.canGoBack) { appState.goBack() }
+    // A look at Insights ends when the reader leaves it, so the mark is taken on the way out and
+    // never on the way in - the pager composes the neighbouring pages, so arriving is not evidence
+    // anybody turned to the tab. `MainActivity` takes the same mark when the app goes to the
+    // background, which is the other way a look ends. See AppState.markInsightsSeen.
+    val destination = appState.destination
+    LaunchedEffect(destination) {
+        if (destination != AppDestination.INSIGHTS) return@LaunchedEffect
+        // Runs on leaving, which is when this effect is cancelled and disposed.
+        try {
+            kotlinx.coroutines.awaitCancellation()
+        } finally {
+            appState.markInsightsSeen()
+        }
+    }
+    // Drawn once for the whole app, above both shells, for the reason the handler above is: a
+    // ticker is pressable on four tabs and one sheet must serve all four. It is outside the
+    // CompositionLocalProvider's content but inside the same composition, so it survives a fold
+    // exactly as the state naming it does. See AppState.openStockTicker.
+    appState.openStockTicker?.let { ticker ->
+        StockSheet(ticker, appState, onDismiss = appState::closeStock)
+    }
     // What each page has open lives on AppState rather than anywhere below this line - see
     // PageState, which explains why the two shells below cannot hold it between them.
     CompositionLocalProvider(
         LocalWindowWidth provides windowWidth,
         LocalNavBarVisible provides navBarVisible,
+        // Remembered on the state rather than rebuilt each frame: a new lambda every recomposition
+        // is a new value for a static local, which invalidates every reader of it - and the readers
+        // here are every ticker on every card on the page.
+        LocalOpenStock provides remember(appState) { appState::openStock },
     ) {
         if (rail) {
             NavigationSuiteScaffoldLayout(
@@ -373,11 +408,23 @@ private fun AppStatusLine(
         val shown = remember { mutableStateOf(text.orEmpty() to (stage ?: StatusStage.DONE)) }
         if (text != null && stage != null) shown.value = text to stage
         val (label, glyph) = shown.value
+        // Only ever on the live message, never on the one held for the fade: a button on a line
+        // that is already leaving is a button whose press lands on nothing.
+        val undo = message?.undo?.takeIf { busy == null }
         Row(
             Modifier
                 // A working line reflects live state and there is nothing to dismiss; the other two
                 // are messages, and a message the reader has finished with should go when tapped.
-                .then(if (glyph == StatusStage.WORKING) Modifier else Modifier.clickable(onClick = onDismiss))
+                // A working line reflects live state and there is nothing to dismiss. Neither is a
+                // line carrying an undo: the whole row being tappable beside a word that says
+                // "Undo" is two targets one of which quietly throws the offer away.
+                .then(
+                    if (glyph == StatusStage.WORKING || undo != null) {
+                        Modifier
+                    } else {
+                        Modifier.clickable(onClick = onDismiss)
+                    },
+                )
                 // Inside the animated content, so the gap under the name arrives and leaves with
                 // the message rather than being held open under an idle header.
                 .padding(top = if (alignEnd) 0.dp else StatusLineGap)
@@ -402,6 +449,20 @@ private fun AppStatusLine(
                 // the glyph beside it ends up a long way from the words it qualifies.
                 modifier = Modifier.weight(1f, fill = false),
             )
+            if (undo != null) {
+                // A plain text button in the app's own accent, which is the one thing on this line
+                // allowed to carry colour - the glyph is tinted and the words never are, and an
+                // action the reader has seconds to notice is the exception that earns it.
+                TextButton(
+                    onClick = {
+                        undo.action()
+                        onDismiss()
+                    },
+                    contentPadding = PaddingValues(horizontal = Space.s, vertical = 0.dp),
+                ) {
+                    Text(undo.label, style = MaterialTheme.typography.labelLarge)
+                }
+            }
         }
     }
 }

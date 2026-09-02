@@ -62,6 +62,9 @@ import com.ikverse.egxanalyzer.model.AnalysedChannel
 import com.ikverse.egxanalyzer.model.AnalysisPlan
 import com.ikverse.egxanalyzer.model.AnalysisAim
 import com.ikverse.egxanalyzer.model.AnalysisContentType
+import com.ikverse.egxanalyzer.model.JobOutcome
+import com.ikverse.egxanalyzer.model.ApproachAlerts
+import com.ikverse.egxanalyzer.model.ApproachChange
 import com.ikverse.egxanalyzer.model.AnalysisSchedule
 import com.ikverse.egxanalyzer.model.MarketRefresh
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
@@ -128,6 +131,7 @@ import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.SessionDigest
 import com.ikverse.egxanalyzer.model.StockOpinion
 import com.ikverse.egxanalyzer.model.opinionId
+import com.ikverse.egxanalyzer.model.positionId
 
 enum class AppDestination(val label: String, val shortLabel: String) {
     ANALYZE("Analyze", "AI"),
@@ -226,6 +230,34 @@ class AppState(
      */
     private val callsChanged: (changes: List<CallChange>) -> Unit = {},
     /**
+     * Says a trade has come within reach of its stop or of target 2; supplied like the rest.
+     *
+     * The only alert here that speaks while something can still be done, which is why it is its own
+     * callback rather than more work inside [tradesChanged]: that one reports what the market has
+     * finished doing, and folding the two together would put one switch over two questions.
+     */
+    private val approachesChanged: (changes: List<ApproachChange>) -> Unit = {},
+    /** Says what a whole session did, once, after the close; supplied like the rest. */
+    private val sessionSummarised: (digest: SessionDigest) -> Unit = {},
+    /**
+     * Says the feed has gone quiet about stocks the record names; supplied like the rest.
+     *
+     * Takes the count and the calls it is costing rather than the report, because a notifier has no
+     * business reasoning about a `PriceHealthReport` - the figure that matters was already decided
+     * by the card that draws one.
+     */
+    private val feedQuiet: (stocks: Int, callsHeld: Int) -> Unit = { _, _ -> },
+    /** Says a scheduled analysis was due and did not happen; supplied like the rest. */
+    private val scheduleMissed: (schedule: AnalysisSchedule) -> Unit = {},
+    /**
+     * How many trades are overdue, for the launcher shortcut that counts them.
+     *
+     * Reported on every rebuild rather than only when the number moves: a launcher can drop a
+     * dynamic shortcut when it is updated or when its slots are needed, and one that is only ever
+     * pushed on a change would stay gone until the count happened to change again.
+     */
+    private val overdueCounted: (count: Int) -> Unit = {},
+    /**
      * Books or cancels this phone's schedule alarm; supplied by the app so this class stays testable.
      */
     private val schedulesChanged: (
@@ -294,6 +326,33 @@ class AppState(
         private set
     var telegramSyncMessage by mutableStateOf<String?>(null)
         private set
+
+    /**
+     * When this reader last had Insights open, which is what "new since you last looked" means.
+     *
+     * Held as state rather than read from the repository at each draw, so the chips vanish the
+     * moment it is marked rather than at the next recomposition that happens to re-read the disk.
+     *
+     * **Zero means a first look and marks nothing.** An install that has never opened the tab would
+     * otherwise greet its reader with every session flagged as new, which says the same as none of
+     * them being flagged and costs a page of chips to say it.
+     */
+    var insightsSeenAt by mutableStateOf(settingsRepository.insightsSeenAt())
+        private set
+
+    /**
+     * Records that the reader has finished looking at Insights.
+     *
+     * Called on leaving the tab and on the app going to the background, which are the two ways a
+     * look ends. Deliberately **not** on arriving: a session marked read the instant the tab
+     * composed would be marked read by the pager, which keeps the neighbouring pages composed and
+     * would clear the chips of a tab nobody had turned to.
+     */
+    fun markInsightsSeen() {
+        val at = System.currentTimeMillis()
+        settingsRepository.recordInsightsSeen(at)
+        insightsSeenAt = at
+    }
 
     /** One-shot banner text for an action that has just finished. */
     var statusMessage by mutableStateOf<StatusMessage?>(null)
@@ -597,7 +656,8 @@ class AppState(
     var pendingResultId by mutableStateOf<Long?>(null)
         private set
 
-    fun openSavedResult(id: Long) {
+    fun openSavedResult(id: Long, returnTo: NavStop? = NavStop(destination)) {
+        returnTo?.let(nav::push)
         pendingResultId = id
         destination = AppDestination.RESULTS
     }
@@ -620,7 +680,8 @@ class AppState(
     var pendingCallId by mutableStateOf<String?>(null)
         private set
 
-    fun openPosition(id: String) {
+    fun openPosition(id: String, returnTo: NavStop? = NavStop(destination)) {
+        returnTo?.let(nav::push)
         // The trip the user just made is over. Left set, a highlight still counting down on the tab
         // being left would fire again the moment they pressed their way back to it.
         pendingCallId = null
@@ -632,7 +693,8 @@ class AppState(
         pendingPositionId = null
     }
 
-    fun openCall(id: String) {
+    fun openCall(id: String, returnTo: NavStop? = NavStop(destination)) {
+        returnTo?.let(nav::push)
         pendingPositionId = null
         pendingCallId = id
         destination = AppDestination.INSIGHTS
@@ -640,6 +702,73 @@ class AppState(
 
     fun consumePendingCall() {
         pendingCallId = null
+    }
+
+    /**
+     * The trade whose sale dialog a notification action asked for, cleared once it has opened.
+     *
+     * A sale needs a price and a date, so **Record sale** can never be a one-tap action in the
+     * shade - the two figures are the user's own and the app must not invent either. What the
+     * action can do is land them on the two fields instead of on a tab with a card to find, which
+     * is the whole of the distance between knowing a trade stopped out and having recorded it.
+     *
+     * Separate from [pendingPositionId] although the same path sets both. Revealing a card and
+     * opening a price dialog on it are different requests: every cross-tab press reveals, and one
+     * entrance that always did both would put a price field in front of the reader every time they
+     * followed a call through to its trade.
+     */
+    var pendingSellPositionId by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * Reveals a trade and opens its sale dialog, for the Record sale action in the shade.
+     *
+     * `returnTo = null` for the reason every notification entrance uses it: the app may not have
+     * been running, so there is no tab to go back to.
+     */
+    fun openPositionToSell(id: String) {
+        openPosition(id, returnTo = null)
+        pendingSellPositionId = id
+    }
+
+    fun consumePendingSell() {
+        pendingSellPositionId = null
+    }
+
+    /**
+     * One stored trade by its id, for a notification action acting with no screen in front of it.
+     *
+     * Off [positions] rather than the derived portfolio: a broadcast can arrive before the first
+     * recompute has run, and [setKeepOpen] takes the stored row rather than the view over it.
+     */
+    fun positionFor(id: String): Position? = positions.firstOrNull { it.id == id }
+
+    /**
+     * The stock whose sheet is open, or null.
+     *
+     * Here rather than in a screen for the reason every other piece of navigation is: the shell
+     * draws one UI beside a rail and another under a pill, and folding the phone disposes one and
+     * composes the other from nothing. A sheet remembered inside either would close itself the
+     * moment the phone was opened, which is precisely when a reader has the room to read it.
+     *
+     * It also has to be one sheet rather than one per screen. A ticker is pressable on four tabs;
+     * four hosts would be four places for the same sheet to be drawn slightly differently, and two
+     * of them could be open at once on the compact layout, where the pager keeps the neighbouring
+     * pages composed.
+     *
+     * **It changes no destination and records no return.** Opening it leaves the reader on the tab
+     * they were reading, which is the point of it being a sheet - see [StockSheet].
+     */
+    var openStockTicker by mutableStateOf<String?>(null)
+        private set
+
+    /** Opens the sheet on one stock, from wherever its ticker was pressed. */
+    fun openStock(ticker: String) {
+        openStockTicker = ticker.trim().takeIf(String::isNotBlank)
+    }
+
+    fun closeStock() {
+        openStockTicker = null
     }
 
     /** A saved analysis covering exactly this session and these chats, awaiting a decision. */
@@ -977,6 +1106,8 @@ class AppState(
          * decision nobody made.
          */
         offeredWindow: Int = appPreferences.defaultTradeWindowSessions,
+        /** Whether the card called it a T+1, taken off the card rather than read back later. */
+        isTPlusOne: Boolean = false,
     ) {
         val normalized = Scoring.normalizeTicker(ticker)
         val existing = positions.firstOrNull {
@@ -1005,6 +1136,10 @@ class AppState(
             // Custom means the user typed over what they were offered. Recorded rather than
             // recomputed later: what was offered moves, the choice did not.
             windowCustom = window != Scoring.clampWindow(offeredWindow),
+            // What the channel called it, which no edit of this trade can change: typing a longer
+            // window over the two it was offered is the user deciding to hold a T+1 call, not the
+            // card ceasing to have been one.
+            isTPlusOne = isTPlusOne,
             // Re-recording a mistyped price must not quietly cancel a Keep Open already set.
             keepOpen = existing?.keepOpen ?: false,
             // Kept from the first purchase, so re-recording a trade does not restart its life.
@@ -1040,8 +1175,38 @@ class AppState(
         )
         localDataStore.savePosition(closed)
         positions = localDataStore.positions()
-        statusMessage = StatusMessage("${position.ticker} closed at ${formatPrice(exitPrice)}", true)
+        statusMessage = StatusMessage(
+            "${position.ticker} closed at ${formatPrice(exitPrice)}",
+            true,
+            // The one genuinely irreversible thing a reader does here, and until now the only way
+            // back from a mistyped sale was Edit trade, which does not clear one. The offer lives
+            // as long as the line does - four seconds - which is the window in which a wrong price
+            // is noticed at all.
+            undo = StatusUndo("Undo") { reopenPosition(position) },
+        )
         publishPosition(closed, deleted = false)
+        appScope.launch { recomputePortfolio() }
+    }
+
+    /**
+     * Puts a trade back the way it was before a sale was recorded against it.
+     *
+     * Takes the **position as it stood**, not an id: the row on disk has already been replaced by
+     * the time this can be pressed, so anything read back would be the closed one. Restoring the
+     * original also restores its `updatedAt`, which is deliberate - a revision that travelled to
+     * another device is overtaken by this one carrying a newer stamp, so the sale is undone there
+     * too rather than being pushed back by the next sync.
+     *
+     * Announced like any other edit, and silent to the notifications for the reason every user edit
+     * is: `recomputePortfolio` without `announceChanges` updates the record without the phone
+     * reporting the button that was just pressed back to the person who pressed it.
+     */
+    fun reopenPosition(position: Position) {
+        val reopened = position.copy(updatedAt = System.currentTimeMillis(), updatedBy = deviceName)
+        localDataStore.savePosition(reopened)
+        positions = localDataStore.positions()
+        statusMessage = StatusMessage("${position.ticker} is open again", true)
+        publishPosition(reopened, deleted = false)
         appScope.launch { recomputePortfolio() }
     }
 
@@ -1114,6 +1279,12 @@ class AppState(
                 "${position.ticker} follows its deadline again"
             },
             true,
+            // Reversible on its own through the card, so the offer here is a convenience rather
+            // than a rescue - but it is the other switch that can silently change what a deadline
+            // does to a trade, and it can now be pressed from a notification with the app closed.
+            undo = StatusUndo("Undo") {
+                setKeepOpen(position, keepOpen = !keepOpen, note = position.keepOpenNote)
+            },
         )
         publishPosition(updated, deleted = false)
         appScope.launch { recomputePortfolio() }
@@ -1252,12 +1423,17 @@ class AppState(
             )
         }
         portfolio = rebuilt
+        // Straight off the rebuild, so the shortcut counts exactly what the Overdue card does.
+        overdueCounted(rebuilt.positions.count(PositionView::overdue))
         reviewTrades(rebuilt, announceChanges)
         // After the trades, and off the same recompute. Every path that announces recomputes the
         // performance first, so the calls this reads are the ones the prices were just scored
         // against - and the holdings it excludes are the ones set two lines above.
         reviewCalls(performance, announceChanges)
-        reviewSessions(rebuilt, performance)
+        // Third, off the same rebuild: it reads the trades reviewTrades has just written down, and
+        // a trade that settled on this pass is no longer approaching anything.
+        reviewApproaches(rebuilt, announceChanges)
+        reviewSessions(rebuilt, performance, announceChanges)
     }
 
     /**
@@ -1273,7 +1449,11 @@ class AppState(
      * Each is written whole, so a heal that rewrote a stock's prices takes the events derived from
      * the old ones with it rather than leaving them beside their replacements.
      */
-    private suspend fun reviewSessions(rebuilt: Portfolio, report: PerformanceReport) {
+    private suspend fun reviewSessions(
+        rebuilt: Portfolio,
+        report: PerformanceReport,
+        announceChanges: Boolean = false,
+    ) {
         val calls = report.sessions.flatMap(ScoredSession::calls)
         // The sessions the record actually knows about, which is the exchange's own calendar as
         // this phone has it - a weekend and a public holiday are simply absent. Both sources are
@@ -1299,6 +1479,42 @@ class AppState(
             ).also(localDataStore::saveSessionDigests)
         }
         sessionDigest = digests.firstOrNull()
+        announceSession(digests.firstOrNull(), announceChanges)
+    }
+
+    /**
+     * Says once what the newest session did, if the reader asked to be told.
+     *
+     * **The one place a digest is spoken.** The card is rebuilt on every recompute and rightly so -
+     * a session has one right answer forever - which is exactly why it cannot decide on its own
+     * whether it has already been said out loud. `session_digest_announced` is the memory, and it
+     * is the same distinction `position_status_seen` draws: what happened is derived, what was
+     * *said* is stored.
+     *
+     * **The newest session only.** A phone switched off for a week comes back with every one of
+     * those sessions filled in correctly on the card - that is the whole point of the digest being
+     * derived - and announcing each of them would be seven days of news piled onto the evening it
+     * was turned on. The card is where a reader catches up; the shade is where they are told.
+     *
+     * Gated on [announceChanges] like the two sweeps above, so an edit the user just made cannot
+     * produce a summary of the session.
+     */
+    private suspend fun announceSession(digest: SessionDigest?, announceChanges: Boolean) {
+        if (!announceChanges || !appPreferences.sessionDigestEnabled) return
+        val newest = digest?.takeIf { !it.isEmpty } ?: return
+        val fresh = withContext(Dispatchers.IO) {
+            if (localDataStore.sessionDigestAnnounced(newest.date)) {
+                false
+            } else {
+                // Written before the notifier is called, not after: a crash between the two would
+                // otherwise leave the session unannounced and repeat the whole line on the next
+                // recompute. Being told nothing once is better than being told the same thing five
+                // times, which is how a channel gets switched off.
+                localDataStore.recordSessionDigestAnnounced(newest.date)
+                true
+            }
+        }
+        if (fresh) sessionSummarised(newest)
     }
 
     /**
@@ -1342,6 +1558,34 @@ class AppState(
             }
         }
         if (announceChanges && appPreferences.callAlertsEnabled) callsChanged(alerts.changes)
+    }
+
+    /**
+     * The third sweep of the same recompute: trades closing on a level rather than reaching one.
+     *
+     * [reviewTrades] and [reviewCalls] both report something the market has finished doing. This
+     * reports something it is still doing, which is the only reason it is a third sweep and not a
+     * branch inside the first: they answer at opposite ends of the same event, and a reader can
+     * reasonably want to be told a stop was taken without being told, twice a week, that one is
+     * getting close.
+     *
+     * The sweep runs whether or not anyone will be told, exactly as the other two do and for the
+     * identical reason: switching the notification on reports what happens **next** instead of
+     * announcing every level a price happens to be sitting near this morning.
+     */
+    private suspend fun reviewApproaches(rebuilt: Portfolio, announceChanges: Boolean) {
+        val alerts = withContext(Dispatchers.IO) {
+            ApproachAlerts.sweep(
+                previous = localDataStore.approachSeen(),
+                positions = rebuilt.positions,
+                thresholdPercent = appPreferences.approachThresholdPercent,
+            ).also {
+                localDataStore.saveApproachSeen(it.record, it.forgotten)
+            }
+        }
+        if (announceChanges && appPreferences.approachAlertsEnabled) {
+            approachesChanged(alerts.changes)
+        }
     }
 
     /**
@@ -1677,7 +1921,62 @@ class AppState(
     }
 
     fun navigate(destination: AppDestination) {
+        // A tab the reader chose ends whatever jump preceded it: back now means "leave", not "undo
+        // the press I made two tabs ago". Guarded on the destination actually changing, because
+        // this is called with the tab already showing more often than not - the pager publishes its
+        // arrival at the end of every travel this class started, and an unguarded clear there would
+        // throw the return away in the same breath as the jump that recorded it.
+        if (destination != this.destination) nav.clear()
         this.destination = destination
+    }
+
+    /**
+     * One step of history, for the system's back button. See [NavStack].
+     *
+     * Held here rather than in the shell for the reason [destination] and [pages] are: folding the
+     * phone disposes one shell whole and composes the other from nothing, so anything back
+     * remembered from inside the composition would be forgotten by the fold.
+     */
+    private val nav = NavStack()
+
+    /**
+     * Whether back has something to undo before the app should close.
+     *
+     * Read by the shell to decide whether to hold the press at all, so a reader with nothing to
+     * unwind gets the system's own behaviour rather than a handler that swallows it.
+     */
+    val canGoBack: Boolean
+        get() = nav.canReturn || pages.filtersActive(destination)
+
+    /**
+     * Undoes the last thing that narrowed or moved the view, and says whether it found one.
+     *
+     * **The jump before the filter**, deliberately. Both can be outstanding at once - a reader
+     * filters Insights to one stock, then presses a card through to the Portfolio - and the jump is
+     * the more recent of the two, so it is the one a back press is about. Answering with the filter
+     * first would strip a narrowing the reader set up deliberately while leaving them on a tab they
+     * did not choose.
+     *
+     * A filter is cleared whole rather than one control at a time. Three presses to undo three
+     * chips would be back re-enacting the reader's typing, and the screen's own Clear filters
+     * button - which is inside the folded panel, and so two presses away when a filter is on -
+     * clears them together too.
+     */
+    fun goBack(): Boolean {
+        nav.pop()?.let { stop ->
+            destination = stop.destination
+            // Straight onto the fields rather than through openPosition or openCall: those record
+            // a jump, and a return that recorded itself would be a back press the next back press
+            // has to undo.
+            pendingPositionId = stop.positionId
+            pendingCallId = stop.callId
+            return true
+        }
+        if (pages.filtersActive(destination)) {
+            pages.clearFilters(destination)
+            return true
+        }
+        return false
     }
 
     /**
@@ -1997,6 +2296,58 @@ class AppState(
     }
 
     /**
+     * Whether the phone says a trade is closing on its stop or on target 2.
+     *
+     * Gates the notification and never the sweep, like every switch here, and books no background
+     * work of its own: the sweep rides a recompute that was already happening. Switching it on
+     * therefore reports what happens next rather than every level a price is currently sitting
+     * near - which is exactly the burst the first-sight rule in `ApproachAlerts` exists to prevent.
+     */
+    fun updateApproachAlerts(enabled: Boolean) {
+        if (enabled == appPreferences.approachAlertsEnabled) return
+        persistPreferences(appPreferences.copy(approachAlertsEnabled = enabled))
+    }
+
+    /**
+     * How near a level counts as closing on it.
+     *
+     * Clamped rather than trusted, the way the trade window is: a value arriving from a synced
+     * document written by a build with different bounds must not widen this one's.
+     */
+    fun updateApproachThreshold(percent: Int) {
+        val clamped = percent.coerceIn(
+            ApproachAlerts.MIN_THRESHOLD_PERCENT,
+            ApproachAlerts.MAX_THRESHOLD_PERCENT,
+        )
+        if (clamped == appPreferences.approachThresholdPercent) return
+        persistPreferences(appPreferences.copy(approachThresholdPercent = clamped))
+    }
+
+    /**
+     * Whether the phone says once, after the close, what the whole session did.
+     *
+     * Gates the notification and never the archive: `session_events` and the card are written on
+     * every recompute regardless, so switching this on reports the next session rather than
+     * announcing a backlog of the last thirty.
+     */
+    fun updateSessionDigest(enabled: Boolean) {
+        if (enabled == appPreferences.sessionDigestEnabled) return
+        persistPreferences(appPreferences.copy(sessionDigestEnabled = enabled))
+    }
+
+    /** Whether the phone says the price feed has gone quiet about stocks the record names. */
+    fun updateFeedAlerts(enabled: Boolean) {
+        if (enabled == appPreferences.feedAlertsEnabled) return
+        persistPreferences(appPreferences.copy(feedAlertsEnabled = enabled))
+    }
+
+    /** Whether the phone says a scheduled analysis was due and did not happen. */
+    fun updateScheduleAlerts(enabled: Boolean) {
+        if (enabled == appPreferences.scheduleAlertsEnabled) return
+        persistPreferences(appPreferences.copy(scheduleAlertsEnabled = enabled))
+    }
+
+    /**
      * Whether anything here wants to be told what became of a trade.
      *
      * One question for both background wakes, because one reading of the record answers both of
@@ -2201,6 +2552,14 @@ class AppState(
             record = settingsRepository::recordAnalysisSchedule,
             paidWorkAllowed = settingsRepository::paidSchedulesEnabled,
         ).runDue(::runScheduledAnalysis)
+            // Missed and failed only. A skip is the app deliberately doing nothing - most often
+            // because paid runs are switched off, which is the standing state of that switch - and
+            // a notification restating it every morning would be the app asking to be allowed to
+            // spend. These two are the app failing to keep a promise, which is the thing silence
+            // hides and this exists to break.
+            .filter { it.lastOutcome == JobOutcome.MISSED || it.lastOutcome == JobOutcome.FAILED }
+            .takeIf { appPreferences.scheduleAlertsEnabled }
+            ?.forEach(scheduleMissed)
         analysisSchedules = settingsRepository.analysisSchedules()
         marketRefreshEnabled = settingsRepository.marketRefreshEnabled()
         rebookSchedules()
@@ -2669,6 +3028,68 @@ class AppState(
         }
         performance = computed.first
         priceHealth = computed.second
+        reviewFeedHealth(computed.second)
+        markTPlusOneTrades()
+    }
+
+    /**
+     * Says once, per spell, that the feed has stopped answering about stocks the record names.
+     *
+     * The state has been computed on every recompute since `PriceHealth` was written and has
+     * reached the reader only through a card in Settings - a screen consulted when something
+     * already looks wrong. The trouble is that nothing looks wrong: a frozen series answers every
+     * request, so a stale symbol is indistinguishable from a stock that has not moved, and every
+     * rate on the page quietly rests on fewer calls than the reader thinks.
+     *
+     * **On the way in, and re-armed on the way out.** `PriceHealth` reports the same fault for as
+     * long as the symbol stays retired, so announcing the state rather than the crossing into it
+     * would be a daily notification about something that happened in June. This is the same rule
+     * `CallAlerts` follows about a price sitting inside a band.
+     *
+     * The flag is written **whether or not anyone is told**, like every sweep here: switching the
+     * notification on reports the next spell rather than the one already running.
+     */
+    private fun reviewFeedHealth(health: PriceHealthReport) {
+        val quiet = !health.clean
+        if (quiet == settingsRepository.feedReportedQuiet()) return
+        settingsRepository.recordFeedReportedQuiet(quiet)
+        if (quiet && appPreferences.feedAlertsEnabled) {
+            feedQuiet(health.faults.size, health.callsHeld)
+        }
+    }
+
+    /**
+     * Gives back to the older trades the one thing they were never asked to remember.
+     *
+     * A trade records what kind of call it was taken on only from the build that added the column;
+     * everything bought before it has the two-session window a T+1 was offered and no word about
+     * why. The record still holds the card, keyed by the same trade id the Portfolio already uses
+     * to lead back to it, so the fact is recoverable exactly once and then written down - after
+     * which a deleted analysis can no longer take it away.
+     *
+     * Set, never cleared. A report the user has since removed says nothing about a trade rather
+     * than saying it was ordinary, and a backfill that also unmarked would spend every recompute
+     * arguing with the purchase that wrote the flag in the first place.
+     *
+     * Written without touching [Position.updatedAt] and without publishing: this device is not
+     * changing the trade, it is finishing a record it already had. The stamp belongs to the user's
+     * own edits, and moving it here would have every phone in a sync overtake the others' real
+     * changes with fifty rewrites that say nothing new. The other device reaches the same answer
+     * off its own copy of the record, on its own next recompute.
+     */
+    private suspend fun markTPlusOneTrades() {
+        val called = performance.sessions
+            .asSequence()
+            .flatMap { it.calls.asSequence() }
+            .filter(ScoredCall::isTPlusOne)
+            .mapTo(mutableSetOf(), ScoredCall::positionId)
+        if (called.isEmpty()) return
+        val unmarked = positions.filter { !it.isTPlusOne && it.id in called }
+        if (unmarked.isEmpty()) return
+        positions = withContext(Dispatchers.IO) {
+            unmarked.forEach { localDataStore.savePosition(it.copy(isTPlusOne = true)) }
+            localDataStore.positions()
+        }
     }
 
     private fun saveAppPreferences(value: AppPreferences) {
@@ -3524,7 +3945,27 @@ data class StatusMessage(
     val text: String,
     val succeeded: Boolean,
     val stage: StatusStage = if (succeeded) StatusStage.DONE else StatusStage.FAILED,
+    /**
+     * One word the reader can press to undo what the line has just reported.
+     *
+     * **A slot on this line rather than a snackbar**, deliberately. The floating toast was removed
+     * on 2026-08-25 because it answered from the far end of the screen from the button that had
+     * been pressed, and bringing one back for this would undo that on purpose. The line already
+     * says what happened, sits where the app's own name is, and clears itself after four seconds -
+     * which is exactly the shape an undo wants.
+     *
+     * **At most one, and only on something destructive.** Recording a sale and closing a trade by
+     * hand are the two irreversible things a reader does in this app; everything else is an edit
+     * they can simply make again. A confirmation carrying a button after every tap would turn the
+     * quietest piece of chrome in the app into the loudest.
+     *
+     * Null on every other message, which is all but two of the fifty-odd outcomes here.
+     */
+    val undo: StatusUndo? = null,
 )
+
+/** What pressing the word on a [StatusMessage] does, and what that word is. */
+data class StatusUndo(val label: String, val action: () -> Unit)
 
 /**
  * Strips everything an API key cannot contain.

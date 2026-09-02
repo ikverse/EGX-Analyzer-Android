@@ -271,6 +271,11 @@ dependencies {
     implementation(libs.androidx.window)
     // The daily overdue check. Nothing else in the app runs while it is closed.
     implementation(libs.androidx.work.runtime.ktx)
+    // The home-screen widget. The one place in this app that draws outside its own window, and the
+    // only reason a second UI toolkit is here at all: a widget is RemoteViews underneath, and Glance
+    // is what lets it be written in the same idiom as everything else rather than in XML.
+    implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.glance.material3)
     implementation(libs.tdl.coroutines.android)
     // Encodes the tg://login link TDLib hands back; scanning it beats typing a phone and a code.
     implementation(libs.zxing.core)

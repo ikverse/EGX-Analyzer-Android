@@ -7,6 +7,7 @@ import com.ikverse.egxanalyzer.model.AnalysisSchedule
 import com.ikverse.egxanalyzer.model.JobOutcome
 import com.ikverse.egxanalyzer.model.MarketRefresh
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
+import com.ikverse.egxanalyzer.model.ApproachAlerts
 import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.CallOrder
 import com.ikverse.egxanalyzer.model.ResponseTimeout
@@ -202,6 +203,14 @@ class SettingsRepository(
         overdueRemindersEnabled = preferences.getBoolean(KEY_OVERDUE_REMINDERS, true),
         tradeAlertsEnabled = preferences.getBoolean(KEY_TRADE_ALERTS, true),
         callAlertsEnabled = preferences.getBoolean(KEY_CALL_ALERTS, false),
+        approachAlertsEnabled = preferences.getBoolean(KEY_APPROACH_ALERTS, false),
+        approachThresholdPercent = preferences.getInt(
+            KEY_APPROACH_THRESHOLD,
+            ApproachAlerts.DEFAULT_THRESHOLD_PERCENT,
+        ),
+        sessionDigestEnabled = preferences.getBoolean(KEY_SESSION_DIGEST, false),
+        feedAlertsEnabled = preferences.getBoolean(KEY_FEED_ALERTS, true),
+        scheduleAlertsEnabled = preferences.getBoolean(KEY_SCHEDULE_ALERTS, true),
         updateChecksEnabled = preferences.getBoolean(KEY_UPDATE_CHECKS, true),
         portfolioOrder = enumPreference(KEY_PORTFOLIO_ORDER, PortfolioOrder.URGENT),
         callOrder = enumPreference(KEY_CALL_ORDER, CallOrder.TICKER),
@@ -228,6 +237,11 @@ class SettingsRepository(
             .putBoolean(KEY_OVERDUE_REMINDERS, value.overdueRemindersEnabled)
             .putBoolean(KEY_TRADE_ALERTS, value.tradeAlertsEnabled)
             .putBoolean(KEY_CALL_ALERTS, value.callAlertsEnabled)
+            .putBoolean(KEY_APPROACH_ALERTS, value.approachAlertsEnabled)
+            .putInt(KEY_APPROACH_THRESHOLD, value.approachThresholdPercent)
+            .putBoolean(KEY_SESSION_DIGEST, value.sessionDigestEnabled)
+            .putBoolean(KEY_FEED_ALERTS, value.feedAlertsEnabled)
+            .putBoolean(KEY_SCHEDULE_ALERTS, value.scheduleAlertsEnabled)
             .putBoolean(KEY_UPDATE_CHECKS, value.updateChecksEnabled)
             // By name rather than by ordinal: reordering the options or dropping one would otherwise
             // silently reinterpret what every existing install had chosen.
@@ -248,6 +262,58 @@ class SettingsRepository(
             .putString(KEY_LAST_PRICE_REFRESH, day)
             .putLong(KEY_LAST_PRICE_REFRESH_AT, System.currentTimeMillis())
             .apply()
+    }
+
+    /**
+     * Whether the phone has already said the feed has gone quiet, and is waiting for it to come
+     * back before saying so again.
+     *
+     * A spell, not an event. `PriceHealth` reports the same fault on every recompute for as long as
+     * a symbol stays retired - which is right for a card somebody goes and looks at, and would be a
+     * daily notification about a stock that stopped answering in June. So the notification is
+     * raised on the way **in** to a spell and re-armed on the way out, exactly as `CallAlerts`
+     * announces the crossing into a band and not the sitting inside one.
+     *
+     * Here rather than in `AppPreferences` because it travels nowhere: it records what *this* phone
+     * has said, and two devices reporting one feed would each want to say it once. It is also not a
+     * table, unlike its two cousins, because it is a single boolean rather than a row per thing -
+     * see `position_approach_seen` for where the distinction goes the other way.
+     */
+    /**
+     * When this reader last had the Insights tab open, so the page can say what arrived since.
+     *
+     * Device-local and deliberately not in `AppPreferences`, which is published: what one phone has
+     * read is not a fact about the record, and syncing it would let a tablet mark a session read on
+     * a phone that never showed it.
+     *
+     * Zero on an install that has never opened the tab, which reads as "everything is new" - and is
+     * handled by the screen, which marks nothing on a first look rather than every session at once.
+     */
+    /**
+     * The overdue count as of the last rebuild, for the home-screen widget.
+     *
+     * A cache, and named as one on purpose. The widget is drawn by the launcher whenever it likes,
+     * in a process that may have just been started for it, and rebuilding the whole portfolio to
+     * answer one number would be the most expensive thing in the app running on the cheapest
+     * surface it has. What the widget shows is what the app last knew, which is the honest promise
+     * a glance makes - and it is rewritten on every recompute, so it is never stale for long.
+     */
+    fun lastOverdueCount(): Int = preferences.getInt(KEY_OVERDUE_COUNT, 0)
+
+    fun recordOverdueCount(count: Int) {
+        preferences.edit().putInt(KEY_OVERDUE_COUNT, count).apply()
+    }
+
+    fun insightsSeenAt(): Long = preferences.getLong(KEY_INSIGHTS_SEEN, 0L)
+
+    fun recordInsightsSeen(at: Long) {
+        preferences.edit().putLong(KEY_INSIGHTS_SEEN, at).apply()
+    }
+
+    fun feedReportedQuiet(): Boolean = preferences.getBoolean(KEY_FEED_QUIET_REPORTED, false)
+
+    fun recordFeedReportedQuiet(reported: Boolean) {
+        preferences.edit().putBoolean(KEY_FEED_QUIET_REPORTED, reported).apply()
     }
 
     /**
@@ -653,6 +719,17 @@ class SettingsRepository(
         const val KEY_BACKUP_FOLDER = "backup_folder"
         const val KEY_LAST_BACKUP_DAY = "last_backup_day"
         const val KEY_MARKET_REFRESH = "market_refresh_enabled"
+
+        /** Device-local, never synced: what this phone has already said about the feed. */
+        const val KEY_FEED_QUIET_REPORTED = "feed_quiet_reported"
+        const val KEY_INSIGHTS_SEEN = "insights_seen_at"
+        const val KEY_OVERDUE_COUNT = "last_overdue_count"
+
+        const val KEY_APPROACH_ALERTS = "approach_alerts_enabled"
+        const val KEY_APPROACH_THRESHOLD = "approach_threshold_percent"
+        const val KEY_SESSION_DIGEST = "session_digest_enabled"
+        const val KEY_FEED_ALERTS = "feed_alerts_enabled"
+        const val KEY_SCHEDULE_ALERTS = "schedule_alerts_enabled"
         const val KEY_MARKET_REFRESH_NOTE = "market_refresh_note"
         const val KEY_MARKET_REFRESH_NOTE_AT = "market_refresh_note_at"
         /** What the build that could hold only one schedule wrote. Read, never written. */

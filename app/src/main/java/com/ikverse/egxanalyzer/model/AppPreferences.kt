@@ -84,6 +84,65 @@ data class AppPreferences(
      */
     val callAlertsEnabled: Boolean = false,
     /**
+     * Whether the phone says a trade is closing on its stop or on target 2.
+     *
+     * The only alert here that arrives while something can still be decided. Every other one
+     * reports a settlement - a stop announced is a stop already taken - so this is the one with any
+     * use beyond the record.
+     *
+     * Default **off**, for the reason [callAlertsEnabled] is: it is inherently the noisiest thing
+     * the app can say, because a price near a level goes on being near it, and a warning that
+     * arrives twice a week about a trade nothing has happened to is how the whole app gets muted.
+     * Somebody who wants it asks for it.
+     */
+    val approachAlertsEnabled: Boolean = false,
+    /**
+     * How near a level counts as closing on it, in percent of the current price.
+     *
+     * A setting rather than a constant because it is the one number here whose right answer depends
+     * on the reader: someone trading tight stops on a liquid large cap and someone holding a thin
+     * mid cap through a 4% day mean different things by "close". [ApproachAlerts] holds the bounds
+     * and the default.
+     */
+    val approachThresholdPercent: Int = ApproachAlerts.DEFAULT_THRESHOLD_PERCENT,
+    /**
+     * Whether the phone says, once after the close, what the whole session did.
+     *
+     * The gap it fills is the session where nothing of the reader's own moved: every other
+     * notification here is about one trade or one call, so an afternoon when three of their
+     * sources' calls reached targets and they held none of them passed in complete silence.
+     *
+     * Default **off**. A daily line is the most easily resented notification an app can have - it
+     * arrives on a rhythm rather than on an event, whether or not anything happened - so it is
+     * switched on by somebody who wants it, exactly like [callAlertsEnabled].
+     */
+    val sessionDigestEnabled: Boolean = false,
+    /**
+     * Whether the phone says the price feed has gone quiet about stocks the record names.
+     *
+     * Default **on**, and that is the difference from the three above: those report the market,
+     * this reports the app being unable to read it. A frozen feed is invisible - the series answers
+     * every request while its newest session stays put - so every rate on the page quietly rests on
+     * fewer calls than the reader believes, with nothing anywhere saying so. It has happened here
+     * once already, on the ISIN symbol migration, and nothing noticed at the time.
+     *
+     * It cannot become chatty: it speaks once when a spell begins and re-arms only when the feed
+     * comes back.
+     */
+    val feedAlertsEnabled: Boolean = true,
+    /**
+     * Whether the phone says a scheduled analysis was due and did not happen.
+     *
+     * Default **on**, for the reason above: it reports the app failing to keep a promise the reader
+     * made it make. The reported symptom of a broken schedule is silence - nothing fires and
+     * nothing says so - and the two system permissions that stop one working are named only on a
+     * screen somebody has to think to open.
+     *
+     * It never announces a *skip*, so it cannot become a daily line about paid runs being switched
+     * off, which is the standing state of that switch.
+     */
+    val scheduleAlertsEnabled: Boolean = true,
+    /**
      * Whether a launch quietly asks GitHub whether a newer build exists.
      *
      * On by default and silent unless there is something new: the app is sideloaded, so a release

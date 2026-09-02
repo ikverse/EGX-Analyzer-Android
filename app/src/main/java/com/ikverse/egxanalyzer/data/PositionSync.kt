@@ -72,6 +72,7 @@ data class SyncedPosition(
             .putOrNull("stopLoss", position.stopLoss)
             .put("windowSessions", position.windowSessions)
             .put("windowCustom", position.windowCustom)
+            .put("isTPlusOne", position.isTPlusOne)
             .put("keepOpen", position.keepOpen)
             .putOrNull("keepOpenNote", position.keepOpenNote)
             .put("openedAt", position.openedAt.toString())
@@ -86,7 +87,8 @@ data class SyncedPosition(
             "id", "ticker", "companyEnglish", "companyArabic", "channel", "recommendationDate",
             "entryPrice", "entryDate", "exitPrice", "exitDate", "closedManually", "entryLow",
             "entryHigh", "target1", "target2", "stopLoss", "windowSessions", "windowCustom",
-            "keepOpen", "keepOpenNote", "openedAt", "updatedAt", "updatedBy", "deleted",
+            "isTPlusOne", "keepOpen", "keepOpenNote", "openedAt", "updatedAt", "updatedBy",
+            "deleted",
         )
 
         /** Null for anything this app version cannot make sense of, which is then skipped. */
@@ -117,6 +119,11 @@ data class SyncedPosition(
                     // Absent on anything written before a trade could outlive its deadline, and
                     // false is what those trades were: the offered window, closing when it ran out.
                     windowCustom = json.optBoolean("windowCustom", false),
+                    // Absent on anything written before a trade remembered what kind of call it
+                    // was taken on. False rather than guessed from the window, and left for the
+                    // backfill that can read the card itself - a device restoring an old backup
+                    // rebuilds its record afterwards and marks these on the next recompute.
+                    isTPlusOne = json.optBoolean("isTPlusOne", false),
                     keepOpen = json.optBoolean("keepOpen", false),
                     keepOpenNote = json.optionalString("keepOpenNote"),
                     openedAt = json.optionalString("openedAt")

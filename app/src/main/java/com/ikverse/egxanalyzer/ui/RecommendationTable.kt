@@ -175,13 +175,23 @@ private fun StockHeadingRow(stock: ConsolidatedRecommendation) {
             .padding(horizontal = Space.m, vertical = Space.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
-        // The anchor for everything under it, so it carries more weight than a row does.
-        Text(
-            stock.stockCode,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-        )
+        // The logo and the code press together, as they do on a card: one thing to the eye is one
+        // target to the finger. The names beside them are deliberately left out - they wrap to two
+        // lines and a press target that tall over a heading reads as the whole heading being a
+        // button. See LocalOpenStock.
+        val openStock = LocalOpenStock.current
+        Row(
+            Modifier.clickable { openStock(stock.stockCode) },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
+            // The anchor for everything under it, so it carries more weight than a row does.
+            Text(
+                stock.stockCode,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
         Column(Modifier.weight(1f).padding(start = 8.dp)) {
             stock.stockNameArabic?.let {
                 Text(

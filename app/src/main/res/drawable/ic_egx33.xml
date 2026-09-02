@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The mark of the EGX 33 Shariah index: an eight-pointed star holding a crescent and a star.
+
+  Drawn on a 200-unit grid rather than Material's 24, because the outline is built from circles and
+  a star polygon whose vertices land on fractions a 24-grid rounds into a visibly lopsided shape.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+    <!-- The eight points: two squares at 45 degrees to each other, traced as one outline. -->
+    <path
+        android:pathData="M100,9L126.7,35.7L164.3,35.7L164.3,73.3L191,100L164.3,126.7L164.3,164.3L126.7,164.3L100,191L73.3,164.3L35.7,164.3L35.7,126.7L9,100L35.7,73.3L35.7,35.7L73.3,35.7Z"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="9"
+        android:strokeLineJoin="round" />
+    <!-- The crescent: one disc with a second taken out of it, which is what evenOdd is for. -->
+    <path
+        android:fillColor="#FF000000"
+        android:fillType="evenOdd"
+        android:pathData="M67,101A32,32 0 1,0 131,101A32,32 0 1,0 67,101ZM82,99.5A28,28 0 1,0 138,99.5A28,28 0 1,0 82,99.5Z" />
+    <!-- The five-pointed star, off the crescent's upper horn. -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M111.5,73L114.4,82L123.9,82L116.2,87.5L119.1,96.5L111.5,91L103.9,96.5L106.8,87.5L99.1,82L108.6,82Z" />
+</vector>

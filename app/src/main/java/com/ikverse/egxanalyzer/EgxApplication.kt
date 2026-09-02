@@ -1,6 +1,10 @@
 package com.ikverse.egxanalyzer
 
 import android.app.Application
+import com.ikverse.egxanalyzer.data.AppShortcuts
+import com.ikverse.egxanalyzer.data.ApproachNotifier
+import com.ikverse.egxanalyzer.data.AttentionNotifier
+import com.ikverse.egxanalyzer.data.SessionDigestNotifier
 import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import com.ikverse.egxanalyzer.data.AnalysisService
 import com.ikverse.egxanalyzer.data.AndroidKeystoreCredentialStore
@@ -20,7 +24,12 @@ import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.TelegramRepository
 import com.ikverse.egxanalyzer.data.TradeStatusNotifier
 import com.ikverse.egxanalyzer.data.UpdateRepository
+import com.ikverse.egxanalyzer.data.refreshTodayWidget
 import com.ikverse.egxanalyzer.ui.AppState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class EgxApplication : Application() {
 
@@ -37,6 +46,15 @@ class EgxApplication : Application() {
      */
     @Volatile
     var startedForSchedule: Boolean = false
+
+    /**
+     * Where a widget redraw is dispatched from.
+     *
+     * Its own scope rather than `AppState`'s: redrawing the home screen is not part of rebuilding
+     * the record, and a failure or a cancellation on one must not reach the other. Application-wide
+     * and never cancelled, because the thing it outlives is a screen and not a process.
+     */
+    private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val appState: AppState by lazy {
         val credentialStore = AndroidKeystoreCredentialStore(this)
@@ -119,6 +137,31 @@ class EgxApplication : Application() {
             // record for the announcement of it.
             callsChanged = { changes ->
                 runCatching { CallAlertNotifier(this).announce(changes) }
+            },
+            // Wrapped like the three above, and for the reason all of them are: the sweep has
+            // already been written down by the time any of these is called, and losing that record
+            // to an exception about a notification would trade the thing for the announcement of it.
+            approachesChanged = { changes ->
+                runCatching { ApproachNotifier(this).announce(changes) }
+            },
+            sessionSummarised = { digest ->
+                runCatching { SessionDigestNotifier(this).announce(digest) }
+            },
+            feedQuiet = { stocks, callsHeld ->
+                runCatching { AttentionNotifier(this).feedQuiet(stocks, callsHeld) }
+            },
+            scheduleMissed = { schedule ->
+                runCatching { AttentionNotifier(this).scheduleMissed(schedule) }
+            },
+            // Already swallows its own failures - a launcher that refuses a shortcut is not
+            // something the reader asked about - so it needs no wrapper here.
+            // Two surfaces off one number: the launcher shortcut that counts overdue trades, and
+            // the home-screen widget, which reads the count back rather than deriving it. Both
+            // swallow their own failures - neither is something the reader asked about.
+            overdueCounted = { count ->
+                AppShortcuts.setOverdue(this, count)
+                settingsRepository.recordOverdueCount(count)
+                widgetScope.launch { refreshTodayWidget(this@EgxApplication) }
             },
             headless = startedForSchedule,
         ).also { state = it }

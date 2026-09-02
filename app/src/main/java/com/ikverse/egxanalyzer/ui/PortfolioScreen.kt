@@ -342,14 +342,13 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
             groups.map { it.recommendationDate.toString() }.distinct().sortedDescending()
         }
         FilterBar(
-            active = dateFilter != null || stockFilter.isNotBlank(),
+            // The shell asks the same question to decide what a back press means, so the predicate
+            // lives on PageState and both read it there. See PageState.filtersActive.
+            active = appState.pages.filtersActive(AppDestination.PORTFOLIO),
             // The date alone. The search box is on show even on a cover screen, so a chip lit by it
             // would be reporting something the reader is already looking at.
             folded = dateFilter != null,
-            onClearAll = {
-                dateFilter = null
-                stockFilter = ""
-            },
+            onClearAll = { appState.pages.clearFilters(AppDestination.PORTFOLIO) },
             // Never folded away: it is the control someone arrives at the screen already knowing they
             // want, and the only one that can empty the list on a keystroke.
             search = { m -> StockFilterField(stockFilter, { stockFilter = it }, modifier = m) },
@@ -396,6 +395,10 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
         // filter thrown away on a trip the reader is about to make back is a filter they have to set
         // again.
         val pendingPosition = appState.pendingPositionId
+        // The trade a Record sale action named. Read beside the reveal because the two
+        // arrive together: that path sets both, so the card is found, flashed, and asked
+        // for the price in one arrival.
+        val pendingSell = appState.pendingSellPositionId
         val reveal = remember { BringIntoViewRequester() }
         LaunchedEffect(pendingPosition, groups, dateFilter, stockFilter) {
             if (pendingPosition == null) return@LaunchedEffect
@@ -454,13 +457,20 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
         // Built once for the whole screen rather than per card. A fresh bundle each time would be a new
         // argument to every section below it, which is a list of positions redrawn on every
         // recomposition of the page around them.
-        val jump = remember(appState, scoredCalls, pendingPosition, reveal) {
+        val jump = remember(appState, scoredCalls, pendingPosition, pendingSell, reveal) {
             PositionJump(
                 scoredCalls = scoredCalls,
-                onOpenCall = appState::openCall,
+                // The trade being left is what back should come back to, so the press names it.
+                // Both tabs key on ScoredCall.positionId, which is why one id serves as the call
+                // to open and the trade to return to. See NavStop.
+                onOpenCall = { id ->
+                    appState.openCall(id, NavStop(AppDestination.PORTFOLIO, positionId = id))
+                },
                 revealPosition = pendingPosition,
                 onRevealShown = appState::consumePendingPosition,
                 reveal = reveal,
+                sellPosition = pendingSell,
+                onSellShown = appState::consumePendingSell,
             )
         }
         shown.forEach { group ->
@@ -512,6 +522,15 @@ private class PositionJump(
     val revealPosition: String?,
     val onRevealShown: () -> Unit,
     val reveal: BringIntoViewRequester,
+    /**
+     * The trade a Record sale action in the shade named, whose dialog should open on arrival.
+     *
+     * Beside the reveal rather than folded into it: the two arrive together on that path - the card
+     * is scrolled to and flashed *and* its dialog opens - but a press inside the app reveals without
+     * selling, and one entrance that always did both would open a price field at every arrival.
+     */
+    val sellPosition: String?,
+    val onSellShown: () -> Unit,
 )
 
 /**
@@ -625,6 +644,8 @@ private fun ColumnScope.PositionGrid(
                     },
                     highlighted = revealed,
                     onHighlightShown = jump.onRevealShown,
+                    startSelling = view.position.id == jump.sellPosition,
+                    onSellingShown = jump.onSellShown,
                     onSell = { price, date -> appState.recordSale(view.position, price, date) },
                     onEditTrade = { price, date, window ->
                         // The dialog cannot confirm with an unparsable window while it is showing

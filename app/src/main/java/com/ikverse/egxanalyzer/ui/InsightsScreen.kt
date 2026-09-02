@@ -138,6 +138,9 @@ internal fun InsightsScreen(appState: AppState) {
         // Kept across restarts where the filters above are not, and the difference is what each one
         // does: an order hides nothing. See AppPreferences.callOrder.
         val callOrder = appState.appPreferences.callOrder
+        // Read once for the whole page, so every card is judged against one reading of when
+        // the reader last looked. See SessionCard's `seenAt`.
+        val seenAt = appState.insightsSeenAt
         val everyChannel = remember(full.channels) { full.channels.map(ChannelScore::channel).sorted() }
 
         // Recomputed, not merely hidden: a rate or a session count still describing calls the
@@ -177,15 +180,13 @@ internal fun InsightsScreen(appState: AppState) {
         // Above the empty state below on purpose: filters that vanish when they match nothing leave
         // the reader looking at "nothing matches" with no way to undo it.
         FilterBar(
-            active = channels.isNotEmpty() || outcomes.isNotEmpty() || stock.isNotBlank(),
+            // The shell asks the same question to decide what a back press means, so the predicate
+            // lives on PageState and both read it there. See PageState.filtersActive.
+            active = appState.pages.filtersActive(AppDestination.INSIGHTS),
             // Only the folded pair. The search box is on show even on a cover screen, so a chip
             // lit by it would be reporting something the reader is already looking at.
             folded = channels.isNotEmpty() || outcomes.isNotEmpty(),
-            onClearAll = {
-                channels = emptySet()
-                outcomes = emptySet()
-                stock = ""
-            },
+            onClearAll = { appState.pages.clearFilters(AppDestination.INSIGHTS) },
             // Never folded away: it is the control someone arrives at this tab already knowing
             // they want, which is the same reason it leads on Results and the Portfolio.
             search = { m -> StockFilterField(stock, { stock = it }, modifier = m) },
@@ -310,13 +311,19 @@ internal fun InsightsScreen(appState: AppState) {
                             latestFor = { ticker -> report.latestPrices[ticker] },
                             scoreFor = { channel -> scoreByChannel[channel] },
                             order = callOrder,
+                            seenAt = seenAt,
                             opinionFor = appState::opinionFor,
                             askingFor = { call -> appState.opinionPending == call.opinionKey() },
                             askModel = askModel,
                             searching = searching,
                             newsWindow = newsWindow,
                             onAsk = { call, again -> appState.askAboutCall(call, again) },
-                            onOpenTrade = appState::openPosition,
+                            onOpenTrade = { id ->
+                                appState.openPosition(
+                                    id,
+                                    NavStop(AppDestination.INSIGHTS, callId = id),
+                                )
+                            },
                             revealCall = pendingCall,
                             onRevealShown = appState::consumePendingCall,
                             reveal = reveal,
@@ -331,13 +338,23 @@ internal fun InsightsScreen(appState: AppState) {
                                 latestFor = { ticker -> report.latestPrices[ticker] },
                                 scoreFor = { channel -> scoreByChannel[channel] },
                                 order = callOrder,
+                                seenAt = seenAt,
                                 opinionFor = appState::opinionFor,
                                 askingFor = { call -> appState.opinionPending == call.opinionKey() },
                                 askModel = askModel,
                                 searching = searching,
                                 newsWindow = newsWindow,
                                 onAsk = { call, again -> appState.askAboutCall(call, again) },
-                                onOpenTrade = appState::openPosition,
+                                // The call being left is what back should come back to, so the
+                                // press names it. Both tabs key on ScoredCall.positionId, which
+                                // is why one id serves as the trade to open and the call to
+                                // return to. See NavStop.
+                                onOpenTrade = { id ->
+                                    appState.openPosition(
+                                        id,
+                                        NavStop(AppDestination.INSIGHTS, callId = id),
+                                    )
+                                },
                                 // A folded card draws none of its calls, so the highlight only ever
                                 // lands on the one this arrival opened.
                                 revealCall = pendingCall,
@@ -894,7 +911,7 @@ private val ChannelHeaderHeight = 44.dp
  * they added up to a good day.
  */
 @Composable
-private fun SessionSummary(run: ScoredSession, tally: CallTally) {
+private fun SessionSummary(run: ScoredSession, tally: CallTally, isNew: Boolean = false) {
     val counts = listOf(
         // Target 1 before target 2, the same order the outcome bars read in and the same order the
         // levels are printed in on every card. Fixed, so it can be learned once.
@@ -917,6 +934,16 @@ private fun SessionSummary(run: ScoredSession, tally: CallTally) {
             horizontalArrangement = Arrangement.spacedBy(Space.s),
             verticalArrangement = Arrangement.spacedBy(Space.xs),
         ) {
+            // First on the line, before any count. It is the only thing here that is about the
+            // reader rather than about the market, and what it answers - "is there anything I have
+            // not seen" - is the question they arrive at this page with.
+            if (isNew) {
+                Text(
+                    "New",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             counts.forEach { (count, word, tone) ->
                 if (count == 0) return@forEach
                 Text(
@@ -960,6 +987,14 @@ private fun SessionCard(
     scoreFor: (String) -> ChannelScore?,
     /** How the calls inside this card are laid out. Orders them; never hides one. */
     order: CallOrder,
+    /**
+     * When the reader last had this tab open, for the New chip.
+     *
+     * Passed down rather than read from `AppState` in here, so every card on one page is judged
+     * against one reading: taking the mark while a page of cards is composing would leave the ones
+     * composed after it unflagged and the ones before it flagged.
+     */
+    seenAt: Long,
     /** What Ask AI has said about a call, if anything. */
     opinionFor: (ScoredCall) -> StockOpinion?,
     /** Whether that call's own request is currently out. */
@@ -986,6 +1021,14 @@ private fun SessionCard(
     // every rate in the app is built from - repeats out, judged calls only. A second count assembled
     // here would be a second set of rules about what a session is worth.
     val tally = remember(run.calls) { PerformanceCalculator.tally(run.calls) }
+    // Analysed since the reader last had this tab open. `lastRunAt` is when the session was last
+    // read rather than when it traded, which is the right clock: a session re-run this morning has
+    // something new on it however old the trading day was.
+    //
+    // Nothing is new on a reader who has never opened the tab. A fresh install would otherwise
+    // flag every session at once, which says exactly what flagging none of them says and takes a
+    // page of chips to say it.
+    val isNew = seenAt > 0L && run.lastRunAt.toEpochMilli() > seenAt
     // Closed by default: a run is a summary line until asked for, so a page of them stays
     // readable however many analyses have been saved.
     ExpandableSection(
@@ -997,7 +1040,7 @@ private fun SessionCard(
         // colouring a return, on the figure the line underneath prints. Grey where nothing has
         // settled yet, which is what a session with nothing to say should look like.
         iconTone = PriceRole.forReturn(tally.averageReturn),
-        summaryContent = { SessionSummary(run, tally) },
+        summaryContent = { SessionSummary(run, tally, isNew) },
         expandedState = expanded,
         onExpandedChange = onExpandedChange,
         modifier = modifier,
@@ -1161,6 +1204,7 @@ private fun ScoredCallRow(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
                         Text(call.ticker, style = MaterialTheme.typography.titleSmall)
+                        Egx33Badge(call.ticker, Modifier.padding(start = Space.s))
                     }
                     listOfNotNull(call.companyArabic, call.companyEnglish)
                         .filter(String::isNotBlank)

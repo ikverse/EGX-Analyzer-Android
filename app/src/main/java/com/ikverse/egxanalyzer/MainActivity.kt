@@ -10,12 +10,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import com.ikverse.egxanalyzer.data.OverdueNotifier
+import com.ikverse.egxanalyzer.data.AppShortcuts
+import com.ikverse.egxanalyzer.data.AttentionNotifier
 import com.ikverse.egxanalyzer.data.CallAlertNotifier
 import com.ikverse.egxanalyzer.data.TradeStatusNotifier
 import com.ikverse.egxanalyzer.data.holdsBackupFolder
 import com.ikverse.egxanalyzer.data.writeBackupTo
 import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppRoot
+import com.ikverse.egxanalyzer.ui.NavStop
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -43,7 +46,14 @@ class MainActivity : ComponentActivity() {
             LifecycleResumeEffect(Unit) {
                 appState.refreshOverdue()
                 backUpIfDue(scope)
-                onPauseOrDispose { }
+                onPauseOrDispose {
+                    // The other way a look at Insights ends. The shell takes the same mark when the
+                    // reader changes tab; this covers the reader who was still on it when the phone
+                    // went in their pocket. See AppState.markInsightsSeen.
+                    if (appState.destination == AppDestination.INSIGHTS) {
+                        appState.markInsightsSeen()
+                    }
+                }
             }
             // Which UI this is depends on the build type, and this activity does not know. Two
             // files named AppRoot.kt - one in src/current, one in src/next - and exactly one of them
@@ -101,9 +111,17 @@ class MainActivity : ComponentActivity() {
         openRequestedResult(intent)
     }
 
+    /**
+     * Every jump here records no return, and that is deliberate.
+     *
+     * A notification arrives at a tab the reader was not on and, most of the time, at an app that
+     * was not running - so there is no "where they came from" to go back to. Recording one would
+     * make the first back press land them on the Analyze tab they never visited, which is a worse
+     * answer than the system's own: leave. See [NavStop].
+     */
     private fun openRequestedResult(intent: Intent?) {
         val id = intent?.getLongExtra(AnalysisNotifier.EXTRA_RESULT_ID, -1L) ?: -1L
-        if (id > 0) appState.openSavedResult(id)
+        if (id > 0) appState.openSavedResult(id, returnTo = null)
         // The overdue reminder names trades, so it has to land on the tab that holds them. Opening
         // the app somewhere else and leaving the user to find them would waste the notification.
         if (intent?.getBooleanExtra(OverdueNotifier.EXTRA_SHOW_PORTFOLIO, false) == true) {
@@ -116,11 +134,35 @@ class MainActivity : ComponentActivity() {
         // keeps a notification from becoming a second, quieter way of finding a position.
         intent?.getStringExtra(TradeStatusNotifier.EXTRA_POSITION_ID)
             ?.takeIf(String::isNotBlank)
-            ?.let(appState::openPosition)
+            ?.let { appState.openPosition(it, returnTo = null) }
+        // Record sale, from the notification's own action. The same arrival as above plus the
+        // dialog, because the two figures a sale needs are the user's and the app has neither.
+        intent?.getStringExtra(TradeStatusNotifier.EXTRA_SELL_POSITION_ID)
+            ?.takeIf(String::isNotBlank)
+            ?.let(appState::openPositionToSell)
         // A buy-zone alert names one call, so it opens that call. `openCall` is the same entrance
         // the Portfolio uses to press through to a recommendation, for the same reason as above.
+        // The launcher shortcuts, read off the action. They carry no id and name no card - a
+        // shortcut is a way into a tab, which is as much as a long-press on an icon can promise.
+        when (intent?.action) {
+            AppShortcuts.ACTION_PORTFOLIO -> {
+                appState.navigate(AppDestination.PORTFOLIO)
+                appState.refreshOverdue()
+            }
+            AppShortcuts.ACTION_INSIGHTS -> appState.navigate(AppDestination.INSIGHTS)
+        }
+        // A feed that has gone quiet, or a schedule that did not run. Both are answered in
+        // Settings; the schedule one opens the section too, through the same entrance the Analyze
+        // card's own button uses, so the row is on screen rather than somewhere on the page.
+        if (intent?.getBooleanExtra(AttentionNotifier.EXTRA_SHOW_SETTINGS, false) == true) {
+            if (intent.getBooleanExtra(AttentionNotifier.EXTRA_SHOW_SCHEDULES, false)) {
+                appState.editSchedules()
+            } else {
+                appState.navigate(AppDestination.SETTINGS)
+            }
+        }
         intent?.getStringExtra(CallAlertNotifier.EXTRA_CALL_ID)
             ?.takeIf(String::isNotBlank)
-            ?.let(appState::openCall)
+            ?.let { appState.openCall(it, returnTo = null) }
     }
 }

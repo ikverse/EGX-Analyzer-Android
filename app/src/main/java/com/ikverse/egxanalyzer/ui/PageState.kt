@@ -83,4 +83,53 @@ internal class PageState {
 
     val portfolioDate: MutableState<String?> = mutableStateOf(null)
     val portfolioStock: MutableState<String> = mutableStateOf("")
+
+    // ── What is narrowing a tab ──────────────────────────────────────────────────────────────
+
+    /**
+     * Whether anything on [destination] is hiding rows from the reader.
+     *
+     * Here rather than in each screen because two things now ask it: the screen, to light its own
+     * Filters chip and offer Clear filters, and the shell, to decide what a back press means. Three
+     * screens each stating their own version of the predicate is three that agree until one gains a
+     * filter and the other reader of it silently stops seeing it.
+     *
+     * **Sorts are not filters and are left out**, which is the rule the screens already followed:
+     * [resultsOrder] changes what is read first and hides nothing, so a back press has no business
+     * resetting it and a chip has no business reporting it.
+     */
+    fun filtersActive(destination: AppDestination): Boolean = when (destination) {
+        AppDestination.RESULTS ->
+            resultsChannels.value.isNotEmpty() ||
+                resultsDate.value != null ||
+                resultsStock.value.isNotBlank()
+        AppDestination.INSIGHTS ->
+            insightsChannels.value.isNotEmpty() ||
+                insightsOutcomes.value.isNotEmpty() ||
+                insightsStock.value.isNotBlank()
+        AppDestination.PORTFOLIO ->
+            portfolioDate.value != null || portfolioStock.value.isNotBlank()
+        AppDestination.ANALYZE, AppDestination.SETTINGS -> false
+    }
+
+    /** Opens [destination] back up to everything it holds. */
+    fun clearFilters(destination: AppDestination) {
+        when (destination) {
+            AppDestination.RESULTS -> {
+                resultsChannels.value = emptySet()
+                resultsDate.value = null
+                resultsStock.value = ""
+            }
+            AppDestination.INSIGHTS -> {
+                insightsChannels.value = emptySet()
+                insightsOutcomes.value = emptySet()
+                insightsStock.value = ""
+            }
+            AppDestination.PORTFOLIO -> {
+                portfolioDate.value = null
+                portfolioStock.value = ""
+            }
+            AppDestination.ANALYZE, AppDestination.SETTINGS -> Unit
+        }
+    }
 }

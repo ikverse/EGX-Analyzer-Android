@@ -1,4 +1,15 @@
 <resources>
     <string name="app_name">EGX Analyzer</string>
+
+    <!-- Long-press the launcher icon. Short labels are what fits under an icon; long labels are
+         what a launcher shows where it has the room. -->
+    <string name="shortcut_portfolio_short">Portfolio</string>
+    <string name="shortcut_portfolio_long">Open my trades</string>
+    <string name="shortcut_insights_short">Insights</string>
+    <string name="shortcut_insights_long">Open the record</string>
+    <!-- The dynamic one, pushed only while something actually is overdue. -->
+    <string name="shortcut_overdue_short">Overdue</string>
+    <!-- Shown in the launcher's widget picker. -->
+    <string name="widget_description">What the session did, and what is overdue.</string>
 </resources>
 

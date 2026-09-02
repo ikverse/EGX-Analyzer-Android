@@ -57,6 +57,21 @@ data class Position(
      */
     val windowCustom: Boolean = false,
     /**
+     * The channel printed the call this trade was taken on as a T+1: buy today, out tomorrow.
+     *
+     * Copied off the card at the moment of purchase rather than looked up later, for the reason the
+     * levels above are copied: the analysis behind a trade can be deleted or re-run, and a trade
+     * that has already happened was still taken on a T+1 call. Read live from the record it would
+     * have gone quiet on exactly the trades whose deadline is the point, while [windowSessions]
+     * went on holding the two sessions that deadline gave them - a card left saying how little time
+     * was left without saying why.
+     *
+     * Not derivable from that window either. Two sessions is what a T+1 is offered, but a reader
+     * who sets their own default to two takes two on every call they record, and a pill reading
+     * every one of those as a T+1 would be putting words in the channel's mouth.
+     */
+    val isTPlusOne: Boolean = false,
+    /**
      * The user has said they are still holding this, whatever the market has since done.
      *
      * Nothing closes a position carrying this except a recorded sale - not the deadline, not a

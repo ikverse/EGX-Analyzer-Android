@@ -82,6 +82,33 @@ class PositionSyncTest {
     }
 
     @Test
+    fun `what kind of call a trade was taken on travels with it`() {
+        val original = revision().let {
+            it.copy(position = it.position.copy(isTPlusOne = true, windowSessions = 2))
+        }
+
+        val returned = SyncedPosition.fromDocument(original.toDocument())!!
+
+        assertTrue(returned.position.isTPlusOne)
+        assertEquals(original, returned)
+    }
+
+    @Test
+    fun `a position written before a trade remembered it was a T+1 reads as an ordinary one`() {
+        // Two sessions is what a T+1 is offered and also what a reader whose default is two takes
+        // on every call, so the absent field cannot be guessed back from the window. False here,
+        // and the backfill against this device's own record is what marks it.
+        val older = JSONObject(
+            revision().let { it.copy(position = it.position.copy(windowSessions = 2)) }.toDocument(),
+        ).apply { remove("isTPlusOne") }.toString()
+
+        val returned = SyncedPosition.fromDocument(older)!!
+
+        assertFalse(returned.position.isTPlusOne)
+        assertEquals(2, returned.position.windowSessions)
+    }
+
+    @Test
     fun `a reason for keeping a trade open travels with it`() {
         val original = revision().let {
             it.copy(position = it.position.copy(keepOpen = true, keepOpenNote = "Holding for T2"))

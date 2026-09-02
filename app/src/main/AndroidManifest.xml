@@ -38,6 +38,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Long-press the launcher icon: Portfolio and Insights. See res/xml/shortcuts.xml
+                 for why those two and not all five, and AppShortcuts for the third one, which is
+                 pushed at runtime only while something is actually overdue. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <!-- Holds the process open for the length of a run; it owns no state of its own. -->
@@ -70,6 +77,32 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
+        </receiver>
+
+        <!-- Keep Open, pressed from a trade notification without the app coming up. Not exported:
+             the only thing that ever sends this is a PendingIntent this app built and handed to the
+             system, and an exported receiver would let any app on the phone close the owner's
+             deadlines for them. -->
+        <receiver
+            android:name=".data.TradeActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.ikverse.egxanalyzer.KEEP_OPEN" />
+            </intent-filter>
+        </receiver>
+
+        <!-- The home-screen widget. Exported, because the launcher is another app and has to be
+             able to bind it - that is what a widget is. It carries no action of its own beyond
+             opening the app, and it reads the record rather than changing it. -->
+        <receiver
+            android:name=".data.TodayWidgetReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/today_widget_info" />
         </receiver>
 
         <!-- Shares a run's trace. Traces hold prompts, source labels and the model's answer, never

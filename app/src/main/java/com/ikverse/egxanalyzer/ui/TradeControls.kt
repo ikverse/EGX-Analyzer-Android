@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -99,6 +100,9 @@ internal class TradeBook(
             // What the dialog showed them, so accepting a T+1 call's two sessions is not recorded
             // as a deadline they set by hand.
             offeredWindow = windowFor(point),
+            // Copied off the card while the card is still in hand. The report behind it can be
+            // deleted or re-run, and neither may take back what this trade was taken on.
+            isTPlusOne = point.isTPlusOne,
         )
     }
 
@@ -339,8 +343,26 @@ internal fun SellButton(
     suggestedExit: Double?,
     onSell: (price: Double, date: LocalDate) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Opens the dialog without the button being pressed, for the Record sale action in the shade.
+     *
+     * A sale needs a price and a date, so it can never be a one-tap action from a notification -
+     * what the action can do is put the reader in front of the two fields rather than in front of
+     * the tab and a hunt for the card. See `TradeStatusNotifier`.
+     */
+    openNow: Boolean = false,
+    /** Clears the request, so dismissing the dialog does not immediately reopen it. */
+    onOpened: () -> Unit = {},
 ) {
     var selling by remember { mutableStateOf(false) }
+    // Keyed on the request rather than run once: a second notification acted on while the app is
+    // already open has to open the dialog again.
+    LaunchedEffect(openNow) {
+        if (openNow) {
+            selling = true
+            onOpened()
+        }
+    }
     OutlinedButton(onClick = { selling = true }, modifier = modifier) {
         Icon(
             Icons.Outlined.Sell,

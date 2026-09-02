@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Long-press the launcher icon.
+
+  Two, and deliberately not five. A shortcut per destination would be the navigation bar drawn a
+  second time somewhere the reader cannot see it, and two of the five are wrong here on their own
+  terms: Settings is not somewhere anybody arrives in a hurry, and Analyze is the tab whose main
+  button spends money, which is the last thing to put one press from a home screen.
+
+  What is left is the two tabs that answer a question: what is happening to my trades, and what did
+  the sources say. A third is added at runtime while something is actually overdue - see
+  `AppShortcuts`, which is where the count comes from.
+
+  Each names an **action** rather than carrying an extra, and that is not a style choice.
+  `android:value` in a shortcut's <extra> is a string: a "true" written there arrives as the String
+  "true", `getBooleanExtra` hands back its default, and the shortcut opens the app on whatever tab
+  it was already on - which looks exactly like a shortcut that does nothing. An action is typed by
+  definition.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="portfolio"
+        android:enabled="true"
+        android:icon="@drawable/ic_egx_notification"
+        android:shortcutShortLabel="@string/shortcut_portfolio_short"
+        android:shortcutLongLabel="@string/shortcut_portfolio_long">
+        <intent
+            android:action="com.ikverse.egxanalyzer.OPEN_PORTFOLIO"
+            android:targetPackage="com.ikverse.egxanalyzer"
+            android:targetClass="com.ikverse.egxanalyzer.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="insights"
+        android:enabled="true"
+        android:icon="@drawable/ic_egx_notification"
+        android:shortcutShortLabel="@string/shortcut_insights_short"
+        android:shortcutLongLabel="@string/shortcut_insights_long">
+        <intent
+            android:action="com.ikverse.egxanalyzer.OPEN_INSIGHTS"
+            android:targetPackage="com.ikverse.egxanalyzer"
+            android:targetClass="com.ikverse.egxanalyzer.MainActivity" />
+    </shortcut>
+</shortcuts>

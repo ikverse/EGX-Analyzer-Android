@@ -33,6 +33,7 @@ import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.SettledCall
 import com.ikverse.egxanalyzer.model.DayEvent
 import com.ikverse.egxanalyzer.model.DayEventKind
+import com.ikverse.egxanalyzer.model.ApproachState
 import com.ikverse.egxanalyzer.model.SessionDigest
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.SourceTrace
@@ -94,8 +95,10 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         db.createPositionStatusSeen()
         db.createStockOpinions()
         db.createCallAlertSeen()
+        db.createApproachSeen()
         db.createSettledCalls()
         db.createSessionEvents()
+        db.createSessionDigestAnnounced()
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -117,12 +120,15 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         db.createPositionStatusSeen()
         db.addPositionRevisionColumns()
         db.addPositionWindowColumns()
+        db.addPositionTimingColumn()
         db.addOpenColumn()
         db.createStockOpinions()
         db.addOpinionDetailColumns()
         db.createCallAlertSeen()
+        db.createApproachSeen()
         db.createSettledCalls()
         db.createSessionEvents()
+        db.createSessionDigestAnnounced()
         db.dropNonTradingSessions()
     }
 
@@ -240,6 +246,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
             stop_loss REAL,
             window_sessions INTEGER NOT NULL,
             window_custom INTEGER NOT NULL DEFAULT 0,
+            is_t_plus_one INTEGER NOT NULL DEFAULT 0,
             keep_open INTEGER NOT NULL DEFAULT 0,
             keep_open_note TEXT,
             unknown TEXT NOT NULL DEFAULT '{}',
@@ -299,6 +306,28 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         }
         if ("unknown" !in columns) {
             execSQL("ALTER TABLE positions ADD COLUMN unknown TEXT NOT NULL DEFAULT '{}'")
+        }
+    }
+
+    /**
+     * Brings a positions table written before a trade remembered it was a T+1 up to date.
+     *
+     * False for every trade already on the phone, and deliberately not guessed at here: a two
+     * session window is what a T+1 is offered, but it is also what a reader who set their default
+     * to two takes on every call, and a migration cannot tell those apart. What can tell them apart
+     * is the record itself, which still holds the card each trade was taken on - so the backfill
+     * runs where that record is built rather than here. See `AppState.recomputePerformance`.
+     *
+     * Its own function rather than a fifth line in [addPositionWindowColumns], whose columns all
+     * arrived together in one build. This one did not, and a phone can hold those four without it.
+     */
+    private fun SQLiteDatabase.addPositionTimingColumn() {
+        val hasColumn = rawQuery("PRAGMA table_info(positions)", null).use { cursor ->
+            generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }
+                .any { it == "is_t_plus_one" }
+        }
+        if (!hasColumn) {
+            execSQL("ALTER TABLE positions ADD COLUMN is_t_plus_one INTEGER NOT NULL DEFAULT 0")
         }
     }
 
@@ -408,6 +437,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
                 put("stop_loss", position.stopLoss)
                 put("window_sessions", position.windowSessions)
                 put("window_custom", if (position.windowCustom) 1 else 0)
+                put("is_t_plus_one", if (position.isTPlusOne) 1 else 0)
                 put("keep_open", if (position.keepOpen) 1 else 0)
                 put("keep_open_note", position.keepOpenNote)
                 put("unknown", unknown)
@@ -439,6 +469,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         stopLoss = nullableDouble(getColumnIndexOrThrow("stop_loss")),
         windowSessions = getInt(getColumnIndexOrThrow("window_sessions")),
         windowCustom = getInt(getColumnIndexOrThrow("window_custom")) == 1,
+        isTPlusOne = getInt(getColumnIndexOrThrow("is_t_plus_one")) == 1,
         keepOpen = getInt(getColumnIndexOrThrow("keep_open")) == 1,
         keepOpenNote = nullableString("keep_open_note"),
         openedAt = Instant.ofEpochMilli(getLong(getColumnIndexOrThrow("opened_at"))),
@@ -1957,6 +1988,112 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
     }
 
     /**
+     * Where each open trade stood against its stop and its target 2 when the reader was last told.
+     *
+     * The third sibling of `position_status_seen` and `call_alert_seen`, device-local for the same
+     * reason both of those are: two phones holding one record would each announce the same trade
+     * closing on the same stop.
+     *
+     * Keyed per trade **and per level**, because a price can be a whisker from its stop and nowhere
+     * near target 2. One key for both would let whichever was checked first swallow the other.
+     */
+    private fun SQLiteDatabase.createApproachSeen() = execSQL(
+        """CREATE TABLE IF NOT EXISTS position_approach_seen (
+            alert_key TEXT PRIMARY KEY,
+            near INTEGER NOT NULL,
+            at INTEGER NOT NULL
+        )""",
+    )
+
+    /** The whole table, one row per watched level, read in full on every sweep. */
+    fun approachSeen(): Map<String, ApproachState> = readableDatabase
+        .query("position_approach_seen", null, null, null, null, null, null)
+        .use { cursor ->
+            buildMap {
+                while (cursor.moveToNext()) {
+                    put(
+                        cursor.getString(cursor.getColumnIndexOrThrow("alert_key")),
+                        ApproachState(
+                            near = cursor.getInt(cursor.getColumnIndexOrThrow("near")) == 1,
+                        ),
+                    )
+                }
+            }
+        }
+
+    /** Writes what has just been said, and forgets the trades that have gone. */
+    fun saveApproachSeen(seen: Map<String, ApproachState>, forgotten: Set<String> = emptySet()) {
+        if (seen.isEmpty() && forgotten.isEmpty()) return
+        val now = System.currentTimeMillis()
+        writableDatabase.beginTransaction()
+        try {
+            seen.forEach { (key, state) ->
+                writableDatabase.insertWithOnConflict(
+                    "position_approach_seen",
+                    null,
+                    ContentValues().apply {
+                        put("alert_key", key)
+                        put("near", if (state.near) 1 else 0)
+                        put("at", now)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            }
+            forgotten.forEach {
+                writableDatabase.delete("position_approach_seen", "alert_key = ?", arrayOf(it))
+            }
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    /**
+     * The sessions whose digest has already been announced.
+     *
+     * `session_events` holds what happened; this holds what was *said about it*, which is the same
+     * distinction `position_status_seen` draws against the statuses it does not cache. The digest is
+     * rebuilt on every recompute and rightly so - it has one right answer forever - and that is
+     * exactly why it cannot decide on its own whether it has been spoken.
+     *
+     * A row per session rather than one "newest announced" value: the two differ on the phone that
+     * was switched off across a session, where a single high-water mark would count a session it
+     * never saw as already said. Device-local, like every other row that records what was spoken.
+     */
+    private fun SQLiteDatabase.createSessionDigestAnnounced() = execSQL(
+        """CREATE TABLE IF NOT EXISTS session_digest_announced (
+            session_date TEXT PRIMARY KEY,
+            at INTEGER NOT NULL
+        )""",
+    )
+
+    /** Whether this session's digest has already been spoken on this device. */
+    fun sessionDigestAnnounced(date: LocalDate): Boolean = readableDatabase
+        .query(
+            "session_digest_announced",
+            arrayOf("session_date"),
+            "session_date = ?",
+            arrayOf(date.toString()),
+            null,
+            null,
+            null,
+        )
+        .use { it.moveToFirst() }
+
+    /** Records that it has been, so a later recompute of the same session says nothing again. */
+    fun recordSessionDigestAnnounced(date: LocalDate) {
+        writableDatabase.insertWithOnConflict(
+            "session_digest_announced",
+            null,
+            ContentValues().apply {
+                put("session_date", date.toString())
+                put("at", System.currentTimeMillis())
+            },
+            SQLiteDatabase.CONFLICT_REPLACE,
+        )
+    }
+
+    /**
      * The verdicts the market can no longer change, so they are never scored again.
      *
      * Keyed on `settledKey`, which carries the levels and the window as well as the call - a
@@ -2314,6 +2451,15 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
         /**
+         * 25 is `position_approach_seen` and `session_digest_announced`, the two remaining things
+         * the phone can say that nothing on disk remembered having said: where a trade stood
+         * against its stop and its target 2 when the reader was last told, and which sessions'
+         * digests have already been spoken. Both are the same shape of fact as
+         * `position_status_seen` and for the same reason - a notification about a change is a
+         * question about two readings, and only one of the two is derivable.
+         * 24 is `is_t_plus_one` on `positions`, the one thing a trade knew when it was recorded and
+         * then forgot: that the channel had printed it as a call to be out of by the next session.
+         * The window it was given carried the consequence all along and never the reason.
          * 21 is `session_events`, what the market did to this record on each trading session. The
          * only thing behind the "what happened" card that is kept, and kept because it is the only
          * part of it nothing else on disk holds: the prices say where a stock stands, and a
@@ -2345,7 +2491,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 23
+        const val DATABASE_VERSION = 25
     }
 }
 

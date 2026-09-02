@@ -124,6 +124,19 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/OpinionPrompt.kt` + `data/OpinionPromptStore.kt` + `data/OpinionSearchBrief.kt` +
   `data/OpinionParser.kt` + `ui/StockOpinionSheet.kt` — Ask AI, on a call card in Insights.
   See below.
+- `ui/NavStack.kt` — one step of history, so back undoes a jump the app made on the reader's
+  behalf. See **What back does** below.
+- `ui/StockSheet.kt` — everything the app knows about one ticker, in one sheet. `LocalOpenStock` is
+  how a ticker anywhere opens it. See below.
+- `model/ApproachAlerts.kt` + `data/ApproachNotifier.kt` — a trade closing on its stop or target 2,
+  said while there is still something to decide.
+- `data/SessionDigestNotifier.kt` — what the whole session did, once, after the close.
+- `data/AttentionNotifier.kt` — the two ways this app stops working without anything looking wrong:
+  a feed that has gone quiet, and a schedule that did not run.
+- `data/TradeActionReceiver.kt` — Keep open, pressed from a notification with the app closed.
+- `data/AppShortcuts.kt` + `res/xml/shortcuts.xml` — long-press the launcher icon.
+- `data/TodayWidget.kt` — the home-screen widget, and the only Glance in the codebase.
+- `ui/CallText.kt` — one call as plain text, for the ⋮ on a call card.
 - `ui/InfoSheet.kt` — `InfoNote`, the question mark that opens one, and the `SettingToggle` /
   `SettingLabel` rows every explained control is built from. See **Where an explanation lives**.
 - `ui/` — one file per screen, plus `CommonUi.kt` and `DesignSystem.kt` for shared pieces.
@@ -736,6 +749,21 @@ trade is then managed, in whatever state it has reached.
   window is editable **by hand and only by hand**, from Edit trade on the position's card — that is
   the user moving their own deadline on purpose, which is the opposite of a setting moving it
   silently. Moving it can close a running trade or reopen one the deadline had closed.
+- **A trade taken on a T+1 call says so, in a pill on its card.** `Position.isTPlusOne`, copied off
+  the card at the purchase alongside the levels and for the same reason — the report behind a trade
+  can be deleted or re-run, and neither may take back what the trade was taken on. It is
+  deliberately **not** derived from the two-session window: that window is what a T+1 is offered and
+  also what a reader whose default is two takes on every call they record, so deriving it would put
+  words in the channel's mouth. Without it the shortest deadline in the app reached the Portfolio as
+  a bare "2 of 2 left", which reads as a trade about to run out rather than one that was always
+  meant to last two sessions — the same silence the chip in Insights exists to break, on the screen
+  where the money actually is. Trades recorded before the column are marked by
+  `AppState.markTPlusOneTrades`, which reads `ScoredCall.isTPlusOne` off the record by the
+  `positionId` the two tabs already press through on: **set, never cleared** — a deleted report says
+  nothing about a trade rather than saying it was ordinary — and written without touching
+  `updatedAt` or publishing, because this device is finishing a record it already had rather than
+  changing the trade. The pill's sentence names the user's own window where they typed over the two
+  they were offered, so it never claims the channel set a deadline the reader chose.
 - The buy dialog offers `defaultTradeWindowSessions` and lets it be overwritten. `windowCustom`
   records that the user typed over what they were offered, rather than being recomputed by comparing
   against the setting later: the setting moves, the choice did not. **This is the only window left
@@ -922,6 +950,77 @@ The daily worker is behind both for the phone whose alarm the system dropped.
   whatever it liked about a state the scorer might never produce, which is the one way a test about
   status changes passes while the app stays silent.
 
+### Warning before the level, not after it
+
+Every notification above reports something the market has finished doing — a stop announced is a
+stop already taken, a buy zone announced is a price already there. `ApproachAlerts` is the only one
+that arrives while there is still a decision to make.
+
+- **Two levels and deliberately not four.** The stop, because it is the only level a reader can act
+  on — selling early is a decision rather than a regret. And target 2, because it is the one level
+  that ends a trade outright. Target 1 closes nothing that needs acting on, and a third alert per
+  trade is how a channel gets switched off.
+- **A distance, never an instruction.** *AMOC is 1.4% from its stop.* What to do about it is exactly
+  the judgement this app refuses to make everywhere else, and it does not start on a lock screen. The
+  return is on the notification because it decides whether a stop coming up is a loss to cut or a
+  profit to protect, and those are opposite situations wearing one sentence.
+- **First sight is recorded and never announced**, the rule `CallAlerts` needed: without it the first
+  sweep would announce every trade that happens to be sitting near a level. **Leaving is recorded and
+  coming back speaks again** — a price that pulls off its stop in the morning and closes on it in the
+  afternoon has done this twice. A price oscillating around the threshold can therefore speak more
+  than once, accepted for the reason `CallAlerts` accepts it: the alternative is a trade that drifts
+  off its stop and is then silently taken by it.
+- `position_approach_seen` is keyed per trade **and per level**: a price can be a whisker from its
+  stop and nowhere near target 2, and one key for both would let whichever was checked first swallow
+  the other. Device-local, like its two siblings.
+- **Default off**, with the threshold a setting (`approachThresholdPercent`, 1-10%, default 2). It is
+  inherently the noisiest thing the app can say, because a price near a level goes on being near it —
+  and there is no right threshold for everybody, since a tight stop on a liquid large cap and a wide
+  one on a thin mid cap mean different things by "close".
+- Pure, with no Android in it, like `TradeAlerts` and `CallAlerts`. `ApproachAlertsTest` drives it
+  through `PortfolioCalculator` over real sessions for the same reason.
+
+### The two silences the app can hear
+
+`AttentionNotifier` covers the two ways this app stops working while nothing looks wrong. Both were
+already detected and both reached the reader only on a screen they had to think to open.
+
+- **A frozen feed looks exactly like a calm market.** `PriceHealth` has computed this on every
+  recompute since it was written and it reached only the Settings card. `AppState.reviewFeedHealth`
+  announces the crossing **into** a spell and re-arms on the way out — announcing the state instead
+  would be a daily line about a symbol that retired in June. `SettingsRepository.feedReportedQuiet`
+  is that memory: a single boolean rather than a table, because it is one fact rather than a row per
+  thing. **Default on**, because it reports the app being unable to do its job rather than something
+  the market did.
+- **A schedule that was due and did not run.** The reported symptom of a broken schedule is silence.
+  `runDueScheduledJobs` announces `MISSED` and `FAILED` and deliberately **not** `SKIPPED`: "paid runs
+  are not allowed to spend credits on this phone" is the standing state of that switch, and a daily
+  notification restating it would be the app asking to be allowed to spend. **It carries no run-now
+  action** — a one-tap way to spend from a lock screen is the same act as spending. Default on.
+- **Its own channel and not the overdue one**, although both are the same "you need to look at this"
+  register. That channel is named for trades past their deadline, and Android silences a whole channel
+  at a time — folding a feed fault into it would mean muting one silently muted the other, which is
+  the exact failure these exist to break.
+
+### Answering a trade from the shade
+
+`TradeStatusNotifier` carries two actions, and which of them can be one tap is decided by what the
+app already knows.
+
+- **Keep open is a true one-tap**, through `TradeActionReceiver`: it is a boolean on the row and
+  needs nothing from the reader. Offered on every ending but `TARGET2_HIT`, which is the one Keep
+  Open cannot argue with. It recomputes with `announceChanges` false, like every user edit — an app
+  that buzzes about the button somebody just pressed is one whose notifications get switched off.
+- **Record sale cannot be**, and that is a fact about the data rather than a limitation of the shade:
+  a sale needs the price the reader got and the day they got it, and the app must not invent either.
+  What the action does instead is land them on those two fields — `AppState.openPositionToSell`,
+  which reveals the card *and* opens its dialog. The two are separate requests on purpose: every
+  cross-tab press reveals, and one entrance that always did both would put a price field in front of
+  the reader every time they followed a call to its trade.
+- **The overdue notification gains neither.** It is deliberately one notification for every late
+  trade — one per trade is how a fortnight away becomes eight buzzes — so there is no single trade for
+  an action to name.
+
 ## What happened this session
 
 The app has always known every fact on this card and has never had a place to say it. A target
@@ -1055,6 +1154,24 @@ no higher. **The two tabs share the arithmetic and not the scope** — see the f
   `JUDGING_HORIZON_SESSIONS` running out, which is the app's backstop rather than anything the
   market did. `PRICE_BREAK` silences both — the app refuses to value across a split, and a card
   announcing a stop it has just admitted it cannot read would be the one place that refusal failed.
+- **It can now say itself once, after the close.** `SessionDigestNotifier`, gated on
+  `sessionDigestEnabled` and **default off**. The gap it fills is precisely the session where nothing
+  of the reader's own moved: every other notification here is about one trade or one call, so an
+  afternoon when three of their sources' calls reached targets and they held none of them was
+  completely silent. The **whole** session and never `heldOnly` - narrowing it would leave this
+  saying what the per-trade notifications already said, one buzz later. Default off because a daily
+  line arrives on a rhythm rather than on an event, which is the `callAlertsEnabled` case exactly.
+  A quiet session is **silent in the shade and not on the card**: on screen "nothing moved" answers a
+  question the reader asked by looking; in the shade it is an interruption to report an absence.
+- **`session_digest_announced` is what stops it repeating** (schema 25). The card is rebuilt on every
+  recompute and rightly so - a session has one right answer forever - which is exactly why it cannot
+  decide on its own whether it has been spoken. Same distinction `position_status_seen` draws: what
+  happened is derived, what was *said* is stored. A row per session rather than one high-water mark,
+  because a phone switched off across a session would otherwise count it as already said. Only the
+  **newest** session is ever announced: a phone off for a week comes back with every session filled
+  in correctly on the card, and announcing each would be seven days of news piled onto one evening.
+  The row is written **before** the notifier is called, so a crash between the two costs one silent
+  evening rather than repeating the same line on every later recompute.
 - **`SessionDigest` is pure and has no Android in it**, like `TradeAlerts` and `ScheduleClock`.
   `SessionDigestTest` builds every trade through `PortfolioCalculator` and every verdict through
   `Scoring`, because a hand-built view would let it assert whatever it liked about a state the
@@ -1788,6 +1905,55 @@ two places to edit one thing and, worse, two places that can disagree about it. 
   which is what this file and the KDoc are for; on the screen they were four blocks of small text
   between the reader and one switch.
 
+## What back does, and the stock sheet
+
+Two things the app could always have done and never did: go back, and put one stock in one place.
+
+- **Back had no handler at all.** `openCall`, `openPosition` and `openSavedResult` throw the reader
+  across tabs — from a card, from a digest tile, from a notification — and the system's back button
+  answered every one of them by closing the app. `NavStack` is one step of history: the tab a jump
+  left, and what to reveal on arriving back at it. `AppState.goBack` spends it, then falls through
+  to clearing the current tab's filters, then to the system. **The jump before the filter**,
+  deliberately — both can be outstanding at once and the jump is the more recent, so answering the
+  filter first would strip a narrowing the reader set up on purpose while leaving them on a tab they
+  did not choose.
+- **One deep, and that is the design.** The five destinations are peers; a back button that walked
+  back through a morning's tab presses would take a dozen presses to leave. What was missing is the
+  *last* jump the app made on the reader's behalf, and nothing else. A tab the reader chose is not a
+  jump, so `navigate` clears the stack rather than adding to it — guarded on the destination actually
+  changing, because the pager publishes its own arrival at the end of every travel this class starts
+  and an unguarded clear there would throw the return away in the same breath as the jump.
+- **A notification records no return.** It arrives at a tab the reader was not on and usually at an
+  app that was not running, so there is nowhere to go back to; recording one would land the first
+  back press on the Analyze tab they never visited.
+- **A filter is cleared whole**, not one control at a time. Three presses to undo three chips would
+  be back re-enacting the reader's typing, and the screen's own Clear filters — two presses away
+  inside the folded panel — clears them together too. `PageState.filtersActive` and `clearFilters`
+  are the one predicate, read by the three screens *and* by the shell, because three screens each
+  stating their own version is three that agree until one gains a filter.
+- **`StockSheet` is a sheet, not a sixth destination.** A ticker's story was spread across four
+  screens and the only way to gather it was to type the same code into three search boxes.
+  `StockSearch` had already made those boxes ask one question; this is where the answers meet. A
+  sheet on `ChannelScoreSheet`'s terms because a stock is not a peer of Analyze and Settings — it is
+  the longer version of a thing that was pressed, which is what a sheet from the bottom already means
+  here. It also keeps back simple, since `ModalBottomSheet` takes the press first, and it opens from
+  any tab without moving the reader off the one they are reading.
+- **It states nothing new.** Every figure on it is drawn somewhere else; what it adds is that they
+  are drawn together. The exception is `StockScore`, which has been computed for every stock since it
+  was written and reached the reader only through the shortlist signals and the Ask AI prompt — so
+  "what happens when anybody recommends this stock" was a question the app could answer and no screen
+  asked. Rows lead through `openPosition` and `openCall`, the two entrances every cross-tab press
+  already uses, and dismiss the sheet first: one left open over the tab it just sent the reader to is
+  covering the card it sent them to read.
+- **`LocalOpenStock` is a composition local, and that is a deliberate exception.** `onOpenTrade` and
+  `onOpenCall` are threaded because they travel one or two levels and belong to the card offering
+  them. A ticker is drawn on a call card inside a session card inside a band, on the same card from
+  Results, on a position card inside a card, and in a table row — threading it would add a parameter
+  to eight signatures to reach four leaves. It sits beside `LocalWindowWidth`, which is where the
+  shell already publishes what every screen may need and no screen owns.
+- **A tile that already presses somewhere keeps its press.** Digest tiles and Overdue tiles still
+  lead to the trade or the call; the ticker only becomes a target where nothing was carrying one.
+
 ## The status line
 
 One line in the header says what the app is doing and what it has just done. It was a floating toast
@@ -1826,6 +1992,18 @@ at the foot of the screen until 2026-08-25.
 - **It animates height as well as opacity.** On the compact layout the line has a row of its own, so
   a plain fade makes the header jump a line taller the instant a message lands — which reads as the
   page twitching rather than as an announcement.
+- **It carries at most one action, and only on something destructive.** `StatusMessage.undo` is a
+  word the reader can press to take back what the line has just reported, and it is a slot on this
+  line rather than a snackbar **deliberately** - the floating toast was removed on 2026-08-25 because
+  it answered from the far end of the screen from the button that had been pressed, and bringing one
+  back for this would undo that on purpose. The line already says what happened, sits where the app's
+  own name is, and clears itself after four seconds, which is exactly the shape an undo wants. Two
+  paths offer one: recording a sale (`reopenPosition`, which restores the row it was handed rather
+  than one read back, and carries a newer stamp so the sale is undone on other devices too) and Keep
+  Open. Everything else is an edit the reader can simply make again, and a button after every
+  confirmation would turn the quietest chrome in the app into the loudest. A line carrying one is
+  **not** dismissable by tapping the row, or the offer would be thrown away by the gesture meant to
+  read it.
 - **The tone is one tinted glyph and never the text.** Colouring the words would make every routine
   confirmation the loudest thing on screen, and this line now sits beside the app's own name, which
   is the last place that should flash. Same rule the toast followed.
@@ -1880,7 +2058,7 @@ app's.
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 23. **Bumping the constant is half of it**: `session_events` was added to
+  `onUpgrade`. Currently 25. **Bumping the constant is half of it**: `session_events` was added to
   both hooks and left at 20, so a fresh install had the table and every upgrade silently did not —
   which fails at the first write and nowhere earlier. `SessionEventStoreTest` caught it. Adding it to only one of the two is the mistake that gets made:
   `CallAlertStoreTest` caught exactly that on version 19 before it shipped.
@@ -1897,13 +2075,34 @@ app's.
   `SessionEventStoreTest` for `session_events`, and version 23 has one in `StockOpinionStoreTest`
   for the `standing`, `forecast` and `checks` columns — that last one writes the **version 22**
   table, which is what every phone that has ever pressed Ask AI is actually on, so it is the
-  upgrade that runs on a real device rather than the oldest one that still can
+  upgrade that runs on a real device rather than the oldest one that still can, and version 24 has
+  one in `LocalDataStoreMigrationTest` for `is_t_plus_one` on `positions`, written against the
+  version-23 table for the same reason, and version 25 has one beside it for
+  `position_approach_seen` and `session_digest_announced` — the two-tables case, which is the
+  shape this trap is usually walked into
   — added by `ALTER`, one guard per column, so the risk
   is not that the upgrade fails but that it takes the answers already on the phone with it. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it
   went in. **Robolectric needs Java 21** to stand up a sandbox for SDK 36 — it refuses on 17 with
   "requires Java 21 (have Java 17)", which is a green run locally on the JBR and a red one anywhere
   pinned lower. CI pins 21 for that reason.
+- **A shortcut's `<extra android:value="true"/>` is a String, not a boolean.** It was written that
+  way first and the shortcut silently did nothing: `getBooleanExtra` handed back its default and the
+  app opened on whatever tab it was already on, which is indistinguishable from a shortcut that is
+  not wired up. Both static shortcuts name an **action** instead, and `AppShortcuts.setOverdue` uses
+  the same one so the launcher's two entrances are read one way. A shortcut intent must carry an
+  action at all, or the launcher refuses it outright.
+- **Glance is the only second UI toolkit here, and it is for the widget alone.** A widget is
+  RemoteViews drawn by the launcher, so it genuinely is a different thing rather than another screen;
+  Glance is what keeps it written in the same idiom instead of in an XML layout. Nothing outside
+  `data/TodayWidget.kt` imports it, and that file imports nothing from `ui` but `AppDates`. **It
+  reads and never computes** — the digest comes out of `session_events` and the overdue count off
+  `SettingsRepository.lastOverdueCount`, a deliberate cache. Rebuilding the portfolio would be the
+  most expensive thing in the app running on the cheapest surface it has, in a process the system is
+  free to kill halfway through. The widget declares **no `updatePeriodMillis`**: the record changes
+  when prices arrive rather than on a clock, and the app pushes a redraw from the same callback that
+  counts overdue trades. The one colour it needs is written out, because a widget has no access to
+  `MaterialTheme`.
 - `PriceRepository` fetches **from where a stock's stored history stops**, via `period1`/`period2`,
   not a fixed range. It used to ask for `5d`: a phone left shut for a week got a hole that every
   later refresh stepped straight over, permanently — and a call whose window contains a hole never

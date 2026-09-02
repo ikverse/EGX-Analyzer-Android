@@ -32,6 +32,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
@@ -66,7 +75,7 @@ internal fun RecommendationCards(
             border = cardOutline,
         ) {
             Column(Modifier.padding(Space.l)) {
-                StockHeader(stock, point = null, channel = null, page = 0, pageCount = 0)
+                StockHeader(stock, point = null, channel = null, page = 0, pageCount = 0, session = null)
             }
         }
         return
@@ -158,7 +167,9 @@ private fun RecommendationCard(
         border = heldBorder(held) ?: cardOutline,
     ) {
         Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
-            StockHeader(stock, point, channel, page, pageCount)
+            // The session the call was made for, from the same source the Bought button
+            // reads it from, so the copied text and the trade agree about which day.
+            StockHeader(stock, point, channel, page, pageCount, trades?.dateOf(point))
 
             // No ladder here, deliberately. This card is a row of the report that would not fit as
             // a row: what it owes the reader is the call's figures, and a drawing of the same five
@@ -221,6 +232,8 @@ private fun StockHeader(
     channel: String?,
     page: Int,
     pageCount: Int,
+    /** The session this occurrence was made for, which the copied text names. */
+    session: java.time.LocalDate?,
 ) {
     // Top-aligned so the right-hand column starts level with the ticker rather than floating
     // against the middle of however many name lines this stock happens to have.
@@ -230,13 +243,21 @@ private fun StockHeader(
             // Beside the column it left a hole under itself the height of the names below the
             // ticker, and it pushed those names in past the ladder and the levels, which start at
             // the card's edge - one card, two left edges. Here the names stay flush with them.
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // The logo and the ticker press together as one target rather than the text alone:
+            // a 12sp glyph beside a headline is two touch targets where the reader sees one thing.
+            // See LocalOpenStock.
+            val openStock = LocalOpenStock.current
+            Row(
+                Modifier.clickable { openStock(stock.stockCode) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 StockLogo(stock.stockCode, LogoSize.Header, Modifier.padding(end = Space.s))
                 Text(
                     stock.stockCode,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                 )
+                Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
             }
             // The Arabic name is the one printed in the source, so it is the reliable identity.
             stock.stockNameArabic?.let {
@@ -275,6 +296,53 @@ private fun StockHeader(
                 }
                 TimingChip(point)
             }
+            // The ⋮ the position card has carried since it was built, arriving on the other card
+            // that holds a call. One item, because there is one thing to do with a call that the
+            // card cannot already do: get its numbers out of the app intact. A report exports as a
+            // spreadsheet, which is the right shape for a record and the wrong one for the four
+            // figures somebody is about to retype into an order ticket.
+            CopyCallMenu(stock, point, channel, session)
+        }
+    }
+}
+
+/**
+ * Copies this call as plain text. See [CallText] for what it says and why.
+ *
+ * `ClipboardManager` through the composition local rather than the system service: it is what
+ * Compose offers, and it is what puts the copy on the same clipboard the text fields in this app
+ * paste from. Android 13 and later show their own confirmation of a copy, so the status line is
+ * deliberately left alone - two announcements of one press is one too many, and the system's own
+ * cannot be turned off.
+ */
+@Composable
+private fun CopyCallMenu(
+    stock: ConsolidatedRecommendation,
+    point: RecommendationDataPoint,
+    channel: String?,
+    session: java.time.LocalDate?,
+) {
+    var open by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(IconSize.Action)) {
+            Icon(
+                Icons.Outlined.MoreVert,
+                contentDescription = "More actions",
+                modifier = Modifier.size(IconSize.Inline),
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Copy call") },
+                leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
+                onClick = {
+                    open = false
+                    clipboard.setText(
+                        AnnotatedString(CallText.of(stock, point, channel, session)),
+                    )
+                },
+            )
         }
     }
 }

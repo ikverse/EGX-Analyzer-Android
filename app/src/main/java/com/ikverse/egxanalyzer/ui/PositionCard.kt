@@ -34,10 +34,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
 import java.time.LocalDate
@@ -69,6 +71,9 @@ internal fun PositionCard(
     onKeepOpen: (keep: Boolean, note: String?) -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
+    /** True on the one card a Record sale action in the shade named. See `TradeStatusNotifier`. */
+    startSelling: Boolean = false,
+    onSellingShown: () -> Unit = {},
 ) {
     val position = view.position
     var menuOpen by remember { mutableStateOf(false) }
@@ -86,7 +91,13 @@ internal fun PositionCard(
             // taller than the one beside it.
             Row(Modifier.heightIn(min = PositionHeaderHeight), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    // One target for the logo and the ticker, as on the call card. The card
+                    // itself carries no press, so this takes none away. See LocalOpenStock.
+                    val openStock = LocalOpenStock.current
+                    Row(
+                        Modifier.clickable { openStock(position.ticker) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         StockLogo(position.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
                         Text(position.ticker, style = MaterialTheme.typography.titleSmall)
                     }
@@ -174,11 +185,19 @@ internal fun PositionCard(
             // Its own row rather than the header, which is held to a fixed height so cards beside
             // each other start level. Drawn only when there is something to say, so an ordinary
             // position is exactly as tall as it was.
-            if (view.overdue || view.keptOpen) {
+            //
+            // Every chip inside is named in the condition. Price scale was not, and a split under a
+            // trade that was neither overdue nor kept open had its chip written and never drawn.
+            if (view.overdue || view.keptOpen || view.priceScaleChanged ||
+                position.isTPlusOne
+            ) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(Space.s),
                     verticalArrangement = Arrangement.spacedBy(Space.xs),
                 ) {
+                    // First in the row: it is the one chip here that was true the day the trade was
+                    // taken, and it is what the deadline further down the card is measured by.
+                    if (position.isTPlusOne) TPlusOneChip(position)
                     if (view.overdue) OverdueChip(view.overdueDays)
                     // One chip, not two saying the same thing: a trade can only be overdue by being
                     // kept open now, so Overdue already carries the state and adds how late it is.
@@ -362,6 +381,8 @@ internal fun PositionCard(
                     SellButton(
                         suggestedExit = view.exitPrice ?: view.currentPrice,
                         onSell = onSell,
+                        openNow = startSelling,
+                        onOpened = onSellingShown,
                     )
                     // Not on a trade already being kept open - the pill says that, and the menu
                     // undoes it - and not on one that reached target 2, which is the single ending
@@ -476,6 +497,52 @@ private fun PositionView.extremeCaption(price: Double?, on: LocalDate?): String?
  * being kept open is to sell it, and the card's menu holds the way to hand it back to its deadline
  * instead.
  */
+/**
+ * Says that the call this trade was taken on named its own deadline, and what that deadline was.
+ *
+ * The reason for the shortest window on the screen. A T+1 trade reached this card as a bare "2 of 2
+ * left" - a figure that reads as a trade about to run out rather than as a trade that was always
+ * meant to last two sessions, which is the difference between a deadline the user should act on and
+ * one that was the point of the call. Insights has said this on the call for as long as the pill has
+ * existed; the Portfolio, where the trade actually is, said nothing.
+ *
+ * Tappable and drawn in `primary` for the reasons the pill in Insights gives: the app's own voice
+ * rather than a verdict or a warning, and a pill that is only sometimes pressable teaches nobody
+ * that it can be pressed. The sentence behind it is about this trade rather than about the call,
+ * which is the one thing the two screens are entitled to word differently.
+ */
+@Composable
+private fun TPlusOneChip(position: Position) {
+    var showing by remember(position.id) { mutableStateOf(false) }
+    val tone = MaterialTheme.colorScheme.primary
+    OutlinePill("T+1", outline = tone, textColor = tone, onClick = { showing = true })
+    if (showing) {
+        val who = position.channel?.takeIf(String::isNotBlank) ?: "The channel"
+        val call = "$who printed this as a T+1 call: buy on the session it was made for, and be " +
+            "out on the next one."
+        // The deadline on the card is the user's own, and the pill must not claim the channel set
+        // it. Typing a longer window over the two it offered is a decision worth naming here - it
+        // is the reason this card's figures and the channel's record can disagree about the trade.
+        val deadline = if (position.windowCustom) {
+            "You gave this trade ${position.windowSessions} " +
+                "${position.windowSessions.sessionWord()} instead, and every figure on this card " +
+                "follows yours."
+        } else {
+            "That is where the ${position.windowSessions} " +
+                "${position.windowSessions.sessionWord()} below came from: the call named this " +
+                "trade's deadline, not your default."
+        }
+        AlertDialog(
+            onDismissRequest = { showing = false },
+            title = { Text("${position.ticker} · a T+1 trade") },
+            text = { Text("$call $deadline") },
+            confirmButton = {
+                TextButton(onClick = { showing = false }) { Text("Close") }
+            },
+        )
+    }
+}
+
 @Composable
 private fun KeptOpenChip() {
     OutlinePill(
