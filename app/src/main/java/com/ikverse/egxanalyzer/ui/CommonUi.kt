@@ -388,7 +388,9 @@ internal fun SectionCard(
                         modifier = if (about == null) Modifier else Modifier.weight(1f),
                         style = MaterialTheme.typography.titleMedium,
                     )
-                    about?.let { InfoButton(it) }
+                    // Dense: the 48dp target on a plain IconButton would make this header band
+                    // taller than the cards beside it on the page that carry no explanation.
+                    about?.let { InfoButton(it, dense = true) }
                 }
                 // The same hairline the chrome uses to separate the app header from the page, so a
                 // card says where its heading ends the way the app does. Only with a title: there is

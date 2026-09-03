@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -64,21 +66,39 @@ internal fun infoNote(title: String, vararg paragraphs: String) =
  *
  * Muted rather than `primary`. It sits beside dozens of controls, and a page of coloured glyphs
  * would be the same clutter in a smaller font.
+ *
+ * @param dense draw the glyph at its own size instead of inside a 48dp [IconButton]. A card heading
+ *   is a [Row] as tall as its title (~24dp); the 48dp touch target inflates that band, so a
+ *   [SectionCard] with an explanation ends up with a taller header than the cards beside it that
+ *   have none. Dense keeps the footprint at the icon's size - the same bare-glyph treatment
+ *   `SubSection` already gives its chevron - so the heading lines up. Left `false` for a settings
+ *   row, where the full target is wanted and nothing is being aligned to.
  */
 @Composable
 internal fun InfoButton(
     note: InfoNote,
     modifier: Modifier = Modifier,
     tint: Color? = null,
+    dense: Boolean = false,
 ) {
     var open by remember { mutableStateOf(false) }
-    IconButton(onClick = { open = true }, modifier = modifier) {
+    val glyph = @Composable {
         Icon(
             Icons.AutoMirrored.Outlined.HelpOutline,
             contentDescription = note.title,
             tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(IconSize.Inline),
         )
+    }
+    if (dense) {
+        Box(
+            modifier
+                .size(IconSize.Inline)
+                .clickable(role = Role.Button) { open = true },
+            contentAlignment = Alignment.Center,
+        ) { glyph() }
+    } else {
+        IconButton(onClick = { open = true }, modifier = modifier) { glyph() }
     }
     if (open) InfoSheet(note) { open = false }
 }
