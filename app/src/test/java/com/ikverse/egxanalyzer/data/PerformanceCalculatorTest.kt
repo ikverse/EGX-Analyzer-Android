@@ -7,6 +7,7 @@ import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.Outcome
+import com.ikverse.egxanalyzer.model.PerformanceCalculator
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.Scoring

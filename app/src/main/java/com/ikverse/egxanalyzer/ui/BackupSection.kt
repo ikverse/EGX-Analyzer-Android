@@ -1,6 +1,5 @@
 package com.ikverse.egxanalyzer.ui
 
-import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,15 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import com.ikverse.egxanalyzer.data.backupFolderLabel
-import com.ikverse.egxanalyzer.data.backupsInFolder
-import com.ikverse.egxanalyzer.data.holdsBackupFolder
-import com.ikverse.egxanalyzer.data.readBackup
-import com.ikverse.egxanalyzer.data.writeBackupTo
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * Backing the record up, and getting it back.
@@ -45,35 +36,21 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 fun BackupControls(appState: AppState) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var pendingRestore by remember { mutableStateOf<Uri?>(null) }
 
-    val folder = appState.backupFolder?.let(Uri::parse)
     // Re-read on every composition rather than remembered: the grant can be revoked from a system
     // page, and a card that went on naming a folder this app can no longer write to would report a
     // phone as backed up on the one day that mattered.
-    val holdsFolder = folder != null && holdsBackupFolder(context, folder)
-    val held = if (holdsFolder && folder != null) backupsInFolder(context, folder) else emptyList()
+    val holdsFolder = appState.holdsBackupFolder()
+    val held = appState.backupsInFolder()
 
     val chooseFolder = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { picked ->
         if (picked == null) return@rememberLauncherForActivityResult
-        // Persisted, or the grant dies with this process and the daily backup silently stops on the
-        // next launch - the failure this whole feature exists to prevent, reproduced inside it.
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                picked,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-            )
-        }
-        appState.saveBackupFolder(picked.toString())
-        appState.statusMessage = StatusMessage(
-            "Backing up to ${backupFolderLabel(picked)}",
-            succeeded = true,
-        )
+        appState.keepBackupFolder(picked.toString())
     }
 
     // Every type, deliberately. A zip that has been round a cloud folder, a chat and a downloads
@@ -105,18 +82,7 @@ fun BackupControls(appState: AppState) {
                     onClick = {
                         scope.launch {
                             busy = true
-                            runCatching {
-                                withContext(Dispatchers.IO) {
-                                    writeBackupTo(
-                                        context = context,
-                                        folder = folder?.takeIf { holdsFolder },
-                                        database = appState.databaseFile(),
-                                        settings = appState.settingsDocument(),
-                                        device = appState.backupDevice(),
-                                        checkpoint = appState::checkpointDatabase,
-                                    )
-                                }
-                            }
+                            runCatching { appState.writeBackup() }
                                 .onSuccess {
                                     appState.recordBackupDay()
                                     appState.statusMessage = StatusMessage("Saved to $it", succeeded = true)
@@ -145,10 +111,12 @@ fun BackupControls(appState: AppState) {
         Text(
             when {
                 holdsFolder && held.isNotEmpty() ->
-                    "Backing up daily to ${backupFolderLabel(folder!!)}. ${held.size} kept, " +
+                    "Backing up daily to ${appState.backupFolderLabel(appState.backupFolder!!)}. " +
+                        "${held.size} kept, " +
                         "newest ${held.first()}."
                 holdsFolder ->
-                    "Backing up daily to ${backupFolderLabel(folder!!)}. Nothing written yet - " +
+                    "Backing up daily to ${appState.backupFolderLabel(appState.backupFolder!!)}. " +
+                        "Nothing written yet - " +
                         "the first copy goes there today."
                 // Not an error: the app works perfectly well like this, and a red warning about a
                 // folder nobody has chosen yet would be scolding someone for the default.
@@ -185,8 +153,7 @@ fun BackupControls(appState: AppState) {
                             label = "Restoring from a backup",
                             success = { outcome -> outcome.summary },
                         ) {
-                            val record = withContext(Dispatchers.IO) { readBackup(context, source) }
-                            appState.restoreFrom(record)
+                            appState.restoreFromBackup(source.toString())
                         }
                         busy = false
                     }

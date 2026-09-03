@@ -19,8 +19,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
-import com.ikverse.egxanalyzer.data.FeedFault
-import com.ikverse.egxanalyzer.data.PerformanceCalculator
+import com.ikverse.egxanalyzer.model.FeedFault
+import com.ikverse.egxanalyzer.model.PerformanceCalculator
 import com.ikverse.egxanalyzer.model.CallTally
 import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.PositionView

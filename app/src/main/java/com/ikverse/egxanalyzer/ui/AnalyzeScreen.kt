@@ -1,8 +1,8 @@
 package com.ikverse.egxanalyzer.ui
 
 import android.Manifest
-import android.app.Activity
 import android.app.DatePickerDialog
+import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -16,7 +16,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -56,6 +55,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
@@ -67,7 +67,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.ikverse.egxanalyzer.data.AnalysisChunking
+import com.ikverse.egxanalyzer.model.AnalysisChunking
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisMode
@@ -81,18 +81,19 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 @Composable
-internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
+internal fun AnalyzeScreen(appState: AppState) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     // Android 13 and later start with notifications denied, and the app never asked. Everything
     // was built - channel, foreground service, deep link - and none of it could reach the screen,
     // which looked exactly like a broken notification rather than a missing permission.
-    var notificationsAllowed by remember { mutableStateOf(AnalysisNotifier(activity).permitted()) }
+    var notificationsAllowed by remember { mutableStateOf(appState.notificationsPermitted()) }
     val lifecycle = LocalLifecycleOwner.current
     DisposableEffect(lifecycle) {
         // Granting happens in system settings, so the answer arrives on the way back in.
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                notificationsAllowed = AnalysisNotifier(activity).permitted()
+                notificationsAllowed = appState.notificationsPermitted()
             }
         }
         lifecycle.lifecycle.addObserver(observer)
@@ -371,7 +372,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                         },
                         onClick = {
                             appState.selectAnalysisMode(AnalysisMode.SPECIFIC_DATE)
-                            showRecommendationDatePicker(activity, appState)
+                            showRecommendationDatePicker(context, appState)
                         },
                     )
                 }
@@ -396,7 +397,7 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                         "app. The analysis itself is unaffected.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = { activity.openNotificationSettings() }) {
+                TextButton(onClick = { appState.openNotificationSettings() }) {
                     Text("Turn on notifications")
                 }
             }
@@ -463,7 +464,7 @@ private fun RecommendationDateOption(
     }
 }
 
-private fun showRecommendationDatePicker(activity: Activity, appState: AppState) {
+private fun showRecommendationDatePicker(context: Context, appState: AppState) {
     val today = LocalDate.now(ZoneId.of("Africa/Cairo"))
     // Never open later than the latest date the picker allows. The target session runs ahead of
     // today on a Friday, a Saturday, or any weekday after the close, and a DatePicker asked to open
@@ -471,7 +472,7 @@ private fun showRecommendationDatePicker(activity: Activity, appState: AppState)
     // anyway, so today is the right place to land.
     val opensOn = minOf(appState.recommendationTargetDate, today)
     DatePickerDialog(
-        activity,
+        context,
         { _, year, month, day ->
             appState.updateRecommendationTargetDate(LocalDate.of(year, month + 1, day))
         },
@@ -759,19 +760,6 @@ private fun DuplicateAnalysisDialog(appState: AppState) {
         dismissButton = {
             TextButton(onClick = appState::dismissDuplicateWarning) { Text("Cancel") }
         },
-    )
-}
-
-/**
- * Opens this app's notification settings.
- *
- * Once the permission has been denied Android will not ask again, so the only way back is the
- * system screen.
- */
-private fun Activity.openNotificationSettings() {
-    startActivity(
-        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-            .putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
     )
 }
 

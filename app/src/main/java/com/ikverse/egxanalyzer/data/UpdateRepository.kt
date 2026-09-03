@@ -12,6 +12,9 @@ import android.os.Build
 import android.provider.Settings
 import com.ikverse.egxanalyzer.BuildConfig
 import com.ikverse.egxanalyzer.data.UpdateInstallReceiver.Companion.ACTION_INSTALL_STATUS
+import com.ikverse.egxanalyzer.model.AvailableUpdate
+import com.ikverse.egxanalyzer.model.DownloadedApk
+import com.ikverse.egxanalyzer.model.byteLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -21,25 +24,6 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
-
-/** Where the update check has got to, so the screen can say the same thing the app is doing. */
-sealed interface UpdateState {
-    data object Idle : UpdateState
-
-    data object Checking : UpdateState
-
-    /** Nothing newer exists. Carries the version asked about, so the answer names what it answered. */
-    data class UpToDate(val versionName: String) : UpdateState
-
-    data class Available(val update: AvailableUpdate) : UpdateState
-
-    data class Downloading(val update: AvailableUpdate, val progress: Float) : UpdateState
-
-    /** Downloaded, checked, and waiting for the one tap that hands it to Android's installer. */
-    data class Ready(val update: AvailableUpdate, val file: File) : UpdateState
-
-    data class Failed(val reason: String) : UpdateState
-}
 
 /**
  * Fetches the app's own updates from its GitHub releases.

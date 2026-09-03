@@ -3,6 +3,7 @@ package com.ikverse.egxanalyzer.data
 import com.ikverse.egxanalyzer.model.RuleKind
 import com.ikverse.egxanalyzer.model.RuleOrigin
 import com.ikverse.egxanalyzer.model.RuleScope
+import com.ikverse.egxanalyzer.model.RuleSet
 import com.ikverse.egxanalyzer.model.RuleSlot
 import com.ikverse.egxanalyzer.model.WordingRule
 import org.junit.Assert.assertEquals
@@ -192,7 +193,8 @@ class PromptComposerTest {
     fun `no marker in the shipped prompt sits after a blank line`() {
         val asset = java.io.File("src/main/assets/consolidated_recommendation.md").readText()
         val offenders = Regex("""
-[ 	]*?
+[ 	]*
+?
 [ 	]*<!--\s*EGX_RULES:\s*([a-z0-9.\-]+)""")
             .findAll(asset)
             .map { it.groupValues[1] }

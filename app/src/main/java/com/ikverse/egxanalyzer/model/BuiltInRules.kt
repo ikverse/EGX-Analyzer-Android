@@ -1,10 +1,4 @@
-package com.ikverse.egxanalyzer.data
-
-import com.ikverse.egxanalyzer.model.RuleKind
-import com.ikverse.egxanalyzer.model.RuleOrigin
-import com.ikverse.egxanalyzer.model.RuleScope
-import com.ikverse.egxanalyzer.model.RuleSlot
-import com.ikverse.egxanalyzer.model.WordingRule
+package com.ikverse.egxanalyzer.model
 
 /**
  * The wording the app ships knowing.

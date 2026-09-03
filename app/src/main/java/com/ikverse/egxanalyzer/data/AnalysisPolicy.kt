@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.ExcludedSource
+import com.ikverse.egxanalyzer.model.RuleSet
 import com.ikverse.egxanalyzer.model.RuleSlot
 import com.ikverse.egxanalyzer.model.WordingRule
 

@@ -1,6 +1,7 @@
 package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.Outcome
+import com.ikverse.egxanalyzer.model.PerformanceCalculator
 import com.ikverse.egxanalyzer.model.RecordSplit
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.StockScore

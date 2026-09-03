@@ -1,8 +1,10 @@
 package com.ikverse.egxanalyzer.data
 
+import com.ikverse.egxanalyzer.model.BuiltInRules
 import com.ikverse.egxanalyzer.model.RuleKind
 import com.ikverse.egxanalyzer.model.RuleOrigin
 import com.ikverse.egxanalyzer.model.RuleScope
+import com.ikverse.egxanalyzer.model.RuleSet
 import com.ikverse.egxanalyzer.model.RuleSlot
 import com.ikverse.egxanalyzer.model.WordingRule
 import org.junit.Assert.assertEquals

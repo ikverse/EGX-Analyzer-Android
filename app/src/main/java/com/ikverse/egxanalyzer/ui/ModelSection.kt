@@ -44,7 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.ikverse.egxanalyzer.data.ModelUsageRecord
+import com.ikverse.egxanalyzer.model.ModelUsageRecord
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudModelInfo
 import com.ikverse.egxanalyzer.model.ModelSuitability

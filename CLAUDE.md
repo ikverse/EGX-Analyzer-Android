@@ -84,7 +84,7 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   from the `usage` block on every answer. Device-local and never synced: a token count describes
   one phone's spending. A run's own total is in its diagnostics; this is the lifetime tally, and
   the only place Ask AI's spending appears at all.
-- `data/AnalysisChunking.kt` — 8 images per request. Beyond ~32 the model loses track of which
+- `model/AnalysisChunking.kt` — 8 images per request. Beyond ~32 the model loses track of which
   image it is citing, which produced exclusions naming the wrong card.
 - `data/ConsolidatedParser.kt` — the model's JSON into `ConsolidatedRecommendation`.
 - `model/Scoring.kt` — how a call is judged. See below.
@@ -94,7 +94,7 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `model/CallSanity.kt` — whether a call's levels can be believed. See below.
 - `model/CallShortlist.kt` — which card is worth a paid question. See below.
 - `model/CallAlerts.kt` + `data/CallAlertNotifier.kt` — a stock reaching a buy zone nobody took.
-- `data/PerformanceCalculator.kt` — per-channel and per-session rollups, and the ranking.
+- `model/PerformanceCalculator.kt` — per-channel and per-session rollups, and the ranking.
 - `model/SettledCall.kt` — the verdict of a call the market has finished with, frozen once and never
   replayed. See below.
 - `ui/ChannelScoreSheet.kt` — how a source is scored, opened by pressing its card in the ranking.
@@ -107,7 +107,7 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   user was last told, and how the phone says so. See below.
 - `model/SessionDigest.kt` + `ui/TodayCard.kt` — what the market did on one trading session, and
   the card that says so on Portfolio and Insights. See below.
-- `data/AnalysisPolicy.kt` + `data/RuleSet.kt` + `data/BuiltInRules.kt` — the local wording filter.
+- `data/AnalysisPolicy.kt` + `model/RuleSet.kt` + `model/BuiltInRules.kt` — the local wording filter.
 - `data/PromptComposer.kt` — generates the prompt sent to the model.
 - `data/ReportSync.kt` + `data/RuleSync.kt` + `data/PositionSync.kt` — what travels between devices.
 - `data/XlsxWriter.kt` + `ui/ReportExport.kt` — a report as a spreadsheet, saved to Downloads or
@@ -153,6 +153,35 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `ui/InfoSheet.kt` — `InfoNote`, the question mark that opens one, and the `SettingToggle` /
   `SettingLabel` rows every explained control is built from. See **Where an explanation lives**.
 - `ui/` — one file per screen, plus `CommonUi.kt` and `DesignSystem.kt` for shared pieces.
+
+## The UI and the engine
+
+The `ui` package imports **nothing** from `data`. That is a rule, not an accident, and the way back
+to it if it ever breaks is `grep -r "egxanalyzer.data" app/src/main/java/com/ikverse/egxanalyzer/ui`
+returning nothing.
+
+- **`ui/AppState.kt` is an interface** — 64 read-only properties, 2 writable ones, and the actions.
+  It is the whole of what a screen may see and do. Nothing else in `ui` knows a repository exists.
+- **`state/LiveAppState.kt` implements it**, and is the only thing holding repositories, the
+  database, the network and a `Context`. It is built once, in `EgxApplication`.
+- **`debug/.../ui/preview/FakeAppState.kt` also implements it**, entirely out of constructor
+  defaults, so `ui/preview/ScreenPreviews.kt` draws every screen in Android Studio with no app
+  running. In `src/debug`, so none of it ships.
+
+Two rules keep it that way:
+
+- **A screen takes `appState: AppState` and never an `Activity`.** An activity cannot exist in a
+  preview, and one parameter of it high up the tree is what forces every screen below to take one.
+  The single exception is the fold lookup in `EgxAnalyzerApp`, which reads `LocalContext` and
+  tolerates null. Anything else needing the platform - a permission, a settings page, a share sheet,
+  a file - is a method on the interface, implemented once in `LiveAppState`.
+- **Pure calculation belongs in `model`, not behind the interface.** `PerformanceCalculator`,
+  `AnalysisChunking`, `RuleSet` and `isEgx33` are functions of their arguments with no Android and
+  no I/O in them, so a screen calls them directly. Routing those through `AppState` would have made
+  the interface a phone book. What goes behind the interface is anything that touches a device.
+
+`src/next` predates this and still takes an `Activity` and reaches into `data` directly. It builds,
+and converting it is the obvious next step if that redesign is ever picked up again.
 
 ## Scoring, and why each rule is there
 
@@ -1537,7 +1566,7 @@ app's storage was holding a file nothing on earth could do anything with.
   be published for a report sitting on disk again.
 - **The decisions are pure functions in `BackupRestore.kt`** — `rulesToRestore`,
   `positionsToRestore`, `runsToRestore`, `promptVersionsToRestore` — exactly as `syncActions` and
-  `rulesToUpload` are, so they are tested as ordinary Kotlin. `AppState.restoreFrom` applies them and
+  `rulesToUpload` are, so they are tested as ordinary Kotlin. `LiveAppState.restoreFromBackup` applies them and
   nothing else. `BackupRoundTripTest` runs under Robolectric and covers the other half: every
   decision is worthless if what comes out of the zip is not what went in, and a backup that reads
   back empty looks exactly like a phone that had nothing on it.

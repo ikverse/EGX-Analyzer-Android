@@ -36,7 +36,7 @@ import java.time.LocalDate
  * writing a plain local name - `var openRun by appState.pages.openResultId` - which is Compose's own
  * `getValue`/`setValue` and not reflection.
  */
-internal class PageState {
+class PageState {
 
     // ── Shared by Portfolio and Insights ─────────────────────────────────────────────────────
 

@@ -1,6 +1,4 @@
-package com.ikverse.egxanalyzer.data
-
-import com.ikverse.egxanalyzer.model.AnalysisInput
+package com.ikverse.egxanalyzer.model
 
 /**
  * Splits one run's sources into requests small enough for the model to keep track of.

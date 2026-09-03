@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.data
 
 import android.content.ContentResolver
 import android.util.Base64
+import com.ikverse.egxanalyzer.model.AnalysisChunking
 import com.ikverse.egxanalyzer.model.AnalysisRequest
 import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.RuleKind
@@ -12,6 +13,7 @@ import com.ikverse.egxanalyzer.model.ResponseTimeout
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudModelInfo
 import com.ikverse.egxanalyzer.model.ModelModality
+import com.ikverse.egxanalyzer.model.RuleSet
 import com.ikverse.egxanalyzer.model.TokenUsage
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SourceTrace

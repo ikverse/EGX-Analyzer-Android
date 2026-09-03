@@ -65,10 +65,10 @@ internal fun ModelChoice(appState: AppState, scope: CoroutineScope) {
 
         if (appState.availableModels.isNotEmpty()) {
             NextChipStrip(
-                options = appState.availableModels,
-                selectedIndex = appState.availableModels.indexOf(appState.cloudConfiguration.model),
+                options = appState.availableModels.map { it.id },
+                selectedIndex = appState.availableModels.indexOfFirst { it.id == appState.cloudConfiguration.model },
                 onPick = { index ->
-                    appState.updateModel(appState.availableModels[index])
+                    appState.updateModel(appState.availableModels[index].id)
                     // Written through rather than left on the screen: the model is what the next
                     // run is sent to, and a choice that lived only in memory would be lost with
                     // the process and silently fall back to the default.

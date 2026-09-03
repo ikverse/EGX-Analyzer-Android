@@ -15,8 +15,19 @@ import com.ikverse.egxanalyzer.ui.theme.EgxAnalyzerTheme
  * versions disagree about. The activity is left knowing only that there is a root to draw.
  */
 @Composable
-internal fun AppRoot(activity: Activity, appState: AppState) {
+internal fun AppRoot(
+    /**
+     * Unused here, and deliberately still in the signature.
+     *
+     * Nothing under `ui` takes an activity any more - every screen is written against [AppState]
+     * alone, which is what lets one be drawn in a `@Preview` with no app running. The parameter
+     * stays because `src/next` still wants one and the two files must agree; it goes when that
+     * one stops asking for it.
+     */
+    @Suppress("UNUSED_PARAMETER") activity: Activity,
+    appState: AppState,
+) {
     EgxAnalyzerTheme(themeMode = appState.appPreferences.themeMode) {
-        EgxAnalyzerApp(activity = activity, appState = appState)
+        EgxAnalyzerApp(appState = appState)
     }
 }

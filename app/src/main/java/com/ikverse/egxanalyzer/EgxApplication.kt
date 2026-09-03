@@ -26,6 +26,7 @@ import com.ikverse.egxanalyzer.data.TelegramRepository
 import com.ikverse.egxanalyzer.data.TradeStatusNotifier
 import com.ikverse.egxanalyzer.data.UpdateRepository
 import com.ikverse.egxanalyzer.data.refreshTodayWidget
+import com.ikverse.egxanalyzer.state.LiveAppState
 import com.ikverse.egxanalyzer.ui.AppState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -93,7 +94,8 @@ class EgxApplication : Application() {
         // two stay separate types - different granularity, different retention, different table -
         // and are joined by one function rather than by either holding the other.
         val intraday = IntradayRepository(localDataStore, symbols)
-        AppState(
+        LiveAppState(
+            context = this,
             settingsRepository = settingsRepository,
             analysisRepository = analysisRepository,
             localDataStore = localDataStore,

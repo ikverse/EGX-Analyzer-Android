@@ -1,6 +1,5 @@
 package com.ikverse.egxanalyzer.model
 
-import com.ikverse.egxanalyzer.data.PerformanceCalculator
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

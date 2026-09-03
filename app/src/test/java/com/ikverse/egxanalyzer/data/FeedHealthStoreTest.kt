@@ -4,6 +4,9 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.ikverse.egxanalyzer.model.FeedFault
+import com.ikverse.egxanalyzer.model.PriceHealthReport
+import com.ikverse.egxanalyzer.model.StockHealth
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

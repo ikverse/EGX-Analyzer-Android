@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PromptVersion
+import com.ikverse.egxanalyzer.model.RestoreOutcome
 import com.ikverse.egxanalyzer.model.RuleKind
 import com.ikverse.egxanalyzer.model.RuleScope
 import com.ikverse.egxanalyzer.model.RuleSlot

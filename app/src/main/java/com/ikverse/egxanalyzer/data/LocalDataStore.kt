@@ -5,6 +5,9 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.ikverse.egxanalyzer.model.FeedFault
+import com.ikverse.egxanalyzer.model.PriceHealthReport
+import com.ikverse.egxanalyzer.model.StockHealth
 import com.ikverse.egxanalyzer.model.WordingRule
 import com.ikverse.egxanalyzer.model.RuleSlot
 import com.ikverse.egxanalyzer.model.RuleScope

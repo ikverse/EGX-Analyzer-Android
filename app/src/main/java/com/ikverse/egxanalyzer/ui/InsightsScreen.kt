@@ -62,7 +62,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ikverse.egxanalyzer.data.PerformanceCalculator
+import com.ikverse.egxanalyzer.model.PerformanceCalculator
 import com.ikverse.egxanalyzer.model.Ambiguity
 import com.ikverse.egxanalyzer.model.CallOrder
 import com.ikverse.egxanalyzer.model.CallSignal

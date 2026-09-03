@@ -2,11 +2,7 @@ package com.ikverse.egxanalyzer.ui
 
 import com.ikverse.egxanalyzer.model.timing
 
-import com.ikverse.egxanalyzer.data.exportIntent
-import com.ikverse.egxanalyzer.data.saveToDownloads
-import com.ikverse.egxanalyzer.data.stageExport
 
-import android.app.Activity
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -77,7 +73,6 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import com.ikverse.egxanalyzer.data.RequestTrace
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextOverflow
@@ -90,6 +85,7 @@ import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SavedAnalysis
+import java.io.File
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -97,7 +93,7 @@ import java.time.temporal.ChronoUnit
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun ResultsScreen(activity: Activity, appState: AppState) {
+internal fun ResultsScreen(appState: AppState) {
     val scope = rememberCoroutineScope()
     Screen(
         title = "Results",
@@ -275,12 +271,13 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                         onHighlightShown = { appState.consumePendingResult() },
                         newerRunExists = saved.result.recommendationTargetDate
                             ?.let { newestRunFor[it]?.isAfter(saved.result.completedAt) } == true,
-                        onShare = { shareReport(activity, appState.reportFor(saved)) },
-                        onSaveLocally = { scope.launch { saveReport(activity, appState, saved) } },
-                        onExport = { scope.launch { exportReport(activity, appState, saved) } },
+                        onShare = { appState.shareReport(saved) },
+                        onSaveLocally = { scope.launch { appState.saveReportToDownloads(saved) } },
+                        onExport = { scope.launch { appState.exportReport(saved) } },
                         onDelete = { appState.deleteResult(saved) },
                         report = { appState.reportFor(saved) },
                         peakFor = appState::peakSince,
+                        traceRoot = appState.traceRoot(),
                         stockFilter = stockFilter,
                     )
                 }
@@ -381,7 +378,7 @@ private val StackPageSpacing = Space.s
  * Runs with no target date go last whichever way the target-date orders point, newest run first
  * among themselves, so that block reads the same either way instead of flipping with the arrow.
  */
-internal enum class RunOrder(val label: String, val comparator: Comparator<SavedAnalysis>) {
+enum class RunOrder(val label: String, val comparator: Comparator<SavedAnalysis>) {
     RUN_NEWEST("Run date, newest", compareByDescending { it.result.completedAt }),
     RUN_OLDEST("Run date, oldest", compareBy { it.result.completedAt }),
     TARGET_NEWEST(
@@ -702,6 +699,8 @@ private fun SavedAnalysisCard(
     report: () -> AnalysisReport,
     /** Highest a stock has traded since the call, for the ladder's arrow. */
     peakFor: (String, LocalDate?) -> Double? = { _, _ -> null },
+    /** Where request traces are kept, so the diagnostics list can count this run's. */
+    traceRoot: File,
     /** What the screen is searching for, which the report opens already narrowed to. */
     stockFilter: String = "",
 ) {
@@ -892,6 +891,7 @@ private fun SavedAnalysisCard(
                 ResultDetail(
                     saved,
                     peakFor,
+                    traceRoot,
                     trades,
                     stockFilter = stockFilter,
                     onHide = { onExpandedChange(false) },
@@ -993,72 +993,11 @@ private fun relativeSession(target: LocalDate): String? {
     }
 }
 
-private fun shareReport(activity: Activity, report: AnalysisReport) {
-    val intent = Intent(Intent.ACTION_SEND).apply {
-        type = "text/markdown"
-        putExtra(Intent.EXTRA_SUBJECT, report.title)
-        putExtra(Intent.EXTRA_TEXT, report.markdown)
-    }
-    activity.startActivity(Intent.createChooser(intent, "Share EGX analysis report"))
-}
-
-/**
- * Writes the report as a spreadsheet into the phone's own Downloads folder.
- *
- * Off the main thread, because it builds and zips the whole table. Nothing opens afterwards, so the
- * toast is the only sign it happened - and it names the file Downloads actually created rather than
- * the one that was asked for, which are not the same when a session has been exported before.
- */
-private suspend fun saveReport(activity: Activity, appState: AppState, saved: SavedAnalysis) {
-    if (!exportable(appState, saved)) return
-    runCatching { withContext(Dispatchers.IO) { saveToDownloads(activity, saved) } }
-        .onSuccess {
-            appState.statusMessage = StatusMessage("Saved to Downloads/$it", succeeded = true)
-        }
-        .onFailure { appState.statusMessage = failed("save", it) }
-}
-
-/**
- * Writes the report as a spreadsheet and offers it onward.
- *
- * The chooser is the confirmation when this one works - a toast behind a full-screen chooser is
- * talking to nobody - so only a refusal and a failure say anything.
- */
-private suspend fun exportReport(activity: Activity, appState: AppState, saved: SavedAnalysis) {
-    if (!exportable(appState, saved)) return
-    runCatching { withContext(Dispatchers.IO) { stageExport(activity, saved) } }
-        .onSuccess { file ->
-            activity.startActivity(
-                Intent.createChooser(exportIntent(activity, file), "Send EGX analysis"),
-            )
-        }
-        .onFailure { appState.statusMessage = failed("write", it) }
-}
-
-/**
- * Whether there is a table to export at all, and the toast when there is not.
- *
- * Analyses saved before the consolidated contract have only the flat list the screen falls back to.
- * An empty sheet of eighteen headings is a worse answer than saying so.
- */
-private fun exportable(appState: AppState, saved: SavedAnalysis): Boolean {
-    if (saved.result.consolidated.isNotEmpty()) return true
-    appState.statusMessage = StatusMessage(
-        "This run predates the table, so there is nothing to export",
-        succeeded = false,
-    )
-    return false
-}
-
-private fun failed(verb: String, error: Throwable) = StatusMessage(
-    "Could not $verb the Excel file: ${error.message ?: "unknown error"}",
-    succeeded = false,
-)
-
 @Composable
 private fun ResultDetail(
     saved: SavedAnalysis,
     peakFor: (String, LocalDate?) -> Double?,
+    traceRoot: File,
     trades: TradeBook,
     /** What the screen is searching for, which this report opens already narrowed to. */
     stockFilter: String,
@@ -1245,7 +1184,7 @@ private fun ResultDetail(
             if (showTrace) "Hide source trace" else "Source trace and diagnostics",
             expanded = showTrace,
         ) { showTrace = !showTrace }
-        AnimatedVisibility(showTrace) { TraceAndDiagnostics(saved) }
+        AnimatedVisibility(showTrace) { TraceAndDiagnostics(saved, traceRoot) }
     }
 
 
@@ -1267,7 +1206,7 @@ private fun ResultDetail(
 
 /** The raw trace, kept collapsed because it is for checking the app rather than reading results. */
 @Composable
-private fun TraceAndDiagnostics(saved: SavedAnalysis) {
+private fun TraceAndDiagnostics(saved: SavedAnalysis, traceRoot: File) {
     val diagnostics = saved.result.diagnostics
     Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Text("Sources", style = MaterialTheme.typography.titleSmall)
@@ -1318,10 +1257,7 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        val traceDirectory = java.io.File(
-            java.io.File(LocalContext.current.filesDir, RequestTrace.TRACE_ROOT),
-            saved.result.requestId,
-        )
+        val traceDirectory = File(traceRoot, saved.result.requestId)
         if (traceDirectory.isDirectory) {
             // What was actually sent, not what we believe was sent. Reconstructing a request from
             // the sources table is how a mis-cited image went unnoticed for two runs.

@@ -1,7 +1,5 @@
 package com.ikverse.egxanalyzer.model
 
-import com.ikverse.egxanalyzer.data.ComposedPrompt
-import com.ikverse.egxanalyzer.data.RuleSet
 
 import android.net.Uri
 import java.time.LocalDate

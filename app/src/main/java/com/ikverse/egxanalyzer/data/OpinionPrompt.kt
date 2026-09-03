@@ -4,6 +4,7 @@ import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.Outcome
+import com.ikverse.egxanalyzer.model.PerformanceCalculator
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.ScoredCall
 import java.time.LocalDate

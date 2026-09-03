@@ -1,6 +1,5 @@
 package com.ikverse.egxanalyzer.ui
 
-import com.ikverse.egxanalyzer.data.saveDatabaseToDownloads
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -57,8 +56,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ikverse.egxanalyzer.BuildConfig
-import com.ikverse.egxanalyzer.data.UpdateState
-import com.ikverse.egxanalyzer.data.ModelUsageRecord
+import com.ikverse.egxanalyzer.model.UpdateState
+import com.ikverse.egxanalyzer.model.ModelUsageRecord
 import com.ikverse.egxanalyzer.model.ApproachAlerts
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
@@ -1071,7 +1070,6 @@ internal fun SettingsScreen(appState: AppState) {
  */
 @Composable
 private fun DiagnosticsControl(appState: AppState) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }
     // A row rather than a column, now that what sat under the button is behind the question mark
@@ -1089,15 +1087,7 @@ private fun DiagnosticsControl(appState: AppState) {
             onClick = {
                 scope.launch {
                     saving = true
-                    runCatching {
-                        withContext(Dispatchers.IO) {
-                            saveDatabaseToDownloads(
-                                context,
-                                appState.databaseFile(),
-                                appState::checkpointDatabase,
-                            )
-                        }
-                    }
+                    runCatching { appState.saveDatabaseToDownloads() }
                         .onSuccess {
                             appState.statusMessage =
                                 StatusMessage("Saved to Downloads/$it", succeeded = true)

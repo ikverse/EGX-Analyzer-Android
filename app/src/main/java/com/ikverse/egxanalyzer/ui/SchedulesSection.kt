@@ -4,7 +4,6 @@ import android.app.TimePickerDialog
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -41,7 +40,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.ikverse.egxanalyzer.data.JobScheduler
 import com.ikverse.egxanalyzer.model.AnalysedChannel
 import com.ikverse.egxanalyzer.model.AnalysisAim
 import com.ikverse.egxanalyzer.model.AnalysisSchedule
@@ -196,7 +194,7 @@ internal fun SchedulesSettingsSection(appState: AppState, contentMaxWidth: Dp) {
                 "Kept on this phone only and never synced.",
             ),
         )
-        SystemPermissions()
+        SystemPermissions(appState)
     }
 }
 
@@ -375,32 +373,25 @@ private fun ReaimControl(appState: AppState, schedule: AnalysisSchedule) {
  * is right leaves the reader unable to tell a granted permission from an app that forgot to check.
  */
 @Composable
-internal fun SystemPermissions() {
-    val context = LocalContext.current
+internal fun SystemPermissions(appState: AppState) {
     SystemPermissionRow(
         // Read on every recomposition rather than remembered: the answer changes on a system page,
         // and this screen is still underneath when the user comes back from it.
-        granted = JobScheduler(context).canScheduleExact(),
+        granted = appState.exactAlarmsAllowed(),
         grantedText = "Exact alarms are allowed, so runs keep to the minute.",
         missing = "Exact alarms are off. Runs can arrive up to an hour late.",
         action = "Allow exact alarms",
     ) {
-        context.startActivity(
-            Intent(
-                Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
-                Uri.parse("package:${context.packageName}"),
-            ),
-        )
+        appState.openExactAlarmSettings()
     }
     SystemPermissionRow(
-        granted = context.getSystemService(PowerManager::class.java)
-            .isIgnoringBatteryOptimizations(context.packageName),
+        granted = appState.batteryOptimizationExempt(),
         grantedText = "Battery optimization is off for this app, so it will not be put to sleep.",
         missing = "Battery optimization can put this app to sleep, and a sleeping app keeps no " +
             "time at all. Samsung does this after a few days of not opening it.",
         action = "Open battery settings",
     ) {
-        context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        appState.openBatteryOptimizationSettings()
     }
 }
 

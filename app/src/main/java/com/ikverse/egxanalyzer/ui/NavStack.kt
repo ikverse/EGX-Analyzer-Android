@@ -42,7 +42,7 @@ data class NavStop(
  *
  * No Android in here, so [NavStackTest] can drive the whole rule without a device.
  */
-internal class NavStack {
+class NavStack {
 
     /**
      * Compose state, not a plain field, and that is load-bearing.

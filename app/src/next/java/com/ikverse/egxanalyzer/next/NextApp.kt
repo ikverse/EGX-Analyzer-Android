@@ -4,7 +4,7 @@ import android.app.Activity
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import com.ikverse.egxanalyzer.data.UpdateState
+import com.ikverse.egxanalyzer.model.UpdateState
 import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppState
 import kotlin.math.roundToInt

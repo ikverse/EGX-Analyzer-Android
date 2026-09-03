@@ -1,9 +1,11 @@
 package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.FeedFault
 import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.ScoredCall
+import com.ikverse.egxanalyzer.model.StockHealth
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

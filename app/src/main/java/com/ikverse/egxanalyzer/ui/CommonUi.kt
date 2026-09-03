@@ -40,7 +40,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.ui.res.painterResource
 import com.ikverse.egxanalyzer.R
-import com.ikverse.egxanalyzer.data.EgxCatalog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
@@ -71,6 +70,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ikverse.egxanalyzer.model.isEgx33
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -872,7 +872,7 @@ internal val PillStackGap: Dp = 3.dp
  */
 @Composable
 internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
-    if (!EgxCatalog.isEgx33(ticker)) return
+    if (!isEgx33(ticker)) return
     Box(
         modifier
             .size(Egx33BadgeSize)

@@ -6,10 +6,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
-import android.os.PowerManager
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import com.ikverse.egxanalyzer.data.JobScheduler
 import com.ikverse.egxanalyzer.model.MarketRefresh
 import com.ikverse.egxanalyzer.model.ScheduleClock
 import kotlinx.coroutines.launch
@@ -31,7 +28,6 @@ import java.time.Instant
 @Composable
 internal fun PricesSubSection(appState: AppState) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     val health = appState.priceHealth
     val held = health.callsHeld
     SubSection(
@@ -80,9 +76,8 @@ internal fun PricesSubSection(appState: AppState) {
             note = appState.marketRefreshNote,
             noteAt = appState.marketRefreshNoteAt,
             now = Instant.now(),
-            exactAlarms = JobScheduler(context).canScheduleExact(),
-            batteryExempt = context.getSystemService(PowerManager::class.java)
-                .isIgnoringBatteryOptimizations(context.packageName),
+            exactAlarms = appState.exactAlarmsAllowed(),
+            batteryExempt = appState.batteryOptimizationExempt(),
         )
         Text(
             status.text,
@@ -95,7 +90,7 @@ internal fun PricesSubSection(appState: AppState) {
         )
         // Only once it is switched on: two system pages offered beside a checkbox nobody has
         // ticked is a section that reads as a list of chores rather than as a setting.
-        if (appState.marketRefreshEnabled) SystemPermissions()
+        if (appState.marketRefreshEnabled) SystemPermissions(appState)
         // All that is left of the fault list, and only when there is something to say. Said in
         // calls as well as in stocks: a count of broken symbols is trivia, and how much of the
         // record they are holding is the reason anybody would read it at all.

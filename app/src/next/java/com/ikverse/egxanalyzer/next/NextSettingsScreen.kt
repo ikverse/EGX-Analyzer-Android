@@ -31,7 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
-import com.ikverse.egxanalyzer.data.UpdateState
+import com.ikverse.egxanalyzer.model.UpdateState
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.TelegramAuthStep

@@ -89,6 +89,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -130,7 +131,7 @@ internal val LocalWindowWidth = staticCompositionLocalOf { WindowWidth.COMPACT }
 internal const val WIDE_LAYOUT_DP = 700f
 
 @Composable
-fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
+fun EgxAnalyzerApp(appState: AppState) {
     val density = LocalDensity.current
     val width = with(density) { LocalWindowInfo.current.containerSize.width.toDp().value }
     val windowWidth = when {
@@ -138,8 +139,14 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
         width >= 600 -> WindowWidth.MEDIUM
         else -> WindowWidth.COMPACT
     }
+    // Taken from the composition rather than passed in: the fold is the one thing on this screen
+    // that genuinely needs an activity, and threading one through every screen to reach it was what
+    // kept the whole UI unable to be drawn without a running app. Null in a preview, which simply
+    // means no fold rather than a crash.
+    val activity = LocalContext.current as? Activity
     val layoutInfo by produceState<WindowLayoutInfo?>(null, activity) {
-        WindowInfoTracker.getOrCreate(activity).windowLayoutInfo(activity).collect { value = it }
+        val host = activity ?: return@produceState
+        WindowInfoTracker.getOrCreate(host).windowLayoutInfo(host).collect { value = it }
     }
     val separatingFold = layoutInfo?.displayFeatures.orEmpty().filterIsInstance<FoldingFeature>()
         .firstOrNull(FoldingFeature::isSeparating)
@@ -213,7 +220,7 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
                     ),
                     color = MaterialTheme.colorScheme.surfaceContainer,
                 ) {
-                    AppContent(activity, appState, rail = true)
+                    AppContent(appState, rail = true)
                 }
             }
         } else {
@@ -226,7 +233,7 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
                     Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.surfaceContainer,
                 ) {
-                    AppContent(activity, appState, rail = false)
+                    AppContent(appState, rail = false)
                 }
                 FloatingNavBar(appState, Modifier.align(Alignment.BottomCenter))
             }
@@ -654,7 +661,7 @@ private fun NavigationIcon(
 }
 
 @Composable
-private fun AppContent(activity: Activity, appState: AppState, rail: Boolean) {
+private fun AppContent(appState: AppState, rail: Boolean) {
     // Arriving somewhere new with the navigation still hidden reads as the bar having gone missing,
     // and the page that hid it is no longer on screen to bring it back.
     val navBarVisible = LocalNavBarVisible.current
@@ -713,10 +720,10 @@ private fun AppContent(activity: Activity, appState: AppState, rail: Boolean) {
                         },
                         label = "destination",
                     ) { destination ->
-                        DestinationScreen(destination, activity, appState)
+                        DestinationScreen(destination, appState)
                     }
                 } else {
-                    DestinationPager(activity, appState)
+                    DestinationPager(appState)
                 }
             }
         }
@@ -753,7 +760,7 @@ private fun AppContent(activity: Activity, appState: AppState, rail: Boolean) {
  * it and a page-wide horizontal drag would be caught by the tables that scroll sideways.
  */
 @Composable
-private fun DestinationPager(activity: Activity, appState: AppState) {
+private fun DestinationPager(appState: AppState) {
     val destinations = AppDestination.entries
     val pager = rememberPagerState(
         initialPage = destinations.indexOf(appState.destination),
@@ -843,14 +850,13 @@ private fun DestinationPager(activity: Activity, appState: AppState) {
         // moves it somewhere there is no gesture for it to stutter.
         beyondViewportPageCount = 1,
     ) { page ->
-        DestinationScreen(destinations[page], activity, appState)
+        DestinationScreen(destinations[page], appState)
     }
 }
 
 @Composable
 private fun DestinationScreen(
     destination: AppDestination,
-    activity: Activity,
     appState: AppState,
 ) {
     // The one place both shells build a page, and so the only place that knows which destination is
@@ -862,8 +868,8 @@ private fun DestinationScreen(
         LocalScrollToTop provides (request?.takeIf { it.first == destination }?.second ?: 0),
     ) {
         when (destination) {
-            AppDestination.ANALYZE -> AnalyzeScreen(activity, appState)
-            AppDestination.RESULTS -> ResultsScreen(activity, appState)
+            AppDestination.ANALYZE -> AnalyzeScreen(appState)
+            AppDestination.RESULTS -> ResultsScreen(appState)
             AppDestination.INSIGHTS -> InsightsScreen(appState)
             AppDestination.PORTFOLIO -> PortfolioScreen(appState)
             AppDestination.SETTINGS -> SettingsScreen(appState)

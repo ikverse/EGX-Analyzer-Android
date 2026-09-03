@@ -31,7 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.ikverse.egxanalyzer.data.RuleRejection
+import com.ikverse.egxanalyzer.model.RuleRejection
 import com.ikverse.egxanalyzer.model.RuleKind
 import com.ikverse.egxanalyzer.model.RuleOrigin
 import com.ikverse.egxanalyzer.model.RuleScope
