@@ -30,8 +30,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,7 +44,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.data.ModelUsageRecord
 import com.ikverse.egxanalyzer.model.CloudConfiguration
+import com.ikverse.egxanalyzer.model.CloudModelInfo
+import com.ikverse.egxanalyzer.model.ModelSuitability
+import com.ikverse.egxanalyzer.model.ModelSuitabilityRules
+import com.ikverse.egxanalyzer.model.formatTokenCount
 import kotlinx.coroutines.launch
 
 /**
@@ -148,24 +155,44 @@ private fun CloudConfiguration.connectionLabel(): String =
         ?: provider.displayName
 
 /**
- * The catalogue, and the one field that searches it.
+ * The catalogue, the field that searches it, and the filter that keeps it to models that can do it.
  *
  * A flat menu was fine for a provider offering a dozen models and unusable for OpenRouter, which
- * lists hundreds: no search, no mark against the one in force, and every row drawn at once.
+ * lists hundreds - most of them embedders, rerankers and voice models that could not read a card at
+ * any price. What is offered by default is what can read one: see `ModelSuitabilityRules`. The
+ * filter can be turned off and an id can still be typed, because those rules read names, and names
+ * change faster than this app is rebuilt.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ModelPickerSheet(appState: AppState, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
+    var showAll by remember { mutableStateOf(false) }
     val configuration = appState.cloudConfiguration
     val typed = query.trim()
-    val matches = remember(appState.availableModels, query, configuration.model) {
+    // Read once, here: the tally lives on disk and this sheet draws hundreds of rows.
+    LaunchedEffect(Unit) { appState.refreshModelUsage() }
+    val catalogue = appState.availableModels
+    val suitable = remember(catalogue) {
+        catalogue.filter {
+            ModelSuitabilityRules.capabilitiesOf(it).suitability == ModelSuitability.SUITABLE
+        }
+    }
+    val offered = remember(catalogue, suitable, showAll, configuration.model) {
+        if (showAll) {
+            catalogue
+        } else {
+            // The model in force is never filtered away. Hiding what is selected leaves the reader
+            // looking at a list that does not contain their own setting.
+            suitable + catalogue.filter { it.id == configuration.model && it !in suitable }
+        }
+    }
+    val matches = remember(offered, query, configuration.model) {
         // The model in force leads its own list. Among three hundred rows it is otherwise the one
         // entry the reader cannot find, and sortedByDescending is stable, so everything below it
         // keeps the order the provider gave.
-        filterModels(appState.availableModels, query)
-            .sortedByDescending { it == configuration.model }
+        filterModels(offered, query).sortedByDescending { it.id == configuration.model }
     }
     val choose: (String) -> Unit = { model ->
         appState.updateModel(model)
@@ -212,19 +239,49 @@ private fun ModelPickerSheet(appState: AppState, onDismiss: () -> Unit) {
                     }
                 },
             )
+            if (catalogue.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        // Says what is being held back and why, so a short list never looks like a
+                        // catalogue that came back short.
+                        "${suitable.size} of ${catalogue.size} can read images",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { showAll = !showAll }) {
+                        Text(if (showAll) "Show suitable" else "Show all")
+                    }
+                }
+            }
             when {
                 matches.isNotEmpty() -> LazyColumn(
                     // Lazy because this is the one list in the app that runs to hundreds of rows.
                     Modifier.heightIn(max = ModelListMaxHeight),
                     verticalArrangement = Arrangement.spacedBy(Space.xs),
                 ) {
-                    items(matches, key = { it }) { model ->
-                        ModelRow(model, selected = model == configuration.model) { choose(model) }
+                    items(matches, key = { it.id }) { model ->
+                        ModelRow(
+                            label = model.id,
+                            detail = modelDetail(model, appState.usageFor(model.id)),
+                            selected = model.id == configuration.model,
+                        ) { choose(model.id) }
                     }
                 }
-                // Nothing in the catalogue answers to what was typed, so what was typed is the
-                // answer - which is what the separate manual-entry field used to be for.
-                typed.isNotEmpty() -> ModelRow("Use “$typed”", selected = false) { choose(typed) }
+                // Nothing on offer answers to what was typed, so what was typed is the answer -
+                // which is what the separate manual-entry field used to be for. It is also the way
+                // to a model the name rules did not recognise: type the id and it is used.
+                typed.isNotEmpty() -> ModelRow(
+                    label = "Use “$typed”",
+                    detail = null,
+                    selected = false,
+                ) { choose(typed) }
+                catalogue.isNotEmpty() -> Text(
+                    "None of the ${catalogue.size} models loaded say they can read images. " +
+                        "Show all, or type a model id above.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 else -> Text(
                     "No models loaded. Load the list, or type a model id above.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -267,8 +324,20 @@ private fun ModelPickerSheet(appState: AppState, onDismiss: () -> Unit) {
     }
 }
 
+/**
+ * The second line of a row: what the model takes in, how much room it has, and what it has cost.
+ *
+ * Null where none of the three is known, so a bare id is drawn as a bare id rather than with an
+ * empty line under it.
+ */
+private fun modelDetail(model: CloudModelInfo, usage: ModelUsageRecord?): String? = listOfNotNull(
+    ModelSuitabilityRules.capabilitiesOf(model).inputLabel(),
+    model.contextLength?.let { "${formatTokenCount(it.toLong())} context" },
+    usage?.let { "${formatTokenCount(it.usage.totalTokens)} tokens · ${it.requests} requests" },
+).joinToString(" · ").takeIf(String::isNotBlank)
+
 @Composable
-private fun ModelRow(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun ModelRow(label: String, detail: String?, selected: Boolean, onClick: () -> Unit) {
     Surface(
         color = if (selected) {
             MaterialTheme.colorScheme.primaryContainer
@@ -285,7 +354,22 @@ private fun ModelRow(label: String, selected: Boolean, onClick: () -> Unit) {
             Modifier.padding(horizontal = Space.m, vertical = Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                Text(label, style = MaterialTheme.typography.bodyMedium)
+                detail?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             if (selected) {
                 Spacer(Modifier.width(Space.s))
                 Icon(
@@ -308,11 +392,11 @@ private fun ModelRow(label: String, selected: Boolean, onClick: () -> Unit) {
  * reproduce punctuation they have no way of knowing. "qwen vl" and "qwen3-vl" both find the same
  * model, which is the point.
  */
-internal fun filterModels(models: List<String>, query: String): List<String> {
+internal fun filterModels(models: List<CloudModelInfo>, query: String): List<CloudModelInfo> {
     val terms = query.lowercase().split(*ModelQuerySeparators).filter(String::isNotEmpty)
     if (terms.isEmpty()) return models
     return models.filter { model ->
-        val candidate = model.lowercase()
+        val candidate = model.id.lowercase()
         terms.all(candidate::contains)
     }
 }

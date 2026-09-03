@@ -76,6 +76,14 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 ## Where things live
 
 - `data/AnalysisRepository.kt` — builds the cloud request, chunks sources, harvests the answer.
+- `model/ModelSuitability.kt` + `model/CloudModelInfo.kt` — which models the picker offers. A run
+  sends screenshots, so image input is the bar: OpenRouter states its modalities and is believed,
+  and the providers that answer with bare ids have their names read. An unrecognised name is
+  unknown rather than rejected — the picker hides it, Show all and typing an id still reach it.
+- `data/ModelUsageStore.kt` + `model/TokenUsage.kt` — what each model has cost in tokens, summed
+  from the `usage` block on every answer. Device-local and never synced: a token count describes
+  one phone's spending. A run's own total is in its diagnostics; this is the lifetime tally, and
+  the only place Ask AI's spending appears at all.
 - `data/AnalysisChunking.kt` — 8 images per request. Beyond ~32 the model loses track of which
   image it is citing, which produced exclusions naming the wrong card.
 - `data/ConsolidatedParser.kt` — the model's JSON into `ConsolidatedRecommendation`.
@@ -90,8 +98,9 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `model/SettledCall.kt` — the verdict of a call the market has finished with, frozen once and never
   replayed. See below.
 - `ui/ChannelScoreSheet.kt` — how a source is scored, opened by pressing its card in the ranking.
-- `data/PriceHealth.kt` + `ui/PriceFeedSection.kt` — which stocks the feed has gone quiet about,
-  what it costs, and the Settings card that explains it in words. See below.
+- `data/PriceHealth.kt` — which stocks the feed has gone quiet about and what it costs. The Settings
+  card that explained it in words was removed on 2026-09-03; one line in `General → Prices` is what
+  is left of it. See below.
 - `data/PortfolioCalculator.kt` + `model/Position.kt` — the trades the user actually took. See below.
 - `model/TradeAlerts.kt` + `data/TradeStatusNotifier.kt` — what has changed about a trade since the
   user was last told, and how the phone says so. See below.
@@ -122,7 +131,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   `data/JobRunner.kt` + `data/ScheduleMigration.kt` — the alarm, the things that mean re-book it,
   what runs, and the one-time move off the old job table. See below.
 - `ui/SchedulesSection.kt` — the schedule summary on Analyze and the editor in Settings.
-  `ui/PriceFeedSection.kt` carries the price-refresh checkbox.
+  `ui/PricesSection.kt` carries the price-refresh checkbox, the never-blank status line and Fetch
+  prices now, drawn as the `Prices` group inside Settings' `General` card.
 - `data/OpinionPrompt.kt` + `data/OpinionPromptStore.kt` + `data/OpinionSearchBrief.kt` +
   `data/OpinionParser.kt` + `ui/StockOpinionSheet.kt` — Ask AI, on a call card in Insights.
   See below.
@@ -643,26 +653,28 @@ that check, run on every recompute and stored nowhere.
 Three things can happen to a stock's prices, and all three end the same way: the app goes quiet
 about that stock rather than wrong about it, and every rate on the page quietly rests on fewer calls
 than the reader thinks. That is exactly why they need saying out loud. `PriceHealth.assess` is the
-one place that does, drawn by `PriceFeedSettingsSection` — **in Settings, beside the other
-diagnostic**, and no longer on Insights.
+one place that does.
 
-- **It explains a figure rather than being one**, which is why it moved. On Insights every reader of
-  the record scrolled past a fault report about four stocks to reach the record of every call, and
-  the thing it qualifies already says so where it matters: a call on a stock with no prices is
-  reported as unjudged on its own card. It is consulted when something looks wrong, and that is what
-  Settings is for.
-- **Present even when nothing is wrong**, which is the one deliberate difference from the Insights
-  version. There it was absent on a healthy day, because a section reading "0 problems" over a
-  record is a section that stops being read on the day it says something. Here it is a place to go
-  and look, and a diagnostic that vanishes when it is working leaves the reader unable to tell
-  "everything is fine" from "the app forgot to check".
-- **The wording is for someone who wants to know why a price is missing**, not for someone who knows
-  what a symbol migration is. `FeedFault.plainly` says what happened, what it costs in calls, and
-  whether fetching again can do anything about it — which for two of the three faults it cannot.
-  `FeedFault.detail` is the short form the record keeps, and stays as it was.
-- A **Fetch prices** button sits under it, offered whatever the state, because it is also how a
-  reader confirms nothing has changed. It reads the free public feed and sends nothing to the model,
-  and the card says so.
+- **The card that explained it in words is gone**, removed on the owner's decision of 2026-09-03
+  along with the whole `Price feed` section of Settings. `PriceHealth` is untouched: it is still
+  computed on every recompute, it still raises the "price feed has gone quiet" notification, and
+  `PriceHealthTest` still covers it. What went is the page — the per-stock fault list, `FeedFaultRow`
+  and `FeedFault.plainly`, the sentences that named each affected stock and said whether fetching
+  again could help. `FeedFault.detail` is unaffected; it is the short form the record keeps.
+- **What is left of it is one line**, in `General → Prices` and only when something is actually
+  wrong: how many stocks are not coming through and how many calls they are holding, in the error
+  colour where any call is waiting. That is the half of the card anybody acted on — the count of
+  broken symbols is trivia, and how much of the record they are holding is the reason to read it at
+  all. It is a **state** rather than a report, so it is drawn from `priceHealth` on every recompute
+  like everything else on that line.
+- **What that costs, stated plainly**: nothing in the app now names *which* stock has gone quiet, or
+  distinguishes a retired symbol from one that has never been priced. The notification still fires
+  and its own explanation still says what a quiet feed does to the record; it no longer has a page to
+  point at. Bringing the list back means bringing back `FeedFault.plainly`, and it was removed on
+  purpose — ask before proposing it.
+- A **Fetch prices** button sits under that line, offered whatever the state, because it is also how
+  a reader confirms nothing has changed. It reads the free public feed and sends nothing to the
+  model, and its own note says so.
 
 - **It replaces nothing and it is not the toast.** The refresh still finishes with
   "Priced 40/42 · 2 unpriced · 1 stale"; that reports a **refresh**, and is gone from the screen a
@@ -1015,7 +1027,9 @@ that arrives while there is still a decision to make.
 already detected and both reached the reader only on a screen they had to think to open.
 
 - **A frozen feed looks exactly like a calm market.** `PriceHealth` has computed this on every
-  recompute since it was written and it reached only the Settings card. `AppState.reviewFeedHealth`
+  recompute since it was written and, until this existed, reached only a card in Settings — the card
+  that has since been removed, which leaves this notification as the only thing that raises it at
+  all. `AppState.reviewFeedHealth`
   announces the crossing **into** a spell and re-arms on the way out — announcing the state instead
   would be a daily line about a symbol that retired in June. `SettingsRepository.feedReportedQuiet`
   is that memory: a single boolean rather than a table, because it is one fact rather than a row per
@@ -1031,7 +1045,13 @@ already detected and both reached the reader only on a screen they had to think 
   a schedule that did not fire are the app reporting on itself, and neither has anything to do with
   how long to hold a position. One card because they are one decision - how much this app may
   interrupt - and because the switch somebody opens Settings to turn off is now under the heading
-  naming what they came to stop. `Trades` keeps the default trade window and nothing else.
+  naming what they came to stop. Since 2026-09-03 the seven are **grouped inside that card** —
+  `Your trades` (three), `Calls and sessions` (two), `The app itself` (two) — because seven switches
+  in a row is a list nobody reads to the end of, and the three headings answer the question a reader
+  actually arrives with, which is never "which of these seven" but "what kind of thing keeps
+  interrupting me". Each group's summary counts its own switches through `switchesOn`, off the same
+  flags as the card's total, so a group and its card cannot disagree. `Trades` as a card is gone: the
+  default trade window is now `General → Trade defaults`.
 - **Its own channel and not the overdue one**, although both are the same "you need to look at this"
   register. That channel is named for trades past their deadline, and Android silences a whole channel
   at a time — folding a feed fault into it would mean muting one silently muted the other, which is
@@ -1701,7 +1721,7 @@ checkbox that needs no configuration at all), the trigger is gone, the name is g
 means the whole of what this phone does unattended fits on one screen. `ScheduledJob`,
 `JobTrigger`, `JobWork` and the `scheduled_jobs` table stay gone.
 
-- **Keeping prices fresh** — `model/MarketRefresh.kt`, switched on in Settings under Price feed.
+- **Keeping prices fresh** — `model/MarketRefresh.kt`, switched on in Settings under General → Prices.
   Every 15 minutes, Sunday to Thursday, 10:00 to 14:45 Cairo. Free: it reads the same public feed
   the Fetch prices button does. Fifteen minutes because Android holds
   `setExactAndAllowWhileIdle` to roughly one alarm every ten while dozing, so anything shorter is
@@ -2104,6 +2124,39 @@ app's.
 - **`InfoNoteTest` reads the sources rather than composing.** A note that has lost its prose draws an
   icon and opens an empty sheet, which looks like an unfinished feature rather than a deleted
   paragraph — silent everywhere else, so it is checked where the words are written.
+
+### How Settings is grouped
+
+Ten cards became **seven** on 2026-09-03, and nothing was removed but the price-feed fault list (see
+**When the feed goes quiet**). In order: **Analysis**, **Scheduled analysis**, **Telegram**,
+**Notifications**, **General**, **Saved data and privacy**, **About**.
+
+- **The problem was cards holding one control each.** Appearance, Sync, Trades and the price refresh
+  were four cards, and each cost a header, a summary line and a tap to reach a single dropdown or a
+  single button — four cards that could not be told apart at a glance because each said nothing but
+  its own name. `General` is where they went, as four `SubSection`s: *Appearance*, *Trade defaults*,
+  *Sync*, *Prices*.
+- **`General` does not claim they are one subject.** What they have in common is that none of them is
+  worth a card — which is what a General is for, and saying so in the source is what stops the next
+  reader trying to find the theme. The bottom two do belong together: Sync and Prices are the free,
+  unpaid ways this device keeps its own copy current, and neither sends anything to the AI provider.
+- **A group nests once and never twice.** `SubSection` is a heading, a chevron and a rule, precisely
+  because a card drawn inside a card reads as a mistake — so every one of these is a group inside a
+  card and not a card inside one. `PricesSubSection` is drawn by its own file for length, not because
+  it is a different kind of thing.
+- **Every group carries a summary, and the summary is the point of folding it.** A closed group that
+  said nothing would put the reader back to opening all of them to find the switch they came for,
+  which is what the grouping was for.
+- **Sync sits under General rather than under Telegram**, which was the other candidate and is the
+  owner's call: the account is what Telegram is about, and pressing Sync now is housekeeping. The
+  Telegram card's own note says where sync went, so the two do not become a place each to look.
+- **Every card and every group carries an `about`**, on the rule above: the note goes on the smallest
+  thing it is true of, and a group-wide one is reachable without opening the group. The pass on
+  2026-09-03 filled the gaps — `Analysis → Model`, `→ What to send`, `→ Validation`, the Telegram
+  card, all four General groups, the three Notifications groups, and the About card.
+- **`Delete all saved analyses` has a group to itself, at the bottom of Saved data and privacy.** The
+  one irreversible button on the page should not sit at the end of a run of buttons that are not, and
+  its note says to take a backup first.
 
 ## Gotchas
 

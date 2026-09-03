@@ -8,6 +8,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import com.ikverse.egxanalyzer.data.AnalysisRepository
+import com.ikverse.egxanalyzer.data.ModelUsageRecord
+import com.ikverse.egxanalyzer.data.ModelUsageStore
 import com.ikverse.egxanalyzer.data.RuleRejection
 import com.ikverse.egxanalyzer.data.RuleSet
 import com.ikverse.egxanalyzer.model.RuleKind
@@ -274,6 +276,13 @@ class AppState(
      * GitHub about a newer build. See that function for why. False everywhere but the scheduled
      * worker, including in tests, so the ordinary start is exactly what it always was.
      */
+    /**
+     * Where each model's token spend is tallied.
+     *
+     * Null in tests, like [updateRepository]: it writes to the device, and nothing here fails
+     * without it - the screens that read it simply have nothing to show.
+     */
+    private val modelUsageStore: ModelUsageStore? = null,
     private val headless: Boolean = false,
 ) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -312,7 +321,17 @@ class AppState(
         private set
     // Seeded from disk rather than empty: the picker is the only safe way to choose a model, and a
     // list that died with the process meant every cold start offered a text field instead.
-    var availableModels by mutableStateOf(settingsRepository.modelList(cloudConfiguration.provider))
+    var availableModels by mutableStateOf(settingsRepository.modelCatalog(cloudConfiguration.provider))
+        private set
+
+    /**
+     * What each model has cost, read once rather than on every row drawn.
+     *
+     * The tally is on disk and the picker draws hundreds of rows, so it is read into state and
+     * refreshed at the two moments it can have changed: a request having been made, and the picker
+     * being opened.
+     */
+    var modelUsage by mutableStateOf(modelUsageStore?.all().orEmpty())
         private set
     var modelListLoading by mutableStateOf(false)
         private set
@@ -1038,6 +1057,8 @@ class AppState(
                         )
                     }
                     opinions = opinions + (id to opinion)
+                    // Ask AI spends too, and leaves no report behind to record it.
+                    refreshModelUsage()
                     opinion
                 }
             } finally {
@@ -2069,7 +2090,7 @@ class AppState(
         cloudConfiguration = settingsRepository.configurationFor(provider)
         settingsMessage = null
         // Each provider keeps its own list, so switching back to one already loaded finds it there.
-        availableModels = settingsRepository.modelList(provider)
+        availableModels = settingsRepository.modelCatalog(provider)
         modelListMessage = null
     }
 
@@ -2129,7 +2150,7 @@ class AppState(
             val models = analysisRepository.listModels()
             credentialVerified = true
             availableModels = models
-            settingsRepository.saveModelList(cloudConfiguration.provider, models)
+            settingsRepository.saveModelCatalog(cloudConfiguration.provider, models)
             // Published with the rest: the list is what makes the model picker usable, and a
             // restored install with no list is back to asking for a model name from memory.
             publishSettings()
@@ -2151,6 +2172,27 @@ class AppState(
         }
     }
 
+    /**
+     * Re-reads the token tally.
+     *
+     * Called where a request has just been paid for and where the tally is about to be looked at.
+     * The store is on disk and the picker draws hundreds of rows, so nothing reads it per row.
+     */
+    fun refreshModelUsage() {
+        modelUsage = modelUsageStore?.all().orEmpty()
+    }
+
+    /** Forgets what every model has cost. The spending happened; only this phone's record of it goes. */
+    fun clearModelUsage() {
+        modelUsageStore?.clear()
+        refreshModelUsage()
+        settingsMessage = "Token usage cleared."
+    }
+
+    /** What one model has cost, for the row that names it. */
+    fun usageFor(model: String): ModelUsageRecord? =
+        modelUsage.firstOrNull { it.provider == cloudConfiguration.provider && it.model == model }
+
     suspend fun loadCloudModels() {
         EndpointPolicy.validate(cloudConfiguration.endpoint)?.let {
             modelListMessage = it
@@ -2164,7 +2206,7 @@ class AppState(
         modelListMessage = "Loading models from ${cloudConfiguration.provider.displayName}…"
         try {
             availableModels = analysisRepository.listModels()
-            settingsRepository.saveModelList(cloudConfiguration.provider, availableModels)
+            settingsRepository.saveModelCatalog(cloudConfiguration.provider, availableModels)
             modelListMessage = if (availableModels.isEmpty()) {
                 "The provider returned no selectable models. You can still enter a model manually."
             } else {
@@ -3195,7 +3237,7 @@ class AppState(
         // default until the next restart - and what it is being set to is the user's own choice.
         selectedContentTypes = appPreferences.defaultContentTypes
         cloudConfiguration = settingsRepository.load()
-        availableModels = settingsRepository.modelList(cloudConfiguration.provider)
+        availableModels = settingsRepository.modelCatalog(cloudConfiguration.provider)
         useDefaultPromptOnly = settingsRepository.useDefaultPromptOnly()
         promptHistory = settingsRepository.promptHistory()
         // The daily check is booked with the system, not with this class: a device that adopts
@@ -3773,6 +3815,8 @@ class AppState(
         analysisRunning(selectedInputs.size, cloudConfiguration.model)
         try {
             val result = analysisRepository.analyze(request)
+            // The run has just spent; the tally on disk has moved and the screen's copy has not.
+            refreshModelUsage()
             localDataStore.saveResult(result, cloudConfiguration.provider, cloudConfiguration.model)
             savedResults = localDataStore.results()
             unreadableResults = localDataStore.unreadableResults

@@ -13,6 +13,7 @@ import com.ikverse.egxanalyzer.data.CloudAnalysisRepository
 import com.ikverse.egxanalyzer.data.IntradayRepository
 import com.ikverse.egxanalyzer.data.JobScheduler
 import com.ikverse.egxanalyzer.data.LocalDataStore
+import com.ikverse.egxanalyzer.data.ModelUsageStore
 import com.ikverse.egxanalyzer.data.OverdueWorker
 import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.PromptStore
@@ -70,6 +71,9 @@ class EgxApplication : Application() {
         // Its own store, reading its own asset. The Ask AI prompt shares nothing with the analysis
         // prompt - no rules, no schema, no version history - and two stores is what keeps it so.
         val opinionPromptStore = OpinionPromptStore(assets)
+        // One tally for both callers: the repository writes every request into it, and AppState
+        // reads it for the picker and for Settings.
+        val modelUsageStore = ModelUsageStore(this)
         val analysisRepository = CloudAnalysisRepository(
             contentResolver = contentResolver,
             credentialStore = credentialStore,
@@ -77,6 +81,7 @@ class EgxApplication : Application() {
             configuration = { state.cloudConfiguration },
             preferences = { state.appPreferences },
             traceFor = { requestId -> RequestTrace(this, requestId) },
+            usageStore = modelUsageStore,
         )
         RequestTrace.prune(this)
         val localDataStore = LocalDataStore(this)
@@ -163,6 +168,7 @@ class EgxApplication : Application() {
                 settingsRepository.recordOverdueCount(count)
                 widgetScope.launch { refreshTodayWidget(this@EgxApplication) }
             },
+            modelUsageStore = modelUsageStore,
             headless = startedForSchedule,
         ).also { state = it }
         // Booked on every launch rather than only when the switch is touched, so an install that

@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import com.ikverse.egxanalyzer.model.CloudModelInfo
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -12,7 +13,7 @@ import org.junit.Test
  */
 class ModelFilterTest {
 
-    private val catalogue = listOf(
+    private val ids = listOf(
         "qwen3.5-omni-plus",
         "qwen3-vl-plus",
         "qwen3-vl:4b",
@@ -20,45 +21,49 @@ class ModelFilterTest {
         "meta-llama/Llama-3.3-70B-Instruct",
     )
 
+    private val catalogue = ids.map(::CloudModelInfo)
+
+    private fun matches(query: String) = filterModels(catalogue, query).map(CloudModelInfo::id)
+
     @Test
     fun `an empty query hides nothing`() {
-        assertEquals(catalogue, filterModels(catalogue, ""))
-        assertEquals(catalogue, filterModels(catalogue, "   "))
+        assertEquals(ids, matches(""))
+        assertEquals(ids, matches("   "))
     }
 
     @Test
     fun `a term is matched anywhere in the id, in any case`() {
-        assertEquals(listOf("openai/gpt-4o"), filterModels(catalogue, "GPT"))
-        assertEquals(listOf("meta-llama/Llama-3.3-70B-Instruct"), filterModels(catalogue, "instruct"))
+        assertEquals(listOf("openai/gpt-4o"), matches("GPT"))
+        assertEquals(listOf("meta-llama/Llama-3.3-70B-Instruct"), matches("instruct"))
     }
 
     /** The whole point: two words, and the separators between them are the app's problem. */
     @Test
     fun `every term must appear, whatever separates them`() {
         val expected = listOf("qwen3-vl-plus", "qwen3-vl:4b")
-        assertEquals(expected, filterModels(catalogue, "qwen vl"))
-        assertEquals(expected, filterModels(catalogue, "qwen-vl"))
-        assertEquals(expected, filterModels(catalogue, "qwen/vl"))
+        assertEquals(expected, matches("qwen vl"))
+        assertEquals(expected, matches("qwen-vl"))
+        assertEquals(expected, matches("qwen/vl"))
     }
 
     /** Pasting the id back in must find it, not filter it out on its own punctuation. */
     @Test
     fun `a full id finds itself`() {
-        assertEquals(listOf("openai/gpt-4o"), filterModels(catalogue, "openai/gpt-4o"))
-        assertEquals(listOf("qwen3-vl:4b"), filterModels(catalogue, "qwen3-vl:4b"))
+        assertEquals(listOf("openai/gpt-4o"), matches("openai/gpt-4o"))
+        assertEquals(listOf("qwen3-vl:4b"), matches("qwen3-vl:4b"))
     }
 
     @Test
     fun `a term nothing carries matches nothing`() {
-        assertEquals(emptyList<String>(), filterModels(catalogue, "gemini"))
-        assertEquals(emptyList<String>(), filterModels(catalogue, "qwen gemini"))
+        assertEquals(emptyList<String>(), matches("gemini"))
+        assertEquals(emptyList<String>(), matches("qwen gemini"))
     }
 
     @Test
     fun `order is left as the provider gave it`() {
         assertEquals(
             listOf("qwen3.5-omni-plus", "qwen3-vl-plus", "qwen3-vl:4b"),
-            filterModels(catalogue, "qwen"),
+            matches("qwen"),
         )
     }
 }

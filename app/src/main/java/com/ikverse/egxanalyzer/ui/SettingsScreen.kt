@@ -16,15 +16,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Rule
-import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.CloudSync
-import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Tune
@@ -45,6 +43,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ikverse.egxanalyzer.BuildConfig
 import com.ikverse.egxanalyzer.data.UpdateState
+import com.ikverse.egxanalyzer.data.ModelUsageRecord
 import com.ikverse.egxanalyzer.model.ApproachAlerts
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
@@ -68,6 +68,9 @@ import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import com.ikverse.egxanalyzer.model.ThemeMode
 import com.ikverse.egxanalyzer.model.ResponseTimeout
 import com.ikverse.egxanalyzer.model.RuleOrigin
+import com.ikverse.egxanalyzer.model.TokenUsage
+import com.ikverse.egxanalyzer.model.formatTokenCount
+import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -139,6 +142,24 @@ internal fun SettingsScreen(appState: AppState) {
         appState.appPreferences.scheduleAlertsEnabled,
     ).count { it }
 
+    // One line per group as well as one for the card. A closed group saying nothing about how much
+    // of it is on would put the reader back to opening all three to find the switch they came for,
+    // which is what the grouping was for. Built from the same flags as the total above, so a group
+    // and the card can never disagree about what is switched on.
+    val tradeNotificationsSummary = switchesOn(
+        appState.appPreferences.overdueRemindersEnabled,
+        appState.appPreferences.tradeAlertsEnabled,
+        appState.appPreferences.approachAlertsEnabled,
+    )
+    val marketNotificationsSummary = switchesOn(
+        appState.appPreferences.callAlertsEnabled,
+        appState.appPreferences.sessionDigestEnabled,
+    )
+    val appNotificationsSummary = switchesOn(
+        appState.appPreferences.feedAlertsEnabled,
+        appState.appPreferences.scheduleAlertsEnabled,
+    )
+
     Screen(
         title = "Settings",
     ) {
@@ -160,6 +181,17 @@ internal fun SettingsScreen(appState: AppState) {
             SubSection(
                 "Model",
                 summary = appState.cloudConfiguration.model.ifBlank { "No model chosen" },
+                about = infoNote(
+                    "Model",
+                    "Who reads the cards. The provider decides which endpoint the request goes " +
+                        "to and which key pays for it; the model itself is chosen on the Analyze " +
+                        "screen, because that is where a run is aimed.",
+                    "The key is encrypted by Android Keystore, never synced to your other " +
+                        "devices, and never written into a backup - a live cloud credential does " +
+                        "not belong in a file about to be copied into a cloud folder.",
+                    "Save and verify sends one free request to check the key is accepted, so a " +
+                        "key typed wrongly is found now rather than on the first paid run.",
+                ),
             ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Box {
@@ -274,6 +306,15 @@ internal fun SettingsScreen(appState: AppState) {
                 "What to send",
                 summary = "${appState.appPreferences.analysisLanguage.displayName} · " +
                     "${appState.appPreferences.defaultContentTypes.size} content types",
+                about = infoNote(
+                    "What to send",
+                    "Which parts of a chat leave this phone, and in what language the answer " +
+                        "comes back. These are the defaults a run starts from; the Analyze " +
+                        "screen can still change them for one run.",
+                    "Every type ticked here is content sent to the AI provider, so this is also " +
+                        "the setting that decides what a run costs: images are the expensive " +
+                        "half, and a channel that posts only text needs none of them.",
+                ),
             ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Box {
@@ -358,6 +399,17 @@ internal fun SettingsScreen(appState: AppState) {
                 "Validation",
                 summary = "${appState.appPreferences.correctionRetries} correction " +
                     if (appState.appPreferences.correctionRetries == 1) "retry" else "retries",
+                about = infoNote(
+                    "Validation",
+                    "What happens to an answer that comes back malformed. A correction retry " +
+                        "hands the model its own reply and the error, and asks again - each one " +
+                        "is another paid request, which is why the ceiling is two.",
+                    "The catalog is the list of Cairo listings held on this phone. Enriching " +
+                        "against it fills in a company's names and codes from that list rather " +
+                        "than from the model, so a ticker read off a screenshot is checked " +
+                        "against something that cannot be misremembered. It costs nothing and " +
+                        "sends nothing.",
+                ),
             ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 SettingLabel(
@@ -436,9 +488,9 @@ internal fun SettingsScreen(appState: AppState) {
                         // that lists nothing still has models.
                         appState.availableModels.forEach { option ->
                             DropdownMenuItem(
-                                text = { Text(option) },
+                                text = { Text(option.id) },
                                 onClick = {
-                                    appState.updateOpinionModel(option)
+                                    appState.updateOpinionModel(option.id)
                                     askModelMenuOpen = false
                                 },
                             )
@@ -521,262 +573,27 @@ internal fun SettingsScreen(appState: AppState) {
                 )
             }
             }
+
+            // Last in the section because it is about every request the section can start - a
+            // run's chunks and its consolidation, and each Ask AI above.
+            SubSection(
+                "Token usage",
+                summary = tokenUsageSummary(appState.modelUsage),
+                about = infoNote(
+                    "Token usage",
+                    "Every request comes back with the token count the provider billed it at. " +
+                        "This is those counts added up per model, on this phone alone - it is " +
+                        "not synced, because a token count describes one phone's spending.",
+                    "A record, not a limit: nothing here stops or slows a run. Clearing it " +
+                        "forgets the record and not the spending, and the provider's own billing " +
+                        "page remains the account that matters.",
+                ),
+            ) {
+            ModelUsageSection(appState)
+            }
         }
 
         SchedulesSettingsSection(appState, FormWidth)
-
-        ExpandableSection(
-            "Appearance",
-            icon = Icons.Outlined.Palette,
-            summary = appState.appPreferences.themeMode.displayName,
-            contentMaxWidth = FormWidth,
-            about = infoNote(
-                "Appearance",
-                "The choice is applied immediately on outer and inner displays.",
-            ),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Box {
-                    OutlinedButton(onClick = { themeMenuOpen = true }) {
-                        Text("Theme: ${appState.appPreferences.themeMode.displayName}")
-                    }
-                    DropdownMenu(
-                        expanded = themeMenuOpen,
-                        onDismissRequest = { themeMenuOpen = false },
-                    ) {
-                        ThemeMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = { Text(mode.displayName) },
-                                onClick = {
-                                    appState.updateThemeMode(mode)
-                                    themeMenuOpen = false
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        ExpandableSection(
-            "Sync",
-            icon = Icons.Outlined.CloudSync,
-            summary = "${appState.savedResults.size} reports on this device",
-            contentMaxWidth = FormWidth,
-            about = infoNote(
-                "Sync",
-                "Reports are kept in a private Telegram channel of your own, so every device " +
-                    "signed in to your account sees the same history.",
-                "A saved report never changes, so syncing only ever adds - nothing is overwritten " +
-                    "and nothing is deleted.",
-            ),
-        ) {
-            Button(
-                onClick = { scope.launch { appState.syncReports() } },
-                enabled = appState.telegramAuthState.step == TelegramAuthStep.READY &&
-                    appState.busyLabel == null,
-            ) { Text("Sync now") }
-            if (appState.telegramAuthState.step != TelegramAuthStep.READY) {
-                Text(
-                    "Sign in to Telegram to sync.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        // "Trades" rather than "Scoring": every control in here is about the user's own trades
-        // now. The window stopped judging the channels - a call is followed until it reaches a
-        // target or the stop, and nothing on this page moves that - so what is left is the one
-        // deadline anybody sets. The seven things the phone can say out loud sat under it until
-        // they moved to Notifications below, which had put "tell me when the price feed goes
-        // quiet" inside a card about how long to hold a trade.
-        ExpandableSection(
-            "Trades",
-            icon = Icons.Outlined.Timeline,
-            summary = "${appState.appPreferences.defaultTradeWindowSessions} trading sessions",
-            contentMaxWidth = FormWidth,
-        ) {
-            val window = appState.appPreferences.defaultTradeWindowSessions
-            SettingRow(
-                about = infoNote(
-                    "Default trade window",
-                    "What a new trade's deadline is offered as when you press Bought, counted " +
-                        "from the session the call was made for. You can type over it there, " +
-                        "or later from Edit trade.",
-                    "It changes nothing already recorded, and it does not affect how the " +
-                        "sources are scored - a call is followed until it reaches a target or " +
-                        "the stop, which is what Insights reports the timings of.",
-                ),
-            ) {
-                Text("Default trade window", modifier = Modifier.weight(1f))
-                Text(
-                    "$window ${if (window == 1) "session" else "sessions"}",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Slider(
-                value = window.toFloat(),
-                onValueChange = { appState.updateDefaultTradeWindow(it.roundToInt()) },
-                valueRange = Scoring.MIN_WINDOW_SESSIONS.toFloat()..
-                    Scoring.MAX_WINDOW_SESSIONS.toFloat(),
-                steps = Scoring.MAX_WINDOW_SESSIONS - Scoring.MIN_WINDOW_SESSIONS - 1,
-            )
-        }
-
-        // Everything the phone can say out loud, in one card. All seven of these lived in Trades,
-        // which was true of the first two and increasingly untrue of the rest: a feed that has gone
-        // quiet and a schedule that did not fire are the app reporting on itself, and neither has
-        // anything to do with how long to hold a position. They are one card because they are one
-        // decision - how much this app is allowed to interrupt - and because the switch somebody
-        // came here to turn off is now under the heading naming what they came to stop.
-        ExpandableSection(
-            "Notifications",
-            icon = Icons.Outlined.NotificationsNone,
-            summary = "$notificationsOn of $NOTIFICATION_COUNT on",
-            contentMaxWidth = FormWidth,
-            about = infoNote(
-                "Notifications",
-                "Each of these reports something that has already happened - a level reached, a " +
-                    "deadline passed, a run that did not fire. None of them says what to do about " +
-                    "it, and none of them can start a run or spend anything.",
-                "Android silences a whole channel at a time, so these arrive on several channels " +
-                    "rather than one: muting news about your trades cannot quietly mute the app " +
-                    "telling you it has stopped working.",
-            ),
-        ) {
-            SettingToggle(
-                label = "Tell me when a trade goes past its deadline",
-                checked = appState.appPreferences.overdueRemindersEnabled,
-                onCheckedChange = appState::updateOverdueReminders,
-                about = infoNote(
-                    "Tell me when a trade goes past its deadline",
-                    "Once a day, and only when something is actually overdue - a trade whose " +
-                        "deadline has passed with no sale recorded.",
-                    "Nothing is analyzed, so this never spends anything on the cloud. With either " +
-                        "of these two switches on, the phone does fetch prices once after the " +
-                        "exchange closes, so it knows what the session did before it says anything.",
-                ),
-            )
-            SettingToggle(
-                label = "Tell me when the market changes a trade",
-                checked = appState.appPreferences.tradeAlertsEnabled,
-                onCheckedChange = appState::updateTradeAlerts,
-                about = infoNote(
-                    "Tell me when the market changes a trade",
-                    "A target reached, the stop taken, the deadline passed - whenever the market " +
-                        "moves one of your trades.",
-                    "The phone looks once at 14:45, after the exchange has closed and its figures " +
-                        "have settled, so a deadline that ran out this afternoon is said this " +
-                        "afternoon. It looks again on every price refresh, and once more each day " +
-                        "in case the alarm was dropped.",
-                    "Not for anything you do yourself: recording a sale or closing a trade says " +
-                        "nothing back to you.",
-                ),
-            )
-            SettingToggle(
-                label = "Tell me when a stock reaches a buy zone",
-                checked = appState.appPreferences.callAlertsEnabled,
-                onCheckedChange = appState::updateCallAlerts,
-                about = infoNote(
-                    "Tell me when a stock reaches a buy zone",
-                    "For calls you have not taken: the price has traded into the entry band a " +
-                        "channel printed. Off unless you switch it on - it is the one notification " +
-                        "here about something you have not committed to.",
-                    "It says what the market did and never what to do about it, and it books no " +
-                        "extra work: the check rides a price refresh that was happening anyway.",
-                ),
-            )
-            SettingToggle(
-                label = "Warn me before a trade reaches a level",
-                checked = appState.appPreferences.approachAlertsEnabled,
-                onCheckedChange = appState::updateApproachAlerts,
-                about = infoNote(
-                    "Warn me before a trade reaches a level",
-                    "Everything else here tells you after the fact - a stop announced is a stop " +
-                        "already taken. This is the one that arrives while you can still decide " +
-                        "something: a trade of yours has come within reach of its stop, or of " +
-                        "target 2.",
-                    "It says the distance and never what to do about it. Off unless you switch it " +
-                        "on, because a price near a level goes on being near it, and this is the " +
-                        "noisiest thing the app can say.",
-                    "It books no extra work: the check rides a recompute that was happening anyway.",
-                ),
-            )
-            if (appState.appPreferences.approachAlertsEnabled) {
-                val threshold = appState.appPreferences.approachThresholdPercent
-                SettingLabel(
-                    "Close enough to warn about: $threshold%",
-                    style = MaterialTheme.typography.bodyLarge,
-                    about = infoNote(
-                        "Close enough to warn about",
-                        "How near the price has to get before the warning above is raised, as a " +
-                            "percentage of the price itself.",
-                        "There is no right answer for everybody: a tight stop on a liquid large " +
-                            "cap and a wide one on a thin mid cap mean different things by close.",
-                    ),
-                )
-                Slider(
-                    value = threshold.toFloat(),
-                    onValueChange = { appState.updateApproachThreshold(it.roundToInt()) },
-                    valueRange = ApproachAlerts.MIN_THRESHOLD_PERCENT.toFloat()..
-                        ApproachAlerts.MAX_THRESHOLD_PERCENT.toFloat(),
-                    steps = ApproachAlerts.MAX_THRESHOLD_PERCENT -
-                        ApproachAlerts.MIN_THRESHOLD_PERCENT - 1,
-                )
-            }
-            SettingToggle(
-                label = "Tell me what the session did",
-                checked = appState.appPreferences.sessionDigestEnabled,
-                onCheckedChange = appState::updateSessionDigest,
-                about = infoNote(
-                    "Tell me what the session did",
-                    "One line after the close: how many calls reached targets, how many were " +
-                        "stopped out, how many ran out of time, and how many of them were yours.",
-                    "The gap it fills is the session where nothing of yours moved. Everything " +
-                        "else here is about one trade or one call, so an afternoon when three " +
-                        "calls from the channels you read hit targets and you held none of them " +
-                        "passed in silence.",
-                    "Off unless you switch it on: it arrives on a rhythm rather than because " +
-                        "something happened, which is the kind of notification that wears out " +
-                        "fastest. Said once per session, whatever else happens that evening.",
-                ),
-            )
-            SettingToggle(
-                label = "Tell me when the price feed goes quiet",
-                checked = appState.appPreferences.feedAlertsEnabled,
-                onCheckedChange = appState::updateFeedAlerts,
-                about = infoNote(
-                    "Tell me when the price feed goes quiet",
-                    "A stock whose prices have stopped arriving looks exactly like a stock that " +
-                        "has not moved - the feed answers every request and its newest session " +
-                        "stays put. Meanwhile every rate on the record quietly rests on fewer " +
-                        "calls than it looks like.",
-                    "This has happened here once already and nothing noticed at the time.",
-                    "On by default, because it reports the app being unable to do its job rather " +
-                        "than something the market did. Said once when it starts, and not again " +
-                        "until the feed comes back and goes quiet a second time. The Price feed " +
-                        "card names every affected stock and what can be done about each.",
-                ),
-            )
-            SettingToggle(
-                label = "Tell me when a scheduled run did not happen",
-                checked = appState.appPreferences.scheduleAlertsEnabled,
-                onCheckedChange = appState::updateScheduleAlerts,
-                about = infoNote(
-                    "Tell me when a scheduled run did not happen",
-                    "A schedule that was due and was missed, or one that failed - with the reason " +
-                        "it gives. The way a schedule breaks on this platform is silence: nothing " +
-                        "fires and nothing says so, and the two permissions that stop one working " +
-                        "are named only on this screen.",
-                    "It never mentions a run that was deliberately skipped, so it cannot become a " +
-                        "daily reminder that paid runs are switched off.",
-                    "It offers no way to start a run: that would be a way to spend from the lock " +
-                        "screen, and starting one is always your own decision.",
-                ),
-            )
-        }
 
         ExpandableSection(
             "Telegram",
@@ -784,6 +601,13 @@ internal fun SettingsScreen(appState: AppState) {
             summary = if (appState.telegramAuthState.step == TelegramAuthStep.READY) "Signed in · ${appState.channels.size} chats" else "Not connected",
             contentMaxWidth = FormWidth,
             summaryTone = if (appState.telegramAuthState.step == TelegramAuthStep.READY) null else MaterialTheme.colorScheme.error,
+            about = infoNote(
+                "Telegram",
+                "The account is how this app reads anything at all: the chats ticked on Analyze " +
+                    "are read as you, on this device, and no chat you have not ticked is opened.",
+                "It is also where your saved reports are kept - in a private channel of your own - " +
+                    "so signing out here stops both. Sending them there is under General.",
+            ),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 if (appState.telegramAuthState.step == TelegramAuthStep.READY) {
@@ -819,10 +643,375 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        // Beside the other diagnostic rather than on Insights, where it used to be: this explains
-        // why a figure is missing rather than being one, and it is consulted when something looks
-        // wrong. See PriceFeedSettingsSection.
-        PriceFeedSettingsSection(appState, FormWidth)
+        // Everything the phone can say out loud, in one card. All seven of these lived in Trades,
+        // which was true of the first two and increasingly untrue of the rest: a feed that has gone
+        // quiet and a schedule that did not fire are the app reporting on itself, and neither has
+        // anything to do with how long to hold a position. They are one card because they are one
+        // decision - how much this app is allowed to interrupt - and because the switch somebody
+        // came here to turn off is now under the heading naming what they came to stop.
+        //
+        // Grouped rather than listed, because seven switches in a row is a list nobody reads to the
+        // end of. The three headings answer the question a reader actually arrives with, which is
+        // never "which of these seven" but "what kind of thing keeps interrupting me".
+        ExpandableSection(
+            "Notifications",
+            icon = Icons.Outlined.NotificationsNone,
+            summary = "$notificationsOn of $NOTIFICATION_COUNT on",
+            contentMaxWidth = FormWidth,
+            about = infoNote(
+                "Notifications",
+                "Each of these reports something that has already happened - a level reached, a " +
+                    "deadline passed, a run that did not fire. None of them says what to do about " +
+                    "it, and none of them can start a run or spend anything.",
+                "Android silences a whole channel at a time, so these arrive on several channels " +
+                    "rather than one: muting news about your trades cannot quietly mute the app " +
+                    "telling you it has stopped working.",
+            ),
+        ) {
+            SubSection(
+                "Your trades",
+                summary = tradeNotificationsSummary,
+                about = infoNote(
+                    "Your trades",
+                    "The three about positions you actually hold. Two of them arrive after the " +
+                        "fact - a stop announced is a stop already taken - and the third is the " +
+                        "only thing on this card that reaches you while you can still decide " +
+                        "something.",
+                ),
+            ) {
+                SettingToggle(
+                    label = "Tell me when a trade goes past its deadline",
+                    checked = appState.appPreferences.overdueRemindersEnabled,
+                    onCheckedChange = appState::updateOverdueReminders,
+                    about = infoNote(
+                        "Tell me when a trade goes past its deadline",
+                        "Once a day, and only when something is actually overdue - a trade whose " +
+                            "deadline has passed with no sale recorded.",
+                        "Nothing is analyzed, so this never spends anything on the cloud. With either " +
+                            "of these two switches on, the phone does fetch prices once after the " +
+                            "exchange closes, so it knows what the session did before it says anything.",
+                    ),
+                )
+                SettingToggle(
+                    label = "Tell me when the market changes a trade",
+                    checked = appState.appPreferences.tradeAlertsEnabled,
+                    onCheckedChange = appState::updateTradeAlerts,
+                    about = infoNote(
+                        "Tell me when the market changes a trade",
+                        "A target reached, the stop taken, the deadline passed - whenever the market " +
+                            "moves one of your trades.",
+                        "The phone looks once at 14:45, after the exchange has closed and its figures " +
+                            "have settled, so a deadline that ran out this afternoon is said this " +
+                            "afternoon. It looks again on every price refresh, and once more each day " +
+                            "in case the alarm was dropped.",
+                        "Not for anything you do yourself: recording a sale or closing a trade says " +
+                            "nothing back to you.",
+                    ),
+                )
+                SettingToggle(
+                    label = "Warn me before a trade reaches a level",
+                    checked = appState.appPreferences.approachAlertsEnabled,
+                    onCheckedChange = appState::updateApproachAlerts,
+                    about = infoNote(
+                        "Warn me before a trade reaches a level",
+                        "Everything else here tells you after the fact - a stop announced is a stop " +
+                            "already taken. This is the one that arrives while you can still decide " +
+                            "something: a trade of yours has come within reach of its stop, or of " +
+                            "target 2.",
+                        "It says the distance and never what to do about it. Off unless you switch it " +
+                            "on, because a price near a level goes on being near it, and this is the " +
+                            "noisiest thing the app can say.",
+                        "It books no extra work: the check rides a recompute that was happening anyway.",
+                    ),
+                )
+                if (appState.appPreferences.approachAlertsEnabled) {
+                    val threshold = appState.appPreferences.approachThresholdPercent
+                    SettingLabel(
+                        "Close enough to warn about: $threshold%",
+                        style = MaterialTheme.typography.bodyLarge,
+                        about = infoNote(
+                            "Close enough to warn about",
+                            "How near the price has to get before the warning above is raised, as a " +
+                                "percentage of the price itself.",
+                            "There is no right answer for everybody: a tight stop on a liquid large " +
+                                "cap and a wide one on a thin mid cap mean different things by close.",
+                        ),
+                    )
+                    Slider(
+                        value = threshold.toFloat(),
+                        onValueChange = { appState.updateApproachThreshold(it.roundToInt()) },
+                        valueRange = ApproachAlerts.MIN_THRESHOLD_PERCENT.toFloat()..
+                            ApproachAlerts.MAX_THRESHOLD_PERCENT.toFloat(),
+                        steps = ApproachAlerts.MAX_THRESHOLD_PERCENT -
+                            ApproachAlerts.MIN_THRESHOLD_PERCENT - 1,
+                    )
+                }
+            }
+
+            SubSection(
+                "Calls and sessions",
+                summary = marketNotificationsSummary,
+                about = infoNote(
+                    "Calls and sessions",
+                    "The two about the market rather than about your money: a call you did not " +
+                        "take reaching its entry band, and what the whole session did.",
+                    "Both are off unless you switch them on, and neither depends on your holding " +
+                        "anything.",
+                ),
+            ) {
+                SettingToggle(
+                    label = "Tell me when a stock reaches a buy zone",
+                    checked = appState.appPreferences.callAlertsEnabled,
+                    onCheckedChange = appState::updateCallAlerts,
+                    about = infoNote(
+                        "Tell me when a stock reaches a buy zone",
+                        "For calls you have not taken: the price has traded into the entry band a " +
+                            "channel printed. Off unless you switch it on - it is the one notification " +
+                            "here about something you have not committed to.",
+                        "It says what the market did and never what to do about it, and it books no " +
+                            "extra work: the check rides a price refresh that was happening anyway.",
+                    ),
+                )
+                SettingToggle(
+                    label = "Tell me what the session did",
+                    checked = appState.appPreferences.sessionDigestEnabled,
+                    onCheckedChange = appState::updateSessionDigest,
+                    about = infoNote(
+                        "Tell me what the session did",
+                        "One line after the close: how many calls reached targets, how many were " +
+                            "stopped out, how many ran out of time, and how many of them were yours.",
+                        "The gap it fills is the session where nothing of yours moved. Everything " +
+                            "else here is about one trade or one call, so an afternoon when three " +
+                            "calls from the channels you read hit targets and you held none of them " +
+                            "passed in silence.",
+                        "Off unless you switch it on: it arrives on a rhythm rather than because " +
+                            "something happened, which is the kind of notification that wears out " +
+                            "fastest. Said once per session, whatever else happens that evening.",
+                    ),
+                )
+            }
+
+            SubSection(
+                "The app itself",
+                summary = appNotificationsSummary,
+                about = infoNote(
+                    "The app itself",
+                    "The two that report this app being unable to do its job, rather than " +
+                        "anything the market did.",
+                    "Both are on by default, and that is deliberate: the way each of these breaks " +
+                        "is silence, so an app that stopped working quietly would look exactly " +
+                        "like a quiet week.",
+                ),
+            ) {
+                SettingToggle(
+                    label = "Tell me when the price feed goes quiet",
+                    checked = appState.appPreferences.feedAlertsEnabled,
+                    onCheckedChange = appState::updateFeedAlerts,
+                    about = infoNote(
+                        "Tell me when the price feed goes quiet",
+                        "A stock whose prices have stopped arriving looks exactly like a stock that " +
+                            "has not moved - the feed answers every request and its newest session " +
+                            "stays put. Meanwhile every rate on the record quietly rests on fewer " +
+                            "calls than it looks like.",
+                        "This has happened here once already and nothing noticed at the time.",
+                        "On by default, because it reports the app being unable to do its job rather " +
+                            "than something the market did. Said once when it starts, and not again " +
+                            "until the feed comes back and goes quiet a second time. Prices under " +
+                            "General says how many stocks are affected and how much of the record " +
+                            "they are holding.",
+                    ),
+                )
+                SettingToggle(
+                    label = "Tell me when a scheduled run did not happen",
+                    checked = appState.appPreferences.scheduleAlertsEnabled,
+                    onCheckedChange = appState::updateScheduleAlerts,
+                    about = infoNote(
+                        "Tell me when a scheduled run did not happen",
+                        "A schedule that was due and was missed, or one that failed - with the reason " +
+                            "it gives. The way a schedule breaks on this platform is silence: nothing " +
+                            "fires and nothing says so, and the two permissions that stop one working " +
+                            "are named only on this screen.",
+                        "It never mentions a run that was deliberately skipped, so it cannot become a " +
+                            "daily reminder that paid runs are switched off.",
+                        "It offers no way to start a run: that would be a way to spend from the lock " +
+                            "screen, and starting one is always your own decision.",
+                    ),
+                )
+            }
+        }
+
+        // The four settings that were a card each. Appearance, the trade window, Sync and the
+        // price refresh had one control apiece, so each of them cost a card header, a summary line
+        // and a tap to reach a single dropdown or a single button - four cards that could not be
+        // told apart at a glance because each said nothing but its own name.
+        //
+        // They are not one subject and this card does not pretend they are. What they have in
+        // common is that none of them is worth a card, which is what a General is for. The two at
+        // the bottom do belong together: Sync and Prices are the free, unpaid ways this device
+        // keeps its own copy current, and neither sends anything to the AI provider.
+        ExpandableSection(
+            "General",
+            icon = Icons.Outlined.Tune,
+            summary = "Theme, trade defaults, sync and prices",
+            contentMaxWidth = FormWidth,
+        ) {
+            SubSection(
+                "Appearance",
+                summary = appState.appPreferences.themeMode.displayName,
+                about = infoNote(
+                    "Appearance",
+                    "The choice is applied immediately on outer and inner displays.",
+                ),
+            ) {
+                Box {
+                    OutlinedButton(onClick = { themeMenuOpen = true }) {
+                        Text("Theme: ${appState.appPreferences.themeMode.displayName}")
+                    }
+                    DropdownMenu(
+                        expanded = themeMenuOpen,
+                        onDismissRequest = { themeMenuOpen = false },
+                    ) {
+                        ThemeMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.displayName) },
+                                onClick = {
+                                    appState.updateThemeMode(mode)
+                                    themeMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // "Trade defaults" rather than "Trades": every control in here is about the user's own
+            // trades, and the one that is left is a default rather than a rule. The window stopped
+            // judging the channels - a call is followed until it reaches a target or the stop, and
+            // nothing on this page moves that - so what is left is the one deadline anybody sets.
+            SubSection(
+                "Trade defaults",
+                summary = "${appState.appPreferences.defaultTradeWindowSessions} trading sessions",
+                about = infoNote(
+                    "Trade defaults",
+                    "What a new trade is offered when you press Bought. Nothing here changes " +
+                        "anything already recorded, and nothing here affects how the sources are " +
+                        "scored.",
+                ),
+            ) {
+                val window = appState.appPreferences.defaultTradeWindowSessions
+                SettingRow(
+                    about = infoNote(
+                        "Default trade window",
+                        "What a new trade's deadline is offered as when you press Bought, counted " +
+                            "from the session the call was made for. You can type over it there, " +
+                            "or later from Edit trade.",
+                        "It changes nothing already recorded, and it does not affect how the " +
+                            "sources are scored - a call is followed until it reaches a target or " +
+                            "the stop, which is what Insights reports the timings of.",
+                    ),
+                ) {
+                    Text("Default trade window", modifier = Modifier.weight(1f))
+                    Text(
+                        "$window ${if (window == 1) "session" else "sessions"}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Slider(
+                    value = window.toFloat(),
+                    onValueChange = { appState.updateDefaultTradeWindow(it.roundToInt()) },
+                    valueRange = Scoring.MIN_WINDOW_SESSIONS.toFloat()..
+                        Scoring.MAX_WINDOW_SESSIONS.toFloat(),
+                    steps = Scoring.MAX_WINDOW_SESSIONS - Scoring.MIN_WINDOW_SESSIONS - 1,
+                )
+            }
+
+            SubSection(
+                "Sync",
+                summary = "${appState.savedResults.size} reports on this device",
+                about = infoNote(
+                    "Sync",
+                    "Reports are kept in a private Telegram channel of your own, so every device " +
+                        "signed in to your account sees the same history.",
+                    "A saved report never changes, so syncing only ever adds - nothing is overwritten " +
+                        "and nothing is deleted.",
+                ),
+            ) {
+                Button(
+                    onClick = { scope.launch { appState.syncReports() } },
+                    enabled = appState.telegramAuthState.step == TelegramAuthStep.READY &&
+                        appState.busyLabel == null,
+                ) { Text("Sync now") }
+                if (appState.telegramAuthState.step != TelegramAuthStep.READY) {
+                    Text(
+                        "Sign in to Telegram to sync.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            PricesSubSection(appState)
+        }
+
+        ExpandableSection(
+            "Saved data and privacy",
+            icon = Icons.Outlined.Shield,
+            summary = "${appState.savedResults.size} saved analyses",
+            contentMaxWidth = FormWidth,
+            about = infoNote(
+                "Saved data and privacy",
+                "Provider keys and the Telegram database key are encrypted using Android " +
+                    "Keystore. App backup is disabled and cloud requests use HTTPS.",
+            ),
+        ) {
+            // Backup here rather than beside Save diagnostics in About, which is the other thing
+            // that writes the record to a file. That one is for whoever is chasing a bug; this is
+            // about the record itself, and it belongs with the section that says how much of it
+            // there is and offers to delete it.
+            SubSection(
+                "Backup",
+                summary = if (appState.backupFolder == null) {
+                    "No folder chosen"
+                } else {
+                    "A folder is chosen"
+                },
+                about = infoNote(
+                    "Backup",
+                    "The whole record as one file: every saved analysis, every trade, and the " +
+                        "settings - but no provider key and no Telegram key, which are encrypted " +
+                        "separately by Android Keystore and have never been part of it.",
+                    "Restoring one adds what it holds to what is already here rather than " +
+                        "replacing it, so a backup taken on another phone can be read in without " +
+                        "losing this one's own history.",
+                ),
+            ) {
+                Text("${appState.savedResults.size} analyses saved on this device")
+                BackupControls(appState)
+            }
+
+            // Its own group, at the bottom, with nothing else in it. The one irreversible button
+            // on this page should not sit at the end of a list of buttons that are not.
+            SubSection(
+                "Delete",
+                summary = "${appState.savedResults.size} saved analyses",
+                about = infoNote(
+                    "Delete",
+                    "This is the only thing in the app that removes saved analyses, and it " +
+                        "removes all of them - from this device, from your Telegram sync channel, " +
+                        "and from every other device that syncs with it.",
+                    "Take a backup first if there is any doubt: nothing here can be undone, and " +
+                        "sync cannot bring back what it has been told to forget.",
+                ),
+            ) {
+                OutlinedButton(
+                    onClick = { confirmDeleteAll = true },
+                    enabled = appState.savedResults.isNotEmpty(),
+                ) {
+                    Text("Delete all saved analyses")
+                }
+            }
+        }
 
         ExpandableSection(
             "About",
@@ -838,6 +1027,13 @@ internal fun SettingsScreen(appState: AppState) {
                 else -> null
             },
             contentMaxWidth = FormWidth,
+            about = infoNote(
+                "About",
+                "Which build this phone is running, whether there is a newer one, and the button " +
+                    "that puts this device's record into Downloads for somebody chasing a bug.",
+                "Updates are read from this app's own GitHub releases. Nothing is downloaded or " +
+                    "installed without you pressing for it, twice.",
+            ),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 SettingLabel(
@@ -850,33 +1046,6 @@ internal fun SettingsScreen(appState: AppState) {
                 )
                 UpdateControls(appState)
                 DiagnosticsControl(appState)
-            }
-        }
-
-        ExpandableSection(
-            "Saved data and privacy",
-            icon = Icons.Outlined.Shield,
-            summary = "${appState.savedResults.size} saved analyses",
-            contentMaxWidth = FormWidth,
-            about = infoNote(
-                "Saved data and privacy",
-                "Provider keys and the Telegram database key are encrypted using Android " +
-                    "Keystore. App backup is disabled and cloud requests use HTTPS.",
-            ),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Text("${appState.savedResults.size} analyses saved on this device")
-                // Here rather than beside Save diagnostics in About, which is the other thing that
-                // writes the record to a file. That one is for whoever is chasing a bug; this is
-                // about the record itself, and it belongs with the section that says how much of it
-                // there is and offers to delete it.
-                BackupControls(appState)
-                OutlinedButton(
-                    onClick = { confirmDeleteAll = true },
-                    enabled = appState.savedResults.isNotEmpty(),
-                ) {
-                    Text("Delete all saved analyses")
-                }
             }
         }
     }
@@ -1112,5 +1281,89 @@ private val SEARCH_RESULTS = listOf(5, 8, 12, 20)
  */
 private const val NOTIFICATION_COUNT = 7
 
+/**
+ * "2 of 3 on", for a group of switches.
+ *
+ * Takes the flags rather than a count and a total, because those are two numbers a caller can get
+ * out of step - which is the mistake [NOTIFICATION_COUNT] exists to stop the card making.
+ */
+private fun switchesOn(vararg flags: Boolean) = "${flags.count { it }} of ${flags.size} on"
+
 private val FormWidth = 560.dp
 
+/**
+ * What each model has cost this phone, heaviest first.
+ *
+ * Per model rather than per run: the run's own total is on its report, and Ask AI leaves no report
+ * at all, so a per-model tally is the only place the whole spend appears. Requests the provider
+ * reported no usage for are named rather than folded in, because a total that is quietly short is
+ * worse than one that says it is short.
+ */
+@Composable
+private fun ModelUsageSection(appState: AppState) {
+    // The tally is read from disk, so it is re-read when the section is opened rather than held
+    // live: a scheduled run can have spent since this screen was built.
+    LaunchedEffect(Unit) { appState.refreshModelUsage() }
+    val usage = appState.modelUsage
+    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+        if (usage.isEmpty()) {
+            Text(
+                "Nothing recorded yet. A run, or one Ask AI, writes what it cost here.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@Column
+        }
+        val total = usage.fold(TokenUsage.NONE) { running, record -> running + record.usage }
+        SettingLabel(
+            "${groupedTokens(total.totalTokens)} tokens across ${usage.size} " +
+                if (usage.size == 1) "model" else "models",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        usage.forEach { record ->
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                Text(record.model, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    listOfNotNull(
+                        "${groupedTokens(record.usage.totalTokens)} tokens",
+                        "${groupedTokens(record.usage.promptTokens)} in / " +
+                            "${groupedTokens(record.usage.completionTokens)} out",
+                        "${record.requests} requests",
+                        record.lastUsed?.let {
+                            "last ${AppDates.DayMonthYear.format(it.atZone(ZoneId.systemDefault()))}"
+                        },
+                    ).joinToString(" \u00b7 "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                record.unreportedRequests.takeIf { it > 0 }?.let {
+                    Text(
+                        "$it request(s) came back with no usage, so this total is short by them.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    record.provider.displayName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        OutlinedButton(onClick = appState::clearModelUsage) {
+            Icon(Icons.Outlined.Delete, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text("Clear token usage")
+        }
+    }
+}
+
+/** The one line the closed section shows: what has been spent, and on how many models. */
+private fun tokenUsageSummary(usage: List<ModelUsageRecord>): String {
+    if (usage.isEmpty()) return "Nothing recorded"
+    val total = usage.fold(TokenUsage.NONE) { running, record -> running + record.usage }
+    return "${formatTokenCount(total.totalTokens)} tokens \u00b7 ${usage.size} " +
+        if (usage.size == 1) "model" else "models"
+}
+
+/** Exact rather than rounded: this is the screen where the figure is being checked against a bill. */
+private fun groupedTokens(value: Long): String = String.format(java.util.Locale.US, "%,d", value)

@@ -10,6 +10,9 @@ import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.ResponseTimeout
 import com.ikverse.egxanalyzer.model.CloudConfiguration
+import com.ikverse.egxanalyzer.model.CloudModelInfo
+import com.ikverse.egxanalyzer.model.ModelModality
+import com.ikverse.egxanalyzer.model.TokenUsage
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.UnaccountedImage
@@ -32,7 +35,7 @@ import com.ikverse.egxanalyzer.model.CloudProvider
 
 interface AnalysisRepository {
     suspend fun analyze(request: AnalysisRequest): AnalysisResult
-    suspend fun listModels(): List<String>
+    suspend fun listModels(): List<CloudModelInfo>
     suspend fun cancel(requestId: String): Boolean
 
     /**
@@ -101,6 +104,13 @@ class CloudAnalysisRepository(
     private val preferences: () -> AppPreferences,
     /** Records what was sent. Null in tests, where there is no device to write to. */
     private val traceFor: ((String) -> RequestTrace)? = null,
+    /**
+     * Where every request's token count is added up, per model.
+     *
+     * Null in tests, for the same reason as [traceFor]: there is no device to write to. A run works
+     * without it and simply leaves no tally behind.
+     */
+    private val usageStore: ModelUsageStore? = null,
 ) : AnalysisRepository {
     private val activeConnections = ConcurrentHashMap<String, HttpURLConnection>()
 
@@ -150,6 +160,10 @@ class CloudAnalysisRepository(
                             durationMilliseconds = (System.nanoTime() - startedAt) / 1_000_000,
                             requestCount = harvest.requestCount + attempt + 1,
                             imagesSent = harvest.imagesSent,
+                            promptTokens = harvest.usage.promptTokens,
+                            completionTokens = harvest.usage.completionTokens,
+                            totalTokens = harvest.usage.totalTokens,
+                            unreportedTokenRequests = harvest.unreportedRequests,
                             unaccountedImages = harvest.unaccounted,
                             promptId = request.prompt?.id,
                             promptSchemaVersion = request.prompt?.schemaVersion,
@@ -186,7 +200,20 @@ class CloudAnalysisRepository(
         var requestCount = 0
         var imagesSent = 0
         var retried = false
+
+        /** What the run has spent so far, as the provider reported it request by request. */
+        var usage = TokenUsage.NONE
+
+        /** Requests the provider reported nothing for, so [usage] is known to be short. */
+        var unreportedRequests = 0
+
+        fun add(answer: CompletionResponse) {
+            if (answer.usage == null) unreportedRequests += 1 else usage += answer.usage
+        }
     }
+
+    /** One answer from the provider, with what it cost. Null usage means it did not say. */
+    private class CompletionResponse(val body: String, val usage: TokenUsage?)
 
     private suspend fun extract(
         request: AnalysisRequest,
@@ -306,11 +333,12 @@ class CloudAnalysisRepository(
         label: String,
     ): ChunkAnswer {
         val body = request.extractionBody(chunk, config.model, appPreferences, correctionInstructions)
-        val response = executeCompletion(request.requestId, body, config, appPreferences, credential)
-        trace?.record(label, body, response)
+        val completion = executeCompletion(request.requestId, body, config, appPreferences, credential)
+        trace?.record(label, body, completion.body)
         harvest.requestCount += 1
+        harvest.add(completion)
         val answer = ChunkAnswer()
-        val payload = runCatching { JSONObject(stripCodeFence(contentOf(response))) }.getOrNull()
+        val payload = runCatching { JSONObject(stripCodeFence(contentOf(completion.body))) }.getOrNull()
         if (payload == null) {
             harvest.warnings += "A source chunk returned no readable JSON."
             return answer
@@ -371,9 +399,10 @@ class CloudAnalysisRepository(
             val body = request.consolidationBody(
                 harvest.extracted, config.model, appPreferences, correctionInstructions,
             )
-            val response = executeCompletion(request.requestId, body, config, appPreferences, credential)
-            trace?.record("consolidation", body, response)
-            runCatching { JSONObject(stripCodeFence(contentOf(response))) }.getOrElse {
+            val completion = executeCompletion(request.requestId, body, config, appPreferences, credential)
+            trace?.record("consolidation", body, completion.body)
+            harvest.add(completion)
+            runCatching { JSONObject(stripCodeFence(contentOf(completion.body))) }.getOrElse {
                 harvest.warnings += "Consolidation returned no readable JSON."
                 JSONObject().put("top_consolidated_recommendations", JSONArray())
             }
@@ -401,13 +430,20 @@ class CloudAnalysisRepository(
         return sourceTraces.firstOrNull { it.sourceId == sourceId }
     }
 
+    /**
+     * Sends one body and hands back the answer with what it cost.
+     *
+     * Every request in the app passes through here - a chunk, a consolidation, an Ask AI - which is
+     * why the token tally is written here rather than at each caller: a path added later is counted
+     * without anyone remembering to count it.
+     */
     private suspend fun executeCompletion(
         requestId: String,
         body: JSONObject,
         config: CloudConfiguration,
         appPreferences: AppPreferences,
         credential: CharArray,
-    ): String {
+    ): CompletionResponse {
         coroutineContext.ensureActive()
         val url = URL("${config.endpoint.trimEnd('/')}/chat/completions")
         val connection = (url.openConnection() as HttpURLConnection).apply {
@@ -437,7 +473,11 @@ class CloudAnalysisRepository(
                     ?: "Cloud request failed (HTTP $status)."
                 error(message)
             }
-            return response
+            val usage = parseUsage(response)
+            // The model the body actually named, not the configured one: Ask AI sends its own, and
+            // OpenRouter's online suffix is taken off before sending.
+            usageStore?.record(config.provider, body.optString("model"), usage)
+            return CompletionResponse(response, usage)
         } finally {
             activeConnections.remove(requestId, connection)
             connection.disconnect()
@@ -461,7 +501,7 @@ class CloudAnalysisRepository(
             val deep = request.deepSearch &&
                 request.search &&
                 config.provider == CloudProvider.QWEN
-            val response = try {
+            val answer = try {
                 executeCompletion(
                     request.requestId, opinionBody(request, config, deep), config,
                     preferences(), credential,
@@ -478,7 +518,7 @@ class CloudAnalysisRepository(
                     preferences(), credential,
                 )
             }
-            contentOf(response)
+            contentOf(answer.body)
         } finally {
             credential.fill('\u0000')
             activeConnections.remove(request.requestId)?.disconnect()
@@ -564,7 +604,7 @@ class CloudAnalysisRepository(
             true
         } ?: false
 
-    override suspend fun listModels(): List<String> = withContext(Dispatchers.IO) {
+    override suspend fun listModels(): List<CloudModelInfo> = withContext(Dispatchers.IO) {
         val config = configuration()
         require(config.endpoint.startsWith("https://")) { "Cloud endpoint must use HTTPS." }
         val credential = credentialStore.read(config.provider)
@@ -595,7 +635,7 @@ class CloudAnalysisRepository(
                     ?: "Could not load models (HTTP $status)."
                 error(message)
             }
-            parseModelIds(response)
+            parseModels(response)
         } finally {
             credential.fill('\u0000')
             connection?.disconnect()
@@ -889,20 +929,77 @@ class CloudAnalysisRepository(
     }
 }
 
-internal fun parseModelIds(response: String): List<String> {
+/**
+ * The catalogue a provider answered with, keeping whatever it said about each model.
+ *
+ * The ids alone used to be kept, which is why the picker could only offer all of them: a name does
+ * not say whether a model can see an image, and the run needs one that can. OpenRouter publishes
+ * its modalities here and is believed; the rest say nothing, and the id is read instead - see
+ * [com.ikverse.egxanalyzer.model.ModelSuitabilityRules].
+ */
+internal fun parseModels(response: String): List<CloudModelInfo> {
     val envelope = JSONObject(response)
     val models = envelope.optJSONArray("data")
         ?: envelope.optJSONArray("models")
         ?: JSONArray()
     return buildList {
         for (index in 0 until models.length()) {
-            val item = models.opt(index)
-            val id = when (item) {
-                is JSONObject -> item.optString("id").ifBlank { item.optString("name") }
-                is String -> item
-                else -> ""
+            when (val item = models.opt(index)) {
+                is JSONObject -> {
+                    val id = item.optString("id").ifBlank { item.optString("name") }
+                    if (id.isNotBlank()) {
+                        add(
+                            CloudModelInfo(
+                                id = id,
+                                statedModalities = item.statedModalities(),
+                                contextLength = item.optInt("context_length").takeIf { it > 0 },
+                            ),
+                        )
+                    }
+                }
+                is String -> if (item.isNotBlank()) add(CloudModelInfo(item))
             }
-            if (id.isNotBlank()) add(id)
         }
-    }.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
+    }
+        .distinctBy(CloudModelInfo::id)
+        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, CloudModelInfo::id))
 }
+
+/**
+ * What one row said it takes in.
+ *
+ * OpenRouter states it twice - `input_modalities` as a list, and `modality` as `text+image->text` -
+ * and the second is what older rows carry, so both are read.
+ */
+private fun JSONObject.statedModalities(): Set<ModelModality> {
+    val architecture = optJSONObject("architecture") ?: return emptySet()
+    architecture.optJSONArray("input_modalities")?.let { listed ->
+        val named = (0 until listed.length()).mapNotNull { ModelModality.from(listed.optString(it)) }
+        if (named.isNotEmpty()) return named.toSet()
+    }
+    return architecture.optString("modality")
+        .substringBefore("->")
+        .split("+")
+        .mapNotNull(ModelModality::from)
+        .toSet()
+}
+
+/**
+ * What a request cost, or null where the provider did not say.
+ *
+ * Null and zero are kept apart on purpose. A provider that reports nothing leaves a run's total
+ * short, and a short total that reads as a complete one is worse than no total at all - so the run
+ * counts those requests separately and says so. `total_tokens` is derived where it is missing:
+ * OpenRouter omits it, and the two halves are always there.
+ */
+internal fun parseUsage(response: String): TokenUsage? {
+    val usage = runCatching { JSONObject(response).optJSONObject("usage") }.getOrNull() ?: return null
+    val prompt = usage.firstLong("prompt_tokens", "input_tokens")
+    val completion = usage.firstLong("completion_tokens", "output_tokens")
+    val total = usage.firstLong("total_tokens").takeIf { it > 0 } ?: (prompt + completion)
+    if (prompt == 0L && completion == 0L && total == 0L) return null
+    return TokenUsage(promptTokens = prompt, completionTokens = completion, totalTokens = total)
+}
+
+private fun JSONObject.firstLong(vararg names: String): Long =
+    names.firstNotNullOfOrNull { name -> optLong(name).takeIf { it > 0 } } ?: 0L

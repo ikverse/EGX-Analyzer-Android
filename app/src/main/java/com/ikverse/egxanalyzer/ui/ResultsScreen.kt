@@ -77,6 +77,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.model.AnalysisDiagnostics
 import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
@@ -1256,6 +1257,13 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        tokenLine(diagnostics)?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         diagnostics.excludedSources.forEach {
             Text(
                 "Excluded ${it.sourceId}: ${it.reason}",
@@ -1322,3 +1330,25 @@ private fun AnalysisResult.imagePathFor(reference: Int?): String? =
 
 /** Below this a table can only be read by scrolling it sideways, which is not reading. */
 private val TableMinWidth = 600.dp
+
+/**
+ * What this run cost, in the provider's own numbers.
+ *
+ * Null for a run saved before this was recorded: an old report has nothing to say here, and a line
+ * of zeroes would read as a run that cost nothing. A provider that reported usage for only some of
+ * its requests says so rather than printing a total that is quietly short.
+ */
+private fun tokenLine(diagnostics: AnalysisDiagnostics): String? {
+    val short = diagnostics.unreportedTokenRequests
+        .takeIf { it > 0 }
+        ?.let { " · $it request(s) reported none" }
+        .orEmpty()
+    if (diagnostics.totalTokens <= 0) {
+        return if (short.isEmpty()) null else "The provider reported no token usage for this run."
+    }
+    return "${diagnostics.totalTokens.grouped()} tokens · " +
+        "${diagnostics.promptTokens.grouped()} in / ${diagnostics.completionTokens.grouped()} out" +
+        short
+}
+
+private fun Long.grouped(): String = String.format(java.util.Locale.US, "%,d", this)

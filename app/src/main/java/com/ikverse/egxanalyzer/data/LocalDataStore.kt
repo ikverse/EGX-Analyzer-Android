@@ -1727,6 +1727,10 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
             })
             put("requestCount", diagnostics.requestCount)
             put("imagesSent", diagnostics.imagesSent)
+            put("promptTokens", diagnostics.promptTokens)
+            put("completionTokens", diagnostics.completionTokens)
+            put("totalTokens", diagnostics.totalTokens)
+            put("unreportedTokenRequests", diagnostics.unreportedTokenRequests)
             put("unaccountedImages", JSONArray().apply {
                 diagnostics.unaccountedImages.forEach {
                     put(
@@ -1816,6 +1820,10 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
                 }.orEmpty(),
                 requestCount = value.optInt("requestCount"),
                 imagesSent = value.optInt("imagesSent"),
+                promptTokens = value.optLong("promptTokens"),
+                completionTokens = value.optLong("completionTokens"),
+                totalTokens = value.optLong("totalTokens"),
+                unreportedTokenRequests = value.optInt("unreportedTokenRequests"),
                 unaccountedImages = value.optJSONArray("unaccountedImages")?.objects()?.map {
                     UnaccountedImage(
                         reference = it.optInt("reference"),

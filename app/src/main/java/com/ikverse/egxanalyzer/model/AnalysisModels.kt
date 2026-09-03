@@ -183,6 +183,18 @@ data class AnalysisDiagnostics(
     /** Model calls a run took: one per source chunk, one to consolidate, plus any retries. */
     val requestCount: Int = 0,
     val imagesSent: Int = 0,
+    /**
+     * What the run cost in tokens, summed over every request it made.
+     *
+     * Reported by the provider rather than counted here: the count that matters is the one being
+     * billed, and it includes the image tokens no client-side estimate can see. A run from before
+     * this was recorded, or from a provider that reports no usage, carries zeroes - which is what
+     * [unreportedTokenRequests] is for, so a partial total is never read as a complete one.
+     */
+    val promptTokens: Long = 0,
+    val completionTokens: Long = 0,
+    val totalTokens: Long = 0,
+    val unreportedTokenRequests: Int = 0,
     val unaccountedImages: List<UnaccountedImage> = emptyList(),
     /**
      * The prompt version this run was judged by, and the rules folded into it.

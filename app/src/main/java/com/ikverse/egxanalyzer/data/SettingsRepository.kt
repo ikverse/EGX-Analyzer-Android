@@ -12,7 +12,9 @@ import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.CallOrder
 import com.ikverse.egxanalyzer.model.ResponseTimeout
 import com.ikverse.egxanalyzer.model.CloudConfiguration
+import com.ikverse.egxanalyzer.model.CloudModelInfo
 import com.ikverse.egxanalyzer.model.CloudProvider
+import com.ikverse.egxanalyzer.model.ModelModality
 import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.ThemeMode
 import com.ikverse.egxanalyzer.model.PromptSnapshot
@@ -70,6 +72,7 @@ class SettingsRepository(
             .remove(provider.endpointKey())
             .remove(provider.modelKey())
             .remove(provider.modelListKey())
+            .remove(provider.modelCatalogKey())
             .apply()
     }
 
@@ -94,9 +97,67 @@ class SettingsRepository(
             .apply()
     }
 
+    /**
+     * The same list, with what the provider said about each model.
+     *
+     * Held beside the ids rather than replacing them: the id list is what travels between devices,
+     * and widening what [SettingsSnapshot] carries would make an older build drop a list it cannot
+     * read. A device that has only ever been synced therefore has ids and no modalities, which is
+     * what the fallback below produces - the picker then reads the names, as it does for every
+     * provider but OpenRouter anyway.
+     */
+    fun modelCatalog(provider: CloudProvider): List<CloudModelInfo> {
+        val raw = preferences.getString(provider.modelCatalogKey(), null)
+            ?: return modelList(provider).map(::CloudModelInfo)
+        return runCatching {
+            val values = JSONArray(raw)
+            buildList {
+                for (index in 0 until values.length()) {
+                    val entry = values.getJSONObject(index)
+                    val id = entry.optString("id")
+                    if (id.isBlank()) continue
+                    val modalities = entry.optJSONArray("modalities")
+                    add(
+                        CloudModelInfo(
+                            id = id,
+                            statedModalities = buildSet {
+                                for (m in 0 until (modalities?.length() ?: 0)) {
+                                    ModelModality.from(modalities!!.optString(m))?.let(::add)
+                                }
+                            },
+                            contextLength = entry.optInt("context").takeIf { it > 0 },
+                        ),
+                    )
+                }
+            }
+        }.getOrElse { modelList(provider).map(::CloudModelInfo) }
+    }
+
+    fun saveModelCatalog(provider: CloudProvider, models: List<CloudModelInfo>) {
+        val json = JSONArray().apply {
+            models.forEach { model ->
+                put(
+                    JSONObject().apply {
+                        put("id", model.id)
+                        put(
+                            "modalities",
+                            JSONArray().apply { model.statedModalities.forEach { put(it.name) } },
+                        )
+                        model.contextLength?.let { put("context", it) }
+                    },
+                )
+            }
+        }
+        preferences.edit().putString(provider.modelCatalogKey(), json.toString()).apply()
+        saveModelList(provider, models.map(CloudModelInfo::id))
+    }
+
     /** Drops a cached list that a changed endpoint or a removed key can no longer vouch for. */
     fun clearModelList(provider: CloudProvider) {
-        preferences.edit().remove(provider.modelListKey()).apply()
+        preferences.edit()
+            .remove(provider.modelListKey())
+            .remove(provider.modelCatalogKey())
+            .apply()
     }
 
     /**
@@ -652,6 +713,9 @@ class SettingsRepository(
             preferences.edit()
                 .putString(entry.provider.endpointKey(), entry.endpoint)
                 .putString(entry.provider.modelKey(), entry.model)
+                // The catalogue that described the list this replaces cannot describe the new one,
+                // and a stale one would win over the ids that just arrived.
+                .remove(entry.provider.modelCatalogKey())
                 .apply()
             saveModelList(entry.provider, entry.models)
         }
@@ -688,6 +752,8 @@ class SettingsRepository(
     private fun CloudProvider.endpointKey() = "endpoint_${name.lowercase()}"
     private fun CloudProvider.modelKey() = "model_${name.lowercase()}"
     private fun CloudProvider.modelListKey() = "model_list_${name.lowercase()}"
+
+    private fun CloudProvider.modelCatalogKey() = "model_catalog_${name.lowercase()}"
     private fun CloudProvider.opinionModelKey() = "opinion_model_${name.lowercase()}"
 
     private companion object {
