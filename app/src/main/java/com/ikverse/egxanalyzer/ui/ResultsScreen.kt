@@ -42,7 +42,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -265,7 +264,7 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                 // halfway down a table you just asked for.
                 val reveal = remember { BringIntoViewRequester() }
                 LaunchedEffect(openRun) {
-                    if (openRun != null) reveal.bringIntoView()
+                    if (openRun != null) reveal.revealIfOnScreen(appState, AppDestination.RESULTS)
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                     bands.forEach { (band, open) ->
@@ -450,12 +449,23 @@ private fun SavedAnalysisCard(
         .size
 
     Card(
-        modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        // The whole card opens the run, and only while it is shut. Open, it holds the report's own
+        // toolbar, its call cards and the source trace, so a card-wide toggle would close the whole
+        // report on a tap that landed in the gap between any two of them - and the reader would have
+        // no idea what they had pressed. The footer row below is what closes it again.
+        onClick = { onExpandedChange(true) },
+        modifier = modifier.fillMaxWidth(),
+        enabled = !expanded,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            // Pinned to the same fill: "disabled" here means the report is open, which is not a
+            // state a card should go grey for.
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
         border = arrivalFlash(highlighted, onHighlightShown) ?: cardOutline,
         shape = MaterialTheme.shapes.large,
     ) {
-        Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
+        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             // Top-aligned: the heading below runs to two lines and a menu centred against both sits
             // level with neither. The floor is what keeps two cards in a grid row level: a report
             // older than a week gets no relative word, and would otherwise stand a line shorter
@@ -555,11 +565,18 @@ private fun SavedAnalysisCard(
                 )
             }
 
-            FilledTonalButton(
-                onClick = { onExpandedChange(!expanded) },
-                modifier = Modifier.fillMaxWidth(),
+            // A row rather than a button, now that the card itself opens the run: a filled button
+            // across the whole width was a second control doing the same job, and the loudest thing
+            // on a card whose subject is the figures above it. The arrow is what says the card
+            // presses at all, and it is still the way back out of an open report.
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
             ) {
-                Text(if (expanded) "Hide recommendations" else "View recommendations")
+                DisclosureButton(
+                    if (expanded) "Hide recommendations" else "View recommendations",
+                    expanded = expanded,
+                ) { onExpandedChange(!expanded) }
             }
 
             AnimatedVisibility(showReport) {
@@ -638,7 +655,7 @@ private fun ReportFigures(stocks: Int, calls: Int, sources: Int, traded: Int) {
                 StatTile(
                     value = value,
                     label = label,
-                    modifier = Modifier.weight(1f).padding(vertical = Space.s, horizontal = Space.xs),
+                    modifier = Modifier.weight(1f).padding(vertical = Space.xs, horizontal = Space.xs),
                     // The stock count leads, as it did before: it is the figure that says how much
                     // report there is.
                     tone = if (index == 0) {
@@ -647,6 +664,9 @@ private fun ReportFigures(stocks: Int, calls: Int, sources: Int, traded: Int) {
                         MaterialTheme.colorScheme.onSurface
                     },
                     alignment = Alignment.CenterHorizontally,
+                    // A strip that says how much report there is, over a card being scanned in a
+                    // grid of them - not the record itself, which is what the Portfolio's tiles are.
+                    dense = true,
                 )
             }
         }
@@ -920,9 +940,10 @@ private fun ResultDetail(
             saved.result.recommendations.forEach { LegacyDetail(it) }
         }
 
-        TextButton(onClick = { showTrace = !showTrace }) {
-            Text(if (showTrace) "Hide source trace" else "Source trace and diagnostics")
-        }
+        DisclosureButton(
+            if (showTrace) "Hide source trace" else "Source trace and diagnostics",
+            expanded = showTrace,
+        ) { showTrace = !showTrace }
         AnimatedVisibility(showTrace) { TraceAndDiagnostics(saved) }
     }
 

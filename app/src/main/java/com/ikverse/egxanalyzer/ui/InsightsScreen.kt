@@ -284,7 +284,7 @@ internal fun InsightsScreen(appState: AppState) {
             // The card is unfolding as this runs, and a scroll measured against a height it is
             // about to leave behind stops short of the card that was asked for.
             delay(REVEAL_SETTLE_MS)
-            reveal.bringIntoView()
+            reveal.revealIfOnScreen(appState, AppDestination.INSIGHTS)
         }
         // Built once for the page rather than searched per card. Keyed on the filtered report, so a
         // channel filter narrows the record a card quotes to the same calls the page is counting -

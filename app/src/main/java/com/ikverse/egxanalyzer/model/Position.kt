@@ -35,9 +35,33 @@ data class Position(
     val channel: String? = null,
     val entryPrice: Double,
     val entryDate: LocalDate,
-    /** The user's own selling price, set only when they record the sale. */
+    /**
+     * The user's own selling price, set only when they record the sale.
+     *
+     * One figure whether the holding went in one go or in two. A sale made in two parts stores the
+     * weighted average of its legs here and says how that was arrived at in [exitPrice1] below, so
+     * everything that measures a return, draws a ladder or adds up the record goes on reading one
+     * price and none of it has to know that a sale can have parts.
+     */
     val exitPrice: Double? = null,
+    /** The day the position was flat, which on a two-part sale is the day the second part went. */
     val exitDate: LocalDate? = null,
+    /**
+     * What the target 1 half went at, where the holding was sold in two parts.
+     *
+     * The usual way out of one of these calls is half at target 1 and the rest at target 2 - two
+     * prices, two days, still one position. These three are what a card needs to say how
+     * [exitPrice] was made up, and they are null on a sale made at a single price, which is exactly
+     * what such a sale is. There is no fourth field for the second leg's day: that is [exitDate],
+     * the day the position ended, and storing it twice would let the two disagree.
+     */
+    val exitPrice1: Double? = null,
+    /** The day the target 1 half went, which is usually well before the position closed. */
+    val exitDate1: LocalDate? = null,
+    /** What the rest of it went at, at target 2. */
+    val exitPrice2: Double? = null,
+    /** The percent of the holding that went at [exitPrice1]; the rest went at [exitPrice2]. */
+    val exitSplitPct: Double? = null,
     /** Sold by hand, whether or not the recommendation's window had closed. */
     val closedManually: Boolean = false,
     /** What the call asked for, kept so a card can show the trade against the advice. */
@@ -96,6 +120,58 @@ data class Position(
 /** The identity of a holding: one stock, one call. */
 fun positionId(ticker: String, recommendationDate: LocalDate): String =
     "$ticker@$recommendationDate"
+
+/**
+ * A sale as the user recorded it: one price and a day, or two of each.
+ *
+ * One object rather than five arguments threaded through four screens. The dialog decides what a
+ * sale is; everything between it and the stored position carries that decision without unpacking
+ * it, so there is exactly one place where a split becomes a price.
+ */
+data class Sale(
+    /** What the target 1 part went at, and on a single-price sale simply what it all went at. */
+    val price1: Double,
+    val date1: LocalDate,
+    /** What the rest went at, absent on a sale made at one price. */
+    val price2: Double? = null,
+    val date2: LocalDate? = null,
+    /** The percent that went at [price1]. A hundred is the whole holding, in one go. */
+    val splitPct: Double = FULL_SPLIT_PCT,
+) {
+    /** Two prices actually apply. A hundred percent at the first is a single-price sale. */
+    val inTwoParts: Boolean get() = price2 != null && splitPct < FULL_SPLIT_PCT
+
+    /** The one price the position closed at: the legs weighted by what went at each. */
+    val blended: Double
+        get() = price2?.takeIf { inTwoParts }?.let { blendExit(price1, it, splitPct) } ?: price1
+
+    /**
+     * The day it was flat.
+     *
+     * The later of the two rather than the second one as typed: the parts are entered together and
+     * a reader who fills them in the other way round has still not sold before they sold.
+     */
+    val closedOn: LocalDate
+        get() = date2?.takeIf { inTwoParts }?.let { maxOf(date1, it) } ?: date1
+
+    /** The day the first part went, on a sale that had one. Null where the whole lot went at once. */
+    val openedOn: LocalDate?
+        get() = date2?.takeIf { inTwoParts }?.let { minOf(date1, it) }
+}
+
+/** The whole holding at one price, and the default any sale dialog starts from being half of. */
+const val FULL_SPLIT_PCT = 100.0
+
+/**
+ * The one price a part-sold holding closed at.
+ *
+ * Rounded to the three decimals every price in this app is quoted and shown to, so the figure the
+ * record keeps is the figure the card prints rather than one float-noise digit away from it.
+ */
+fun blendExit(price1: Double, price2: Double, splitPct: Double): Double {
+    val share = (splitPct / FULL_SPLIT_PCT).coerceIn(0.0, 1.0)
+    return (price1 * share + price2 * (1 - share)).round(3)
+}
 
 /**
  * Where a position stands.
@@ -241,6 +317,16 @@ data class PositionView(
 
     /** A sale can still be recorded against any position the user has not reported selling. */
     val awaitingSale: Boolean get() = position.exitPrice == null
+
+    /**
+     * The holding went out in two parts, at two prices.
+     *
+     * Only ever a question about how [exitPrice] was arrived at. Nothing here is measured
+     * differently for one - a position sold in two goes is as closed as one sold in a single go,
+     * and its return is struck from the same one figure.
+     */
+    val soldInParts: Boolean
+        get() = position.exitPrice1 != null && position.exitPrice2 != null
 
     /** Past its deadline and still held on purpose, which is the only state the app asks about. */
     val overdue: Boolean get() = overdueDays > 0

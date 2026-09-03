@@ -95,7 +95,7 @@ internal fun OccurrenceSheet(
                     onBuy = { price, date, window ->
                         trades.buy(stock, point, channel, price, date, window)
                     },
-                    onSell = { price, date -> held?.let { trades.sell(it, price, date) } },
+                    onSell = { sale -> held?.let { trades.sell(it, sale) } },
                 )
             }
 

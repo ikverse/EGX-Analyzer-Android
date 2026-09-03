@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,6 +46,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 
@@ -166,7 +168,7 @@ private fun RecommendationCard(
         // the hairline every other card on the page is drawn with.
         border = heldBorder(held) ?: cardOutline,
     ) {
-        Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.m)) {
+        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             // The session the call was made for, from the same source the Bought button
             // reads it from, so the copied text and the trade agree about which day.
             StockHeader(stock, point, channel, page, pageCount, trades?.dateOf(point))
@@ -180,39 +182,57 @@ private fun RecommendationCard(
             point.riskRewardRatio()?.let { ratio ->
                 Text(
                     "Risk / reward  1 : ${"%.1f".format(ratio)}",
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
-            // Only where the call has a session to belong to: an occurrence the model left undated
-            // cannot be scored, so a trade filed against it would have no deadline to run to.
-            if (trades != null && trades.dateOf(point) != null) {
-                TradeAction(
-                    held = held,
-                    suggestedEntry = point.entryMidpoint(),
-                    defaultWindow = trades.windowFor(point),
-                    tPlusOne = point.isTPlusOne,
-                    onBuy = { price, date, window ->
-                        trades.buy(stock, point, channel, price, date, window)
-                    },
-                    onSell = { price, date -> held?.let { trades.sell(it, price, date) } },
-                    // Recording a purchase belongs on the card the call was read off; closing a
-                    // position does not. A sale is the end of a trade, and it is made where the
-                    // trade lives - Portfolio, or the occurrence sheet - not off a card being
-                    // scanned for what to buy next. The held and overdue chips still show here.
-                    canSell = false,
-                )
+            // A line under the figures, because the two things below it are the only parts of this
+            // card that answer a press. Everything above is the call as the channel printed it.
+            HorizontalDivider()
+
+            // One row, and the two ends of it are the two kinds of press this card offers: what it
+            // records, and what it opens. They sat on separate lines and read as two afterthoughts.
+            //
+            // A FlowRow rather than a Row, for the reason the position card's controls are one: a
+            // held call puts its status, its overdue and its price-scale pills on the left of this
+            // line, and on a cover screen three of those beside the source button is a line that
+            // has to wrap rather than one that may clip.
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
+                // Only where the call has a session to belong to: an occurrence the model left
+                // undated cannot be scored, so a trade filed against it would have no deadline to
+                // run to. A spacer holds the source button on the right where there is no trade
+                // control, rather than letting it slide into the ticker's column.
+                if (trades != null && trades.dateOf(point) != null) {
+                    TradeAction(
+                        held = held,
+                        suggestedEntry = point.entryMidpoint(),
+                        defaultWindow = trades.windowFor(point),
+                        tPlusOne = point.isTPlusOne,
+                        onBuy = { price, date, window ->
+                            trades.buy(stock, point, channel, price, date, window)
+                        },
+                        onSell = { sale -> held?.let { trades.sell(it, sale) } },
+                        // Recording a purchase belongs on the card the call was read off; closing a
+                        // position does not. A sale is the end of a trade, and it is made where the
+                        // trade lives - Portfolio, or the occurrence sheet - not off a card being
+                        // scanned for what to buy next. The held and overdue chips still show here.
+                        canSell = false,
+                    )
+                } else {
+                    Spacer(Modifier.width(0.dp))
+                }
+                // The same press the whole card already answers, said in a place the reader can
+                // aim at - and the arrow is what makes the card's own press discoverable at all.
+                DisclosureButton("Source", expanded) { expanded = !expanded }
             }
 
-            Text(
-                if (expanded) "Hide source" else "Source",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-
             AnimatedVisibility(expanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     HorizontalDivider()
                     OccurrenceDetail(point, imagePath) { viewingImage = true }
                 }
@@ -251,10 +271,10 @@ private fun StockHeader(
                 Modifier.clickable { openStock(stock.stockCode) },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                StockLogo(stock.stockCode, LogoSize.Header, Modifier.padding(end = Space.s))
+                StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
                 Text(
                     stock.stockCode,
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                 )
                 Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
@@ -286,7 +306,7 @@ private fun StockHeader(
                     // Held in a box the height of the ticker's own line and centred in it, so the
                     // dots sit against the ticker at any font scale rather than at one guessed size.
                     val tickerLine = with(LocalDensity.current) {
-                        MaterialTheme.typography.headlineSmall.lineHeight.toDp()
+                        MaterialTheme.typography.titleLarge.lineHeight.toDp()
                     }
                     Box(
                         Modifier.height(tickerLine),
@@ -393,7 +413,7 @@ private fun TimingChip(point: RecommendationDataPoint) {
  */
 @Composable
 private fun LevelGrid(point: RecommendationDataPoint) {
-    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         LevelPair(
             { Level("Entry", entryText(point), PriceRole.entry, it) },
             { Level("Stop loss", figure(point.stopLoss, point.riskPct), PriceRole.stop, it) },
@@ -441,9 +461,29 @@ private fun Level(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = tone)
+        Text(
+            value,
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontSize = LevelFigure,
+                lineHeight = LevelFigureLine,
+            ),
+            fontWeight = FontWeight.SemiBold,
+            color = tone,
+        )
     }
 }
+
+/**
+ * A step under `titleMedium`, on a line tighter than the scale gives it.
+ *
+ * Six of these are the tallest thing on the card, and the card is one of a dozen being scanned.
+ * The scale's line heights are deliberately generous because Arabic carries marks above and below
+ * the line - see `AppTypography` - and a price never does, so this is the one place where taking
+ * the line in clips nothing. Set as a copy of the role rather than as a role of its own: the face
+ * and the weight are still the scale's, and only the size is this card's business.
+ */
+private val LevelFigure = 15.sp
+private val LevelFigureLine = 18.sp
 
 @Composable
 private fun OccurrenceDetail(

@@ -153,6 +153,51 @@ class PositionSyncTest {
         assertTrue(back.position.closedManually)
     }
 
+    @Test
+    fun `a sale made in two parts travels with both of them`() {
+        val sold = revision(exitPrice = 11.5).let {
+            it.copy(
+                position = it.position.copy(
+                    exitDate = called.plusDays(9),
+                    exitPrice1 = 11.0,
+                    exitDate1 = called.plusDays(3),
+                    exitPrice2 = 12.0,
+                    exitSplitPct = 50.0,
+                ),
+            )
+        }
+
+        val back = SyncedPosition.fromDocument(sold.toDocument())
+
+        assertEquals(sold, back)
+        // The blend is what closes the position on the other device, and the legs say how it was
+        // reached - a trade that arrived carrying only the blend could no longer explain itself.
+        assertEquals(11.5, back!!.position.exitPrice!!, 0.001)
+        assertEquals(11.0, back.position.exitPrice1!!, 0.001)
+        assertEquals(12.0, back.position.exitPrice2!!, 0.001)
+        assertEquals(50.0, back.position.exitSplitPct!!, 0.001)
+        assertEquals(called.plusDays(3), back.position.exitDate1)
+        assertEquals(called.plusDays(9), back.position.exitDate)
+    }
+
+    @Test
+    fun `a sale written before parts existed arrives as the single price it was`() {
+        // What every closed trade already in the channel looks like: an exit and a date, and no
+        // word about parts. It must come back as a sale made at one price rather than as one with
+        // half its legs missing.
+        val document = JSONObject(revision(exitPrice = 11.5).toDocument()).apply {
+            listOf("exitPrice1", "exitDate1", "exitPrice2", "exitSplitPct").forEach(::remove)
+        }
+
+        val back = SyncedPosition.fromDocument(document.toString())!!.position
+
+        assertEquals(11.5, back.exitPrice!!, 0.001)
+        assertNull(back.exitPrice1)
+        assertNull(back.exitDate1)
+        assertNull(back.exitPrice2)
+        assertNull(back.exitSplitPct)
+    }
+
     /** A call the source never priced fully still travels; a missing level is not a zero. */
     @Test
     fun `absent levels come back absent rather than as zero`() {

@@ -10,6 +10,7 @@ import com.ikverse.egxanalyzer.model.ApproachState
 import com.ikverse.egxanalyzer.model.IntradayBar
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -330,6 +331,57 @@ class LocalDataStoreMigrationTest {
     }
 
     @Test
+    fun `a phone on schema 25 gains the split-exit columns and keeps the sale under them`() {
+        // 25 is where every phone holding trades is, so this is the upgrade that actually runs on
+        // a real device. The row is a closed trade, because a sale is exactly what these four
+        // columns describe and exactly what a bad migration would take with it.
+        Version25(context).writableDatabase.use { old ->
+            old.insert("positions", null, version25SoldPosition())
+        }
+
+        val restored = LocalDataStore(context).positions().single()
+
+        assertEquals("AMOC@2026-07-20", restored.id)
+        assertEquals(11.4, restored.exitPrice!!, 0.0001)
+        assertEquals(called.plusDays(3), restored.exitDate)
+        assertTrue(restored.closedManually)
+        // Null on every sale recorded before one could be made in two parts, which is what those
+        // sales were: one price, one day, the whole holding. Nothing is backfilled, because
+        // `exit_price` has always held what the position closed at.
+        assertNull(restored.exitPrice1)
+        assertNull(restored.exitDate1)
+        assertNull(restored.exitPrice2)
+        assertNull(restored.exitSplitPct)
+    }
+
+    @Test
+    fun `the upgraded table takes a sale made in two parts`() {
+        Version25(context).writableDatabase.use { old ->
+            old.insert("positions", null, version25SoldPosition())
+        }
+
+        val store = LocalDataStore(context)
+        store.savePosition(
+            store.positions().single().copy(
+                exitPrice = 11.5,
+                exitDate = called.plusDays(9),
+                exitPrice1 = 11.0,
+                exitDate1 = called.plusDays(3),
+                exitPrice2 = 12.0,
+                exitSplitPct = 50.0,
+            ),
+        )
+
+        val back = LocalDataStore(context).positions().single()
+        assertEquals(11.5, back.exitPrice!!, 0.0001)
+        assertEquals(11.0, back.exitPrice1!!, 0.0001)
+        assertEquals(12.0, back.exitPrice2!!, 0.0001)
+        assertEquals(50.0, back.exitSplitPct!!, 0.0001)
+        assertEquals(called.plusDays(3), back.exitDate1)
+        assertEquals(called.plusDays(9), back.exitDate)
+    }
+
+    @Test
     fun `a phone on schema 23 gains the two tables version 25 added and keeps its trade`() {
         // The trap this file exists for, and the one the codebase notes call out by name: a table
         // added to onCreate and not to onUpgrade gives every fresh install the table and no
@@ -392,6 +444,14 @@ class LocalDataStoreMigrationTest {
         put("close", 10.2)
         put("volume", 1_000.0)
         put("source", "Yahoo Finance")
+    }
+
+    private fun version25SoldPosition() = ContentValues().apply {
+        putAll(version23Position())
+        put("is_t_plus_one", 0)
+        put("exit_price", 11.4)
+        put("exit_date", called.plusDays(3).toString())
+        put("closed_manually", 1)
     }
 
     private fun version23Position() = ContentValues().apply {
@@ -724,6 +784,52 @@ class LocalDataStoreMigrationTest {
      * would move both sides of the test together, so the one upgrade that actually runs on a real
      * device is the one the test would quietly stop covering.
      */
+    /**
+     * The positions table as version 25 shipped it: version 23's, plus the T+1 column.
+     *
+     * Written out rather than derived from Version23 with an ALTER, for the reason this whole file
+     * exists - an "old" schema assembled out of today's migration code moves whenever that code
+     * does, and would pass through the very change that breaks a real upgrade.
+     */
+    private class Version25(context: Context) :
+        SQLiteOpenHelper(context, LocalDataStore.DATABASE_NAME, null, 25) {
+
+        override fun onCreate(db: SQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS positions (
+                    id TEXT PRIMARY KEY,
+                    ticker TEXT NOT NULL,
+                    name_en TEXT,
+                    name_ar TEXT,
+                    channel TEXT,
+                    recommendation_date TEXT NOT NULL,
+                    entry_price REAL NOT NULL,
+                    entry_date TEXT NOT NULL,
+                    exit_price REAL,
+                    exit_date TEXT,
+                    closed_manually INTEGER NOT NULL DEFAULT 0,
+                    entry_low REAL,
+                    entry_high REAL,
+                    target1 REAL,
+                    target2 REAL,
+                    stop_loss REAL,
+                    window_sessions INTEGER NOT NULL,
+                    window_custom INTEGER NOT NULL DEFAULT 0,
+                    is_t_plus_one INTEGER NOT NULL DEFAULT 0,
+                    keep_open INTEGER NOT NULL DEFAULT 0,
+                    keep_open_note TEXT,
+                    unknown TEXT NOT NULL DEFAULT '{}',
+                    opened_at INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL DEFAULT 0,
+                    updated_by TEXT NOT NULL DEFAULT '',
+                    deleted INTEGER NOT NULL DEFAULT 0
+                )""",
+            )
+        }
+
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    }
+
     private class Version23(context: Context) :
         SQLiteOpenHelper(context, LocalDataStore.DATABASE_NAME, null, 23) {
 

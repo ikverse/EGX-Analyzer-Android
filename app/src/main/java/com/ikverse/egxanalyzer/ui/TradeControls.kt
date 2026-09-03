@@ -4,18 +4,15 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AddShoppingCart
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Sell
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,7 +32,9 @@ import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.FULL_SPLIT_PCT
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
+import com.ikverse.egxanalyzer.model.Sale
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.callDate
 import com.ikverse.egxanalyzer.model.offeredTradeWindow
@@ -106,8 +105,7 @@ internal class TradeBook(
         )
     }
 
-    fun sell(view: PositionView, price: Double, date: LocalDate) =
-        appState.recordSale(view.position, price, date)
+    fun sell(view: PositionView, sale: Sale) = appState.recordSale(view.position, sale)
 }
 
 /**
@@ -160,7 +158,7 @@ internal fun TradeAction(
      */
     canSell: Boolean = true,
     onBuy: (price: Double, date: LocalDate, windowSessions: Int) -> Unit,
-    onSell: (price: Double, date: LocalDate) -> Unit,
+    onSell: (Sale) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var buying by remember { mutableStateOf(false) }
@@ -171,14 +169,7 @@ internal fun TradeAction(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (held == null) {
-            FilledTonalButton(onClick = { buying = true }) {
-                Icon(
-                    Icons.Outlined.AddShoppingCart,
-                    contentDescription = null,
-                    modifier = Modifier.size(IconSize.Inline),
-                )
-                Text("Bought", Modifier.padding(start = Space.s))
-            }
+            ActionPill("Bought", Icons.Outlined.AddShoppingCart, onClick = { buying = true })
         } else {
             PositionStatusChip(held)
             // The same warning the Portfolio card carries, on the card the trade was taken from:
@@ -190,7 +181,7 @@ internal fun TradeAction(
                 // The estimate before the live price: they are the same while the trade is open,
                 // and once the deadline has closed it the estimate is the better guess at what the
                 // user actually got out at.
-                SellButton(suggestedExit ?: held.exitPrice ?: held.currentPrice, onSell)
+                SellButton(held, suggestedExit ?: held.exitPrice ?: held.currentPrice, onSell)
             }
         }
     }
@@ -269,14 +260,12 @@ internal fun KeepOpenButton(
     modifier: Modifier = Modifier,
 ) {
     var asking by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { asking = true }, modifier = modifier) {
-        Icon(
-            Icons.Outlined.HourglassEmpty,
-            contentDescription = null,
-            modifier = Modifier.size(IconSize.Inline),
-        )
-        Text("Keep open", Modifier.padding(start = Space.s))
-    }
+    ActionPill(
+        "Keep open",
+        Icons.Outlined.HourglassEmpty,
+        onClick = { asking = true },
+        modifier = modifier,
+    )
 
     if (asking) {
         KeepOpenDialog(
@@ -340,8 +329,10 @@ private fun KeepOpenDialog(onDismiss: () -> Unit, onConfirm: (String?) -> Unit) 
  */
 @Composable
 internal fun SellButton(
+    /** The trade being closed, for the levels its own call printed. */
+    held: PositionView,
     suggestedExit: Double?,
-    onSell: (price: Double, date: LocalDate) -> Unit,
+    onSell: (Sale) -> Unit,
     modifier: Modifier = Modifier,
     /**
      * Opens the dialog without the button being pressed, for the Record sale action in the shade.
@@ -363,31 +354,190 @@ internal fun SellButton(
             onOpened()
         }
     }
-    OutlinedButton(onClick = { selling = true }, modifier = modifier) {
-        Icon(
-            Icons.Outlined.Sell,
-            contentDescription = null,
-            modifier = Modifier.size(IconSize.Inline),
-        )
-        Text("Sold", Modifier.padding(start = Space.s))
-    }
+    ActionPill("Sold", Icons.Outlined.Sell, onClick = { selling = true }, modifier = modifier)
     if (selling) {
-        TradeDialog(
-            title = "Record the sale",
-            explanation = "The price you actually sold at. The position closes now, whether or " +
-                "not the recommendation's sessions have run out.",
-            priceLabel = "Selling price",
-            dateLabel = "Selling date",
-            confirmLabel = "Close position",
-            initialPrice = suggestedExit,
+        SellDialog(
+            held = held,
+            suggestedExit = suggestedExit,
             onDismiss = { selling = false },
-            onConfirm = { price, date, _ ->
+            onConfirm = { sale ->
                 selling = false
-                onSell(price, date)
+                onSell(sale)
             },
         )
     }
 }
+
+/**
+ * The two prices a holding usually goes out at, and the share that went at each.
+ *
+ * A call names two targets and the ordinary way out of one is half at the first and the rest at the
+ * second, which is two prices on two days and one position. The dialog offers exactly that: the
+ * call's own targets prefilled, split evenly, both editable. Typing 100 into the split collapses it
+ * back to the single price and single day a sale used to be, which is why there is no second dialog
+ * and no switch to choose between them.
+ *
+ * Separate from [TradeDialog] rather than a third mode of it. That one asks a price and a day and
+ * optionally a window, and every field it has means the same thing in both of its uses; folding
+ * five fields and a conditional half into it would leave one dialog whose questions depend on which
+ * button opened it.
+ */
+@Composable
+private fun SellDialog(
+    held: PositionView,
+    suggestedExit: Double?,
+    onDismiss: () -> Unit,
+    onConfirm: (Sale) -> Unit,
+) {
+    val position = held.position
+    // The call's own targets, which is where a holder following it gets out. Today's estimate
+    // stands in where the call never printed one, so a call without targets still sells.
+    var price1 by remember {
+        mutableStateOf((position.target1 ?: suggestedExit)?.let(::formatPrice).orEmpty())
+    }
+    var price2 by remember {
+        mutableStateOf((position.target2 ?: suggestedExit)?.let(::formatPrice).orEmpty())
+    }
+    var split by remember { mutableStateOf(formatPrice(HALF_SPLIT_PCT)) }
+    var date1 by remember { mutableStateOf(LocalDate.now().toString()) }
+    var date2 by remember { mutableStateOf(LocalDate.now().toString()) }
+
+    val parsedPrice1 = price1.toPriceOrNull()
+    val parsedPrice2 = price2.toPriceOrNull()
+    val parsedSplit = remember(split) { split.toSplitOrNull() }
+    val parsedDate1 = remember(date1) { runCatching { LocalDate.parse(date1.trim()) }.getOrNull() }
+    val parsedDate2 = remember(date2) { runCatching { LocalDate.parse(date2.trim()) }.getOrNull() }
+    // The whole lot at one price is the sale this dialog collapses to, and it asks two fewer
+    // questions rather than asking them and ignoring the answers.
+    val inTwoParts = parsedSplit != null && parsedSplit < FULL_SPLIT_PCT
+    // Rejected rather than silently reordered. The two parts are typed together, so a second date
+    // before the first is a typo, and a dialog that quietly swapped them would store a day the
+    // user never gave.
+    val datesInOrder = !inTwoParts || parsedDate1 == null || parsedDate2 == null ||
+        !parsedDate2.isBefore(parsedDate1)
+    val sale = when {
+        parsedPrice1 == null || parsedSplit == null || parsedDate1 == null -> null
+        !inTwoParts -> Sale(price1 = parsedPrice1, date1 = parsedDate1)
+        parsedPrice2 == null || parsedDate2 == null || !datesInOrder -> null
+        else -> Sale(parsedPrice1, parsedDate1, parsedPrice2, parsedDate2, parsedSplit)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Record the sale") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(Space.m),
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    "The prices you actually sold at. A call names two targets and the usual way " +
+                        "out is half at the first and the rest at the second, so both are " +
+                        "offered - set the share to 100% where the whole holding went at one " +
+                        "price. The position closes now, whether or not the recommendation's " +
+                        "sessions have run out.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = price1,
+                    onValueChange = { price1 = it },
+                    label = { Text(if (inTwoParts) "Target 1 price" else "Selling price") },
+                    singleLine = true,
+                    isError = price1.isNotBlank() && parsedPrice1 == null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = date1,
+                    onValueChange = { date1 = it },
+                    label = { Text(if (inTwoParts) "Target 1 date" else "Selling date") },
+                    singleLine = true,
+                    isError = parsedDate1 == null,
+                    supportingText = { Text("YYYY-MM-DD") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = split,
+                    onValueChange = { split = it },
+                    label = { Text("Sold at this price (%)") },
+                    singleLine = true,
+                    isError = parsedSplit == null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    supportingText = {
+                        Text(
+                            when {
+                                parsedSplit == null -> "Between 1 and 100."
+                                inTwoParts -> "The rest went at the target 2 price below."
+                                else -> "The whole holding, at the one price above."
+                            },
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (inTwoParts) {
+                    OutlinedTextField(
+                        value = price2,
+                        onValueChange = { price2 = it },
+                        label = { Text("Target 2 price") },
+                        singleLine = true,
+                        isError = price2.isNotBlank() && parsedPrice2 == null,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = date2,
+                        onValueChange = { date2 = it },
+                        label = { Text("Target 2 date") },
+                        singleLine = true,
+                        isError = parsedDate2 == null || !datesInOrder,
+                        supportingText = {
+                            Text(
+                                if (!datesInOrder) {
+                                    "The second part cannot have gone before the first."
+                                } else {
+                                    "YYYY-MM-DD"
+                                },
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                // What the position will actually carry, before it carries it. Every figure on the
+                // card is measured from this one number, and a reader who has just typed two
+                // prices has no way to check it otherwise.
+                sale?.takeIf(Sale::inTwoParts)?.let { pending ->
+                    Text(
+                        "Closes at ${formatPrice(pending.blended)} - the two prices weighted " +
+                            "${formatPrice(pending.splitPct)} / " +
+                            "${formatPrice(FULL_SPLIT_PCT - pending.splitPct)}.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = sale != null,
+                onClick = { onConfirm(sale ?: return@TextButton) },
+            ) { Text("Close position") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Half the holding, which is what a call naming two targets is usually taken in. */
+private const val HALF_SPLIT_PCT = 50.0
+
+/**
+ * A share of the holding the app will actually honour, or nothing.
+ *
+ * Zero is refused along with everything outside the range: a part that is none of the holding is
+ * not a part, and it would store a second price that moved nothing.
+ */
+private fun String.toSplitOrNull(): Double? = trim().replace(',', '.').toDoubleOrNull()
+    ?.takeIf { it > 0.0 && it <= FULL_SPLIT_PCT }
 
 /**
  * A price and a date, and nothing else.

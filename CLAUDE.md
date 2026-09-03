@@ -108,6 +108,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   trade's card, and the Bought button and closing controls that sit on a recommendation card.
 - `ui/CommonUi.kt` holds `Figure` and `FigureGroup`, and `ui/DesignSystem.kt` holds `AppDates` —
   the one figure layout and the one set of date patterns, for every screen that draws either.
+  `CommonUi.kt` also holds `ActionPill` and `DisclosureButton`, the two kinds of button a card is
+  allowed to carry. See **A button on a card is one of two things** under Gotchas.
 - `ui/EgxAnalyzerApp.kt` holds `AppHeader` and `AppStatusLine` — the app's name, and the one line
   that says what it is doing or has just done. See **The status line** below.
 - `model/ScheduleClock.kt` + `model/MarketRefresh.kt` + `model/CloseSweep.kt` +
@@ -707,6 +709,20 @@ trade is then managed, in whatever state it has reached.
 - **Every percentage is measured from the user's own prices.** Closed by hand it is realized, from
   the price they gave; otherwise it is an estimate, marked at the stop, the target, or the last
   close, and labelled as an estimate.
+- **A sale can be made in two parts, because that is how one of these calls is usually taken**:
+  half the holding at target 1 and the rest at target 2, on two different days. The Sold dialog
+  offers the call's own two targets prefilled and a share that starts at 50%; typing 100 collapses
+  it back to the one price and one day a sale used to be, which is why there is no second dialog and
+  no switch between them. `Position.exitPrice` still holds **one** price - the legs weighted by the
+  split - so the return, the ladder, the win rate and every average go on reading a single figure
+  and none of them knows a sale can have parts. `exitPrice1`, `exitDate1`, `exitPrice2` and
+  `exitSplitPct` sit beside it saying how that figure was made up, and are null on a sale made at
+  one price, which is exactly what such a sale is. `exitDate` is the second leg's day rather than a
+  fifth column repeating it, since the day the position went flat and the day the last part went
+  are one fact. **The estimate for a trade with no recorded sale is deliberately untouched**: a full
+  hit is still valued at target 2. Applying the split there would silently restate the return on
+  every closed trade already on the phone, and the split is what the reader *did*, not what the call
+  said.
 - **The card draws the levels before it lists them.** `PriceLadder`, the same drawing Results and
   Insights use, with one difference that is the whole point of this tab: the entry mark is the
   price actually paid rather than the band the channel printed, and the arrow is where the trade
@@ -2058,7 +2074,7 @@ app's.
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 25. **Bumping the constant is half of it**: `session_events` was added to
+  `onUpgrade`. Currently 26. **Bumping the constant is half of it**: `session_events` was added to
   both hooks and left at 20, so a fresh install had the table and every upgrade silently did not —
   which fails at the first write and nowhere earlier. `SessionEventStoreTest` caught it. Adding it to only one of the two is the mistake that gets made:
   `CallAlertStoreTest` caught exactly that on version 19 before it shipped.
@@ -2079,7 +2095,9 @@ app's.
   one in `LocalDataStoreMigrationTest` for `is_t_plus_one` on `positions`, written against the
   version-23 table for the same reason, and version 25 has one beside it for
   `position_approach_seen` and `session_digest_announced` — the two-tables case, which is the
-  shape this trap is usually walked into
+  shape this trap is usually walked into, and version 26 has one beside *that* for the four
+  split-exit columns on `positions`, written against the version-25 table because that is where
+  every phone holding trades actually is
   — added by `ALTER`, one guard per column, so the risk
   is not that the upgrade fails but that it takes the answers already on the phone with it. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it
@@ -2245,6 +2263,27 @@ app's.
   floating edge in the app, gradient or not — the bar sits directly under the action on a compact
   screen, and an edge thicker on one of them would read as the two not matching rather than as one
   of them being the control. The colour is what separates them.
+- **A button on a card is one of two things, and its colour says which.** `ActionPill` in
+  `CommonUi.kt` is anything that changes the record — Bought, Sold, Keep open — as a `PillHeight`
+  ring in the app's own `primary` at half strength. `DisclosureButton` is anything that only opens
+  or closes a section — View / Hide recommendations, Source, Source trace — as a bare `primary`
+  label with an arrow that flips with the section. They were a filled tonal button, two outlined
+  ones and two text ones, which said that recording a purchase is a heavier act than recording a
+  sale, and put those two in one row on a position card disagreeing about it. **Three things are
+  deliberately outside the system**: the Ask AI pill, because violet is the model speaking and the
+  one hue on these screens that is not a measurement; the Analyze action, which is 56dp of teal
+  aurora and a tier above anything drawn on a card (see the entries above); and an `AlertDialog`'s
+  buttons, which are Material's convention rather than this app's. **The pills are 32dp and the
+  touch target is still 48**, through `minimumInteractiveComponentSize` — the trick the Ask AI pill
+  already used, and the reason a smaller button here costs nothing to press. Settings, Channels,
+  Backup and Schedules were left out of the pass on 2026-09-03 and still hold ~40 buttons in the
+  old mixed state.
+- **A report card opens on a press anywhere, and only while it is shut.** `Card(onClick = …,
+  enabled = !expanded)` in `SavedAnalysisCard`, with `disabledContainerColor` pinned to the same
+  fill so "disabled" does not read as greyed out. Open, that card holds the report's own toolbar,
+  its call cards and the source trace, so a card-wide toggle would close the whole report on a tap
+  landing in the gap between any two of them. The footer row — a `DisclosureButton`, which replaced
+  a full-width filled button doing the same job as the card under it — is what closes it again.
 - **A page's filters sit on a shelf, not on the page.** `FilterBar` wraps them in a
   `surfaceContainerLow` surface — deliberately a step *below* the `surfaceContainer` cards it
   filters and above the `background` well they sit on, so it reads as a shelf the controls stand on
@@ -2352,6 +2391,20 @@ app's.
   holder before the leaving page has written to it, and on the way back it restores what the
   previous fold left there. `movableContentOf` cannot reach across `HorizontalPager`'s lazy
   subcomposition. `PageState`'s own comment carries the whole reasoning.
+- **A `bringIntoView` escapes the page it was asked from.** The request travels up through every
+  scrollable ancestor, and on a phone the outermost one is `DestinationPager` — so a reveal fired
+  from a page the reader has left scrolls *that page* back into view, which is the pager travelling
+  back to the tab they were leaving. `beyondViewportPageCount = 1` is what keeps the page alive to
+  fire it: the Portfolio is still composed, and still running the effect that reveals a trade, while
+  Insights is the tab on screen. It beat a tab press rather than losing to one — `animateScrollToPage`
+  and a reveal scroll run at the same `MutatePriority`, so the later of the two wins — while a swipe
+  survived, because a drag holds the pager at `UserInput` where no reveal can take it, which is what
+  made this read as the navigation bar alone being broken. Every reveal now goes through
+  `revealIfOnScreen`, which drops the request unless `AppState.destination` is the tab the page is
+  drawn on. Three call sites: the Portfolio's trade, Insights' call, the Results report. The card is
+  left unfolded either way, and a reveal the reader has walked away from is dropped rather than held
+  for their return — the rule `NavStop` already states, that revealing the wrong card is worse than
+  revealing none.
 - Scrollbar overlays must be applied **outside** the scrolling node, or they are measured against
   the content and slide away with it.
 - `NavigationSuiteScaffoldLayout` does **not** consume window insets for its content; the full

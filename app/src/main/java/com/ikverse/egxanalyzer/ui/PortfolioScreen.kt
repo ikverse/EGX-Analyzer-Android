@@ -428,7 +428,7 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
             // The card is unfolding as this runs, and a scroll measured against a height it is about to
             // leave behind stops short of the trade that was asked for.
             delay(REVEAL_SETTLE_MS)
-            reveal.bringIntoView()
+            reveal.revealIfOnScreen(appState, AppDestination.PORTFOLIO)
         }
 
         if (shown.isEmpty()) {
@@ -646,7 +646,7 @@ private fun ColumnScope.PositionGrid(
                     onHighlightShown = jump.onRevealShown,
                     startSelling = view.position.id == jump.sellPosition,
                     onSellingShown = jump.onSellShown,
-                    onSell = { price, date -> appState.recordSale(view.position, price, date) },
+                    onSell = { sale -> appState.recordSale(view.position, sale) },
                     onEditTrade = { price, date, window ->
                         // The dialog cannot confirm with an unparsable window while it is showing
                         // the field, so the fallback is only ever reached if it stops showing one.

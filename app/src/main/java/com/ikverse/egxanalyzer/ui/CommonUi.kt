@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -24,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
@@ -33,7 +35,9 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.ui.res.painterResource
 import com.ikverse.egxanalyzer.R
 import com.ikverse.egxanalyzer.data.EgxCatalog
@@ -56,6 +60,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -516,6 +521,34 @@ private const val FlashDurationMs = 2_400L
  */
 internal const val REVEAL_SETTLE_MS = 320L
 
+/**
+ * Scrolls to a card, unless the reader has left the tab it is drawn on.
+ *
+ * A [BringIntoViewRequester]'s request travels up through every scrollable ancestor, and on a phone
+ * the outermost one is the pager holding the five tabs. Fired from a page the reader is no longer
+ * looking at, it scrolls that page back into view - which is the pager travelling back to the tab
+ * they had just left. The pager keeps its neighbours composed, so a page walked away from is still
+ * alive and still running the effect that reveals a card on it. See `DestinationPager`.
+ *
+ * It won against a tab press rather than losing to one: a press animates the pager at the same
+ * priority a reveal scrolls it, so the later of the two wins, and the reveal was the later one. A
+ * swipe survived, which is what made this look like the bar alone was broken - a drag holds the
+ * pager at a priority no reveal can take.
+ *
+ * Dropped rather than held for the reader's return, which is the rule [NavStop] already states
+ * about the trip back: revealing the wrong card is worse than revealing none, and a press answered
+ * minutes late is a card flashing for a reason nobody remembers. The section holding it is left
+ * unfolded either way, which is most of what the reveal was for.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+internal suspend fun BringIntoViewRequester.revealIfOnScreen(
+    appState: AppState,
+    tab: AppDestination,
+) {
+    if (appState.destination != tab) return
+    bringIntoView()
+}
+
 /** A single figure with its label, for wherever a screen summarises counts or totals. */
 @Composable
 internal fun StatTile(
@@ -525,23 +558,142 @@ internal fun StatTile(
     tone: Color = MaterialTheme.colorScheme.onSurface,
     /** Centred where the tile is one cell of a divided strip, so figures line up under each other. */
     alignment: Alignment.Horizontal = Alignment.Start,
+    /**
+     * A step down, for a strip that annotates a card rather than being what the card is for.
+     *
+     * The report card carries four of these over everything it says about a run, where the
+     * Portfolio's are the record itself and lead their own page. Same tile either way - a second
+     * composable for a smaller figure is how the label under one drifts from the label under the
+     * other - and the caller says which of the two jobs it is doing.
+     */
+    dense: Boolean = false,
 ) {
     Column(
         modifier,
-        verticalArrangement = Arrangement.spacedBy(Space.xs),
+        verticalArrangement = Arrangement.spacedBy(if (dense) DenseFigureGap else Space.xs),
         horizontalAlignment = alignment,
     ) {
         // The role sets the size; the figure sets its own face. Everything a tile ever holds is a
         // number, and the display face is for names.
         Text(
             value,
-            style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
+            style = if (dense) {
+                MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures)
+            } else {
+                MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures)
+            },
             color = tone,
         )
         Text(
             label.uppercase(),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Tighter than [Space.xs], which read as two facts where a dense tile is meant to read as one. */
+private val DenseFigureGap = 2.dp
+
+/**
+ * Every button on a card that changes the record: bought, sold, kept open.
+ *
+ * One shape and one colour for the three of them, because they are one kind of act. They were a
+ * filled tonal button and two outlined ones, which said that recording a purchase is a heavier
+ * thing than recording a sale - and on a position card the two sat in the same row disagreeing
+ * about it. What a card's buttons say now is what pressing costs: a ring in the app's own cyan
+ * changes something, a bare label with an arrow ([DisclosureButton]) only opens something, and
+ * violet is still the model's alone. The screen's own action keeps the teal aurora, a tier above
+ * anything drawn on a card; a dialog's buttons stay Material's, because that is a convention the
+ * app did not invent and must not fork.
+ *
+ * A ring rather than a fill, for the reason [OutlinePill] is one: a position card can carry three
+ * of these at once, and three blocks of colour compete with the figures they sit under.
+ *
+ * [PillHeight] like every other pill here, and the target under it is still the full 48dp -
+ * `minimumInteractiveComponentSize` is what separates how big a button looks from how big a
+ * fingertip is.
+ */
+@Composable
+internal fun ActionPill(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val ink = MaterialTheme.colorScheme.primary
+    Row(
+        modifier
+            .minimumInteractiveComponentSize()
+            .height(PillHeight)
+            .border(ActionRing, ink.copy(alpha = ActionRingAlpha), CircleShape)
+            // After the edge, so the ripple is bounded by the pill rather than by the row.
+            .clip(CircleShape)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = Space.m),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(IconSize.Hint))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** A hairline, so a row of these never competes with the edge of the card holding them. */
+private val ActionRing = 1.dp
+
+/**
+ * Half strength.
+ *
+ * The label is the button and the ring is only its boundary; at full strength a row of two came out
+ * as two bright wires on a dark card - the same fault the action's own edge was taken down for.
+ */
+private const val ActionRingAlpha = 0.5f
+
+/**
+ * The button that opens or closes a section of the card it sits on, and does nothing else.
+ *
+ * The arrow is the state rather than the label: down where there is more under it, up where what is
+ * under it is showing. No ring, because [ActionPill]'s ring is what says a press changes something,
+ * and a control that only moves the page must not borrow it.
+ */
+@Composable
+internal fun DisclosureButton(
+    label: String,
+    expanded: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val ink = MaterialTheme.colorScheme.primary
+    Row(
+        modifier
+            .minimumInteractiveComponentSize()
+            .height(PillHeight)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Icon(
+            if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+            contentDescription = null,
+            tint = ink,
+            modifier = Modifier.size(IconSize.Hint),
         )
     }
 }

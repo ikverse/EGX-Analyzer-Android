@@ -91,6 +91,8 @@ import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.PromptSnapshot
+import com.ikverse.egxanalyzer.model.FULL_SPLIT_PCT
+import com.ikverse.egxanalyzer.model.Sale
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.ScheduleClock
@@ -1165,10 +1167,22 @@ class AppState(
      * Immediate, whatever the recommendation's window still says: the trade is over when the user
      * says it is over, and the window only ever decided when to stop watching.
      */
-    fun recordSale(position: Position, exitPrice: Double, exitDate: LocalDate) {
+    /**
+     * Closes a position at the price - or the two prices - the user says they got.
+     *
+     * The blend is what the row carries as its exit, so every figure downstream goes on reading one
+     * price; the legs ride along beside it so the card can say how that one price was arrived at.
+     * All four are null on a sale made at a single price, which keeps such a sale byte-for-byte the
+     * row it has always been.
+     */
+    fun recordSale(position: Position, sale: Sale) {
         val closed = position.copy(
-            exitPrice = exitPrice,
-            exitDate = exitDate,
+            exitPrice = sale.blended,
+            exitDate = sale.closedOn,
+            exitPrice1 = sale.price1.takeIf { sale.inTwoParts },
+            exitDate1 = sale.openedOn,
+            exitPrice2 = sale.price2.takeIf { sale.inTwoParts },
+            exitSplitPct = sale.splitPct.takeIf { sale.inTwoParts },
             closedManually = true,
             updatedAt = System.currentTimeMillis(),
             updatedBy = deviceName,
@@ -1176,7 +1190,16 @@ class AppState(
         localDataStore.savePosition(closed)
         positions = localDataStore.positions()
         statusMessage = StatusMessage(
-            "${position.ticker} closed at ${formatPrice(exitPrice)}",
+            "${position.ticker} closed at ${formatPrice(sale.blended)}" +
+                // The parts, where there were parts. The blend alone is a price the user never
+                // typed, and a line reporting it back without saying so reads like a mistyped sale.
+                if (sale.inTwoParts) {
+                    " · ${formatPrice(sale.splitPct)}% at ${formatPrice(sale.price1)}, " +
+                        "${formatPrice(FULL_SPLIT_PCT - sale.splitPct)}% at " +
+                        formatPrice(sale.price2)
+                } else {
+                    ""
+                },
             true,
             // The one genuinely irreversible thing a reader does here, and until now the only way
             // back from a mistyped sale was Edit trade, which does not clear one. The offer lives
@@ -1187,6 +1210,15 @@ class AppState(
         publishPosition(closed, deleted = false)
         appScope.launch { recomputePortfolio() }
     }
+
+    /**
+     * The whole holding at one price, which is a sale with one part.
+     *
+     * Kept so a caller with nothing to say about parts does not have to build a [Sale] to say
+     * nothing - the `next` shell's sheet is one, and every test that closes a trade is another.
+     */
+    fun recordSale(position: Position, exitPrice: Double, exitDate: LocalDate) =
+        recordSale(position, Sale(price1 = exitPrice, date1 = exitDate))
 
     /**
      * Puts a trade back the way it was before a sale was recorded against it.
@@ -3892,7 +3924,18 @@ class AppState(
                     appendLine(
                         "- Exit: ${formatPrice(view.exitPrice)}" +
                             (position.exitDate?.let { " on $it" } ?: "") +
-                            " (${if (view.realized) "realized" else "estimated"})",
+                            " (${if (view.realized) "realized" else "estimated"})" +
+                            // A sale made in two parts says so here too. The figure above it is
+                            // the blend, and a record that printed it bare would be quoting a
+                            // price the trade was never actually done at.
+                            if (view.soldInParts) {
+                                " - ${formatPrice(position.exitSplitPct)}% at " +
+                                    "${formatPrice(position.exitPrice1)}" +
+                                    (position.exitDate1?.let { " on $it" } ?: "") +
+                                    ", the rest at ${formatPrice(position.exitPrice2)}"
+                            } else {
+                                ""
+                            },
                     )
                     appendLine("- Return: ${formatPercent(view.returnPct)}")
                     appendLine(

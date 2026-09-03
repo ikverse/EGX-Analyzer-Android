@@ -102,6 +102,55 @@ class PortfolioCalculatorTest {
     }
 
     @Test
+    fun `a sale made in two parts is realized at the blend of them`() {
+        // Half at target 1 and half at target 2 - 11 and 12 against an entry of 10, so the trade
+        // closed at 11.5 and made 15%. Neither leg is a return on its own: taking the first would
+        // report 10% on a trade that made more, and taking the second 20% on shares half of which
+        // were sold a week earlier.
+        val sold = position(entryPrice = 10.0, windowSessions = 10).copy(
+            exitPrice = 11.5,
+            exitDate = called.plusDays(9),
+            exitPrice1 = 11.0,
+            exitDate1 = called.plusDays(3),
+            exitPrice2 = 12.0,
+            exitSplitPct = 50.0,
+            closedManually = true,
+        )
+
+        val view = PortfolioCalculator.evaluate(
+            position = sold,
+            sessions = flat(12.4),
+            currentPrice = 12.4,
+        )
+
+        assertEquals(PositionStatus.CLOSED_MANUALLY, view.status)
+        assertFalse(view.open)
+        assertTrue(view.realized)
+        assertTrue(view.soldInParts)
+        // The blend, and emphatically not the latest close: the position is closed, and what the
+        // stock did afterwards belongs to whoever holds it now.
+        assertEquals(11.5, view.exitPrice!!, 0.001)
+        assertEquals(15.0, view.returnPct!!, 0.001)
+    }
+
+    @Test
+    fun `a sale made at one price says it was made at one price`() {
+        // The flag reads the legs rather than the exit, so a trade sold in a single go must not
+        // start claiming parts it never had - the card would print a second price it does not hold.
+        val sold = position(entryPrice = 10.0, windowSessions = 10)
+            .copy(exitPrice = 11.5, exitDate = called.plusDays(9), closedManually = true)
+
+        val view = PortfolioCalculator.evaluate(
+            position = sold,
+            sessions = flat(12.4),
+            currentPrice = 12.4,
+        )
+
+        assertFalse(view.soldInParts)
+        assertEquals(15.0, view.returnPct!!, 0.001)
+    }
+
+    @Test
     fun `selling by hand closes the position mid-window and realizes the return`() {
         val sold = position(entryPrice = 10.0, windowSessions = 10)
             .copy(exitPrice = 10.8, exitDate = called.plusDays(1), closedManually = true)

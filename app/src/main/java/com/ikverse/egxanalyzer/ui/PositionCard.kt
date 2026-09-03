@@ -39,9 +39,11 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.model.FULL_SPLIT_PCT
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.Sale
 import java.time.LocalDate
 
 /**
@@ -66,7 +68,7 @@ internal fun PositionCard(
     onOpenCall: (() -> Unit)?,
     highlighted: Boolean,
     onHighlightShown: () -> Unit,
-    onSell: (Double, LocalDate) -> Unit,
+    onSell: (Sale) -> Unit,
     onEditTrade: (Double, LocalDate, Int?) -> Unit,
     onKeepOpen: (keep: Boolean, note: String?) -> Unit,
     onRemove: () -> Unit,
@@ -379,6 +381,7 @@ internal fun PositionCard(
                     // likely figure the user sold at, and the estimate is already marked at the
                     // stop, the target, or the last close of the window.
                     SellButton(
+                        held = view,
                         suggestedExit = view.exitPrice ?: view.currentPrice,
                         onSell = onSell,
                         openNow = startSelling,
@@ -567,6 +570,9 @@ private fun KeptOpenChip() {
 private fun PositionView.profitLine(): String {
     val at = formatPrice(exitPrice)
     val line = when {
+        // The blend is not a price anybody typed, so the parts come first and it follows as what
+        // they came to. Printing it alone would report the trade as done at a price it never was.
+        realized && soldInParts -> "Realized · ${position.partsLine()} · average $at"
         realized -> "Realized · sold at $at" + position.exitDate.dated()
         open -> "Estimated · marked at $at" + currentPriceOn.dated()
         status == PositionStatus.STOPPED_OUT -> "Estimated · stopped at $at" + settledOn.dated()
@@ -576,6 +582,20 @@ private fun PositionView.profitLine(): String {
     }
     val disagrees = marketStatus != status
     return line + if (disagrees) " · the call itself: ${marketStatus.label.lowercase()}" else ""
+}
+
+/**
+ * The two halves of a sale, each with what it went at and the day it went.
+ *
+ * Reads in the order it happened, which is also the order the dialog asked for it: the target 1
+ * part, then the rest. Both dates are printed - the whole reason a sale has parts is that they
+ * usually happen a week or more away from each other.
+ */
+private fun Position.partsLine(): String {
+    val first = formatPrice(exitSplitPct)
+    val rest = formatPrice(FULL_SPLIT_PCT - (exitSplitPct ?: FULL_SPLIT_PCT))
+    return "sold $first% at ${formatPrice(exitPrice1)}" + exitDate1.dated() +
+        " and $rest% at ${formatPrice(exitPrice2)}" + exitDate.dated()
 }
 
 /** " on 14 Aug", or nothing at all where the session behind a price was never recorded. */

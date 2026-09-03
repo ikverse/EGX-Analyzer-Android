@@ -121,6 +121,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         db.addPositionRevisionColumns()
         db.addPositionWindowColumns()
         db.addPositionTimingColumn()
+        db.addPositionSplitExitColumns()
         db.addOpenColumn()
         db.createStockOpinions()
         db.addOpinionDetailColumns()
@@ -238,6 +239,10 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
             entry_date TEXT NOT NULL,
             exit_price REAL,
             exit_date TEXT,
+            exit_price_1 REAL,
+            exit_date_1 TEXT,
+            exit_price_2 REAL,
+            exit_split_pct REAL,
             closed_manually INTEGER NOT NULL DEFAULT 0,
             entry_low REAL,
             entry_high REAL,
@@ -328,6 +333,36 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         }
         if (!hasColumn) {
             execSQL("ALTER TABLE positions ADD COLUMN is_t_plus_one INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    /**
+     * Brings a positions table written before a sale could be made in two parts up to date.
+     *
+     * Null on every trade already on the phone, which is what those sales were: one price, one day,
+     * the whole holding. Nothing is backfilled and nothing needs to be - `exit_price` has always
+     * held what the position closed at, and these four only say how that figure was made up on the
+     * sales recorded from here on.
+     *
+     * Asked for one column at a time, for the reason the window columns are: a build that ships
+     * some of them leaves phones holding some of them, and a single guard over the first would
+     * decide the rest had arrived.
+     */
+    private fun SQLiteDatabase.addPositionSplitExitColumns() {
+        val columns = rawQuery("PRAGMA table_info(positions)", null).use { cursor ->
+            generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }.toSet()
+        }
+        if ("exit_price_1" !in columns) {
+            execSQL("ALTER TABLE positions ADD COLUMN exit_price_1 REAL")
+        }
+        if ("exit_date_1" !in columns) {
+            execSQL("ALTER TABLE positions ADD COLUMN exit_date_1 TEXT")
+        }
+        if ("exit_price_2" !in columns) {
+            execSQL("ALTER TABLE positions ADD COLUMN exit_price_2 REAL")
+        }
+        if ("exit_split_pct" !in columns) {
+            execSQL("ALTER TABLE positions ADD COLUMN exit_split_pct REAL")
         }
     }
 
@@ -429,6 +464,10 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
                 put("entry_date", position.entryDate.toString())
                 put("exit_price", position.exitPrice)
                 put("exit_date", position.exitDate?.toString())
+                put("exit_price_1", position.exitPrice1)
+                put("exit_date_1", position.exitDate1?.toString())
+                put("exit_price_2", position.exitPrice2)
+                put("exit_split_pct", position.exitSplitPct)
                 put("closed_manually", if (position.closedManually) 1 else 0)
                 put("entry_low", position.entryLow)
                 put("entry_high", position.entryHigh)
@@ -461,6 +500,10 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         entryDate = LocalDate.parse(getString(getColumnIndexOrThrow("entry_date"))),
         exitPrice = nullableDouble(getColumnIndexOrThrow("exit_price")),
         exitDate = nullableString("exit_date")?.let(LocalDate::parse),
+        exitPrice1 = nullableDouble(getColumnIndexOrThrow("exit_price_1")),
+        exitDate1 = nullableString("exit_date_1")?.let(LocalDate::parse),
+        exitPrice2 = nullableDouble(getColumnIndexOrThrow("exit_price_2")),
+        exitSplitPct = nullableDouble(getColumnIndexOrThrow("exit_split_pct")),
         closedManually = getInt(getColumnIndexOrThrow("closed_manually")) == 1,
         entryLow = nullableDouble(getColumnIndexOrThrow("entry_low")),
         entryHigh = nullableDouble(getColumnIndexOrThrow("entry_high")),
@@ -2451,6 +2494,12 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
         /**
+         * 26 is `exit_price_1`, `exit_date_1`, `exit_price_2` and `exit_split_pct` on `positions`,
+         * which say how a sale made in two parts was made up: half the holding at target 1 on one
+         * day and the rest at target 2 on another. `exit_price` still holds the one price the
+         * position closed at - the two weighted by the split - so nothing that reads a return had
+         * to learn anything, and every trade recorded before this keeps all four null, which is
+         * what a sale made at a single price is.
          * 25 is `position_approach_seen` and `session_digest_announced`, the two remaining things
          * the phone can say that nothing on disk remembered having said: where a trade stood
          * against its stop and its target 2 when the reader was last told, and which sessions'
@@ -2491,7 +2540,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 25
+        const val DATABASE_VERSION = 26
     }
 }
 

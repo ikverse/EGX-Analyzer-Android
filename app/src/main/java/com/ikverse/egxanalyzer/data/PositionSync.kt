@@ -64,6 +64,10 @@ data class SyncedPosition(
             .put("entryDate", position.entryDate.toString())
             .putOrNull("exitPrice", position.exitPrice)
             .putOrNull("exitDate", position.exitDate?.toString())
+            .putOrNull("exitPrice1", position.exitPrice1)
+            .putOrNull("exitDate1", position.exitDate1?.toString())
+            .putOrNull("exitPrice2", position.exitPrice2)
+            .putOrNull("exitSplitPct", position.exitSplitPct)
             .put("closedManually", position.closedManually)
             .putOrNull("entryLow", position.entryLow)
             .putOrNull("entryHigh", position.entryHigh)
@@ -85,7 +89,8 @@ data class SyncedPosition(
     companion object {
         private val KNOWN = setOf(
             "id", "ticker", "companyEnglish", "companyArabic", "channel", "recommendationDate",
-            "entryPrice", "entryDate", "exitPrice", "exitDate", "closedManually", "entryLow",
+            "entryPrice", "entryDate", "exitPrice", "exitDate", "exitPrice1", "exitDate1",
+            "exitPrice2", "exitSplitPct", "closedManually", "entryLow",
             "entryHigh", "target1", "target2", "stopLoss", "windowSessions", "windowCustom",
             "isTPlusOne", "keepOpen", "keepOpenNote", "openedAt", "updatedAt", "updatedBy",
             "deleted",
@@ -109,6 +114,14 @@ data class SyncedPosition(
                     entryDate = LocalDate.parse(json.getString("entryDate")),
                     exitPrice = json.optionalDouble("exitPrice"),
                     exitDate = json.optionalString("exitDate")?.let(LocalDate::parse),
+                    // All four absent on a sale made at one price, and on every sale recorded
+                    // before one could be made in two. `exitPrice` carries what the position
+                    // closed at either way, so a device reading this without them loses how the
+                    // figure was made up and never the figure.
+                    exitPrice1 = json.optionalDouble("exitPrice1"),
+                    exitDate1 = json.optionalString("exitDate1")?.let(LocalDate::parse),
+                    exitPrice2 = json.optionalDouble("exitPrice2"),
+                    exitSplitPct = json.optionalDouble("exitSplitPct"),
                     closedManually = json.optBoolean("closedManually", false),
                     entryLow = json.optionalDouble("entryLow"),
                     entryHigh = json.optionalDouble("entryHigh"),
