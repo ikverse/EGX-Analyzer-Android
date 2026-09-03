@@ -6,13 +6,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -135,17 +133,11 @@ private val ChevronGutter: Dp = IconSize.Action
 /**
  * The leading column a control stands in, as wide as the widest of them.
  *
- * A switch is 52dp and a checkbox draws 20dp inside a 48dp touch target, so left to themselves the
- * two put their labels 16dp apart on a page that reads as one list of settings. One column instead,
- * and both labels start at the same place.
+ * A switch is 52dp wide, and every setting here is now one. The column is kept rather than folded
+ * into the switch's own width so that a row built by hand - a button, a slider - can stand in the
+ * same place and start its label where the switch rows start theirs.
  */
 private val ControlColumn: Dp = 52.dp
-
-/**
- * How far inside its own touch target a checkbox draws its box: half the gap between the 48dp
- * target Material gives it and the 20dp square it actually paints.
- */
-private val CheckboxInset: Dp = (48.dp - 20.dp) / 2
 
 /**
  * One line of a settings card: whatever the control is, and its explanation in the card's gutter.
@@ -174,20 +166,14 @@ internal fun SettingRow(
 /**
  * A setting that is on or off, its name, and where its explanation went.
  *
- * Written once because it was written fifteen times: a `Row` holding a `Checkbox` and a `Text`,
- * then a paragraph underneath in `bodySmall` and `onSurfaceVariant`. The paragraph is now [about]
- * and the row is now level - the fifteen hand-built ones had drifted into a checkbox leading here,
- * a switch trailing there, and two different gaps between the control and its label.
+ * Written once because it was written fifteen times: a `Row` holding a control and a `Text`, then a
+ * paragraph underneath in `bodySmall` and `onSurfaceVariant`. The paragraph is now [about] and the
+ * row is now level - the fifteen hand-built ones had drifted into a control leading here, one
+ * trailing there, and two different gaps between the control and its label.
  *
- * The control leads in every case, switch or checkbox. Which of the two is used says how heavy the
- * setting is, not where it sits: a switch is for something that arms the phone to act on its own,
- * which is the distinction `SchedulesSection` drew and the reason it is kept.
- *
- * **The checkbox is drawn [CheckboxInset] to the left of where Material puts it.** That padding is
- * inside its touch target, so a card whose buttons, text and sliders all start at the card's own
- * edge had its checkboxes starting 14dp further in - the one thing on the page that did not line up
- * with the rest of it. The target keeps its full 48dp and simply overhangs the card's own padding
- * by that much, so nothing about pressing it changes.
+ * **The control is a switch in every case.** It used to be a checkbox unless the setting armed the
+ * phone to act on its own, which is a distinction the page could not carry: two shapes of control
+ * down one list of settings read as two kinds of list, not as heavy settings and light ones.
  *
  * @param about absent for a setting whose label is the whole of it. Most have one; "Text messages"
  *   in the content-type list does not, and giving it a question mark to open two words would be
@@ -200,26 +186,11 @@ internal fun SettingToggle(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     about: InfoNote? = null,
-    /** A switch instead of a checkbox, for a setting that lets the phone act while nobody is looking. */
-    switch: Boolean = false,
     enabled: Boolean = true,
 ) {
     SettingRow(modifier, about) {
         Box(Modifier.width(ControlColumn), contentAlignment = Alignment.CenterStart) {
-            if (switch) {
-                Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
-            } else {
-                // Shifted rather than resized. Forcing the target's size from outside would put
-                // the constraints on the wrong side of the padding Material applies inside it, and
-                // the box would be drawn against the top-left corner of the cell instead of in the
-                // middle of it - a checkbox riding a few pixels high on every row.
-                Checkbox(
-                    checked = checked,
-                    onCheckedChange = onCheckedChange,
-                    enabled = enabled,
-                    modifier = Modifier.offset(x = -CheckboxInset),
-                )
-            }
+            Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
         }
         Text(
             label,

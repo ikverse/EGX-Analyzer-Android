@@ -57,7 +57,6 @@ internal fun GeneratedPromptSection(appState: AppState) {
             label = "Use the default prompt only",
             checked = appState.useDefaultPromptOnly,
             onCheckedChange = appState::usePromptDefaultOnly,
-            switch = true,
             about = infoNote(
                 "Use the default prompt only",
                 "Sends the shipped prompt untouched.",

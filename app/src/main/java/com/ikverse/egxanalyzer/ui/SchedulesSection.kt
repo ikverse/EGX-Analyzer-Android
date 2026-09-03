@@ -183,14 +183,12 @@ internal fun SchedulesSettingsSection(appState: AppState, contentMaxWidth: Dp) {
                 )
             }
         }
-        // A switch rather than a checkbox, and deliberately last: letting the phone keep a time
-        // says nothing about letting it spend money at that time, and arming the clock to spend
-        // later is the same act as spending.
+        // Deliberately last: letting the phone keep a time says nothing about letting it spend
+        // money at that time, and arming the clock to spend later is the same act as spending.
         SettingToggle(
             label = "Allow runs that spend cloud credits",
             checked = appState.paidSchedulesEnabled,
             onCheckedChange = appState::updatePaidSchedulesEnabled,
-            switch = true,
             about = infoNote(
                 "Allow runs that spend cloud credits",
                 "Off, a run that came due is passed over and says so rather than being made " +
