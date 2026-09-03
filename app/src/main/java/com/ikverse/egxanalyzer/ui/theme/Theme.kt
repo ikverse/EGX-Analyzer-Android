@@ -225,6 +225,28 @@ data class ExtraColors(
     val actionAurora: List<Color>,
 
     /**
+     * The same aurora, painted through the app's own mark in the header and the rail.
+     *
+     * The mark was one flat `primary` glyph, which is what the launcher tile was reduced to when it
+     * moved out of the rail. This gives it the light the action already carries, on a twelve-second
+     * sweep that reverses - long enough that it is ambience rather than an animation, and slow
+     * enough that chrome which never leaves the screen never catches the eye.
+     *
+     * **The aurora's own hues, in the aurora's own order, and no new hue enters the palette.** That
+     * is the whole reason this is the aurora rather than something invented for the mark: cyan is
+     * already the app's voice, and every other family here is spoken for - green a target, red a
+     * stop, blue a price the market reached, amber out of time, violet the model speaking. A mark in
+     * any of those would be the app's name claiming one of its own signals.
+     *
+     * **Opaque, where [actionAurora] is not**, and that is the one difference. Those stops are three
+     * soft circles drifting over a ground at 0.84, so they are kept low or the busy parts of the
+     * sweep read as more solid than the button. These are painted *through* a 24dp glyph with
+     * `SrcIn`: there is nothing behind them to show through, and a mark at two thirds strength is
+     * simply a dimmer mark.
+     */
+    val markAurora: List<Color>,
+
+    /**
      * The hairline the action wears while a run is going, in place of the neutral outline.
      *
      * One value for both themes, for the same reason [aiOnFill] is white in both: [aiAction] runs
@@ -277,6 +299,9 @@ internal val DarkExtras = ExtraColors(
     actionGlow = Color(0xFF5DD4E8),
     actionAuroraBase = Color(0xD6072A3E),
     actionAurora = listOf(Color(0x6B5DD4E8), Color(0x5C4C9DF0), Color(0x9E0B6D7F)),
+    // The aurora's three hues at full strength: the cyan the mark already wore, the blue that means
+    // a price the market reached, and the deep teal the action's ground is built from.
+    markAurora = listOf(Color(0xFF5DD4E8), Color(0xFF4C9DF0), Color(0xFF0B6D7F)),
     aiStop = Color(0xFFFF8A80),
     aiLine = listOf(Color(0xFF9E8AF0), Color(0xFFB98ADD), Color(0xFFDE86B4)),
     aiText = Color(0xFFB9A3F2),
@@ -313,6 +338,9 @@ internal val LightExtras = ExtraColors(
     // The light theme's market blue in the middle stop, for the reason the dark theme's is its own:
     // #4C9DF0 was picked to read on black.
     actionAurora = listOf(Color(0x6B3FB4CE), Color(0x5C1668C7), Color(0x9E0A5C6C)),
+    // This theme's own three, for the reason the aurora above takes this theme's own: the mark sits
+    // on a near-white header here, and the dark theme's #5DD4E8 on it is barely a mark at all.
+    markAurora = listOf(Color(0xFF3FB4CE), Color(0xFF1668C7), Color(0xFF0A5C6C)),
     aiStop = Color(0xFFFF8A80),
     // The fill's own stops, unlike the dark theme: here the line has to be darker than the card,
     // which is the same direction the fill goes.

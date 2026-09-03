@@ -11,6 +11,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
@@ -30,6 +36,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -76,9 +83,11 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.CancellationException
@@ -92,11 +101,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
@@ -105,9 +122,12 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.R
+import com.ikverse.egxanalyzer.ui.theme.extraColors
+import kotlin.math.roundToInt
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import androidx.window.layout.WindowLayoutInfo
@@ -191,6 +211,19 @@ fun EgxAnalyzerApp(appState: AppState) {
     appState.openStockTicker?.let { ticker ->
         StockSheet(ticker, appState, onDismiss = appState::closeStock)
     }
+    // Whether the header is on screen, worked out once above both shells.
+    //
+    // It leaves on the same scroll that takes the floating pill and comes back with it, and it stays
+    // put whenever the app has something to say - the status line lives in it, so a message landing
+    // on a scrolled page would otherwise be announced off screen.
+    //
+    // Read here rather than inside `AppContent` because the rail's mark travels against the same
+    // signal from outside the header entirely (see the rail branch below), and two copies of this
+    // rule would let the two part company mid-travel. It costs the shell nothing that was not
+    // already being paid: `AppContent` has always read both of these properties.
+    val headerVisible = navBarVisible.value ||
+        appState.busyLabel != null ||
+        appState.statusMessage != null
     // What each page has open lives on AppState rather than anywhere below this line - see
     // PageState, which explains why the two shells below cannot hold it between them.
     CompositionLocalProvider(
@@ -203,25 +236,80 @@ fun EgxAnalyzerApp(appState: AppState) {
         LocalOpenStock provides remember(appState) { appState::openStock },
     ) {
         if (rail) {
-            NavigationSuiteScaffoldLayout(
-                navigationSuite = { AppRail(appState) },
-                navigationSuiteType = NavigationSuiteType.NavigationRail,
-            ) {
-                // The suite scaffold used to paint this; the layout does not. Without it the window
-                // background shows through behind the status and navigation bars as a pale band. It
-                // is the chrome colour rather than the page's, because this is what shows behind the
-                // system bars, and through the rounded corners where the page stops short of them.
-                Surface(
-                    // The layout does not do this for us the way the full NavigationSuiteScaffold
-                    // does, and without it the page keeps clear of the gesture strip that the rail
-                    // beside it is already holding: a second empty band, the width of the strip, in
-                    // the chrome colour, between the bottom of the page and the first row of icons.
-                    Modifier.fillMaxSize().consumeWindowInsets(
-                        NavigationRailDefaults.windowInsets.only(WindowInsetsSides.Start),
-                    ),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
+            // **The mark does not leave with the header here.** On the phone the header collapses
+            // and takes the name, the status line and the mark up out of the window together, which
+            // is right: there is nowhere else on that layout for a mark to be. Beside a rail there
+            // is - the rail's own top gap, which `RailTopInset` already holds open so that the rail
+            // reads as the header band turning the corner. With the band gone the mark is what is
+            // left holding that corner, so it travels left into the gap and stays put there, at the
+            // height it already had, rather than vanishing along with the words.
+            //
+            // It is therefore drawn **here** and not in the header: it has to outlive a collapse,
+            // and it has to cross the start edge of the content pane, which is exactly where the
+            // rail ends and what the pane clips at.
+            var railWidth by remember { mutableIntStateOf(0) }
+            var shellOrigin by remember { mutableStateOf(Offset.Zero) }
+            // Where the header holds the mark's place. Window coordinates, measured off the slot the
+            // header leaves rather than worked out from its paddings: a figure derived from the
+            // header's own arithmetic would be wrong the first time a status line, a font scale or a
+            // cutout changed how tall that row is. Null until the first layout, and nothing is drawn
+            // until then - a mark placed at the origin for one frame is a glyph flashing in the
+            // corner of every cold start.
+            var markAnchor by remember { mutableStateOf<Offset?>(null) }
+            val markSize = with(density) { AppMarkSize.roundToPx() }
+            Box(Modifier.fillMaxSize().onGloballyPositioned { shellOrigin = it.positionInWindow() }) {
+                NavigationSuiteScaffoldLayout(
+                    navigationSuite = {
+                        AppRail(appState, Modifier.onSizeChanged { railWidth = it.width })
+                    },
+                    navigationSuiteType = NavigationSuiteType.NavigationRail,
                 ) {
-                    AppContent(appState, rail = true)
+                    // The suite scaffold used to paint this; the layout does not. Without it the
+                    // window background shows through behind the status and navigation bars as a
+                    // pale band. It is the chrome colour rather than the page's, because this is
+                    // what shows behind the system bars, and through the rounded corners where the
+                    // page stops short of them.
+                    Surface(
+                        // The layout does not do this for us the way the full NavigationSuiteScaffold
+                        // does, and without it the page keeps clear of the gesture strip that the
+                        // rail beside it is already holding: a second empty band, the width of the
+                        // strip, in the chrome colour, between the bottom of the page and the first
+                        // row of icons.
+                        Modifier.fillMaxSize().consumeWindowInsets(
+                            NavigationRailDefaults.windowInsets.only(WindowInsetsSides.Start),
+                        ),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                    ) {
+                        AppContent(
+                            appState,
+                            rail = true,
+                            headerVisible = headerVisible,
+                            // Recorded only while the header is at rest showing. It reports on every
+                            // layout pass, and a collapse is a run of them: left ungated, the anchor
+                            // would be dragged upward frame by frame as the header left, and the
+                            // mark would set off from wherever the header had got to rather than
+                            // from where it sits.
+                            onMarkAnchor = { if (headerVisible) markAnchor = it },
+                        )
+                    }
+                }
+                val anchor = markAnchor
+                if (anchor != null && railWidth > 0) {
+                    // Only x moves. The mark keeps the height it has in the header, which is what
+                    // puts it in the rail's top gap rather than level with the first destination.
+                    val restX = (railWidth - markSize) / 2
+                    val travelled by animateIntAsState(
+                        if (headerVisible) (anchor.x - shellOrigin.x).roundToInt() else restX,
+                        // The header's own tween, so the two are one movement rather than two
+                        // pieces of chrome leaving at slightly different moments.
+                        animationSpec = tween(HeaderMoveMilliseconds),
+                        label = "mark travel",
+                    )
+                    AppMark(
+                        Modifier.offset {
+                            IntOffset(travelled, (anchor.y - shellOrigin.y).roundToInt())
+                        },
+                    )
                 }
             }
         } else {
@@ -234,7 +322,9 @@ fun EgxAnalyzerApp(appState: AppState) {
                     Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.surfaceContainer,
                 ) {
-                    AppContent(appState, rail = false)
+                    // No anchor: on this layout the mark is drawn inside the header and leaves with
+                    // it, because there is no rail for it to travel into.
+                    AppContent(appState, rail = false, headerVisible = headerVisible)
                 }
                 FloatingNavBar(appState, Modifier.align(Alignment.BottomCenter))
             }
@@ -301,10 +391,15 @@ private val AppMarkSize = 24.dp
 /**
  * Says which app this is, and what it is doing, above whatever page is showing.
  *
- * Fixed, where the page titles under it scroll away with their content: a name that goes with them
- * leaves the top of a long page saying nothing at all. The mark is the launcher artwork reduced to
- * one colour: the full tile in the rail read as a sticker among the flat navigation glyphs, and it
- * only ever appeared on the wide layout, where this says the same thing on both.
+ * It leaves on the same scroll that takes the navigation and comes back with it, on both layouts -
+ * see the call site, which explains why one signal drives the two. The mark is the launcher artwork
+ * reduced to a single shape: the full tile in the rail read as a sticker among the flat navigation
+ * glyphs, and it only ever appeared on the wide layout, where this says the same thing on both.
+ *
+ * @param onMarkAnchor given beside a rail, and what makes the mark outlast this header. The row
+ *   holds the mark's place open with a spacer and reports where that place is; the shell draws the
+ *   real mark over the top and slides it into the rail as this collapses. Null on the phone, where
+ *   the mark is drawn inline and leaves with everything else.
  *
  * **The status line lives here now**, where a floating toast used to carry it. Two things put it
  * here. It was the only piece of chrome that had to be lifted clear of the navigation bar and
@@ -316,7 +411,11 @@ private val AppMarkSize = 24.dp
  * @see AppStatusLine for what it draws, and [StatusStage] for how long each kind stays.
  */
 @Composable
-private fun AppHeader(appState: AppState, onDismissStatus: () -> Unit) {
+private fun AppHeader(
+    appState: AppState,
+    onDismissStatus: () -> Unit,
+    onMarkAnchor: ((Offset) -> Unit)? = null,
+) {
     // A step up from the page it sits on, which separates it without a rule underneath as well.
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         // The window's own width, not this header's, and not measured again here: the shell already
@@ -332,13 +431,18 @@ private fun AppHeader(appState: AppState, onDismissStatus: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    painterResource(R.drawable.ic_egx_notification),
-                    // The name is right beside it, and a reader announcing both says it twice.
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(AppMarkSize),
-                )
+                if (onMarkAnchor == null) {
+                    AppMark()
+                } else {
+                    // The mark's place, held open so the name and the status line sit exactly where
+                    // they would with the glyph in the row. The glyph itself is drawn by the shell,
+                    // over this, and reported to it from here.
+                    Spacer(
+                        Modifier
+                            .size(AppMarkSize)
+                            .onGloballyPositioned { onMarkAnchor(it.positionInWindow()) },
+                    )
+                }
                 Text(
                     stringResource(R.string.app_name),
                     style = MaterialTheme.typography.titleLarge,
@@ -368,6 +472,87 @@ private fun AppHeader(appState: AppState, onDismissStatus: () -> Unit) {
         }
     }
 }
+
+/**
+ * The app's own mark, with the aurora moving through it.
+ *
+ * One composable for both layouts: inline in the phone's header, and drawn over the shell on the
+ * wide one so it can outlive the header and travel into the rail. A second copy for the travelling
+ * one is how the two would end up different marks.
+ *
+ * **The gradient is painted through the glyph rather than into the asset.** `ic_egx_notification` is
+ * a one-colour vector and stays one; the layer below it is drawn, then a rectangle of the brush is
+ * laid over it with `SrcIn`, which keeps the brush inside whatever the vector covers. The offscreen
+ * compositing strategy is not optional - without a layer for the blend to be confined to, that
+ * rectangle lands over the header instead of inside the mark.
+ *
+ * **`phase` is read inside the draw lambda, and that is what makes a permanent animation
+ * affordable.** This is chrome that never leaves the screen, so the sweep runs for as long as the
+ * app is in front - and a state read in the composition phase would recompose the header, and
+ * everything the header's own recomposition reaches, on every frame of it. Read here the invalidation
+ * is confined to the draw phase: a frame costs one 24dp glyph redrawn and no recomposition at all.
+ * `arrivalFlash` in `CommonUi` makes the same argument from the other end, by composing itself only
+ * while it is wanted.
+ *
+ * The tint underneath is the flat `primary` this mark used to be. Nothing normally sees it, since
+ * `SrcIn` replaces it wholesale; it is what the mark falls back to rather than a blank space if the
+ * blend is ever refused.
+ */
+@Composable
+private fun AppMark(modifier: Modifier = Modifier) {
+    val hues = extraColors.markAurora
+    val sweep = rememberInfiniteTransition(label = "mark aurora")
+    val phase by sweep.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            // Eased rather than linear, because it reverses: a linear ramp changes direction at the
+            // turn hard enough to be the one frame of this that catches the eye.
+            tween(MarkSweepMilliseconds, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "sweep",
+    )
+    Icon(
+        painterResource(R.drawable.ic_egx_notification),
+        // The name is right beside it, and a reader announcing both says it twice.
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.primary,
+        modifier = modifier
+            .size(AppMarkSize)
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                // A ramp several times the glyph, slid diagonally across it, so what a reader sees
+                // is colour travelling *through* the mark. A ramp the size of the mark would change
+                // the whole glyph's hue at once, which reads as a light being switched rather than
+                // as one moving.
+                val span = size.maxDimension * MarkSweepSpan
+                val at = -span + (size.maxDimension + span) * phase
+                drawRect(
+                    Brush.linearGradient(
+                        colors = hues,
+                        start = Offset(at, at),
+                        end = Offset(at + span, at + span),
+                    ),
+                    blendMode = BlendMode.SrcIn,
+                )
+            },
+    )
+}
+
+/**
+ * Twelve seconds each way, and deliberately that slow.
+ *
+ * This is on chrome that is always on screen, so the test it has to pass is that a reader never
+ * catches it moving - they look up and the mark is a different colour from the one they remember.
+ * Anything brisk enough to be seen as an animation would be the app's own name flashing beside a
+ * page of figures, which is the last place in this app that should.
+ */
+private const val MarkSweepMilliseconds = 12_000
+
+/** How many marks wide the ramp is. Enough that no more than one of its three hues is ever inside. */
+private const val MarkSweepSpan = 3f
 
 /**
  * How long the header takes to leave or return.
@@ -519,11 +704,15 @@ private val StatusGlyphSize = 14.dp
 private val RailItemGap = 16.dp
 
 @Composable
-private fun AppRail(appState: AppState) {
+private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
     // Material leaves a rail the page's own colour; this one carries the header's, so the two meet
     // as one piece of chrome around the page rather than as a rail that has vanished into it.
-    // Destinations only - the app's mark is in the header, where both layouts have one.
-    NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+    // Destinations only - the app's mark is drawn over this rather than in it, so that it can be in
+    // the header while there is one and here once the header has gone. See the rail shell.
+    NavigationRail(
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
         Spacer(Modifier.height(RailTopInset))
         AppDestination.entries.forEachIndexed { index, destination ->
             if (index > 0) Spacer(Modifier.height(RailItemGap))
@@ -670,7 +859,12 @@ private fun NavigationIcon(
 }
 
 @Composable
-private fun AppContent(appState: AppState, rail: Boolean) {
+private fun AppContent(
+    appState: AppState,
+    rail: Boolean,
+    headerVisible: Boolean,
+    onMarkAnchor: ((Offset) -> Unit)? = null,
+) {
     // Arriving somewhere new with the navigation still hidden reads as the bar having gone missing,
     // and the page that hid it is no longer on screen to bring it back.
     val navBarVisible = LocalNavBarVisible.current
@@ -707,12 +901,14 @@ private fun AppContent(appState: AppState, rail: Boolean) {
             // so a message landing on a page that has been scrolled down would otherwise be
             // announced off screen - and a failure is the one kind that arrives unbidden.
             //
-            // Beside a rail it never hides at all: there is no pill there to leave with, `Screen`
-            // writes the flag regardless of layout, and a header that vanished on its own on the
-            // wide layout would be the only thing moving.
-            val speaking = appState.busyLabel != null || appState.statusMessage != null
+            // **Beside a rail it hides too.** It did not, on the reasoning that there is no pill
+            // over there to leave with and a header vanishing alone would be the only thing moving -
+            // which was true of a header that left alone, and stopped being true once the mark
+            // survived it. `Screen` has always written the flag regardless of layout, so the wide
+            // layout needed nothing new to drive this; what it needed was somewhere for the mark to
+            // go, and the rail's own top gap is it. See the rail shell.
             AnimatedVisibility(
-                visible = rail || navBarVisible.value || speaking,
+                visible = headerVisible,
                 // A short tween rather than the default spring, and the reason is not the look of
                 // it. This animates the height of the page below, so every frame of it moves the
                 // extent that `Screen`'s watcher is reading - and that watcher stands down for as
@@ -724,7 +920,11 @@ private fun AppContent(appState: AppState, rail: Boolean) {
                 exit = shrinkVertically(tween(HeaderMoveMilliseconds), shrinkTowards = Alignment.Top) +
                     fadeOut(tween(HeaderMoveMilliseconds)),
             ) {
-                AppHeader(appState, onDismissStatus = appState::consumeStatusMessage)
+                AppHeader(
+                    appState,
+                    onDismissStatus = appState::consumeStatusMessage,
+                    onMarkAnchor = onMarkAnchor,
+                )
             }
             // Above the well rather than inside it, so a run starting does not push the rounded
             // edge down the screen. The bar carries no label any more - the header above it names

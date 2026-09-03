@@ -6,8 +6,6 @@ import com.ikverse.egxanalyzer.model.timing
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
@@ -60,6 +58,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -90,6 +89,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -344,9 +344,25 @@ private val SavedRunMinWidth = 300.dp
  * Enough to read as a second card and no more. The inset is what makes it read as behind rather
  * than beside: an edge running the full height of the card in front is a border, not a card under
  * it, so the card behind is held down from the top while it shows past the bottom.
+ *
+ * It was 6dp and 8dp and read as neither. Both cards are `surfaceContainer` with the same hairline,
+ * so six units of a second one against the page is a slab with a line through it - the mistake the
+ * filter shelf made with `surfaceContainerLow` on this palette, where six units of difference reads
+ * as one continuous ground rather than two surfaces. Widening alone would have made a fatter
+ * border; what separates them is [StackBackAlpha].
  */
-private val StackEdgeDepth = 6.dp
-private val StackEdgeInset = 8.dp
+private val StackEdgeDepth = 10.dp
+private val StackEdgeInset = 10.dp
+
+/**
+ * How solid the card behind is drawn, once it is a whole page back.
+ *
+ * Depth is dimness. It is the half of the peek that says the strip is a card lying under this one
+ * rather than an edge drawn around it, and it is what stops two identical fills meeting at a
+ * hairline. Interpolated on the same distance the offset and the shrink use, so a card coming
+ * forward gains its weight back over exactly the travel it gains its size back over.
+ */
+private const val StackBackAlpha = 0.6f
 
 /**
  * How big the card behind is drawn, as a fraction of the one in front, and how far the card being
@@ -567,6 +583,13 @@ private fun SavedRunStack(
     // halts it dead, which on a short flick - the way a stack of two or three is actually read - is
     // most of what read as stiff. A spring damped just under one lands it without a bounce a reader
     // would have to watch twice to be sure of.
+    // The one number the whole stack is drawn from: the cards' transforms, the dots' marker and the
+    // line of type beside it all read this, so nothing on screen can report a different swipe from
+    // anything else. Built once per stack rather than per card - three cards each holding their own
+    // reader of one pager is three things to keep in step.
+    val stackPosition = remember(pager, runs.size) {
+        StackPosition(runs.size) { pager.currentPage + pager.currentPageOffsetFraction }
+    }
     val fling = PagerDefaults.flingBehavior(
         state = pager,
         snapAnimationSpec = spring(
@@ -601,7 +624,10 @@ private fun SavedRunStack(
             card(
                 saved,
                 expanded,
-                StackPosition(page, runs.size),
+                // The stack's own position and not this card's page, so every card in it reads the
+                // same gesture: what the dots report is where the stack stands, which is the one
+                // thing a card behind and a card in front cannot disagree about.
+                stackPosition,
                 if (expanded) {
                     // An open report is as tall as its report. Holding it to the shut cards' floor
                     // would be measuring it against something it is not.
@@ -640,8 +666,14 @@ private fun SavedRunStack(
                                 // Everything further back than the first card behind sits at that
                                 // same resting offset, exactly covered by it. Drawing the rest of a
                                 // long stack there is a pile of full-height cards redrawn every
-                                // frame for pixels nobody can see.
-                                alpha = if (distance > 1.5f) 0f else 1f
+                                // frame for pixels nobody can see. What is still drawn dims as it
+                                // goes back, which is what makes the strip read as a card under
+                                // this one rather than a border around it.
+                                alpha = if (distance > 1.5f) {
+                                    0f
+                                } else {
+                                    1f - (1f - StackBackAlpha) * t
+                                }
                             } else {
                                 // In front, on its way out: it slides as the pager takes it, lifts
                                 // fractionally, and fades on a squared curve so it has gone by
@@ -667,10 +699,16 @@ private fun SavedRunStack(
     }
 }
 
-/** Which reading of a session a card is, for the dots and the line of type beside them. */
-private data class StackPosition(val page: Int, val count: Int)
+/**
+ * Where the stack stands, for the dots and the line of type beside them.
+ *
+ * A live position rather than this card's own page number, because the readout is the gesture: the
+ * marker travels with the cards on the same fraction they move on, and the words turn over as it
+ * crosses the halfway mark. A lambda for the reason the cards' transforms are read in their layer -
+ * read as a value, every card of every stack would recompose for each frame of a drag.
+ */
+private class StackPosition(val count: Int, val position: () -> Float)
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SavedAnalysisCard(
     modifier: Modifier = Modifier,
@@ -777,35 +815,41 @@ private fun SavedAnalysisCard(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    // Which reading this is and whether a later one has covered it are one
-                    // thought, so they are one line: the dots, the count in words, then the pill.
-                    // Inside the card rather than on a strip over it - a strip would be a second
-                    // heading for something the card is already titled with, and would sit at a
-                    // different height on every grid row pairing a stacked day with a single-run
-                    // one. A `FlowRow` because on a cover-screen card there is not room for all
-                    // three, and a pill dropping to a second line is better than one clipped.
-                    if (stack != null || newerRunExists) {
-                        FlowRow(
-                            Modifier.padding(top = Space.xs),
-                            horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                            verticalArrangement = Arrangement.spacedBy(Space.xs),
-                            itemVerticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            stack?.let {
-                                PageDots(it.page, it.count)
-                                Text(
-                                    "Run ${it.page + 1} of ${it.count}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            // Only where a later run covered the same session. A re-run leaves an
-                            // older report looking exactly as current as the newest one, which is
-                            // the same trap the unreadable notice exists for. Worded as a fact
-                            // rather than "superseded": an older run keeps the chats the newer one
-                            // never read, which is how the scoring treats it too.
-                            if (newerRunExists) StatusPill("Newer run exists")
-                        }
+                    // Only where a later run covered the same session. A re-run leaves an older
+                    // report looking exactly as current as the newest one, which is the same trap
+                    // the unreadable notice exists for. Worded as a fact rather than "superseded":
+                    // an older run keeps the chats the newer one never read, which is how the
+                    // scoring treats it too.
+                    if (newerRunExists) {
+                        Box(Modifier.padding(top = Space.xs)) { StatusPill("Newer run exists") }
+                    }
+                }
+                // Which reading of the session this card is, kept up here beside the menu rather
+                // than under the dates. At the top right it reads as the card's place in the stack
+                // it sits in, and it stays at one height whatever the heading below it does, so two
+                // cards in a grid row line up. Centred against the menu button, not top-aligned
+                // with it, because the dots are shorter than the icon and would otherwise ride high
+                // of it. One line always: the heading column has the weight, so a narrow card takes
+                // room from the dates rather than wrapping this.
+                stack?.let {
+                    // Which run the words name, which is the one more than half in front. Derived
+                    // rather than read: the position moves every frame of a drag and this changes
+                    // once, so the line recomposes when it has something new to say and not before.
+                    val showing by remember(it) {
+                        derivedStateOf { it.position().roundToInt() + 1 }
+                    }
+                    Row(
+                        Modifier.height(MenuButtonHeight),
+                        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        PageDots(it.count, it.position)
+                        Text(
+                            "Run $showing of ${it.count}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
                     }
                 }
                 Box {
@@ -1340,6 +1384,9 @@ private fun LegacyDetail(recommendation: RecommendationResult) {
  * 16dp relative word under it, and 32dp for the provider line where it wraps to its second.
  */
 private val RunHeaderHeight = 76.dp
+
+/** An `IconButton`'s own size, so the run index beside the menu centres on the icon, not above it. */
+private val MenuButtonHeight = 48.dp
 
 /** Weekday first: which session a report is about is read as a day before it is read as a date. */
 private val TARGET_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM yyyy")

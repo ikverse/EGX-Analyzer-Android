@@ -83,4 +83,43 @@ class ActionPaletteTest {
         assertEquals(DarkExtras.actionLine.size, LightExtras.actionLine.size)
         assertEquals(DarkExtras.actionFill.size, LightExtras.actionFill.size)
     }
+
+    /**
+     * The mark's aurora is solid, where the action's is not.
+     *
+     * The action's stops are three soft circles over a ground and are kept low deliberately. The
+     * mark's are painted through a 24dp glyph with `SrcIn`, so there is nothing behind them to show
+     * through and an alpha carried over from the action is simply a dimmer mark - which is the exact
+     * mistake this pins, because copying `actionAurora` is the obvious way to reach for these hues.
+     */
+    @Test
+    fun `the mark's aurora is opaque where the action's is not`() {
+        themes.forEach { (name, extras) ->
+            extras.markAurora.forEach { stop ->
+                assertTrue("$name draws the mark with a transparent stop", stop.alpha == 1f)
+            }
+            assertTrue(
+                "$name draws the action's aurora solid",
+                extras.actionAurora.all { it.alpha < 1f },
+            )
+        }
+    }
+
+    /**
+     * The mark carries the aurora's own hues, in the aurora's own order.
+     *
+     * The palette is fixed because every family in it means something, and the mark is the app's own
+     * name - so it may wear the app's own voice and nothing else. Compared on hue alone, since the
+     * alphas are the one thing the two are meant to disagree about.
+     */
+    @Test
+    fun `the mark and the action draw the same aurora`() {
+        themes.forEach { (name, extras) ->
+            assertEquals(
+                "$name gives the mark its own hues",
+                extras.actionAurora.map { it.copy(alpha = 1f).value },
+                extras.markAurora.map(Color::value),
+            )
+        }
+    }
 }

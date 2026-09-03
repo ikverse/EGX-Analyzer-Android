@@ -2,8 +2,8 @@ package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.layout.onSizeChanged
@@ -36,7 +35,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -380,25 +378,44 @@ internal fun <T> expandableBands(
  * comfortably is no longer a dot, and one that is not is a control nobody can hit.
  */
 @Composable
-internal fun PageDots(current: Int, total: Int) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+internal fun PageDots(current: Int, total: Int) = PageDots(total) { current.toFloat() }
+
+/**
+ * The same readout, following a drag rather than reporting where one ended.
+ *
+ * The marker travels between two dots on the same fraction the cards are moving on, so a swipe
+ * abandoned half way walks it back rather than leaving it where it was and then jumping. A dot lit
+ * at the snap can only report a page turn after the fact, which on a stack of two or three - a
+ * short flick, decided in a few hundred milliseconds - is the whole gesture reported once it is
+ * over.
+ *
+ * `position` is a lambda and not a `Float` deliberately: read as a parameter, every card of every
+ * stack would recompose for each frame of a drag. Read inside the draw, they redraw. Same reason
+ * the cards' own transform is read in their `graphicsLayer` and not in the composable body.
+ *
+ * One even pitch, where the dots used to be spaced by their own widths - the marker has to travel a
+ * fixed distance per page or it would arrive at each dot at a different moment.
+ */
+@Composable
+internal fun PageDots(total: Int, position: () -> Float) {
+    val marker = MaterialTheme.colorScheme.primary
+    val rest = MaterialTheme.colorScheme.outlineVariant
+    Canvas(Modifier.size(width = DotPitch * total, height = DotMarkerSize)) {
+        val pitch = DotPitch.toPx()
+        val middle = size.height / 2f
         repeat(total) { index ->
-            Box(
-                Modifier
-                    .padding(horizontal = 2.dp)
-                    .size(if (index == current) 7.dp else 5.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (index == current) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.outlineVariant
-                        },
-                    ),
-            )
+            drawCircle(rest, DotSize.toPx() / 2f, Offset(pitch * (index + 0.5f), middle))
         }
+        val at = position().coerceIn(0f, (total - 1).toFloat())
+        drawCircle(marker, DotMarkerSize.toPx() / 2f, Offset(pitch * (at + 0.5f), middle))
     }
 }
+
+private val DotSize = 5.dp
+private val DotMarkerSize = 7.dp
+
+/** Wide enough for the marker and the gap either side of it, so the row reads as evenly spaced. */
+private val DotPitch = 11.dp
 
 /**
  * Draws a scrollbar that appears while scrolling and fades out afterwards.
