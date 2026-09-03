@@ -110,7 +110,12 @@ data class AnalysisSchedule(
      */
     fun plan(): AnalysisPlan = AnalysisPlan(
         channels = channels,
-        contentTypes = contentTypes,
+        // The aim is frozen where it was armed, so a schedule set up while voice was still on the
+        // screen still carries it. Intersected here rather than rewritten on the row: what was
+        // aimed is a record of what the owner chose, and this is the moment it turns into a paid
+        // request. A schedule aimed at voice alone therefore plans nothing and is skipped, which
+        // is what a type the app no longer offers should cost. See AnalysisContentType.OFFERED.
+        contentTypes = contentTypes.intersect(AnalysisContentType.OFFERED),
         mode = AnalysisMode.NEXT_DAY,
     )
 

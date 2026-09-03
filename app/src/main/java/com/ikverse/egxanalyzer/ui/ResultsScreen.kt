@@ -70,6 +70,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import com.ikverse.egxanalyzer.data.RequestTrace
@@ -77,6 +78,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.ikverse.egxanalyzer.model.AnalysisDiagnostics
 import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.AnalysisResult
@@ -336,13 +338,23 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
 private val SavedRunMinWidth = 300.dp
 
 /**
- * How much of the card behind shows past the side of the one in front.
+ * How much of the card behind shows past the side and the foot of the one in front.
  *
  * Enough to read as a second card and no more. The inset is what makes it read as behind rather
- * than beside: an edge as tall as the card in front is a border, not a card under it.
+ * than beside: an edge running the full height of the card in front is a border, not a card under
+ * it, so the card behind is held down from the top while it shows past the bottom.
  */
 private val StackEdgeDepth = 6.dp
 private val StackEdgeInset = 8.dp
+
+/**
+ * The gap the pager leaves between two readings of a session.
+ *
+ * Named rather than written twice: a card behind cancels the pager's own travel to hold its place
+ * in the stack, and travel is a page plus this gap. The two drifting apart would leave the card
+ * creeping sideways under the thumb.
+ */
+private val StackPageSpacing = Space.s
 
 /**
  * The orders a saved run can be listed in.
@@ -494,8 +506,9 @@ private fun UnreadableNotice(count: Int) {
  * A day with a single run draws exactly as it always did: no dots, no edge. Most days are that day,
  * and a stack drawn around a stack of one is chrome reporting nothing.
  *
- * The card behind shows down its side rather than under its foot, because the side is the way out
- * of it. An edge below says there is more; an edge to the right says which way to push.
+ * The card behind shows down its side and along its foot, offset down-and-right like a card laid
+ * under this one rather than a border drawn around it. The edge to the right is the one that says
+ * which way to push; the edge below says there is more of the same behind it.
  */
 @Composable
 private fun SavedRunStack(
@@ -540,7 +553,6 @@ private fun SavedRunStack(
                 Modifier.matchParentSize().padding(
                     start = StackEdgeDepth,
                     top = StackEdgeInset,
-                    bottom = StackEdgeInset,
                 ),
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 shape = MaterialTheme.shapes.large,
@@ -552,11 +564,15 @@ private fun SavedRunStack(
             // Open, the report takes back the strip the card behind was showing through, so it
             // runs out to the edge rather than stopping short of one for a card that is no longer
             // drawn.
-            modifier = if (open) Modifier else Modifier.padding(end = StackEdgeDepth),
+            modifier = if (open) {
+                Modifier
+            } else {
+                Modifier.padding(end = StackEdgeDepth, bottom = StackEdgeDepth)
+            },
             // No peek. Insetting only the sessions that were run twice would make their cards
             // narrower than the rest, and a grid row of cards that do not match reads as a fault
             // before it reads as a hint. The dots and the edge carry the hint instead.
-            pageSpacing = Space.s,
+            pageSpacing = StackPageSpacing,
             verticalAlignment = Alignment.Top,
             // Nothing is swiped past an open report. It holds its own sideways pager over a stock's
             // occurrences and tables that scroll sideways, and a drag landing on either would be
@@ -575,6 +591,36 @@ private fun SavedRunStack(
                     Modifier.fillMaxWidth()
                 } else {
                     Modifier.fillMaxWidth()
+                        // A lower run number is always the card on top. Left to the pager, page 2
+                        // draws over page 1, and the card that is meant to be underneath swipes
+                        // across the front of the one it is behind.
+                        .zIndex(-page.toFloat())
+                        .graphicsLayer {
+                            // How far this card is from the front, in pages: 0 while it is the
+                            // one in front, 1 where it sits one back, and fractional under the
+                            // thumb. Read here rather than in the composable body - read at
+                            // composition every card of every stack would recompose for each
+                            // frame of a drag; read in the layer they only redraw.
+                            val distance =
+                                (page - pager.currentPage) + pager.currentPageOffsetFraction
+                            if (distance > 0f) {
+                                // Behind: this card does not travel with the pager at all. Its
+                                // translation cancels the scroll and puts it where the resting
+                                // edge is drawn instead, so it rises into place as the card in
+                                // front leaves rather than sliding in from off-screen. No scale -
+                                // the resting edge is a plain offset, and matching it exactly is
+                                // what lets the card land on it without a step.
+                                val t = distance.coerceAtMost(1f)
+                                val travelled = distance * (size.width + StackPageSpacing.toPx())
+                                translationX = StackEdgeDepth.toPx() * t - travelled
+                                translationY = StackEdgeInset.toPx() * t
+                            } else {
+                                // In front, on its way out: it slides as the pager takes it and
+                                // fades as it goes, which is the half that reads as a card being
+                                // lifted off rather than a page being shoved sideways.
+                                alpha = (1f + distance).coerceIn(0f, 1f)
+                            }
+                        }
                         .onSizeChanged { if (it.height > tallest) tallest = it.height }
                         .heightIn(min = floor)
                 },

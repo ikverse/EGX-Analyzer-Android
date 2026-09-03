@@ -284,9 +284,9 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
         // 600dp of container, which is the width at which each card still clears 300: the cover
         // screen (379) keeps them stacked, the unfolded Fold (638) gives 313 each and the tablet
         // (706) gives 347. `alignHeights` is what makes the two backgrounds line up - one card
-        // holds three checkboxes and the other two options, and left to themselves they end at two
-        // different heights, which reads as one of them having failed rather than as one simply
-        // having less in it.
+        // holds a pair of checkboxes and the other two options, and left to themselves they end
+        // at two different heights, which reads as one of them having failed rather than as one
+        // simply having less in it.
         AdaptivePanes(
             minWidth = 600.dp,
             mainWeight = 1f,
@@ -322,9 +322,12 @@ internal fun AnalyzeScreen(activity: Activity, appState: AppState) {
                         horizontalArrangement = Arrangement.spacedBy(Space.l),
                         verticalArrangement = Arrangement.spacedBy(Space.xs),
                     ) {
-                        ContentTypeToggle("Text", AnalysisContentType.TEXT, appState)
-                        ContentTypeToggle("Images", AnalysisContentType.IMAGES, appState)
-                        ContentTypeToggle("Voice", AnalysisContentType.AUDIO, appState)
+                        // Drawn from OFFERED rather than from three calls written out here, so
+                        // a type the app has stopped offering leaves this row by leaving that
+                        // list. Voice went that way on 2026-09-03.
+                        AnalysisContentType.OFFERED.forEach { type ->
+                            ContentTypeToggle(contentTypeLabel(type), type, appState)
+                        }
                     }
                     // Drawn where the boxes are, for the same reason the model card carries its own.
                     if (blocker == AnalyzeBlocker.NO_CONTENT_TYPE) {
@@ -685,6 +688,18 @@ private fun MessageTile(source: SourceTrace) {
             }
         }
     }
+}
+
+/**
+ * The word for a content type, for the checkboxes that offer it.
+ *
+ * Exhaustive over the enum rather than over OFFERED, so a type added to one is a compile error
+ * here rather than a row drawn with no label.
+ */
+private fun contentTypeLabel(type: AnalysisContentType): String = when (type) {
+    AnalysisContentType.TEXT -> "Text"
+    AnalysisContentType.IMAGES -> "Images"
+    AnalysisContentType.AUDIO -> "Voice"
 }
 
 /** What kind of message it is, as a glyph: the word for it, repeated down a column, is noise. */

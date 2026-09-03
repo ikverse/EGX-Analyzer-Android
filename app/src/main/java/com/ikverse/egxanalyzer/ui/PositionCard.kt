@@ -102,6 +102,7 @@ internal fun PositionCard(
                     ) {
                         StockLogo(position.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
                         Text(position.ticker, style = MaterialTheme.typography.titleSmall)
+                        Egx33Badge(position.ticker, Modifier.padding(start = Space.s))
                     }
                     listOfNotNull(position.companyArabic, position.companyEnglish)
                         .filter(String::isNotBlank)

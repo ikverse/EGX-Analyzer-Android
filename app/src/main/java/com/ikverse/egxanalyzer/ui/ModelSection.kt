@@ -174,19 +174,13 @@ private fun ModelPickerSheet(appState: AppState, onDismiss: () -> Unit) {
     // Read once, here: the tally lives on disk and this sheet draws hundreds of rows.
     LaunchedEffect(Unit) { appState.refreshModelUsage() }
     val catalogue = appState.availableModels
-    val suitable = remember(catalogue) {
-        catalogue.filter {
+    val stated = remember(catalogue) {
+        catalogue.count {
             ModelSuitabilityRules.capabilitiesOf(it).suitability == ModelSuitability.SUITABLE
         }
     }
-    val offered = remember(catalogue, suitable, showAll, configuration.model) {
-        if (showAll) {
-            catalogue
-        } else {
-            // The model in force is never filtered away. Hiding what is selected leaves the reader
-            // looking at a list that does not contain their own setting.
-            suitable + catalogue.filter { it.id == configuration.model && it !in suitable }
-        }
+    val offered = remember(catalogue, showAll, configuration.model) {
+        offeredModels(catalogue, showAll, configuration.model)
     }
     val matches = remember(offered, query, configuration.model) {
         // The model in force leads its own list. Among three hundred rows it is otherwise the one
@@ -243,14 +237,16 @@ private fun ModelPickerSheet(appState: AppState, onDismiss: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         // Says what is being held back and why, so a short list never looks like a
-                        // catalogue that came back short.
-                        "${suitable.size} of ${catalogue.size} can read images",
+                        // catalogue that came back short. Two numbers rather than one: what is on
+                        // offer is wider than what is known to see, because a name this build has
+                        // never heard of is still shown.
+                        "${offered.size} of ${catalogue.size} offered · $stated state image input",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
                     TextButton(onClick = { showAll = !showAll }) {
-                        Text(if (showAll) "Show suitable" else "Show all")
+                        Text(if (showAll) "Show offered" else "Show all")
                     }
                 }
             }
@@ -277,7 +273,7 @@ private fun ModelPickerSheet(appState: AppState, onDismiss: () -> Unit) {
                     selected = false,
                 ) { choose(typed) }
                 catalogue.isNotEmpty() -> Text(
-                    "None of the ${catalogue.size} models loaded say they can read images. " +
+                    "None of the ${catalogue.size} models loaded can read images. " +
                         "Show all, or type a model id above.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -321,6 +317,28 @@ private fun ModelPickerSheet(appState: AppState, onDismiss: () -> Unit) {
                 )
             }
         }
+    }
+}
+
+/**
+ * The models the picker puts up, in the order the provider gave them.
+ *
+ * Only what is known not to work is held back - the embedders, rerankers and voice models that
+ * could not read a card at any price. A name this build has never heard of is shown, because the
+ * rules that read names are a guess and they age: every model released after this build would
+ * otherwise arrive invisible, which is how a new Qwen generation came to be missing from a list
+ * that still had the last one. [showAll] drops even that much, and the model in force is never
+ * filtered away - a list that does not contain the reader's own setting reads as a broken list.
+ */
+internal fun offeredModels(
+    catalogue: List<CloudModelInfo>,
+    showAll: Boolean,
+    chosen: String,
+): List<CloudModelInfo> = when {
+    showAll -> catalogue
+    else -> catalogue.filter {
+        ModelSuitabilityRules.capabilitiesOf(it).suitability != ModelSuitability.UNSUITABLE ||
+            it.id == chosen
     }
 }
 

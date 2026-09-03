@@ -305,7 +305,14 @@ internal fun SettingsScreen(appState: AppState) {
             SubSection(
                 "What to send",
                 summary = "${appState.appPreferences.analysisLanguage.displayName} · " +
-                    "${appState.appPreferences.defaultContentTypes.size} content types",
+                    // Counted over what is offered, not over what is stored: a preference saved
+                    // while voice was still on the screen still carries it, and a closed card
+                    // reading three over a section showing two is the card disagreeing with
+                    // itself.
+                    "${
+                        appState.appPreferences.defaultContentTypes
+                            .count { it in AnalysisContentType.OFFERED }
+                    } content types",
                 about = infoNote(
                     "What to send",
                     "Which parts of a chat leave this phone, and in what language the answer " +
@@ -337,7 +344,7 @@ internal fun SettingsScreen(appState: AppState) {
                     }
                 }
                 SettingLabel("Default Telegram content")
-                AnalysisContentType.entries.forEach { type ->
+                AnalysisContentType.OFFERED.forEach { type ->
                     SettingToggle(
                         label = when (type) {
                             AnalysisContentType.TEXT -> "Text messages"

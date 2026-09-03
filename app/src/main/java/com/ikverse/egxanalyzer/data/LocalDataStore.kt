@@ -99,6 +99,8 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         db.createSettledCalls()
         db.createSessionEvents()
         db.createSessionDigestAnnounced()
+        db.createFeedChecks()
+        db.createFeedFaults()
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -130,6 +132,8 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         db.createSettledCalls()
         db.createSessionEvents()
         db.createSessionDigestAnnounced()
+        db.createFeedChecks()
+        db.createFeedFaults()
         db.dropNonTradingSessions()
     }
 
@@ -2435,6 +2439,229 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         }
 
     /**
+     * A log of what [PriceHealth] has found, so a diagnostics copy carries more than the state the
+     * phone happened to be in the moment it was saved.
+     *
+     * `PriceHealth.assess` is computed fresh on every recompute and was never stored - the screen
+     * that drew it read the state and threw the reading away, and the one thing a diagnostic needs
+     * that a live screen does not is history: the check where a stock went quiet, and the check
+     * where it came back. This is that log, kept only in the database that `Save diagnostics`
+     * already copies off a phone - no screen in the app reads it back.
+     *
+     * `feed_checks` is one row per **recorded** assessment, including the clean ones: a diagnostic
+     * that only ever wrote rows when something was wrong could not tell "the app checked and found
+     * nothing wrong" from "the app never checked", which is exactly the distinction the removed
+     * Settings card existed to make visible. `feed_faults` is the detail behind a check that found
+     * something, one row per faulty stock, keyed on `(checked_at, ticker)` so the two can be
+     * joined without guessing.
+     *
+     * Local and never synced, for the reason `price_events` and `session_events` are: every phone
+     * fetches the same public feed and reaches the same conclusion, so shipping one device's log
+     * into another's would duplicate a measurement rather than share a fact.
+     */
+    private fun SQLiteDatabase.createFeedChecks() = execSQL(
+        """CREATE TABLE IF NOT EXISTS feed_checks (
+            checked_at INTEGER PRIMARY KEY,
+            stocks_named INTEGER NOT NULL,
+            faulty_stocks INTEGER NOT NULL,
+            calls_held INTEGER NOT NULL
+        )""",
+    )
+
+    private fun SQLiteDatabase.createFeedFaults() = execSQL(
+        """CREATE TABLE IF NOT EXISTS feed_faults (
+            checked_at INTEGER NOT NULL,
+            ticker TEXT NOT NULL,
+            faults TEXT NOT NULL,
+            newest_session TEXT,
+            age_days INTEGER,
+            calls_held INTEGER NOT NULL,
+            PRIMARY KEY (checked_at, ticker)
+        )""",
+    )
+
+    /**
+     * Records one assessment, but only if it says something the newest recorded one did not.
+     *
+     * A recompute happens on every price refresh - roughly every fifteen minutes while the market
+     * is open - and writing a row every time would fill the log with two hundred identical
+     * "everything is fine" entries and push out the one check that actually changed. Comparing
+     * against the newest row rather than a remembered flag is what lets this share nothing with
+     * `AppState.reviewFeedHealth`, which decides whether to *speak*: a spell that goes on for a
+     * week is one notification and can still be many checks, each confirming the calls held has
+     * moved as more of a source's calls fall inside the fault.
+     */
+    fun saveFeedHealth(health: PriceHealthReport, now: Long = System.currentTimeMillis()) {
+        if (health.signature() == newestFeedCheckSignature()) return
+        writableDatabase.beginTransaction()
+        try {
+            writableDatabase.insertWithOnConflict(
+                "feed_checks",
+                null,
+                ContentValues().apply {
+                    put("checked_at", now)
+                    put("stocks_named", health.stocksNamed)
+                    put("faulty_stocks", health.faults.size)
+                    put("calls_held", health.callsHeld)
+                },
+                SQLiteDatabase.CONFLICT_REPLACE,
+            )
+            health.faults.forEach { stock ->
+                writableDatabase.insertWithOnConflict(
+                    "feed_faults",
+                    null,
+                    ContentValues().apply {
+                        put("checked_at", now)
+                        put("ticker", stock.ticker)
+                        put("faults", stock.faults.joinToString(",") { it.name })
+                        put("newest_session", stock.newestSession?.toString())
+                        put("age_days", stock.ageDays)
+                        put("calls_held", stock.callsHeld)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            }
+            // Pruned inside the same transaction as the write it makes room for, so a log that
+            // never changes is never opened for writing at all.
+            val cutoff = writableDatabase.query(
+                "feed_checks",
+                arrayOf("checked_at"),
+                null,
+                null,
+                null,
+                null,
+                "checked_at DESC",
+                "$FEED_HEALTH_CHECKS_KEPT,1",
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+            if (cutoff != null) {
+                writableDatabase.delete("feed_checks", "checked_at <= ?", arrayOf(cutoff.toString()))
+                writableDatabase.delete("feed_faults", "checked_at <= ?", arrayOf(cutoff.toString()))
+            }
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    /** What the newest recorded check actually said, or null where nothing has been recorded yet. */
+    private fun newestFeedCheckSignature(): String? {
+        val newest = writableDatabase.query(
+            "feed_checks",
+            arrayOf("checked_at", "stocks_named"),
+            null,
+            null,
+            null,
+            null,
+            "checked_at DESC",
+            "1",
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) to cursor.getInt(1) else null }
+            ?: return null
+        val (checkedAt, stocksNamed) = newest
+        val faults = writableDatabase.query(
+            "feed_faults",
+            arrayOf("ticker", "faults", "calls_held"),
+            "checked_at = ?",
+            arrayOf(checkedAt.toString()),
+            null,
+            null,
+            null,
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(Triple(cursor.getString(0), cursor.getString(1), cursor.getInt(2)))
+                }
+            }
+        }
+        return faultSignature(stocksNamed, faults)
+    }
+
+    /**
+     * One report and the newest recorded check, reduced to the same comparable string.
+     *
+     * Ticker order does not matter to what the reader is told, so both sides sort before joining -
+     * without it a report whose faults merely came back in a different order from the same rows
+     * would read as a change worth a new entry.
+     */
+    private fun PriceHealthReport.signature(): String = faultSignature(
+        stocksNamed,
+        faults.map { Triple(it.ticker, it.faults.joinToString(",") { f -> f.name }, it.callsHeld) },
+    )
+
+    private fun faultSignature(stocksNamed: Int, faults: List<Triple<String, String, Int>>): String =
+        "$stocksNamed|" + faults.sortedBy { it.first }
+            .joinToString(";") { (ticker, faultNames, held) -> "$ticker:$faultNames:$held" }
+
+    /**
+     * The log, newest first, for a diagnostics copy read off a device.
+     *
+     * Never called from a screen - the one line Settings prints is derived from `priceHealth` on
+     * every recompute, exactly as it always was, so this table can never disagree with it. This
+     * exists for the file `Save diagnostics` writes, where a reader wants the history the screen
+     * has never kept.
+     */
+    fun feedHealthChecks(limit: Int = FEED_HEALTH_CHECKS_KEPT): List<FeedHealthCheck> {
+        val checks = readableDatabase.query(
+            "feed_checks",
+            null,
+            null,
+            null,
+            null,
+            null,
+            "checked_at DESC",
+            limit.toString(),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        Triple(
+                            cursor.getLong(cursor.getColumnIndexOrThrow("checked_at")),
+                            cursor.getInt(cursor.getColumnIndexOrThrow("stocks_named")),
+                            cursor.getInt(cursor.getColumnIndexOrThrow("calls_held")),
+                        ),
+                    )
+                }
+            }
+        }
+        return checks.map { (checkedAt, stocksNamed, callsHeld) ->
+            val faults = readableDatabase.query(
+                "feed_faults",
+                null,
+                "checked_at = ?",
+                arrayOf(checkedAt.toString()),
+                null,
+                null,
+                null,
+            ).use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) {
+                        val faultNames = cursor.getString(cursor.getColumnIndexOrThrow("faults"))
+                            .split(",")
+                            .filter(String::isNotBlank)
+                            .mapNotNull { name -> runCatching { FeedFault.valueOf(name) }.getOrNull() }
+                            .toSet()
+                        if (faultNames.isEmpty()) continue
+                        add(
+                            StockHealth(
+                                ticker = cursor.getString(cursor.getColumnIndexOrThrow("ticker")),
+                                faults = faultNames,
+                                newestSession = cursor.nullableDate("newest_session"),
+                                ageDays = cursor.nullableLong("age_days"),
+                                callsHeld = cursor.getInt(cursor.getColumnIndexOrThrow("calls_held")),
+                            ),
+                        )
+                    }
+                }
+            }
+            FeedHealthCheck(
+                checkedAt = Instant.ofEpochMilli(checkedAt),
+                stocksNamed = stocksNamed,
+                callsHeld = callsHeld,
+                faults = faults,
+            )
+        }
+    }
+
+    /**
      * The whole table, which is one row per trade and read in full on every sweep.
      *
      * A status this build no longer knows the name of is dropped rather than crashing the read, and
@@ -2501,7 +2728,13 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
     /** Internal rather than private so the migration test can open version 9 by the same name. */
     internal companion object {
         const val DATABASE_NAME = "egx_analyzer.db"
+        /** How many [FeedHealthCheck]s are kept. A log with no ceiling is a file that keeps growing. */
+        const val FEED_HEALTH_CHECKS_KEPT = 200
         /**
+         * 27 is `feed_checks` and `feed_faults`, a log of what `PriceHealth` has found - kept
+         * because the Settings card that used to explain a fault in words was removed and nothing
+         * else on disk remembered what the app had noticed. Never read by a screen; see
+         * `LocalDataStore.feedHealthChecks`.
          * 26 is `exit_price_1`, `exit_date_1`, `exit_price_2` and `exit_split_pct` on `positions`,
          * which say how a sale made in two parts was made up: half the holding at target 1 on one
          * day and the rest at target 2 on another. `exit_price` still holds the one price the
@@ -2548,7 +2781,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 26
+        const val DATABASE_VERSION = 27
     }
 }
 

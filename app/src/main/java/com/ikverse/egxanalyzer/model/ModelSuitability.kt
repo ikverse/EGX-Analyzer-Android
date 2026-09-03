@@ -8,7 +8,7 @@ enum class ModelSuitability {
     /** It cannot: an embedder, a reranker, a voice model, or a text-only chat model. */
     UNSUITABLE,
 
-    /** Nothing said either way. Hidden by the filter, still reachable by typing the id. */
+    /** Nothing said either way. Offered anyway: only [UNSUITABLE] is held back. */
     UNKNOWN,
 }
 
@@ -41,8 +41,9 @@ data class ModelCapabilities(
  * one cannot do this job at any price. OpenRouter states its modalities and is simply believed.
  * Qwen, OpenAI and Hugging Face return a name and nothing else, so the name is read - an allowlist
  * of the families known to have vision, and a rejection list for the ids that are plainly something
- * else. Anything unrecognised is [ModelSuitability.UNKNOWN] rather than rejected: this list will be
- * out of date the week after it is written, and a new model must never become unreachable.
+ * else. Anything unrecognised is [ModelSuitability.UNKNOWN] rather than rejected, and the picker
+ * offers it: this list will be out of date the week after it is written, and a new model must never
+ * become invisible for having a name written after this build.
  */
 object ModelSuitabilityRules {
 

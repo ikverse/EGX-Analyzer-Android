@@ -88,6 +88,21 @@ data class PriceHealthReport(
 }
 
 /**
+ * One row of the log [LocalDataStore.saveFeedHealth] keeps, read back by [LocalDataStore.feedHealthChecks].
+ *
+ * A [PriceHealthReport] that happened to be worth recording, with the moment it was checked
+ * attached - the one thing the live report itself has no reason to carry, because it is always
+ * "now". Never drawn by a screen; see [LocalDataStore.feedHealthChecks] for why it is stored at
+ * all.
+ */
+data class FeedHealthCheck(
+    val checkedAt: java.time.Instant,
+    val stocksNamed: Int,
+    val callsHeld: Int,
+    val faults: List<StockHealth>,
+)
+
+/**
  * Which stocks the price feed has gone quiet about, and what that is costing the record.
  *
  * Every input here is already on disk and already read on a recompute - the newest session per

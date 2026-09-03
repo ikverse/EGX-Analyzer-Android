@@ -100,7 +100,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `ui/ChannelScoreSheet.kt` — how a source is scored, opened by pressing its card in the ranking.
 - `data/PriceHealth.kt` — which stocks the feed has gone quiet about and what it costs. The Settings
   card that explained it in words was removed on 2026-09-03; one line in `General → Prices` is what
-  is left of it. See below.
+  is left on screen, and `feed_checks` / `feed_faults` in `LocalDataStore` are the log that replaced
+  the rest of it, for a diagnostics copy read off a device. See below.
 - `data/PortfolioCalculator.kt` + `model/Position.kt` — the trades the user actually took. See below.
 - `model/TradeAlerts.kt` + `data/TradeStatusNotifier.kt` — what has changed about a trade since the
   user was last told, and how the phone says so. See below.
@@ -667,11 +668,25 @@ one place that does.
   broken symbols is trivia, and how much of the record they are holding is the reason to read it at
   all. It is a **state** rather than a report, so it is drawn from `priceHealth` on every recompute
   like everything else on that line.
-- **What that costs, stated plainly**: nothing in the app now names *which* stock has gone quiet, or
-  distinguishes a retired symbol from one that has never been priced. The notification still fires
-  and its own explanation still says what a quiet feed does to the record; it no longer has a page to
-  point at. Bringing the list back means bringing back `FeedFault.plainly`, and it was removed on
+- **No screen names which stock has gone quiet any more; the database does.** `feed_checks` and
+  `feed_faults` are the log (schema 27, `LocalDataStore.saveFeedHealth`), and `Save diagnostics`
+  already copies the file they live in — so which stock, which fault, how stale and how many calls
+  it was holding all come off a phone without a cable, which matters for an app other people use.
+  What is *not* recoverable is the prose: the table stores `STALE`, not the sentence explaining
+  what a retired symbol looks like from here. Bringing `FeedFault.plainly` back was declined on
   purpose — ask before proposing it.
+- **A check is recorded only when it says something the newest recorded one did not.** A recompute
+  runs on every price refresh, so writing each one would fill the log with two hundred identical
+  "everything is fine" rows and push out the check that actually changed. The comparison is a
+  signature over the stock count, each stock's faults and its calls held — sorted, so faults merely
+  coming back in a different order is not a change. **A clean check is still a row**: a log that
+  only ever wrote when something was wrong could not separate "checked, nothing wrong" from "never
+  checked", which is exactly what the card's always-present list existed to say.
+- **Pruned to the newest 200 checks**, inside the same transaction as the write that makes room, so
+  a log that never changes is never opened for writing at all. Nothing reads it back for the
+  screen — the line in `General → Prices` is derived from `priceHealth` on every recompute exactly
+  as it always was, so the table cannot disagree with what is on screen. Device-local and never
+  synced, like `price_events` and `session_events`.
 - A **Fetch prices** button sits under that line, offered whatever the state, because it is also how
   a reader confirms nothing has changed. It reads the free public feed and sends nothing to the
   model, and its own note says so.
@@ -1476,6 +1491,10 @@ data means uninstalling this one and taking the record with it.
 - **`checkpoint()` first, and it is not optional.** SQLite runs in write-ahead mode, so the newest
   commits sit in a `-wal` sidecar until something folds them in — copying the database alone hands
   over a record missing exactly the recent activity worth asking about.
+- **The feed-health log travels in it**, which is most of why it is written down at all — see
+  **When the feed goes quiet**. `SELECT * FROM feed_checks ORDER BY checked_at DESC` is the history
+  of what the app noticed about the price feed, and `feed_faults` joined on `checked_at` is which
+  stocks each check was about.
 - **No credential travels in it.** Provider keys and the Telegram database key are encrypted by
   Android Keystore in their own preferences file and have never been in this database.
 
@@ -2164,7 +2183,7 @@ Ten cards became **seven** on 2026-09-03, and nothing was removed but the price-
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 26. **Bumping the constant is half of it**: `session_events` was added to
+  `onUpgrade`. Currently 27. **Bumping the constant is half of it**: `session_events` was added to
   both hooks and left at 20, so a fresh install had the table and every upgrade silently did not —
   which fails at the first write and nowhere earlier. `SessionEventStoreTest` caught it. Adding it to only one of the two is the mistake that gets made:
   `CallAlertStoreTest` caught exactly that on version 19 before it shipped.
@@ -2187,7 +2206,8 @@ Ten cards became **seven** on 2026-09-03, and nothing was removed but the price-
   `position_approach_seen` and `session_digest_announced` — the two-tables case, which is the
   shape this trap is usually walked into, and version 26 has one beside *that* for the four
   split-exit columns on `positions`, written against the version-25 table because that is where
-  every phone holding trades actually is
+  every phone holding trades actually is, and version 27 has one in `FeedHealthStoreTest` for
+  `feed_checks` and `feed_faults`, written against the version-26 table for that same reason
   — added by `ALTER`, one guard per column, so the risk
   is not that the upgrade fails but that it takes the answers already on the phone with it. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it

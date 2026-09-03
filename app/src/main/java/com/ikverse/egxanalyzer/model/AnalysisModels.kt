@@ -12,6 +12,31 @@ enum class AnalysisContentType {
     TEXT,
     IMAGES,
     AUDIO,
+    ;
+
+    companion object {
+        /**
+         * What the app offers, which is deliberately not everything it can read.
+         *
+         * `AUDIO` is hidden for now, on the owner's decision. Nothing behind it was removed -
+         * `TelegramRepository` still reads a voice note, `AnalysisInput.Voice` still exists, and
+         * the provider request still carries one - so putting `AUDIO` back in this list is the
+         * whole of bringing it back.
+         *
+         * **Hidden has to mean off, not merely invisible**, and that is why this list is applied
+         * to the selection as well as to the two screens that draw it. That checkbox was the only
+         * control over voice, and `AppPreferences.defaultContentTypes` shipped with every type
+         * ticked - so hiding the control alone would leave every phone on which it was never
+         * unticked going on downloading voice notes and sending them to a paid provider, with
+         * nothing left on screen to stop it. The selection is intersected with this wherever it is
+         * seeded from the preference, and a schedule's frozen aim is intersected where it becomes
+         * a plan, since a schedule aimed before this was hidden carries whatever was ticked then.
+         *
+         * A list rather than a set: the two screens draw it in this order, and an intersection
+         * takes any `Iterable`.
+         */
+        val OFFERED: List<AnalysisContentType> = listOf(TEXT, IMAGES)
+    }
 }
 
 enum class AnalysisMode {

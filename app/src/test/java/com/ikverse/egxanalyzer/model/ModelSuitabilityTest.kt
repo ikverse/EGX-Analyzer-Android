@@ -10,8 +10,8 @@ import org.junit.Test
  *
  * A run sends screenshots, so a model that cannot see one cannot do the job. What the provider
  * published is believed outright; where it published nothing the name is read, and a name nobody
- * recognises is held back rather than rejected - the difference matters, because a filter that
- * rejected the unrecognised would make every model released after this build unreachable.
+ * recognises is marked unknown rather than rejected - the difference matters, because the picker
+ * holds back only what is known not to work, so an unrecognised name is still offered.
  */
 class ModelSuitabilityTest {
 
@@ -71,8 +71,7 @@ class ModelSuitabilityTest {
     /**
      * The rule that keeps this list from ageing badly.
      *
-     * An id nobody here has heard of is hidden by the filter and reachable by typing it or by
-     * turning the filter off. It is never refused.
+     * An id nobody here has heard of is offered by the picker all the same, and is never refused.
      */
     @Test
     fun `an unrecognised name is unknown rather than refused`() {

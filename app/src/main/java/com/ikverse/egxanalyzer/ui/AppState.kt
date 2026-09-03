@@ -303,7 +303,12 @@ class AppState(
         private set
     var appPreferences by mutableStateOf(settingsRepository.loadPreferences())
         private set
-    var selectedContentTypes by mutableStateOf(appPreferences.defaultContentTypes)
+    // Intersected with OFFERED rather than taken whole: the stored preference shipped with every
+    // type ticked, so a phone that never unticked voice would go on sending it with no control
+    // left on screen to stop it. See AnalysisContentType.OFFERED.
+    var selectedContentTypes by mutableStateOf(
+        appPreferences.defaultContentTypes.intersect(AnalysisContentType.OFFERED),
+    )
         private set
     var analysisMode by mutableStateOf(AnalysisMode.NEXT_DAY)
         private set
@@ -3093,12 +3098,16 @@ class AppState(
             // On the same thread and from the same read: the breaks and the latest sessions are
             // already in hand here, and asking for them again on the main thread would be a second
             // trip to the database for figures this one has already paid for.
-            report to PriceHealth.assess(
+            val health = PriceHealth.assess(
                 calls = report.sessions.flatMap(ScoredSession::calls),
                 latestPrices = latest,
                 breaks = breaks,
                 today = today,
             )
+            // Logged here and only here - the one place this is computed - rather than from the
+            // published `priceHealth` state, which the main thread would have to hop back off of.
+            localDataStore.saveFeedHealth(health)
+            report to health
         }
         performance = computed.first
         priceHealth = computed.second
@@ -3236,6 +3245,7 @@ class AppState(
         // reinstalled phone happens before this arrives. Left alone it would show the shipped
         // default until the next restart - and what it is being set to is the user's own choice.
         selectedContentTypes = appPreferences.defaultContentTypes
+            .intersect(AnalysisContentType.OFFERED)
         cloudConfiguration = settingsRepository.load()
         availableModels = settingsRepository.modelCatalog(cloudConfiguration.provider)
         useDefaultPromptOnly = settingsRepository.useDefaultPromptOnly()
