@@ -686,7 +686,29 @@ private fun AppContent(appState: AppState, rail: Boolean) {
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            AppHeader(appState, onDismissStatus = appState::consumeStatusMessage)
+            // The header gets out of the way on the same scroll that takes the pill, and comes back
+            // with it. One signal for both: two rules would let the two pieces of chrome leave at
+            // slightly different moments, which reads as them coming loose from each other rather
+            // than as the page filling the window. Unlike the pill it is laid out in this column
+            // rather than floating over the page, so the well grows into the room it leaves - which
+            // is why it collapses its height as well as fading, and collapses towards the top so the
+            // name travels up out of the window rather than sinking behind the well.
+            //
+            // Never hidden while the app has something to say. The status line lives in this header,
+            // so a message landing on a page that has been scrolled down would otherwise be
+            // announced off screen - and a failure is the one kind that arrives unbidden.
+            //
+            // Beside a rail it never hides at all: there is no pill there to leave with, `Screen`
+            // writes the flag regardless of layout, and a header that vanished on its own on the
+            // wide layout would be the only thing moving.
+            val speaking = appState.busyLabel != null || appState.statusMessage != null
+            AnimatedVisibility(
+                visible = rail || navBarVisible.value || speaking,
+                enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+            ) {
+                AppHeader(appState, onDismissStatus = appState::consumeStatusMessage)
+            }
             // Above the well rather than inside it, so a run starting does not push the rounded
             // edge down the screen. The bar carries no label any more - the header above it names
             // what is running, and the two said the same thing a few pixels apart.

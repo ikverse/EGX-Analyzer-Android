@@ -336,13 +336,20 @@ val LocalExtraColors = staticCompositionLocalOf { LightExtras }
 val extraColors: ExtraColors
     @Composable get() = LocalExtraColors.current
 
-/** Rounder than the M3 default; these screens are card-dense and softer corners keep them calm. */
+/**
+ * Tighter than the M3 default from `medium` up - 12/16/28 there against 10/14/18 here.
+ *
+ * These screens are card-dense, and a large radius repeated down a column of cards curves away more
+ * of each card's own top row than it settles. Squarer corners let a stack read as a list rather than
+ * as a pile of lozenges, and the page well and the navigation pill - both on `large` - stop reading
+ * as capsules laid over the chrome.
+ */
 private val AppShapes = Shapes(
-    extraSmall = RoundedCornerShape(6.dp),
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(22.dp),
-    extraLarge = RoundedCornerShape(30.dp),
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(10.dp),
+    large = RoundedCornerShape(14.dp),
+    extraLarge = RoundedCornerShape(18.dp),
 )
 
 @Composable
