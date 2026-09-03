@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.expandVertically
@@ -368,6 +369,14 @@ private fun AppHeader(appState: AppState, onDismissStatus: () -> Unit) {
     }
 }
 
+/**
+ * How long the header takes to leave or return.
+ *
+ * Deliberately brief. See the note at the call site: this is also how long the page's own scroll
+ * watcher spends ignoring the reader, because the movement changes the extent it reads.
+ */
+private const val HeaderMoveMilliseconds = 180
+
 /** Between the name and a message sitting under it, on the layout where one does. */
 private val StatusLineGap = 6.dp
 
@@ -704,8 +713,16 @@ private fun AppContent(appState: AppState, rail: Boolean) {
             val speaking = appState.busyLabel != null || appState.statusMessage != null
             AnimatedVisibility(
                 visible = rail || navBarVisible.value || speaking,
-                enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
-                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+                // A short tween rather than the default spring, and the reason is not the look of
+                // it. This animates the height of the page below, so every frame of it moves the
+                // extent that `Screen`'s watcher is reading - and that watcher stands down for as
+                // long as the extent keeps changing. A spring's tail would leave it standing down
+                // well after the header had visibly finished; a fixed tween bounds the deaf window
+                // to the movement itself.
+                enter = fadeIn(tween(HeaderMoveMilliseconds)) +
+                    expandVertically(tween(HeaderMoveMilliseconds), expandFrom = Alignment.Top),
+                exit = shrinkVertically(tween(HeaderMoveMilliseconds), shrinkTowards = Alignment.Top) +
+                    fadeOut(tween(HeaderMoveMilliseconds)),
             ) {
                 AppHeader(appState, onDismissStatus = appState::consumeStatusMessage)
             }

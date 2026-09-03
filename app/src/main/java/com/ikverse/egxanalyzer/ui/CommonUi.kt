@@ -110,7 +110,22 @@ internal fun Screen(
     val worthHiding = with(LocalDensity.current) { NavBarFootprint.toPx() } + slop
     LaunchedEffect(scroll, slop, worthHiding) {
         var mark = scroll.value
+        var lastMax = scroll.maxValue
         snapshotFlow { scroll.value to scroll.maxValue }.collect { (offset, max) ->
+            // **Only a still page is read as a gesture.** Hiding the chrome makes the header
+            // collapse, which gives this page a taller viewport, which shortens `maxValue` - and at
+            // the foot of a page a shorter `maxValue` clamps the offset down by the height the
+            // header just gave up. That drop is not a reader pulling the page back; it is the page
+            // growing under them. Read as a gesture it showed the chrome again, which shrank the
+            // viewport, which pushed the offset back down, which hid it again - the two pieces of
+            // chrome flickering in and out for as long as a finger was moving, and never settling
+            // hidden. So a frame where the extent changed only re-marks where the page is: the
+            // watcher picks up again from there once the header has finished moving.
+            if (max != lastMax) {
+                lastMax = max
+                mark = offset
+                return@collect
+            }
             when {
                 // The top of a page always shows it: there is nothing hidden behind the bar up
                 // here, and a page that opens with no navigation showing looks broken.
