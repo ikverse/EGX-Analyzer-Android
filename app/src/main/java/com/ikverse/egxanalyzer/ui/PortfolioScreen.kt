@@ -360,6 +360,9 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
             // Never folded away: it is the control someone arrives at the screen already knowing they
             // want, and the only one that can empty the list on a keystroke.
             search = { m -> StockFilterField(stockFilter, { stockFilter = it }, modifier = m) },
+            // The one bar that does not sit on the page's well: it lives inside the Positions card,
+            // so that is what it has to fill with while it is pinned over the sessions below it.
+            pinnedColor = MaterialTheme.colorScheme.surfaceContainer,
         ) {
             SingleSelectFilter(
                 label = "dates",

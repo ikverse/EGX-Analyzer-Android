@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.TableChart
@@ -355,6 +356,20 @@ private val StackEdgeDepth = 10.dp
 private val StackEdgeInset = 10.dp
 
 /**
+ * How much of the row's width each card gives up so the peek has somewhere to sit.
+ *
+ * Half the depth on each side rather than the whole of it on the right. Reserved on the right
+ * alone, the front card sat ten units nearer the left edge of the screen than the right and read
+ * as hung crooked - the peek is drawn behind the card, so nothing filled the gap it left. Taken
+ * evenly the card is centred in its row again, and the card behind still shows down the right
+ * because the offset that puts it there is measured from the front card, not from the screen.
+ *
+ * Charged to every day and not only the ones that were run twice: a card ten units wider than the
+ * one under it is the mismatch the pager's own comment refuses a peek to avoid.
+ */
+private val StackSideInset = StackEdgeDepth / 2
+
+/**
  * How solid the card behind is drawn, once it is a whole page back.
  *
  * Depth is dimness. It is the half of the peek that says the strip is a card lying under this one
@@ -555,7 +570,9 @@ private fun SavedRunStack(
     card: @Composable (SavedAnalysis, Boolean, StackPosition?, Modifier) -> Unit,
 ) {
     if (runs.size == 1) {
-        card(runs.single(), openRunId != null, null, modifier)
+        // The same side inset a stacked day takes, so one width runs down the whole list.
+        val inset = if (openRunId != null) Modifier else Modifier.padding(horizontal = StackSideInset)
+        card(runs.single(), openRunId != null, null, modifier.then(inset))
         return
     }
     val open = openRunId != null
@@ -607,7 +624,11 @@ private fun SavedRunStack(
             modifier = if (open) {
                 Modifier
             } else {
-                Modifier.padding(end = StackEdgeDepth, bottom = StackEdgeInset)
+                Modifier.padding(
+                    start = StackSideInset,
+                    end = StackSideInset,
+                    bottom = StackEdgeInset,
+                )
             },
             // No peek. Insetting only the sessions that were run twice would make their cards
             // narrower than the rest, and a grid row of cards that do not match reads as a fault
@@ -785,7 +806,10 @@ private fun SavedAnalysisCard(
             // older than a week gets no relative word, and would otherwise stand a line shorter
             // than the one beside it.
             Row(Modifier.heightIn(min = RunHeaderHeight), verticalAlignment = Alignment.Top) {
-                Column(Modifier.weight(1f)) {
+                // Spaced rather than butted together. Three lines of type at three sizes with
+                // nothing between them read as one block to be picked apart, which is what made
+                // the head of the card feel packed while the foot sat empty.
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                     // The session the report is about, which is the first thing anyone reads a
                     // card for and was previously the raw stored date.
                     Text(
@@ -812,7 +836,12 @@ private fun SavedAnalysisCard(
                                 .format(COMPLETED_FORMAT),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
+                        // One line, always. Wrapped, it took a second line to show three more
+                        // characters of a model name and snapped the run date mid-word - two lines
+                        // of small print that said less than the one line does. Whatever will not
+                        // fit is the tail of the timestamp, which the reader has the target date
+                        // above for anyway.
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     // Only where a later run covered the same session. A re-run leaves an older
@@ -845,7 +874,9 @@ private fun SavedAnalysisCard(
                     ) {
                         PageDots(it.count, it.position)
                         Text(
-                            "Run $showing of ${it.count}",
+                            // "Run 1 of 3" spelled out took sixty units off the heading column
+                            // beside it, which is what forced the run line under the date to wrap.
+                            "Run $showing/${it.count}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -886,6 +917,49 @@ private fun SavedAnalysisCard(
                 }
             }
 
+            // The first of three equal shares of whatever height this card has spare, and it has
+            // spare height whenever it is not the tallest shut card of its session's stack: every
+            // card in a stack is held to that one so the pile does not change depth under the
+            // thumb. Left to the column the whole surplus fell below the last row, and a card
+            // carrying one line less than the one behind it ended in a band of nothing under the
+            // button. Divided between the gaps it reads as a roomier card rather than an
+            // unfinished one. All three collapse to zero on the card that set the floor, and an
+            // open report is measured by its own contents rather than held to anything.
+            if (!expanded) Spacer(Modifier.weight(1f))
+
+            // What the run actually read, above the figures rather than under them. Set in the
+            // same small grey as the provider line and placed below the counts, it read as a
+            // caption on them - and which chats a report came out of is the one thing that
+            // decides whether its calls are worth anything. Same size and ink as body copy now,
+            // and the icon is what stops a line of chat names reading as another date.
+            saved.channelNames().takeIf(List<String>::isNotEmpty)?.let { names ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.Forum,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        // Three names and a count: on its own line above a full-width row it has
+                        // the room the old position under the figures did not.
+                        if (names.size <= 3) {
+                            names.joinToString(" · ")
+                        } else {
+                            names.take(3).joinToString(" · ") + " +${names.size - 3}"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            if (!expanded) Spacer(Modifier.weight(1f))
+
             ReportFigures(
                 stocks = stockCount,
                 calls = callCount,
@@ -893,21 +967,7 @@ private fun SavedAnalysisCard(
                 traded = tradedCount,
             )
 
-            saved.channelNames().takeIf(List<String>::isNotEmpty)?.let { names ->
-                Text(
-                    // Two names and a count: the full list of a six-chat run would wrap to three
-                    // lines and push the button off a half-width card.
-                    if (names.size <= 2) {
-                        names.joinToString(" · ")
-                    } else {
-                        names.take(2).joinToString(" · ") + " +${names.size - 2}"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            if (!expanded) Spacer(Modifier.weight(1f))
 
             // A row rather than a button, now that the card itself opens the run: a filled button
             // across the whole width was a second control doing the same job, and the loudest thing

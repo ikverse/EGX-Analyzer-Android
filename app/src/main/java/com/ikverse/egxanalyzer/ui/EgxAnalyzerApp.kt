@@ -123,6 +123,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.R
@@ -385,8 +386,12 @@ private val BarLabelSize = 11.sp
  */
 private val RailTopInset = 70.dp
 
-/** Sized to the name beside it rather than to the navigation grid, which it does not belong to. */
-private val AppMarkSize = 24.dp
+/**
+ * Sized to the name beside it rather than to the navigation grid, which it does not belong to - a
+ * little over the title's own height, so the mark reads as the anchor of the row instead of as one
+ * more letter in it.
+ */
+private val AppMarkSize = 28.dp
 
 /**
  * Says which app this is, and what it is doing, above whatever page is showing.
@@ -935,9 +940,19 @@ private fun AppContent(
             // The page sits in the chrome the way a card sits on the page, and takes the corner
             // radius the cards themselves use. The hairline is what keeps that edge drawn when a
             // card scrolls up under it, since a card is the same colour as the chrome around it.
+            //
+            // Beside a rail the end corner is squared as well, so the only radius left on the well
+            // is the one where it meets the rail. On the phone both top corners round away from the
+            // window's own edges, which is what sets the page into the chrome. On the wide layout
+            // those two corners are not the same kind of corner: the start edge is where the rail
+            // stops and there is chrome behind it for a radius to reveal, while the end edge runs
+            // along the side of the window, where a curve reads as the page shrinking away from the
+            // frame rather than as a corner of anything.
+            val squared = CornerSize(0.dp)
             val wellShape = MaterialTheme.shapes.large.copy(
-                bottomStart = CornerSize(0.dp),
-                bottomEnd = CornerSize(0.dp),
+                topEnd = if (rail) squared else MaterialTheme.shapes.large.topEnd,
+                bottomStart = squared,
+                bottomEnd = squared,
             )
             Surface(
                 Modifier.fillMaxWidth().weight(1f)
@@ -1123,6 +1138,16 @@ private fun DestinationScreen(
  * window, where a line reads as the frame of the screen rather than as the edge of the page. The
  * other three sides still earn their place: a card scrolled up under the header is the same colour as
  * the chrome, and without the top edge there is nothing to say where the page starts.
+ *
+ * **The two top corners are read separately**, because on the wide layout they are no longer the
+ * same corner - see the call site. One radius for both was true while they matched and would have
+ * drawn a curve on the end corner the Surface underneath had already squared, which is a hairline
+ * lifting off the fill it is supposed to edge. A corner with no radius is a plain right angle
+ * rather than an arc of nothing: `arcTo` over a zero-sized rectangle is not a defined instruction.
+ *
+ * Start and end are resolved against the layout direction rather than taken as left and right. That
+ * assumption was harmless while the two matched and is exactly the sort of thing that fails on one
+ * device, in one language, long after anyone remembers this function exists.
  */
 private fun Modifier.wellOutline(
     shape: CornerBasedShape,
@@ -1134,19 +1159,27 @@ private fun Modifier.wellOutline(
     // Half the stroke, so the line lands inside the bounds the way a border does rather than
     // straddling them and losing its outer half to the clip.
     val edge = stroke / 2
-    val radius = shape.topStart.toPx(size, this)
+    val start = shape.topStart.toPx(size, this)
+    val end = shape.topEnd.toPx(size, this)
+    val ltr = layoutDirection == LayoutDirection.Ltr
+    val left = if (ltr) start else end
+    val right = if (ltr) end else start
     val path = Path().apply {
-        // Up the left side, round the top, and back down the right - left open at the bottom.
+        // Up the left side, across the top, and back down the right - left open at the bottom.
         moveTo(edge, size.height)
-        lineTo(edge, edge + radius)
-        arcTo(Rect(edge, edge, edge + 2 * radius, edge + 2 * radius), 180f, 90f, false)
-        lineTo(size.width - edge - radius, edge)
-        arcTo(
-            Rect(size.width - edge - 2 * radius, edge, size.width - edge, edge + 2 * radius),
-            270f,
-            90f,
-            false,
-        )
+        lineTo(edge, edge + left)
+        if (left > 0f) {
+            arcTo(Rect(edge, edge, edge + 2 * left, edge + 2 * left), 180f, 90f, false)
+        }
+        lineTo(size.width - edge - right, edge)
+        if (right > 0f) {
+            arcTo(
+                Rect(size.width - edge - 2 * right, edge, size.width - edge, edge + 2 * right),
+                270f,
+                90f,
+                false,
+            )
+        }
         lineTo(size.width - edge, size.height)
     }
     drawPath(path, color, style = Stroke(stroke))

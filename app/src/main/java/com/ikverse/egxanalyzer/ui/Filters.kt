@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
@@ -34,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,8 +43,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import kotlin.math.max
 
 /**
  * A dropdown of checkboxes, for a filter that accepts any combination.
@@ -360,6 +367,17 @@ internal fun FilterBar(
      */
     search: (@Composable (Modifier) -> Unit)? = null,
     /**
+     * What the bar paints behind itself **while it is held at the top of the screen**.
+     *
+     * Transparent at rest, because the bar is a shelf rather than a card and takes whatever is
+     * behind it (see the `color` argument below). Pinned it cannot: the list it filters is passing
+     * underneath, and a transparent shelf with rows sliding through it is unreadable. So it fills
+     * with whatever it is sitting on - the page's well on Results and Insights, the Positions card
+     * on the Portfolio - which keeps it looking exactly as it does at rest and stops the content
+     * showing through.
+     */
+    pinnedColor: Color = MaterialTheme.colorScheme.background,
+    /**
      * Receives a [RowScope], not a `FlowRowScope`: these sit on one scrolling line rather than
      * wrapping onto a second. `FilterRow` keeps the flow, because the in-report toolbar it draws
      * shares its row with a Hide button and is a different shape.
@@ -367,6 +385,43 @@ internal fun FilterBar(
     content: @Composable RowScope.() -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
+    // How far the bar has been scrolled past the top of the page's viewport, and the room it has to
+    // travel back down before it would leave the group it belongs to. This is the same trick the
+    // report's own table toolbar uses (see RecommendationTable): the bar is pushed down by exactly
+    // what the scroll took away, so it looks pinned without being lifted out of the page - and the
+    // clamp means it leaves with the last thing it filters rather than hanging over whatever card
+    // comes next.
+    //
+    // Measured on the outer Box, which is never translated. Reading the position of the thing being
+    // moved is a feedback loop: the offset moves it, which changes its position, which changes the
+    // offset.
+    val viewportTop = LocalViewportTop.current
+    var pin by remember { mutableFloatStateOf(0f) }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            // Above the content it filters, so the rows pass behind it rather than over it.
+            .zIndex(1f)
+            .onGloballyPositioned { coordinates ->
+                val top = coordinates.positionInWindow().y
+                // The parent is the column holding the bar and everything it narrows - the page on
+                // Results and Insights, the Positions card on the Portfolio - so its foot is where
+                // the bar has nothing left to sit over.
+                val room = coordinates.parentLayoutCoordinates?.let { parent ->
+                    parent.positionInWindow().y + parent.size.height - top - coordinates.size.height
+                } ?: 0f
+                pin = (viewportTop - top).coerceIn(0f, max(0f, room))
+            },
+    ) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer { translationY = pin }
+            // Rectangular and behind the rounded shelf, so the corners it leaves are covered too:
+            // a row sliding through the notch of a rounded corner is the same fault as one sliding
+            // through the whole bar, in four smaller pieces.
+            .background(if (pin > 0f) pinnedColor else Color.Transparent),
+    ) {
     Surface(
         shape = MaterialTheme.shapes.large,
         // Transparent, and that is the second attempt. It was `surfaceContainerLow` on the argument
@@ -432,6 +487,8 @@ internal fun FilterBar(
                 }
             }
         }
+    }
+    }
     }
 }
 
