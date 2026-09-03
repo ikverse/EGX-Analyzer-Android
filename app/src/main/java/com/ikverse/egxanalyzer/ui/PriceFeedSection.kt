@@ -3,6 +3,7 @@ package com.ikverse.egxanalyzer.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudOff
@@ -147,20 +148,20 @@ internal fun PriceFeedSettingsSection(appState: AppState, contentMaxWidth: Dp) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         // Offered whatever the state, because it is also how a reader confirms nothing has changed.
         // A price fetch costs nothing: it reads a free public feed and sends nothing to the model.
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        SettingRow(
+            about = infoNote(
+                "Fetch prices now",
+                "Prices come from a free public feed and nothing is sent to the AI provider, " +
+                    "so fetching them costs nothing.",
+            ),
+        ) {
             OutlinedButton(
                 onClick = { scope.launch { appState.refreshPrices() } },
                 enabled = !appState.pricesRefreshing,
             ) {
                 Text(if (appState.pricesRefreshing) "Fetching…" else "Fetch prices now")
             }
-            InfoButton(
-                infoNote(
-                    "Fetch prices now",
-                    "Prices come from a free public feed and nothing is sent to the AI provider, " +
-                        "so fetching them costs nothing.",
-                ),
-            )
+            Spacer(Modifier.weight(1f))
         }
     }
 }

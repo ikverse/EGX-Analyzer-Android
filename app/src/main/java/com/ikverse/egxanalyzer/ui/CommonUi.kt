@@ -318,6 +318,17 @@ internal fun SubSection(
  *
  * @param about what the group is for, behind the heading's question mark rather than in a paragraph
  *   under it. Ignored without a [title]: there is no heading to hang it on.
+ * @param contentInset how far the content is held in from the card's edge.
+ *
+ * [Space.l] everywhere the content is things to read - controls, figures, sentences - which is what
+ * a card normally holds. A card whose children are themselves **cards** passes [Space.s], because
+ * the child draws its own border and the parent is then paying for an edge that is already there.
+ * The heading and its rule keep the full inset whatever this is: the alternative is a title that
+ * sits at a different distance from the card's edge than every other title on the page, which is
+ * the almost-aligned this file's spacing scale exists to stop.
+ *
+ * It matters because these nest. Positions is a card holding session cards holding trade cards, and
+ * at a full inset per level the innermost card had 285dp of a 411dp screen.
  */
 @Composable
 internal fun SectionCard(
@@ -325,6 +336,7 @@ internal fun SectionCard(
     icon: ImageVector? = null,
     modifier: Modifier = Modifier,
     about: InfoNote? = null,
+    contentInset: Dp = Space.l,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Card(
@@ -333,9 +345,18 @@ internal fun SectionCard(
         shape = MaterialTheme.shapes.large,
         border = cardOutline,
     ) {
-        Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        // Vertical only, so the heading band and the content band can be held in by different
+        // amounts. Both were one padding on this Column until the nesting above made the two
+        // different questions.
+        Column(
+            Modifier.padding(vertical = Space.l),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
             if (title != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.padding(horizontal = Space.l),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     if (icon != null) {
                         Icon(
                             icon,
@@ -357,9 +378,16 @@ internal fun SectionCard(
                 // The same hairline the chrome uses to separate the app header from the page, so a
                 // card says where its heading ends the way the app does. Only with a title: there is
                 // nothing to separate without one.
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                HorizontalDivider(
+                    Modifier.padding(horizontal = Space.l),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
             }
-            content()
+            Column(
+                Modifier.padding(horizontal = contentInset),
+                verticalArrangement = Arrangement.spacedBy(Space.s),
+                content = content,
+            )
         }
     }
 }
@@ -399,6 +427,14 @@ internal fun ExpandableSection(
     summaryContent: (@Composable () -> Unit)? = null,
     /** Caps the content, for groups of form controls: a text field the width of a desk is unusable. */
     contentMaxWidth: Dp? = null,
+    /**
+     * How far the content is held in from the card's edge, on [SectionCard]'s rule.
+     *
+     * [Space.s] where the children are cards - the child's own border is the edge, and a full inset
+     * at every level of a nest is what left a trade card 285dp of a 411dp screen. The header row and
+     * the rule under it keep their 16 whatever this is.
+     */
+    contentInset: Dp = Space.l,
     /**
      * What the whole group is for, behind a question mark in the header.
      *
@@ -478,7 +514,7 @@ internal fun ExpandableSection(
                     )
                     Column(
                         Modifier
-                            .padding(start = Space.l, end = Space.l, top = Space.s, bottom = Space.l)
+                            .padding(start = contentInset, end = contentInset, top = Space.s, bottom = Space.l)
                             .then(contentMaxWidth?.let { Modifier.widthIn(max = it) } ?: Modifier),
                         verticalArrangement = Arrangement.spacedBy(Space.s),
                         content = content,

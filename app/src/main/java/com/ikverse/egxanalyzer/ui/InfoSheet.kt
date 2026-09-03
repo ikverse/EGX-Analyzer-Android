@@ -1,11 +1,15 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material3.Checkbox
@@ -26,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -115,6 +120,58 @@ internal fun InfoSheet(note: InfoNote, onDismiss: () -> Unit) {
 }
 
 /**
+ * The room a card's chevron takes at its right edge, held open by every question mark drawn inside
+ * the card.
+ *
+ * `ExpandableSection` puts the group's own question mark *before* that chevron, so the affordance
+ * that explains a whole card sat 24dp to the left of the ones explaining the controls in it - one
+ * column of question marks in the headings, a second one down the contents, on a page built almost
+ * entirely of those two things. Reserving the chevron's own width inside the card makes it one
+ * column. It is only ever spent on a row that has a question mark, so nothing else on the card
+ * gives up any width for it.
+ */
+private val ChevronGutter: Dp = IconSize.Action
+
+/**
+ * The leading column a control stands in, as wide as the widest of them.
+ *
+ * A switch is 52dp and a checkbox draws 20dp inside a 48dp touch target, so left to themselves the
+ * two put their labels 16dp apart on a page that reads as one list of settings. One column instead,
+ * and both labels start at the same place.
+ */
+private val ControlColumn: Dp = 52.dp
+
+/**
+ * How far inside its own touch target a checkbox draws its box: half the gap between the 48dp
+ * target Material gives it and the 20dp square it actually paints.
+ */
+private val CheckboxInset: Dp = (48.dp - 20.dp) / 2
+
+/**
+ * One line of a settings card: whatever the control is, and its explanation in the card's gutter.
+ *
+ * Written because the question marks had drifted. [SettingToggle] and [SettingLabel] put theirs at
+ * the trailing edge; the four rows built by hand - Save diagnostics, Restore from a backup, Fetch
+ * prices now, Add a schedule - put theirs immediately after the button, so on a card holding both
+ * shapes the same affordance appeared in two places and neither read as a column. Here it has one
+ * home, and a caller cannot put it anywhere else.
+ *
+ * The caller decides what stretches: give the element that should fill the line a `weight(1f)`, or
+ * add a weighted [Spacer] after a button so the question mark is pushed to the edge.
+ */
+@Composable
+internal fun SettingRow(
+    modifier: Modifier = Modifier,
+    about: InfoNote? = null,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        content()
+        about?.let { InfoButton(it, Modifier.padding(end = ChevronGutter)) }
+    }
+}
+
+/**
  * A setting that is on or off, its name, and where its explanation went.
  *
  * Written once because it was written fifteen times: a `Row` holding a `Checkbox` and a `Text`,
@@ -125,6 +182,12 @@ internal fun InfoSheet(note: InfoNote, onDismiss: () -> Unit) {
  * The control leads in every case, switch or checkbox. Which of the two is used says how heavy the
  * setting is, not where it sits: a switch is for something that arms the phone to act on its own,
  * which is the distinction `SchedulesSection` drew and the reason it is kept.
+ *
+ * **The checkbox is drawn [CheckboxInset] to the left of where Material puts it.** That padding is
+ * inside its touch target, so a card whose buttons, text and sliders all start at the card's own
+ * edge had its checkboxes starting 14dp further in - the one thing on the page that did not line up
+ * with the rest of it. The target keeps its full 48dp and simply overhangs the card's own padding
+ * by that much, so nothing about pressing it changes.
  *
  * @param about absent for a setting whose label is the whole of it. Most have one; "Text messages"
  *   in the content-type list does not, and giving it a question mark to open two words would be
@@ -141,23 +204,30 @@ internal fun SettingToggle(
     switch: Boolean = false,
     enabled: Boolean = true,
 ) {
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        if (switch) {
-            Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
-        } else {
-            Checkbox(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+    SettingRow(modifier, about) {
+        Box(Modifier.width(ControlColumn), contentAlignment = Alignment.CenterStart) {
+            if (switch) {
+                Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+            } else {
+                // Shifted rather than resized. Forcing the target's size from outside would put
+                // the constraints on the wrong side of the padding Material applies inside it, and
+                // the box would be drawn against the top-left corner of the cell instead of in the
+                // middle of it - a checkbox riding a few pixels high on every row.
+                Checkbox(
+                    checked = checked,
+                    onCheckedChange = onCheckedChange,
+                    enabled = enabled,
+                    modifier = Modifier.offset(x = -CheckboxInset),
+                )
+            }
         }
         Text(
             label,
             modifier = Modifier
                 .weight(1f)
-                // A switch draws no padding of its own, where a checkbox ships with it. Without
-                // this the two rows put their labels at two different offsets on the same card.
-                .padding(start = if (switch) Space.m else 0.dp)
-                .padding(end = Space.s),
+                .padding(start = Space.m, end = Space.s),
             style = MaterialTheme.typography.bodyLarge,
         )
-        about?.let { InfoButton(it) }
     }
 }
 
@@ -179,8 +249,7 @@ internal fun SettingLabel(
     about: InfoNote? = null,
     style: TextStyle = MaterialTheme.typography.labelLarge,
 ) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    SettingRow(about = about) {
         Text(text, Modifier.weight(1f), style = style)
-        about?.let { InfoButton(it) }
     }
 }

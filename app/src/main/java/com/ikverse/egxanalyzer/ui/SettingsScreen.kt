@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -22,6 +21,7 @@ import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.CloudDownload
@@ -50,7 +50,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -127,6 +126,18 @@ internal fun SettingsScreen(appState: AppState) {
     } else {
         "$askModel \u00b7 no search"
     }
+
+    // Counted here rather than in the summary line so the two cannot disagree about how many
+    // switches the card actually holds.
+    val notificationsOn = listOf(
+        appState.appPreferences.overdueRemindersEnabled,
+        appState.appPreferences.tradeAlertsEnabled,
+        appState.appPreferences.callAlertsEnabled,
+        appState.appPreferences.approachAlertsEnabled,
+        appState.appPreferences.sessionDigestEnabled,
+        appState.appPreferences.feedAlertsEnabled,
+        appState.appPreferences.scheduleAlertsEnabled,
+    ).count { it }
 
     Screen(
         title = "Settings",
@@ -576,8 +587,10 @@ internal fun SettingsScreen(appState: AppState) {
 
         // "Trades" rather than "Scoring": every control in here is about the user's own trades
         // now. The window stopped judging the channels - a call is followed until it reaches a
-        // target or the stop, and nothing on this page moves that - so what is left is a deadline
-        // for a position and two notifications about positions.
+        // target or the stop, and nothing on this page moves that - so what is left is the one
+        // deadline anybody sets. The seven things the phone can say out loud sat under it until
+        // they moved to Notifications below, which had put "tell me when the price feed goes
+        // quiet" inside a card about how long to hold a trade.
         ExpandableSection(
             "Trades",
             icon = Icons.Outlined.Timeline,
@@ -585,23 +598,22 @@ internal fun SettingsScreen(appState: AppState) {
             contentMaxWidth = FormWidth,
         ) {
             val window = appState.appPreferences.defaultTradeWindowSessions
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            SettingRow(
+                about = infoNote(
+                    "Default trade window",
+                    "What a new trade's deadline is offered as when you press Bought, counted " +
+                        "from the session the call was made for. You can type over it there, " +
+                        "or later from Edit trade.",
+                    "It changes nothing already recorded, and it does not affect how the " +
+                        "sources are scored - a call is followed until it reaches a target or " +
+                        "the stop, which is what Insights reports the timings of.",
+                ),
+            ) {
                 Text("Default trade window", modifier = Modifier.weight(1f))
                 Text(
                     "$window ${if (window == 1) "session" else "sessions"}",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary,
-                )
-                InfoButton(
-                    infoNote(
-                        "Default trade window",
-                        "What a new trade's deadline is offered as when you press Bought, counted " +
-                            "from the session the call was made for. You can type over it there, " +
-                            "or later from Edit trade.",
-                        "It changes nothing already recorded, and it does not affect how the " +
-                            "sources are scored - a call is followed until it reaches a target or " +
-                            "the stop, which is what Insights reports the timings of.",
-                    ),
                 )
             }
             Slider(
@@ -611,6 +623,29 @@ internal fun SettingsScreen(appState: AppState) {
                     Scoring.MAX_WINDOW_SESSIONS.toFloat(),
                 steps = Scoring.MAX_WINDOW_SESSIONS - Scoring.MIN_WINDOW_SESSIONS - 1,
             )
+        }
+
+        // Everything the phone can say out loud, in one card. All seven of these lived in Trades,
+        // which was true of the first two and increasingly untrue of the rest: a feed that has gone
+        // quiet and a schedule that did not fire are the app reporting on itself, and neither has
+        // anything to do with how long to hold a position. They are one card because they are one
+        // decision - how much this app is allowed to interrupt - and because the switch somebody
+        // came here to turn off is now under the heading naming what they came to stop.
+        ExpandableSection(
+            "Notifications",
+            icon = Icons.Outlined.NotificationsNone,
+            summary = "$notificationsOn of $NOTIFICATION_COUNT on",
+            contentMaxWidth = FormWidth,
+            about = infoNote(
+                "Notifications",
+                "Each of these reports something that has already happened - a level reached, a " +
+                    "deadline passed, a run that did not fire. None of them says what to do about " +
+                    "it, and none of them can start a run or spend anything.",
+                "Android silences a whole channel at a time, so these arrive on several channels " +
+                    "rather than one: muting news about your trades cannot quietly mute the app " +
+                    "telling you it has stopped working.",
+            ),
+        ) {
             SettingToggle(
                 label = "Tell me when a trade goes past its deadline",
                 checked = appState.appPreferences.overdueRemindersEnabled,
@@ -865,7 +900,14 @@ private fun DiagnosticsControl(appState: AppState) {
     var saving by remember { mutableStateOf(false) }
     // A row rather than a column, now that what sat under the button is behind the question mark
     // beside it: one line where there were four.
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    SettingRow(
+        about = infoNote(
+            "Save diagnostics",
+            "Copies this device's saved record into Downloads.",
+            "No provider key and no Telegram key travels in it - those are encrypted " +
+                "separately by Android Keystore and have never been part of it.",
+        ),
+    ) {
         OutlinedButton(
             enabled = !saving,
             onClick = {
@@ -897,14 +939,7 @@ private fun DiagnosticsControl(appState: AppState) {
         ) {
             Text(if (saving) "Saving…" else "Save diagnostics")
         }
-        InfoButton(
-            infoNote(
-                "Save diagnostics",
-                "Copies this device's saved record into Downloads.",
-                "No provider key and no Telegram key travels in it - those are encrypted " +
-                    "separately by Android Keystore and have never been part of it.",
-            ),
-        )
+        Spacer(Modifier.weight(1f))
     }
 }
 
@@ -1068,6 +1103,14 @@ private val NEWS_WINDOWS = listOf(15, 30, 90, 180)
  * setting that lies about what it does.
  */
 private val SEARCH_RESULTS = listOf(5, 8, 12, 20)
+
+/**
+ * How many switches the Notifications card holds.
+ *
+ * Named rather than written into the summary, because "3 of 7 on" over a card showing eight
+ * switches is the kind of wrong nobody notices for months.
+ */
+private const val NOTIFICATION_COUNT = 7
 
 private val FormWidth = 560.dp
 

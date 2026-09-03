@@ -328,7 +328,15 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
     // read as one background: the section had no edge of its own to say where it began or ended.
     // A card gives it one, and the filters are unambiguously *its* filters rather than something
     // floating above the next thing down.
-    SectionCard(title = "Positions", icon = Icons.Outlined.AccountBalanceWallet) {
+    // The one card on the tab whose children are cards, so it holds them in by Space.s rather than
+    // the Space.l a card of controls uses. Three frames stood between the page and a trade - this
+    // card, the session card, the trade card - each paying a full inset and each drawing its own
+    // hairline, which left the trade 285dp of a 411dp cover screen. See SectionCard.contentInset.
+    SectionCard(
+        title = "Positions",
+        icon = Icons.Outlined.AccountBalanceWallet,
+        contentInset = Space.s,
+    ) {
         if (groups.isEmpty()) {
             Text(
                 "Nothing recorded yet.",
@@ -483,6 +491,9 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
                 // session-event tiles do. At the page's own `surfaceContainer` it would be the same
                 // fill as the card holding it and would have no edge but its hairline.
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                // Its children are the trade cards, so it holds them in by the same Space.s the
+                // card around it uses, and for the same reason.
+                contentInset = Space.s,
                 // Every card starts folded, a session still running included. Once enough sessions
                 // have been traded, the ones that opened themselves were most of the screen, and the
                 // list of dates is what makes the record readable - the summary line says how each

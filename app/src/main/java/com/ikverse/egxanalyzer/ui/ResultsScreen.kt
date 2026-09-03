@@ -10,6 +10,8 @@ import android.app.Activity
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
@@ -61,13 +63,14 @@ import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import com.ikverse.egxanalyzer.data.RequestTrace
 import androidx.compose.ui.platform.LocalDensity
@@ -282,10 +285,6 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                         // Only while this day is the open one. A stack that is shut has no open
                         // run to keep in step with, and its pager is free to be swiped.
                         openRunId = openRun.takeIf { open },
-                        onOpenRun = { saved ->
-                            openRun = saved.id
-                            appState.selectResult(saved)
-                        },
                         modifier = stackModifier,
                     ) { saved, expanded, stack, cardModifier ->
                         card(saved, expanded, stack, cardModifier)
@@ -502,8 +501,6 @@ private fun SavedRunStack(
     runs: List<SavedAnalysis>,
     /** The run whose report is open, when it is one of these. Null while the whole stack is shut. */
     openRunId: Long?,
-    /** Moves the open report onto the run the reader swiped to. */
-    onOpenRun: (SavedAnalysis) -> Unit,
     modifier: Modifier = Modifier,
     card: @Composable (SavedAnalysis, Boolean, StackPosition?, Modifier) -> Unit,
 ) {
@@ -511,6 +508,7 @@ private fun SavedRunStack(
         card(runs.single(), openRunId != null, null, modifier)
         return
     }
+    val open = openRunId != null
     val openIndex = runs.indexOfFirst { it.id == openRunId }
     val pager = rememberPagerState(
         // Opening the day at whichever run is open, rather than at the front: a report opened from
@@ -521,19 +519,22 @@ private fun SavedRunStack(
     LaunchedEffect(openIndex) {
         if (openIndex >= 0 && openIndex != pager.currentPage) pager.scrollToPage(openIndex)
     }
-    // Swiping with a report open carries the report across, rather than leaving one run's report
-    // showing under a card that is no longer its own. Keyed on the open run as well as the pager,
-    // so the check below is reading which run is open now and not which one was when it started.
-    LaunchedEffect(pager, runs, openRunId) {
-        snapshotFlow { pager.settledPage }.collect { page ->
-            if (openRunId != null && runs[page].id != openRunId) onOpenRun(runs[page])
-        }
-    }
+    // How tall the tallest shut card of this session stands, which every other one is then held to.
+    // A run naming six chats is two lines taller than one naming two, and a stack that changed
+    // height under the thumb read as the page moving rather than as a card being turned.
+    //
+    // Measured rather than asked for. `IntrinsicSize` is the obvious way to write this and it
+    // throws: these cards contain a `SubcomposeLayout`, and intrinsic measurement of one is
+    // unsupported - the trap `ResponsiveRows` and `AdaptivePanes` both carry a warning about. Read
+    // back this way the floor can only grow, so it settles in one pass.
+    var tallest by remember(runs) { mutableIntStateOf(0) }
+    val floor = with(LocalDensity.current) { tallest.toDp() }
     Box(modifier.fillMaxWidth()) {
         // The card behind this one, showing the last few dp of its side. Only where there is
         // actually one behind: on the last reading the stack has been walked to its end, and an
-        // edge beside it would be drawing a card that is not there.
-        if (pager.currentPage < runs.lastIndex) {
+        // edge beside it would be drawing a card that is not there. And never under an open
+        // report, where it would stand the whole height of the report as a ghost of it.
+        if (!open && pager.currentPage < runs.lastIndex) {
             Surface(
                 Modifier.matchParentSize().padding(
                     start = StackEdgeDepth,
@@ -547,15 +548,36 @@ private fun SavedRunStack(
         }
         HorizontalPager(
             state = pager,
-            modifier = Modifier.padding(end = StackEdgeDepth),
+            // Open, the report takes back the strip the card behind was showing through, so it
+            // runs out to the edge rather than stopping short of one for a card that is no longer
+            // drawn.
+            modifier = if (open) Modifier else Modifier.padding(end = StackEdgeDepth),
             // No peek. Insetting only the sessions that were run twice would make their cards
             // narrower than the rest, and a grid row of cards that do not match reads as a fault
             // before it reads as a hint. The dots and the edge carry the hint instead.
             pageSpacing = Space.s,
             verticalAlignment = Alignment.Top,
+            // Nothing is swiped past an open report. It holds its own sideways pager over a stock's
+            // occurrences and tables that scroll sideways, and a drag landing on either would be
+            // caught by two things at once. Closing it is what puts the stack back under the thumb.
+            userScrollEnabled = !open,
         ) { page ->
             val saved = runs[page]
-            card(saved, saved.id == openRunId, StackPosition(page, runs.size), Modifier.fillMaxWidth())
+            val expanded = saved.id == openRunId
+            card(
+                saved,
+                expanded,
+                StackPosition(page, runs.size),
+                if (expanded) {
+                    // An open report is as tall as its report. Holding it to the shut cards' floor
+                    // would be measuring it against something it is not.
+                    Modifier.fillMaxWidth()
+                } else {
+                    Modifier.fillMaxWidth()
+                        .onSizeChanged { if (it.height > tallest) tallest = it.height }
+                        .heightIn(min = floor)
+                },
+            )
         }
     }
 }
@@ -563,6 +585,7 @@ private fun SavedRunStack(
 /** Which reading of a session a card is, for the dots and the line of type beside them. */
 private data class StackPosition(val page: Int, val count: Int)
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SavedAnalysisCard(
     modifier: Modifier = Modifier,
@@ -667,22 +690,34 @@ private fun SavedAnalysisCard(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    // Inside the card rather than over it. A strip above the card would be a second
-                    // heading for something the card is already titled with, and it would sit at a
-                    // different height on every row of a grid that pairs a stacked day with a
-                    // single-run one.
-                    stack?.let {
-                        Row(
+                    // Which reading this is and whether a later one has covered it are one
+                    // thought, so they are one line: the dots, the count in words, then the pill.
+                    // Inside the card rather than on a strip over it - a strip would be a second
+                    // heading for something the card is already titled with, and would sit at a
+                    // different height on every grid row pairing a stacked day with a single-run
+                    // one. A `FlowRow` because on a cover-screen card there is not room for all
+                    // three, and a pill dropping to a second line is better than one clipped.
+                    if (stack != null || newerRunExists) {
+                        FlowRow(
                             Modifier.padding(top = Space.xs),
                             horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                            verticalAlignment = Alignment.CenterVertically,
+                            verticalArrangement = Arrangement.spacedBy(Space.xs),
+                            itemVerticalAlignment = Alignment.CenterVertically,
                         ) {
-                            PageDots(it.page, it.count)
-                            Text(
-                                "Run ${it.page + 1} of ${it.count}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            stack?.let {
+                                PageDots(it.page, it.count)
+                                Text(
+                                    "Run ${it.page + 1} of ${it.count}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            // Only where a later run covered the same session. A re-run leaves an
+                            // older report looking exactly as current as the newest one, which is
+                            // the same trap the unreadable notice exists for. Worded as a fact
+                            // rather than "superseded": an older run keeps the chats the newer one
+                            // never read, which is how the scoring treats it too.
+                            if (newerRunExists) StatusPill("Newer run exists")
                         }
                     }
                 }
@@ -719,12 +754,6 @@ private fun SavedAnalysisCard(
                     }
                 }
             }
-
-            // Only where a later run covered the same session. A re-run leaves an older report
-            // looking exactly as current as the newest one, which is the same trap the unreadable
-            // notice exists for. Worded as a fact rather than "superseded": an older run keeps the
-            // chats the newer one never read, which is how the scoring treats it too.
-            if (newerRunExists) StatusPill("Newer run exists")
 
             ReportFigures(
                 stocks = stockCount,

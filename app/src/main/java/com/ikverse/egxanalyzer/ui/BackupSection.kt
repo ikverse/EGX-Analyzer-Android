@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.ikverse.egxanalyzer.data.backupFolderLabel
 import com.ikverse.egxanalyzer.data.backupsInFolder
@@ -84,56 +85,61 @@ fun BackupControls(appState: AppState) {
     ) { picked -> pendingRestore = picked }
 
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            OutlinedButton(
-                enabled = !busy,
-                onClick = {
-                    scope.launch {
-                        busy = true
-                        runCatching {
-                            withContext(Dispatchers.IO) {
-                                writeBackupTo(
-                                    context = context,
-                                    folder = folder?.takeIf { holdsFolder },
-                                    database = appState.databaseFile(),
-                                    settings = appState.settingsDocument(),
-                                    device = appState.backupDevice(),
-                                    checkpoint = appState::checkpointDatabase,
-                                )
-                            }
-                        }
-                            .onSuccess {
-                                appState.recordBackupDay()
-                                appState.statusMessage = StatusMessage("Saved to $it", succeeded = true)
-                            }
-                            .onFailure {
-                                appState.statusMessage = StatusMessage(
-                                    it.message?.takeIf(String::isNotBlank) ?: "Could not write a backup",
-                                    succeeded = false,
-                                )
-                            }
-                        busy = false
-                    }
-                },
+        // In the row with the buttons it describes. It was a second grey paragraph under the
+        // status line, so the card said what a backup is every time somebody came to read whether
+        // one had been written.
+        SettingRow(
+            about = infoNote(
+                "What a backup holds",
+                "Every report, trade, rule and setting.",
+                "Your provider API key is not in it and never leaves this phone.",
+            ),
+        ) {
+            FlowRow(
+                Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalArrangement = Arrangement.spacedBy(Space.s),
             ) {
-                Text(if (busy) "Working…" else "Back up now")
+                OutlinedButton(
+                    enabled = !busy,
+                    onClick = {
+                        scope.launch {
+                            busy = true
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    writeBackupTo(
+                                        context = context,
+                                        folder = folder?.takeIf { holdsFolder },
+                                        database = appState.databaseFile(),
+                                        settings = appState.settingsDocument(),
+                                        device = appState.backupDevice(),
+                                        checkpoint = appState::checkpointDatabase,
+                                    )
+                                }
+                            }
+                                .onSuccess {
+                                    appState.recordBackupDay()
+                                    appState.statusMessage = StatusMessage("Saved to $it", succeeded = true)
+                                }
+                                .onFailure {
+                                    appState.statusMessage = StatusMessage(
+                                        it.message?.takeIf(String::isNotBlank) ?: "Could not write a backup",
+                                        succeeded = false,
+                                    )
+                                }
+                            busy = false
+                        }
+                    },
+                ) {
+                    Text(if (busy) "Working…" else "Back up now")
+                }
+                OutlinedButton(enabled = !busy, onClick = { chooseFolder.launch(null) }) {
+                    Text(if (holdsFolder) "Change folder" else "Choose a folder")
+                }
+                OutlinedButton(enabled = !busy, onClick = { pickBackup.launch(arrayOf("*/*")) }) {
+                    Text("Restore from a backup")
+                }
             }
-            OutlinedButton(enabled = !busy, onClick = { chooseFolder.launch(null) }) {
-                Text(if (holdsFolder) "Change folder" else "Choose a folder")
-            }
-            OutlinedButton(enabled = !busy, onClick = { pickBackup.launch(arrayOf("*/*")) }) {
-                Text("Restore from a backup")
-            }
-            // In the row with the buttons it describes. It was a second grey paragraph under the
-            // status line, so the card said what a backup is every time somebody came to read
-            // whether one had been written.
-            InfoButton(
-                infoNote(
-                    "What a backup holds",
-                    "Every report, trade, rule and setting.",
-                    "Your provider API key is not in it and never leaves this phone.",
-                ),
-            )
         }
 
         Text(

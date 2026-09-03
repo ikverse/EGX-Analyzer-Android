@@ -859,6 +859,19 @@ trade is then managed, in whatever state it has reached.
   parent with nothing but a hairline between them, the rule `OverdueTile` and `EventTile` already
   follow. `ExpandableSection.containerColor` is named by the caller rather than assumed, because
   only the caller knows what its card is sitting on.
+- **A card whose children are cards holds them in by `Space.s`, not `Space.l`.** Three frames stand
+  between the page and a trade — the Positions card, the session card, the trade card — and every
+  one of them was paying a full 16dp inset on top of a hairline it had already drawn, which left the
+  trade card **285dp of a 411dp cover screen**: 126dp, nearly a third of the panel, spent on chrome.
+  `SectionCard.contentInset` and `ExpandableSection.contentInset` are that dial, `Space.l` by default
+  so every other card on the tab is untouched, and both give it back 32dp — 317dp on the cover, 335
+  on each of the unfolded panel's two columns. **The heading and its rule keep the full inset**
+  whatever the content takes, which is the whole reason the two are separate paddings now: a title
+  sitting 8dp from its card's edge while every other title on the page sits at 16 is exactly the
+  almost-aligned the spacing scale exists to stop. The trade card's own `Space.m` is deliberately
+  untouched — it is the innermost, and the only one of the four holding content rather than another
+  card. The reduced inset is **named by the caller** for `containerColor`'s reason: only the caller
+  knows whether what it is about to draw has an edge of its own.
 - **`PortfolioOrder` holds the sort rules, for the screen and the calculator both.** `URGENT` is the
   default and what `PortfolioCalculator` groups by, so anything reading the portfolio without a
   screen gets the order the screen opens on. It sorts overdue-first then newest — date order alone
@@ -1013,6 +1026,12 @@ already detected and both reached the reader only on a screen they had to think 
   are not allowed to spend credits on this phone" is the standing state of that switch, and a daily
   notification restating it would be the app asking to be allowed to spend. **It carries no run-now
   action** — a one-tap way to spend from a lock screen is the same act as spending. Default on.
+- **All seven switches live in Settings under `Notifications`**, not in `Trades` where they grew up.
+  That was true of the first two and increasingly untrue of the rest: a feed that has gone quiet and
+  a schedule that did not fire are the app reporting on itself, and neither has anything to do with
+  how long to hold a position. One card because they are one decision - how much this app may
+  interrupt - and because the switch somebody opens Settings to turn off is now under the heading
+  naming what they came to stop. `Trades` keeps the default trade window and nothing else.
 - **Its own channel and not the overdue one**, although both are the same "you need to look at this"
   register. That channel is named for trades past their deadline, and Android silences a whole channel
   at a time — folding a feed fault into it would mean muting one silently muted the other, which is
@@ -2059,6 +2078,24 @@ app's.
 - **`SettingLabel` defaults to `labelLarge` and takes `bodyLarge` for a value.** A version number and
   a slider's current reading were body type before they gained a question mark; shrinking a figure to
   make room for the affordance beside it is the affordance changing what it was added to explain.
+- **Every question mark on a settings card sits in one column, and `SettingRow` is what puts it
+  there.** Four rows had been built by hand - Save diagnostics, Restore from a backup, Fetch prices
+  now, Add a schedule - and each put its question mark immediately after the button, where
+  `SettingToggle` and `SettingLabel` put theirs at the trailing edge: the same affordance in two
+  places on one card, so neither read as a column. A row that carries one also holds open
+  `ChevronGutter`, the 24dp `ExpandableSection` spends on its chevron, because the group's own
+  question mark sits *before* that chevron - without the gutter the headings' column and the
+  contents' column stand 24dp apart down a page made almost entirely of those two things. The
+  gutter is spent only on a row that has a question mark, so nothing else gives up any width.
+- **`SettingToggle` draws its checkbox 14dp left of where Material puts it.** That padding is inside
+  the touch target, so a card whose buttons, text and sliders all start at the card's own edge had
+  its checkboxes starting 14dp further in - the one thing on the page not lining up with the rest.
+  The target keeps its full 48dp and overhangs the card's own padding by that much, so pressing it
+  is unchanged - shifted rather than resized, because forcing the size from outside puts the
+  constraints on the wrong side of Material's internal padding and draws the box against the corner
+  of its cell instead of in the middle. Both
+  controls then stand in one `ControlColumn` as wide as the switch, which is what puts a checkbox's
+  label and a switch's label at the same place; left to themselves the two sat 16dp apart.
 - **Five kinds of text deliberately stayed on the page**, and the distinction is what stops this
   becoming a way to hide things: an `AlertDialog`'s body, because a confirmation *is* its
   explanation; live status and error lines, which report a state rather than a rule; empty states,

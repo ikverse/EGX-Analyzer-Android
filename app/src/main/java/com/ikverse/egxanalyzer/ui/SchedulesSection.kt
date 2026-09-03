@@ -162,7 +162,7 @@ internal fun SchedulesSettingsSection(appState: AppState, contentMaxWidth: Dp) {
                 "is also what the most expensive day can cost.",
         )
         if (schedules.size < AnalysisSchedule.MAX) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            SettingRow(about = cap) {
                 TextButton(onClick = appState::addAnalysisSchedule) {
                     Icon(
                         Icons.Outlined.Add,
@@ -171,16 +171,16 @@ internal fun SchedulesSettingsSection(appState: AppState, contentMaxWidth: Dp) {
                     )
                     Text("Add a schedule")
                 }
-                InfoButton(cap)
+                Spacer(Modifier.weight(1f))
             }
         } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            SettingRow(about = cap) {
                 Text(
                     "All ${AnalysisSchedule.MAX} schedules are in use",
+                    Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                InfoButton(cap)
             }
         }
         // A switch rather than a checkbox, and deliberately last: letting the phone keep a time
