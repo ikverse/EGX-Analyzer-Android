@@ -3,7 +3,6 @@ package com.ikverse.egxanalyzer.ui
 import com.ikverse.egxanalyzer.model.timing
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
@@ -43,7 +41,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -102,35 +99,6 @@ internal fun RecommendationCards(
                 trades = trades,
                 page = page,
                 pageCount = points.size,
-            )
-        }
-    }
-}
-
-/**
- * Which occurrence is showing, and how many there are.
- *
- * Drawn under the timing chip rather than below the card: the header already stands two lines tall
- * to keep names level, so this costs no height, and the chip is exactly what differs between one
- * occurrence and the next - `Watching` on this page, `Explicit date` on the one after. Dots beneath
- * it read as "this chip is one of four", which is what they mean.
- */
-@Composable
-private fun PageDots(current: Int, total: Int) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        repeat(total) { index ->
-            Box(
-                Modifier
-                    .padding(horizontal = 2.dp)
-                    .size(if (index == current) 7.dp else 5.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (index == current) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.outlineVariant
-                        },
-                    ),
             )
         }
     }
@@ -311,7 +279,12 @@ private fun StockHeader(
                     Box(
                         Modifier.height(tickerLine),
                         contentAlignment = Alignment.Center,
-                    ) { PageDots(page, pageCount) }
+                    ) {
+                        // Under the timing chip rather than below the card: the header already stands
+                        // two lines tall to keep names level, so this costs no height, and the chip is
+                        // exactly what differs between one occurrence and the next.
+                        PageDots(page, pageCount)
+                    }
                     Spacer(Modifier.height(Space.xs))
                 }
                 TimingChip(point)

@@ -269,6 +269,7 @@ internal fun InsightsScreen(appState: AppState) {
         // Where the call being pointed at sits, so the page can scroll to it inside whichever
         // session card holds it.
         val reveal = remember { BringIntoViewRequester() }
+        val settled = LocalTabsSettled.current
         LaunchedEffect(pendingCall, report) {
             if (pendingCall == null) return@LaunchedEffect
             val session = report.sessionFor(pendingCall)
@@ -284,7 +285,7 @@ internal fun InsightsScreen(appState: AppState) {
             // The card is unfolding as this runs, and a scroll measured against a height it is
             // about to leave behind stops short of the card that was asked for.
             delay(REVEAL_SETTLE_MS)
-            reveal.revealIfOnScreen(appState, AppDestination.INSIGHTS)
+            reveal.revealIfOnScreen(appState, AppDestination.INSIGHTS, settled)
         }
         // Built once for the page rather than searched per card. Keyed on the filtered report, so a
         // channel filter narrows the record a card quotes to the same calls the page is counting -

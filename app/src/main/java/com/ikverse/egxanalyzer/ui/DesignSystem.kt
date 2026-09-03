@@ -3,6 +3,7 @@ package com.ikverse.egxanalyzer.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -18,6 +19,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.layout.onSizeChanged
@@ -29,8 +33,10 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -361,6 +367,37 @@ internal fun <T> expandableBands(
     }
     if (closed.isNotEmpty()) bands += closed.toList() to false
     return bands
+}
+
+/**
+ * Which page of a pager is showing, and how many there are.
+ *
+ * Lives here because two screens now page through cards - the occurrences of one stock, and the
+ * runs of one session - and a pager whose dots are drawn a second way reads as a different control
+ * doing a different thing.
+ *
+ * A readout, never a control. Swiping is what moves a pager; a dot large enough to press
+ * comfortably is no longer a dot, and one that is not is a control nobody can hit.
+ */
+@Composable
+internal fun PageDots(current: Int, total: Int) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        repeat(total) { index ->
+            Box(
+                Modifier
+                    .padding(horizontal = 2.dp)
+                    .size(if (index == current) 7.dp else 5.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (index == current) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant
+                        },
+                    ),
+            )
+        }
+    }
 }
 
 /**

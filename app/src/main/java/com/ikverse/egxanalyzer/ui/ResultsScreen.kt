@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -58,10 +60,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -217,17 +221,28 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
             }
             BoxWithConstraints {
                 val columns = responsiveColumns(minColumnWidth = SavedRunMinWidth, maxColumns = 2)
+                // One entry per session rather than per run: a session re-read three times is one
+                // row of the list, swiped through, newest reading in front. Done before the bands
+                // are cut because an open run takes the whole width and its whole stack goes with
+                // it - a day cannot be half in a grid row and half out of it.
+                val days = remember(shown) { groupRunsByDay(shown) }
                 // Grouped before rendering rather than while: the open run interrupts the grid, and
                 // where it does so cannot be decided one card at a time.
-                val bands = remember(shown, openRun) {
-                    expandableBands(shown) { it.id == openRun }
+                val bands = remember(days, openRun) {
+                    expandableBands(days) { day -> day.any { it.id == openRun } }
                 }
 
                 @Composable
-                fun card(saved: SavedAnalysis, expanded: Boolean, cardModifier: Modifier) {
+                fun card(
+                    saved: SavedAnalysis,
+                    expanded: Boolean,
+                    stack: StackPosition?,
+                    cardModifier: Modifier,
+                ) {
                     SavedAnalysisCard(
                         modifier = cardModifier,
                         saved = saved,
+                        stack = stack,
                         // Built per run: every card inside it dates its call from this run's target
                         // session, which is what the scorer does too.
                         trades = remember(appState, saved.id) {
@@ -260,23 +275,49 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
                     )
                 }
 
+                @Composable
+                fun stack(day: List<SavedAnalysis>, open: Boolean, stackModifier: Modifier) {
+                    SavedRunStack(
+                        runs = day,
+                        // Only while this day is the open one. A stack that is shut has no open
+                        // run to keep in step with, and its pager is free to be swiped.
+                        openRunId = openRun.takeIf { open },
+                        onOpenRun = { saved ->
+                            openRun = saved.id
+                            appState.selectResult(saved)
+                        },
+                        modifier = stackModifier,
+                    ) { saved, expanded, stack, cardModifier ->
+                        card(saved, expanded, stack, cardModifier)
+                    }
+                }
+
                 // Opening a report puts its top at the top of the view, rather than leaving you
                 // halfway down a table you just asked for.
                 val reveal = remember { BringIntoViewRequester() }
+                val settled = LocalTabsSettled.current
                 LaunchedEffect(openRun) {
-                    if (openRun != null) reveal.revealIfOnScreen(appState, AppDestination.RESULTS)
+                    if (openRun != null) {
+                        reveal.revealIfOnScreen(appState, AppDestination.RESULTS, settled)
+                    }
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                     bands.forEach { (band, open) ->
                         if (open) {
-                            card(
-                                band.single(),
-                                expanded = true,
-                                cardModifier = Modifier.fillMaxWidth().bringIntoViewRequester(reveal),
-                            )
+                            val day = band.single()
+                            // Keyed by the run in front, so that re-sorting the list, or a new run
+                            // arriving for this session, cannot hand one day's page to another.
+                            key(day.first().id) {
+                                stack(
+                                    day,
+                                    open = true,
+                                    stackModifier = Modifier.fillMaxWidth()
+                                        .bringIntoViewRequester(reveal),
+                                )
+                            }
                         } else {
-                            ResponsiveRows(band, columns) { saved, cardModifier ->
-                                card(saved, expanded = false, cardModifier = cardModifier)
+                            ResponsiveRows(band, columns) { day, cardModifier ->
+                                key(day.first().id) { stack(day, open = false, cardModifier) }
                             }
                         }
                     }
@@ -293,6 +334,15 @@ internal fun ResultsScreen(activity: Activity, appState: AppState) {
  * old 380dp minimum asked for 760dp and never once got it on the screen it was meant for.
  */
 private val SavedRunMinWidth = 300.dp
+
+/**
+ * How much of the card behind shows past the side of the one in front.
+ *
+ * Enough to read as a second card and no more. The inset is what makes it read as behind rather
+ * than beside: an edge as tall as the card in front is a border, not a card under it.
+ */
+private val StackEdgeDepth = 6.dp
+private val StackEdgeInset = 8.dp
 
 /**
  * The orders a saved run can be listed in.
@@ -318,6 +368,41 @@ internal enum class RunOrder(val label: String, val comparator: Comparator<Saved
             .thenBy { it.result.recommendationTargetDate }
             .thenByDescending { it.result.completedAt },
     ),
+}
+
+/**
+ * Every run of one session, gathered into a single row of the list.
+ *
+ * The session is the target date, not the day the run happened: a session read again the next
+ * morning is a second reading of the same day's calls, which is the thing worth putting behind one
+ * card. Two runs made in one evening for two different sessions are two rows, as they should be.
+ *
+ * Order is never touched. A day sits where its first run sat, and the runs inside it stay in the
+ * order the chosen sort put them - which is newest run first under three of the four sorts, and
+ * oldest first under "Run date, oldest", where first is exactly what was asked for.
+ *
+ * A run with no target date is a row of its own. There is no day to gather it into, and quietly
+ * heaping the undated ones together would claim they belong to one session.
+ */
+internal fun groupRunsByDay(runs: List<SavedAnalysis>): List<List<SavedAnalysis>> {
+    val days = mutableListOf<MutableList<SavedAnalysis>>()
+    val byTarget = mutableMapOf<LocalDate, MutableList<SavedAnalysis>>()
+    runs.forEach { run ->
+        val target = run.result.recommendationTargetDate
+        if (target == null) {
+            days += mutableListOf(run)
+            return@forEach
+        }
+        val started = byTarget[target]
+        if (started != null) {
+            started += run
+        } else {
+            val fresh = mutableListOf(run)
+            byTarget[target] = fresh
+            days += fresh
+        }
+    }
+    return days
 }
 
 /** The channel behind an occurrence, named so it can be ticked off a list. */
@@ -399,10 +484,91 @@ private fun UnreadableNotice(count: Int) {
     }
 }
 
+/**
+ * Every reading of one session, as a stack of cards the reader swipes through.
+ *
+ * A session re-run three times used to fill three cards of the grid with the same date, and the
+ * only thing separating them was a line of small print naming the time each was run at. One row per
+ * session, with the readings behind it, is what the list was always describing.
+ *
+ * A day with a single run draws exactly as it always did: no dots, no edge. Most days are that day,
+ * and a stack drawn around a stack of one is chrome reporting nothing.
+ *
+ * The card behind shows down its side rather than under its foot, because the side is the way out
+ * of it. An edge below says there is more; an edge to the right says which way to push.
+ */
+@Composable
+private fun SavedRunStack(
+    runs: List<SavedAnalysis>,
+    /** The run whose report is open, when it is one of these. Null while the whole stack is shut. */
+    openRunId: Long?,
+    /** Moves the open report onto the run the reader swiped to. */
+    onOpenRun: (SavedAnalysis) -> Unit,
+    modifier: Modifier = Modifier,
+    card: @Composable (SavedAnalysis, Boolean, StackPosition?, Modifier) -> Unit,
+) {
+    if (runs.size == 1) {
+        card(runs.single(), openRunId != null, null, modifier)
+        return
+    }
+    val openIndex = runs.indexOfFirst { it.id == openRunId }
+    val pager = rememberPagerState(
+        // Opening the day at whichever run is open, rather than at the front: a report opened from
+        // a notification can be any reading of the session, including one behind the front card.
+        initialPage = openIndex.coerceAtLeast(0),
+        pageCount = { runs.size },
+    )
+    LaunchedEffect(openIndex) {
+        if (openIndex >= 0 && openIndex != pager.currentPage) pager.scrollToPage(openIndex)
+    }
+    // Swiping with a report open carries the report across, rather than leaving one run's report
+    // showing under a card that is no longer its own. Keyed on the open run as well as the pager,
+    // so the check below is reading which run is open now and not which one was when it started.
+    LaunchedEffect(pager, runs, openRunId) {
+        snapshotFlow { pager.settledPage }.collect { page ->
+            if (openRunId != null && runs[page].id != openRunId) onOpenRun(runs[page])
+        }
+    }
+    Box(modifier.fillMaxWidth()) {
+        // The card behind this one, showing the last few dp of its side. Only where there is
+        // actually one behind: on the last reading the stack has been walked to its end, and an
+        // edge beside it would be drawing a card that is not there.
+        if (pager.currentPage < runs.lastIndex) {
+            Surface(
+                Modifier.matchParentSize().padding(
+                    start = StackEdgeDepth,
+                    top = StackEdgeInset,
+                    bottom = StackEdgeInset,
+                ),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shape = MaterialTheme.shapes.large,
+                border = cardOutline,
+            ) {}
+        }
+        HorizontalPager(
+            state = pager,
+            modifier = Modifier.padding(end = StackEdgeDepth),
+            // No peek. Insetting only the sessions that were run twice would make their cards
+            // narrower than the rest, and a grid row of cards that do not match reads as a fault
+            // before it reads as a hint. The dots and the edge carry the hint instead.
+            pageSpacing = Space.s,
+            verticalAlignment = Alignment.Top,
+        ) { page ->
+            val saved = runs[page]
+            card(saved, saved.id == openRunId, StackPosition(page, runs.size), Modifier.fillMaxWidth())
+        }
+    }
+}
+
+/** Which reading of a session a card is, for the dots and the line of type beside them. */
+private data class StackPosition(val page: Int, val count: Int)
+
 @Composable
 private fun SavedAnalysisCard(
     modifier: Modifier = Modifier,
     saved: SavedAnalysis,
+    /** Which reading of its session this is, where the session was read more than once. */
+    stack: StackPosition? = null,
     /** Records what the user did about the calls in this run. */
     trades: TradeBook,
     /** Held by the screen, which needs it to give an open report a row of its own. */
@@ -501,6 +667,24 @@ private fun SavedAnalysisCard(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    // Inside the card rather than over it. A strip above the card would be a second
+                    // heading for something the card is already titled with, and it would sit at a
+                    // different height on every row of a grid that pairs a stacked day with a
+                    // single-run one.
+                    stack?.let {
+                        Row(
+                            Modifier.padding(top = Space.xs),
+                            horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            PageDots(it.page, it.count)
+                            Text(
+                                "Run ${it.page + 1} of ${it.count}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
                 Box {
                     IconButton(onClick = { menuOpen = true }) {

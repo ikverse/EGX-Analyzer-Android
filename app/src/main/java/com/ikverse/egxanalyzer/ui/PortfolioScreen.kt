@@ -400,6 +400,7 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
         // for the price in one arrival.
         val pendingSell = appState.pendingSellPositionId
         val reveal = remember { BringIntoViewRequester() }
+        val settled = LocalTabsSettled.current
         LaunchedEffect(pendingPosition, groups, dateFilter, stockFilter) {
             if (pendingPosition == null) return@LaunchedEffect
             val target = groups.firstOrNull { group ->
@@ -428,7 +429,7 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
             // The card is unfolding as this runs, and a scroll measured against a height it is about to
             // leave behind stops short of the trade that was asked for.
             delay(REVEAL_SETTLE_MS)
-            reveal.revealIfOnScreen(appState, AppDestination.PORTFOLIO)
+            reveal.revealIfOnScreen(appState, AppDestination.PORTFOLIO, settled)
         }
 
         if (shown.isEmpty()) {

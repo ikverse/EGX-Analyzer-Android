@@ -73,6 +73,7 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -151,6 +152,9 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
     // Held here rather than inside the pages: the bar is drawn over them, and it has to survive a
     // change of destination.
     val navBarVisible = remember { mutableStateOf(true) }
+    // Held here for the same reason, and read by exactly one thing - see LocalTabsSettled. The pager
+    // below writes it; beside a rail nothing does, and nothing there needs to.
+    val tabsSettled = remember { mutableStateOf(true) }
     // Above the shells and not inside either of them: back means the same thing whichever one is
     // drawn, and a handler in each would be one rule written twice. Enabled only when there is
     // something to undo, so a reader with nothing outstanding gets the system's own behaviour -
@@ -184,6 +188,7 @@ fun EgxAnalyzerApp(activity: Activity, appState: AppState) {
     CompositionLocalProvider(
         LocalWindowWidth provides windowWidth,
         LocalNavBarVisible provides navBarVisible,
+        LocalTabsSettled provides tabsSettled,
         // Remembered on the state rather than rebuilt each frame: a new lambda every recomposition
         // is a new value for a static local, which invalidates every reader of it - and the readers
         // here are every ticker on every card on the page.
@@ -764,6 +769,16 @@ private fun DestinationPager(activity: Activity, appState: AppState) {
     // splits a gesture into scroll sessions can reach it, which is exactly what the flag it replaces
     // could not say - see the note above.
     val travelling = remember { mutableStateOf<Int?>(null) }
+    // Whether the pages have stopped moving, for the one thing outside this function that has to
+    // know a page composing is not a reader arriving on it. Every way the pager moves is covered,
+    // a travel and a hand alike, because it is read off the pager itself rather than off the flags
+    // above. Put back on the way out: folding the phone disposes this whole subtree for the rail's
+    // AnimatedContent, and a flag left false there would hold every later reveal forever.
+    val settled = LocalTabsSettled.current
+    LaunchedEffect(pager, settled) {
+        snapshotFlow { pager.isScrollInProgress }.collect { settled.value = !it }
+    }
+    DisposableEffect(settled) { onDispose { settled.value = true } }
 
     LaunchedEffect(pager) {
         launch {

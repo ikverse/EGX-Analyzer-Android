@@ -356,8 +356,6 @@ internal fun PositionCard(
                 ),
             )
 
-            HorizontalDivider()
-
             Text(
                 view.profitLine(),
                 style = MaterialTheme.typography.bodySmall,
@@ -371,10 +369,16 @@ internal fun PositionCard(
             // what the user actually got out at turns an estimate into a fact, and on one the
             // deadline closed while they were still holding it.
             if (view.awaitingSale) {
+                // The rule a call card ends with, in the one place it means the same thing: what is
+                // above it is the trade as it stands, and what is below it is what can be done about
+                // it. It used to sit a line higher, above the estimate - which reads as a figure and
+                // belongs with the figures it qualifies - and that left the pills ending the card
+                // with nothing between them and the record. Inside the `if`, so a settled trade with
+                // nothing to press does not finish on a rule under no buttons.
+                HorizontalDivider()
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(Space.s),
                     verticalArrangement = Arrangement.spacedBy(Space.xs),
-                    modifier = Modifier.padding(top = Space.xs),
                 ) {
                     // The estimate rather than today's close. While the trade is open the two are
                     // the same thing; once the deadline has closed it, today's price is the least

@@ -2405,6 +2405,20 @@ app's.
   left unfolded either way, and a reveal the reader has walked away from is dropped rather than held
   for their return — the rule `NavStop` already states, that revealing the wrong card is worse than
   revealing none.
+- **The tab is not the arrival, and checking it alone fixed half of this.** A press sets
+  `AppState.destination` in the same breath it starts the pager travelling, so a page that composes
+  *during* that travel passes a destination check and cancels the very scroll carrying the reader to
+  it — the pager, barely off the tab they pressed from, snaps back to it. Only a tab two or more
+  pages away can do this: a neighbour is already composed and its effects do not run again. That is
+  the whole of why the Portfolio reached Insights, next door, and never Results, two along, and why
+  Results failed only once a report had been opened — `openRun` is `PageState.openResultId`, which
+  outlives the tab, so it is null at a cold start and non-null forever after. `revealIfOnScreen`
+  waits on `LocalTabsSettled` — written by `DestinationPager` off `pager.isScrollInProgress`, true
+  beside a rail, and put back to true on dispose so a fold cannot strand it — then asks about the
+  destination a second time on the other side of the wait. Waited out rather than dropped, because
+  an arrival that *should* reveal composes its page mid-travel too: a notification opening a saved
+  report is one, and dropping it would answer the notification with a page scrolled to wherever it
+  was last left.
 - Scrollbar overlays must be applied **outside** the scrolling node, or they are measured against
   the content and slide away with it.
 - `NavigationSuiteScaffoldLayout` does **not** consume window insets for its content; the full

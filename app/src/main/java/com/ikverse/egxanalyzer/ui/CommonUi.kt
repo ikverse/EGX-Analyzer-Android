@@ -57,6 +57,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +72,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.ui.text.TextStyle
@@ -215,6 +217,19 @@ internal val LocalViewportTop = compositionLocalOf { 0f }
  * screen, so a page being scrolled has no other way to tell it to get out of the way.
  */
 internal val LocalNavBarVisible = staticCompositionLocalOf { mutableStateOf(true) }
+
+/**
+ * Whether the pager holding the five tabs has come to rest.
+ *
+ * Owned by the shell and written by `DestinationPager`, the same way round as [LocalNavBarVisible]:
+ * something outside every screen knows this, and a page has no other way to ask. True beside a rail
+ * and true whenever there is no pager at all, because there is then nothing to arrive from.
+ *
+ * Read by [revealIfOnScreen], which is the only thing that needs it - see the trap written up
+ * there. A page composing is not the same event as a reader arriving on it: on a phone the two are
+ * a whole travel apart.
+ */
+internal val LocalTabsSettled = staticCompositionLocalOf { mutableStateOf(true) }
 
 /**
  * How many times this page has been asked to return to the top, or zero.
@@ -539,12 +554,28 @@ internal const val REVEAL_SETTLE_MS = 320L
  * about the trip back: revealing the wrong card is worse than revealing none, and a press answered
  * minutes late is a card flashing for a reason nobody remembers. The section holding it is left
  * unfolded either way, which is most of what the reveal was for.
+ *
+ * **The tab alone was not enough, and that is the whole of [settled].** A destination names where
+ * the reader is going, not whether they have got there: a press sets it in the same breath it
+ * starts the travel, so a page arriving *during* that travel passes the check and cancels the very
+ * scroll that is carrying the reader to it. The pager, barely off the tab they pressed from, then
+ * snaps back to it. Only a tab two or more pages away can do this - a neighbour is already
+ * composed and its effects do not run again - which is why the Portfolio reached Insights and
+ * never Results. So the request waits out the pager and asks again on the other side, rather than
+ * being dropped: an arrival that should reveal, a notification opening a saved report among them,
+ * composes its page mid-travel too, and dropping the request would answer the notification with a
+ * page scrolled to wherever it was left.
  */
 @OptIn(ExperimentalFoundationApi::class)
 internal suspend fun BringIntoViewRequester.revealIfOnScreen(
     appState: AppState,
     tab: AppDestination,
+    settled: State<Boolean>,
 ) {
+    if (appState.destination != tab) return
+    snapshotFlow { settled.value }.first { it }
+    // Asked again on the other side of the wait: a travel is long enough for the reader to press
+    // somewhere else, and the tab this was for may no longer be the tab on screen.
     if (appState.destination != tab) return
     bringIntoView()
 }
