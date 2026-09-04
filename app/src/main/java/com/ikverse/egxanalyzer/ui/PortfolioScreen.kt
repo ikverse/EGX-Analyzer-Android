@@ -361,8 +361,9 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
             // want, and the only one that can empty the list on a keystroke.
             search = { m -> StockFilterField(stockFilter, { stockFilter = it }, modifier = m) },
             // The one bar that does not sit on the page's well: it lives inside the Positions card,
-            // so that is what it has to fill with while it is pinned over the sessions below it.
-            pinnedColor = MaterialTheme.colorScheme.surfaceContainer,
+            // so it has to lift off a surface that is already a step up. `surfaceContainer` here -
+            // the card's own colour - would be a shelf that had simply stopped scrolling.
+            floatingColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
             SingleSelectFilter(
                 label = "dates",

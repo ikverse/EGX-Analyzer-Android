@@ -1,6 +1,7 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -41,9 +42,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -370,16 +368,19 @@ internal fun FilterBar(
      */
     search: (@Composable (Modifier) -> Unit)? = null,
     /**
-     * What the bar paints behind itself **while it is held at the top of the screen**.
+     * What the bar fills with **while it is held at the top of the screen**.
      *
      * Transparent at rest, because the bar is a shelf rather than a card and takes whatever is
-     * behind it (see the `color` argument below). Pinned it cannot: the list it filters is passing
-     * underneath, and a transparent shelf with rows sliding through it is unreadable. So it fills
-     * with whatever it is sitting on - the page's well on Results and Insights, the Positions card
-     * on the Portfolio - which keeps it looking exactly as it does at rest and stops the content
-     * showing through.
+     * behind it (see the `color` argument below). Held, it cannot: the list it filters is passing
+     * underneath, and a transparent shelf with rows sliding through it is unreadable.
+     *
+     * A step **above** what it sits on rather than the same colour - `surfaceContainer` over the
+     * page's well, `surfaceContainerHigh` inside the Positions card. Filling with the background
+     * made it a slab of page that happened to hold the controls, with the rows appearing out of
+     * nothing at its edge. A step up, with a shadow under it and its own rounded corners, it reads
+     * as what it now is: one card lifted off the page while the rest of it travels underneath.
      */
-    pinnedColor: Color = MaterialTheme.colorScheme.background,
+    floatingColor: Color = MaterialTheme.colorScheme.surfaceContainer,
     /**
      * Receives a [RowScope], not a `FlowRowScope`: these sit on one scrolling line rather than
      * wrapping onto a second. `FilterRow` keeps the flow, because the in-report toolbar it draws
@@ -399,10 +400,11 @@ internal fun FilterBar(
     // moved is a feedback loop: the offset moves it, which changes its position, which changes the
     // offset.
     val viewportTop = LocalViewportTop.current
-    // Held this far below the top of the viewport rather than hard against it. Pinned flush, the
-    // bar butts straight onto the app header above it and the two read as one slab of chrome; the
-    // same [Space.m] the page puts between its cards keeps it looking like something resting on the
-    // page. It also starts holding a fraction early, which is what stops it touching at all.
+    // Held this far below the top of the viewport rather than hard against it. Flush, the bar butts
+    // straight onto the app header above it and the two read as one slab of chrome - and a card
+    // that is floating cannot be touching the thing it floats over. The same [Space.m] the page
+    // puts between its cards. It also starts holding a fraction early, which is what stops it
+    // touching at all.
     val pinGap = with(LocalDensity.current) { Space.m.toPx() }
     var pin by remember { mutableFloatStateOf(0f) }
     Box(
@@ -421,30 +423,16 @@ internal fun FilterBar(
                 pin = (viewportTop + pinGap - top).coerceIn(0f, max(0f, room))
             },
     ) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .graphicsLayer { translationY = pin }
-            // Rectangular and behind the rounded shelf, so the corners it leaves are covered too:
-            // a row sliding through the notch of a rounded corner is the same fault as one sliding
-            // through the whole bar, in four smaller pieces.
-            //
-            // Drawn rather than laid out, and it reaches [pinGap] **above** the bar to cover the gap
-            // it is now held at - otherwise the rows would simply pass through that instead. A top
-            // padding would have done the same thing by making the bar taller, which is height the
-            // page does not have while the bar is at rest, and the growth would move everything
-            // under it the moment it pinned.
-            .drawBehind {
-                if (pin > 0f) {
-                    drawRect(
-                        color = pinnedColor,
-                        topLeft = Offset(0f, -pinGap),
-                        size = Size(size.width, size.height + pinGap),
-                    )
-                }
-            },
-    ) {
+    val floating = pin > 0f
+    // Animated, so the bar rises as it takes hold rather than a shadow appearing under a shelf that
+    // has not visibly moved. Short: the lift happens while a finger is dragging, and anything slower
+    // arrives after the scroll it belongs to.
+    val lift by animateDpAsState(if (floating) FloatingFilterLift else 0.dp, label = "filter bar lift")
+    Box(Modifier.fillMaxWidth().graphicsLayer { translationY = pin }) {
     Surface(
+        // The shadow is the whole of what says this is off the page: the fill alone is a card, and a
+        // card the same size as the ones underneath it reads as one of them that stopped scrolling.
+        shadowElevation = lift,
         shape = MaterialTheme.shapes.large,
         // Transparent, and that is the second attempt. It was `surfaceContainerLow` on the argument
         // that a shelf should sit a step below the cards it filters - which is sound reasoning about
@@ -453,7 +441,9 @@ internal fun FilterBar(
         // continuous background with a hairline through it. No fill cannot make that mistake. It
         // takes whatever is behind it and the outline says where it ends, which is also what lets
         // it sit on the page on two tabs and inside the Positions card on the third.
-        color = Color.Transparent,
+        // Opaque only while it is off the page. At rest it goes back to taking whatever is behind
+        // it, which is the shelf this has always been on a page nobody has scrolled yet.
+        color = if (floating) floatingColor else Color.Transparent,
         border = cardOutline,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -513,6 +503,16 @@ internal fun FilterBar(
     }
     }
 }
+
+/**
+ * How far the filter bar stands off the page once it is holding at the top.
+ *
+ * Material's own resting elevation for a card that floats over content. Higher and the shadow
+ * spreads far enough to darken the row under it into something that looks selected; lower and on
+ * this palette there is no shadow at all - the well is nearly black, and a 2dp shadow on it is
+ * indistinguishable from none.
+ */
+private val FloatingFilterLift = 6.dp
 
 /** The row a screen's filters sit in, wrapping rather than scrolling on a narrow screen. */
 @Composable
