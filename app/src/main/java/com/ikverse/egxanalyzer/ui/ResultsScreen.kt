@@ -120,6 +120,13 @@ internal fun ResultsScreen(appState: AppState) {
                 .sortedDescending()
         }
         if (appState.savedResults.isNotEmpty()) {
+            // Room between the page's title and the shelf under it. On the column's own 12 the bar
+            // sat right beneath the headline and read as part of it rather than as the first thing
+            // on the page - and it is the one row here that never scrolls away, so it is the row
+            // that can least afford to look crowded. A spacer rather than padding on the bar: the
+            // bar measures its own position to pin itself, and anything wrapped around it either
+            // travels with it or becomes the parent it clamps against.
+            Spacer(Modifier.height(Space.xs))
             FilterBar(
                 // The shell asks the same question to decide what a back press means, so the
                 // predicate lives on PageState and both read it there. See PageState.filtersActive.

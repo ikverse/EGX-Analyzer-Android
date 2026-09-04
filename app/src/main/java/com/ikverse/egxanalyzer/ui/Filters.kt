@@ -2,7 +2,6 @@ package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
@@ -42,10 +41,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -396,6 +399,11 @@ internal fun FilterBar(
     // moved is a feedback loop: the offset moves it, which changes its position, which changes the
     // offset.
     val viewportTop = LocalViewportTop.current
+    // Held this far below the top of the viewport rather than hard against it. Pinned flush, the
+    // bar butts straight onto the app header above it and the two read as one slab of chrome; the
+    // same [Space.m] the page puts between its cards keeps it looking like something resting on the
+    // page. It also starts holding a fraction early, which is what stops it touching at all.
+    val pinGap = with(LocalDensity.current) { Space.m.toPx() }
     var pin by remember { mutableFloatStateOf(0f) }
     Box(
         Modifier
@@ -410,7 +418,7 @@ internal fun FilterBar(
                 val room = coordinates.parentLayoutCoordinates?.let { parent ->
                     parent.positionInWindow().y + parent.size.height - top - coordinates.size.height
                 } ?: 0f
-                pin = (viewportTop - top).coerceIn(0f, max(0f, room))
+                pin = (viewportTop + pinGap - top).coerceIn(0f, max(0f, room))
             },
     ) {
     Box(
@@ -420,7 +428,21 @@ internal fun FilterBar(
             // Rectangular and behind the rounded shelf, so the corners it leaves are covered too:
             // a row sliding through the notch of a rounded corner is the same fault as one sliding
             // through the whole bar, in four smaller pieces.
-            .background(if (pin > 0f) pinnedColor else Color.Transparent),
+            //
+            // Drawn rather than laid out, and it reaches [pinGap] **above** the bar to cover the gap
+            // it is now held at - otherwise the rows would simply pass through that instead. A top
+            // padding would have done the same thing by making the bar taller, which is height the
+            // page does not have while the bar is at rest, and the growth would move everything
+            // under it the moment it pinned.
+            .drawBehind {
+                if (pin > 0f) {
+                    drawRect(
+                        color = pinnedColor,
+                        topLeft = Offset(0f, -pinGap),
+                        size = Size(size.width, size.height + pinGap),
+                    )
+                }
+            },
     ) {
     Surface(
         shape = MaterialTheme.shapes.large,
