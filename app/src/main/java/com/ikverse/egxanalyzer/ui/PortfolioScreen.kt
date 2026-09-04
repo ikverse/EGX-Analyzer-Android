@@ -33,10 +33,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.PortfolioGroup
 import com.ikverse.egxanalyzer.model.PortfolioOrder
@@ -209,6 +212,13 @@ private fun OverdueCard(overdue: List<PositionView>, onOpen: (String) -> Unit) {
  * long the trade has actually been held - the session date the card opens into does not - and then
  * the return, in the same green or red it wears everywhere else in the app.
  *
+ * Those three sit on one line while one line holds them, and drop the return onto a second when it
+ * does not - which is what the wide screens actually ask for. More room across the window buys more
+ * tiles, not wider ones: at four across a tablet's tile is narrower than a phone's two, and the
+ * figure being ellipsed away there was the return, the one thing on the tile the user cannot work
+ * out from the rest of it. Measured rather than switched on a column count, so a pane width nobody
+ * thought to test gets the same answer as the ones that were.
+ *
  * The press is the trip a call in Insights already makes: [AppState.openPosition] hands the id to
  * the arrival effect in [PositionSection], which clears the date filter only if it is what hides
  * the trade, unfolds the session card, scrolls to it and flashes its edge. No second path to
@@ -219,11 +229,15 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
     // Read before the builder rather than inside it: the colour is a composable lookup and the line
     // it belongs to is plain text.
     val returnColor = PriceRole.forReturn(view.returnPct)
-    val meta = buildAnnotatedString {
+    // Built as its three parts rather than one string: the line below joins them or breaks them
+    // depending on what fits, and a joined string cannot be taken apart again without parsing it.
+    val days = buildAnnotatedString {
         withStyle(SpanStyle(color = MaterialTheme.colorScheme.error)) {
             append("${view.overdueDays}d")
         }
-        append(" · ${shortDate(view.position.entryDate)} · ")
+    }
+    val held = AnnotatedString(shortDate(view.position.entryDate))
+    val ret = buildAnnotatedString {
         withStyle(SpanStyle(color = returnColor)) {
             append(formatPercent(view.returnPct))
         }
@@ -268,14 +282,57 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
             }
             // Everything measured, on the line that has room for it. No word for the state:
             // every trade on this card is one the user is keeping open, so saying so would be
-            // the card's own heading repeated on every tile. One line, ellipsis as the guard.
+            // the card's own heading repeated on every tile.
+            OverdueMeta(days = days, held = held, ret = ret)
+        }
+    }
+}
+
+/**
+ * The three measured facts, on one line or two.
+ *
+ * One line while one line holds them, which is every tile on a phone and most of them on a Fold.
+ * When it does not hold them the return drops to a line of its own and the day count keeps the
+ * entry date company above it - the pair that reads as one thing, both of them about time, and
+ * between them short enough to survive any width a tile is ever given.
+ *
+ * Measured rather than wrapped: left to wrap, the break lands wherever the width happens to put it,
+ * so a tablet row of four tiles would break three of them in three different places and leave a
+ * separator dangling at the end of a line. Measured against the tile's own width, every tile that
+ * breaks breaks in the same place, and one that does not is left exactly as it was.
+ */
+@Composable
+private fun OverdueMeta(days: AnnotatedString, held: AnnotatedString, ret: AnnotatedString) {
+    val measurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.labelSmall
+    val separator = AnnotatedString(" · ")
+    val whole = remember(days, held, ret) { days + separator + held + separator + ret }
+    val time = remember(days, held) { days + separator + held }
+    BoxWithConstraints {
+        val available = constraints.maxWidth
+        // Unbounded only in a measuring pass nothing is drawn from; treated as room for the line so
+        // the tile is never measured as the taller of the two shapes and then drawn as the shorter.
+        val fits = remember(whole, style, available) {
+            available == Constraints.Infinity ||
+                measurer.measure(whole, style, softWrap = false).size.width <= available
+        }
+        Column {
             Text(
-                meta,
-                style = MaterialTheme.typography.labelSmall,
+                if (fits) whole else time,
+                style = style,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (!fits) {
+                Text(
+                    ret,
+                    style = style,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
