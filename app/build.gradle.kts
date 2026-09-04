@@ -6,7 +6,7 @@
 // One place decides the version. It stayed at 0.1.0 through every build, so a device could not be
 // asked which one it was running - a question that cost real time while diagnosing a black screen.
 // Bump the name here; the code is derived from it so the two can never disagree.
-val appVersionName = "3.3.2"
+val appVersionName = "3.3.3"
 val appVersionCode = appVersionName.split(".").let { (major, minor, patch) ->
     major.toInt() * 10_000 + minor.toInt() * 100 + patch.toInt()
 }
