@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -257,7 +258,7 @@ fun EgxAnalyzerApp(appState: AppState) {
             // until then - a mark placed at the origin for one frame is a glyph flashing in the
             // corner of every cold start.
             var markAnchor by remember { mutableStateOf<Offset?>(null) }
-            val markSize = with(density) { AppMarkSize.roundToPx() }
+            val dockedSize = with(density) { AppMarkRailSize.roundToPx() }
             Box(Modifier.fillMaxSize().onGloballyPositioned { shellOrigin = it.positionInWindow() }) {
                 NavigationSuiteScaffoldLayout(
                     navigationSuite = {
@@ -296,9 +297,12 @@ fun EgxAnalyzerApp(appState: AppState) {
                 }
                 val anchor = markAnchor
                 if (anchor != null && railWidth > 0) {
-                    // Only x moves. The mark keeps the height it has in the header, which is what
-                    // puts it in the rail's top gap rather than level with the first destination.
-                    val restX = (railWidth - markSize) / 2
+                    // The mark keeps the *height* it has in the header, which is what puts it in
+                    // the rail's top gap rather than level with the first destination. What moves
+                    // is x, and what changes on the way is the size: beside the name the mark is
+                    // sized to the name, and once the name has gone it is the only thing left
+                    // holding that corner, so it grows into the job.
+                    val restX = (railWidth - dockedSize) / 2
                     val travelled by animateIntAsState(
                         if (headerVisible) (anchor.x - shellOrigin.x).roundToInt() else restX,
                         // The header's own tween, so the two are one movement rather than two
@@ -306,10 +310,24 @@ fun EgxAnalyzerApp(appState: AppState) {
                         animationSpec = tween(HeaderMoveMilliseconds),
                         label = "mark travel",
                     )
+                    val size by animateDpAsState(
+                        if (headerVisible) AppMarkSize else AppMarkRailSize,
+                        animationSpec = tween(HeaderMoveMilliseconds),
+                        label = "mark size",
+                    )
                     AppMark(
                         Modifier.offset {
-                            IntOffset(travelled, (anchor.y - shellOrigin.y).roundToInt())
+                            // Grown around its own centre rather than from its top-left corner: an
+                            // icon laid out from the anchor would put every extra dp below the line
+                            // it shares with the title, and swell downward out of the rail's gap
+                            // instead of filling it.
+                            val grown = ((size - AppMarkSize) / 2).roundToPx()
+                            IntOffset(
+                                travelled,
+                                (anchor.y - shellOrigin.y).roundToInt() - grown,
+                            )
                         },
+                        markSize = size,
                     )
                 }
             }
@@ -384,7 +402,7 @@ private val BarLabelSize = 11.sp
  * half a heading. The gap it leaves is beside the band, in the same colour, so the rail reads as the
  * band turning the corner rather than as a rail that starts late.
  */
-private val RailTopInset = 70.dp
+private val RailTopInset = 62.dp
 
 /**
  * Sized to the name beside it rather than to the navigation grid, which it does not belong to - a
@@ -392,6 +410,28 @@ private val RailTopInset = 70.dp
  * more letter in it.
  */
 private val AppMarkSize = 28.dp
+
+/**
+ * What the mark grows to once it has docked in the rail.
+ *
+ * In the header it is sized to the name beside it. In the rail's top gap there is no name: it is the
+ * only thing left holding that corner, against a column of 28dp glyphs, and at the name's size it
+ * reads as a sixth destination that has lost its label. A size up separates it from the grid without
+ * making it artwork again.
+ */
+private val AppMarkRailSize = 36.dp
+
+/**
+ * The wide header's vertical padding, against [HeaderPadding] on the phone.
+ *
+ * The status line sits beside the name here rather than under it, so the band is one row either way
+ * - and a row of chrome that is the same height on a 40-line window as on a 20-line one is spending
+ * a larger share of a screen that has more to show.
+ */
+private val WideHeaderPadding = 8.dp
+
+/** The phone header's vertical padding, where the status line stacks under the name and needs it. */
+private val HeaderPadding = 12.dp
 
 /**
  * Says which app this is, and what it is doing, above whatever page is showing.
@@ -430,7 +470,12 @@ private fun AppHeader(
         // No arrangement spacing: the gap above a message belongs to the message, and spacing here
         // would hold 6dp open under the name on every idle compact header. It is applied inside the
         // line instead, where it collapses along with it.
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Column(
+            Modifier.fillMaxWidth().padding(
+                horizontal = 16.dp,
+                vertical = if (beside) WideHeaderPadding else HeaderPadding,
+            ),
+        ) {
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -485,6 +530,10 @@ private fun AppHeader(
  * wide one so it can outlive the header and travel into the rail. A second copy for the travelling
  * one is how the two would end up different marks.
  *
+ * @param markSize [AppMarkSize] in a header, where the name sets it, animated up to [AppMarkRailSize]
+ *   by the shell as the mark docks in the rail. The gradient is measured off the glyph, so the sweep
+ *   stays the same length of travel through the mark at either size.
+ *
  * **The gradient is painted through the glyph rather than into the asset.** `ic_egx_notification` is
  * a one-colour vector and stays one; the layer below it is drawn, then a rectangle of the brush is
  * laid over it with `SrcIn`, which keeps the brush inside whatever the vector covers. The offscreen
@@ -504,7 +553,7 @@ private fun AppHeader(
  * blend is ever refused.
  */
 @Composable
-private fun AppMark(modifier: Modifier = Modifier) {
+private fun AppMark(modifier: Modifier = Modifier, markSize: Dp = AppMarkSize) {
     val hues = extraColors.markAurora
     val sweep = rememberInfiniteTransition(label = "mark aurora")
     val phase by sweep.animateFloat(
@@ -524,7 +573,7 @@ private fun AppMark(modifier: Modifier = Modifier) {
         contentDescription = null,
         tint = MaterialTheme.colorScheme.primary,
         modifier = modifier
-            .size(AppMarkSize)
+            .size(markSize)
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .drawWithContent {
                 drawContent()
