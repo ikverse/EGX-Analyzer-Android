@@ -1826,6 +1826,25 @@ class LiveAppState(
     }
 
     /**
+     * The last [sessions] stored closes for one stock, oldest first.
+     *
+     * Read from the store rather than from the report: the report keeps only the newest session per
+     * stock and the sessions inside a judged window, and a line drawn from those would have a hole
+     * in it wherever nobody happened to have made a call.
+     *
+     * Normalized first, because the store is keyed the way the scorer keys everything - COMI and
+     * COMI.CA are one stock, and asking for the raw string would draw an empty chart for half the
+     * tickers in the app.
+     */
+    override suspend fun priceHistory(ticker: String, sessions: Int): List<DailySession> {
+        if (sessions <= 0) return emptyList()
+        val wanted = Scoring.normalizeTicker(ticker)
+        return withContext(Dispatchers.IO) {
+            localDataStore.allSessions(wanted).takeLast(sessions)
+        }
+    }
+
+    /**
      * Whether [enterForeground] has already run, so that it runs once however it is reached.
      *
      * Declared above `init` on purpose: a property initialiser placed below it runs *after* the

@@ -25,6 +25,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.model.CallTally
 import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.ui.theme.extraColors
 import kotlin.math.max
@@ -58,9 +59,56 @@ internal fun OutcomeBar(
     height: Dp = OutcomeBarHeight,
     /** The surface behind the bar, which the softened segment is mixed onto. */
     on: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+) = OutcomeBar(score.verdicts(), modifier, height, on)
+
+/**
+ * The same band, drawn from a tally rather than from a source.
+ *
+ * A stock's record divides exactly as a channel's does - [CallTally] carries the same four counts
+ * under the same names, because both are built by the same calculator - and the stock sheet asks
+ * the identical question of them. Taking the tally is what lets it be the identical bar: the order,
+ * the two weights of green, the counts drawn inside the segments and the spoken description are all
+ * one implementation, so the bar under a stock cannot come to read differently from the bar under
+ * the source that called it.
+ */
+@Composable
+internal fun OutcomeBar(
+    tally: CallTally,
+    modifier: Modifier = Modifier,
+    height: Dp = OutcomeBarHeight,
+    on: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+) = OutcomeBar(tally.verdicts(), modifier, height, on)
+
+/**
+ * What the bar is actually drawn from: the four verdicts and their total.
+ *
+ * A source and a stock are two records of the same shape, and this is that shape. Neither type is
+ * reduced to it anywhere else - it exists so the drawing below has one input rather than two, and
+ * so a third kind of record costs a `verdicts()` and nothing more.
+ */
+private data class Verdicts(
+    val judged: Int,
+    val fullHits: Int,
+    val partialHits: Int,
+    val stopped: Int,
+    val expired: Int,
+)
+
+private fun ChannelScore.verdicts() =
+    Verdicts(judged, fullHits, partialHits, stopped, expired)
+
+private fun CallTally.verdicts() =
+    Verdicts(judged, fullHits, partialHits, stopped, expired)
+
+@Composable
+private fun OutcomeBar(
+    verdicts: Verdicts,
+    modifier: Modifier,
+    height: Dp,
+    on: Color,
 ) {
-    if (score.judged <= 0) return
-    val parts = score.segments(on)
+    if (verdicts.judged <= 0) return
+    val parts = verdicts.segments(on)
     Box(
         modifier
             .fillMaxWidth()
@@ -68,7 +116,7 @@ internal fun OutcomeBar(
             .clip(RoundedCornerShape(OutcomeBarCorner))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             // The bar is a picture of the counts, so a reader that cannot see it is told them.
-            .semantics { contentDescription = score.spoken() },
+            .semantics { contentDescription = verdicts.spoken() },
     ) {
         Row(Modifier.fillMaxWidth().fillMaxHeight()) {
             parts.forEach { part -> Segment(part, height) }
@@ -113,7 +161,7 @@ private data class OutcomeSegment(val count: Int, val color: Color, val label: S
  * cannot disagree with the report it summarises.
  */
 @Composable
-private fun ChannelScore.segments(on: Color): List<OutcomeSegment> {
+private fun Verdicts.segments(on: Color): List<OutcomeSegment> {
     val target = PriceRole.target
     return listOf(
         OutcomeSegment(partialHits, target, "reached target 1 only"),
@@ -157,7 +205,12 @@ private fun contrast(ink: Color, segment: Color): Float {
 }
 
 /** What the bar says out loud, for a reader who cannot see it. */
-internal fun ChannelScore.spoken(): String = buildString {
+internal fun ChannelScore.spoken(): String = verdicts().spoken()
+
+/** The same sentence for a stock's record, which divides into the same four verdicts. */
+internal fun CallTally.spoken(): String = verdicts().spoken()
+
+private fun Verdicts.spoken(): String = buildString {
     append("$judged settled ${if (judged == 1) "call" else "calls"}")
     listOf(
         partialHits to "reached target 1 only",

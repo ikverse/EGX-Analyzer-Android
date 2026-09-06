@@ -28,6 +28,15 @@ class ScheduleReceiver : BroadcastReceiver() {
         val action = intent.action ?: return
         if (action !in handled) return
         val application = context.applicationContext
+        // Before anything else, and on this thread on purpose.
+        //
+        // An exact alarm puts the app on a temporary allowlist measured in seconds, and that
+        // allowlist is the only reason it may start a foreground service at seven in the morning.
+        // Handing this to a coroutine would spend the window on a thread hop, so the question is
+        // asked here - it is shared preferences and arithmetic - and the service is started inside
+        // it. Everything below can afford to wait; this cannot.
+        val started = ScheduledRun.paidAnalysisOwed(application) &&
+            ScheduledRunService.start(application)
         // A broadcast has about ten seconds and this touches storage, so it is finished off the
         // main thread and the system is told to keep the process alive until it is done.
         val finish = goAsync()
@@ -48,7 +57,11 @@ class ScheduleReceiver : BroadcastReceiver() {
                 // Swept while anything is on, and cancelled only when everything is off - the same
                 // shape as the daily check, and for the same reason. Reading only the analysis
                 // side here would take the price refresh down with it silently.
-                if (schedules.any { it.enabled } || marketRefresh || closeSweep) {
+                //
+                // Skipped where the service above took the job, which serves the same sweep with
+                // no ten-minute ceiling over it. Enqueueing the worker as well would be a second
+                // run of the same fires racing the first.
+                if (!started && (schedules.any { it.enabled } || marketRefresh || closeSweep)) {
                     ScheduledJobWorker.sweep(application)
                 }
             } finally {

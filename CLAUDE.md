@@ -131,6 +131,13 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/JobScheduler.kt` + `data/ScheduleReceiver.kt` + `data/ScheduledJobWorker.kt` +
   `data/JobRunner.kt` + `data/ScheduleMigration.kt` — the alarm, the things that mean re-book it,
   what runs, and the one-time move off the old job table. See below.
+- `data/ScheduledRun.kt` + `data/ScheduledRunService.kt` — which of the two routes answers a wake,
+  and the foreground service a paid analysis takes. WorkManager stops ordinary work at about ten
+  minutes and a busy morning's run outlasts that, so a wake that owes a paid analysis is answered by
+  a service with no such ceiling. It is started from `ScheduleReceiver` inside the seconds-long
+  allowlist an **exact** alarm grants its receiver — which is what makes that permission
+  load-bearing for a paid schedule rather than merely a matter of punctuality — and falls back to
+  the worker where the system refuses it.
 - `ui/SchedulesSection.kt` — the schedule summary on Analyze and the editor in Settings.
   `ui/PricesSection.kt` carries the price-refresh checkbox, the never-blank status line and Fetch
   prices now, drawn as the `Prices` group inside Settings' `General` card.
@@ -141,6 +148,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   behalf. See **What back does** below.
 - `ui/StockSheet.kt` — everything the app knows about one ticker, in one sheet. `LocalOpenStock` is
   how a ticker anywhere opens it. See below.
+- `ui/StockTrend.kt` — `Sparkline` and `DayRange`, the two drawings on that sheet: where a stock
+  has been over its last 60 stored sessions, and where its close sits inside its own day.
 - `model/ApproachAlerts.kt` + `data/ApproachNotifier.kt` — a trade closing on its stop or target 2,
   said while there is still something to decide.
 - `data/SessionDigestNotifier.kt` — what the whole session did, once, after the close.
@@ -2041,21 +2050,49 @@ Two things the app could always have done and never did: go back, and put one st
   the longer version of a thing that was pressed, which is what a sheet from the bottom already means
   here. It also keeps back simple, since `ModalBottomSheet` takes the press first, and it opens from
   any tab without moving the reader off the one they are reading.
-- **It states nothing new.** Every figure on it is drawn somewhere else; what it adds is that they
-  are drawn together. The exception is `StockScore`, which has been computed for every stock since it
-  was written and reached the reader only through the shortlist signals and the Ask AI prompt — so
-  "what happens when anybody recommends this stock" was a question the app could answer and no screen
-  asked. Rows lead through `openPosition` and `openCall`, the two entrances every cross-tab press
-  already uses, and dismiss the sheet first: one left open over the tab it just sent the reader to is
-  covering the card it sent them to read.
+- **It states two things that are new, and the rest was only ever scattered.** `StockScore` has been
+  computed for every stock since it was written and reached the reader only through the shortlist
+  signals and the Ask AI prompt — so "what happens when anybody recommends this stock" was a question
+  the app could answer and no screen asked. `Sparkline` is the other: every price anywhere else in
+  this app is a single figure, so whether a stock has been climbing for a month or fell off a cliff
+  last Tuesday was the one thing the record held and no screen drew. It reads
+  `AppState.priceHistory`, which is a **suspending disk read** off `LocalDataStore.allSessions` —
+  the report keeps one session per stock, so a line built from it would have a hole wherever nobody
+  happened to have made a call — asked for after the sheet is already on screen, so the rest of it
+  never waits behind a query. Everything else on the sheet is drawn somewhere else already; what it
+  adds is that they are drawn together. Rows lead through `openPosition` and `openCall`, the two
+  entrances every cross-tab press already uses, and dismiss the sheet first: one left open over the
+  tab it just sent the reader to is covering the card it sent them to read.
+- **A header, a scroller and an action bar**, rather than one column of dividers. The heading and the
+  price are what the sheet was opened to see and no longer scroll away; the record, the trades and
+  the calls run between them, each in a card of its own on `surfaceContainerHigh`; and the two things
+  a reader does about a stock sit on the bottom edge. The record's rates carry `OutcomeBar`, which
+  now takes a `CallTally` as well as a `ChannelScore` — both reduce to the same private `Verdicts`,
+  so a stock's band and a source's band are one drawing and cannot come to disagree. The calls list
+  is **capped at five** with a press that counts the rest: a stock the whole channel list likes
+  carries thirty, and thirty rows push the record and the trades off the top of a scroll opened to
+  compare all three.
+- **The action bar is the call card's own two controls, against the newest call.** `AskAiButton` with
+  the same confirmation and the same saved-answer sheet, and `TradeAction`, which is the app's only
+  way of recording a purchase — this is one more surface asking it, not a second way of asking. A
+  question about a stock is a question about what somebody said about it and a trade is recorded
+  against the call it was taken on, so the bar names the call it is acting on underneath itself; the
+  newest is the one a reader opening a stock this morning is acting on.
 - **`LocalOpenStock` is a composition local, and that is a deliberate exception.** `onOpenTrade` and
   `onOpenCall` are threaded because they travel one or two levels and belong to the card offering
   them. A ticker is drawn on a call card inside a session card inside a band, on the same card from
-  Results, on a position card inside a card, and in a table row — threading it would add a parameter
-  to eight signatures to reach four leaves. It sits beside `LocalWindowWidth`, which is where the
+  Results, on a position card inside a card, on the day's event tiles on two tabs, and in a table
+  row — threading it would add a parameter to a dozen signatures to reach six leaves. It sits beside `LocalWindowWidth`, which is where the
   shell already publishes what every screen may need and no screen owns.
-- **A tile that already presses somewhere keeps its press.** Digest tiles and Overdue tiles still
-  lead to the trade or the call; the ticker only becomes a target where nothing was carrying one.
+- **A tile that already presses somewhere keeps its press, and the ticker becomes a second target
+  inside it.** That was the rule the other way round until 2026-09-07 — the ticker was a target only
+  where nothing else was — which left the day's event tiles and the Overdue tiles as the two places a
+  stock could be looked at and not opened. Two targets on one tile, and the smaller has to be aimed
+  at: the tile is one thing that happened and the ticker is the stock it happened to, and a reader
+  deciding about the first often wants the second. The **arrow stays outside** the inner press, since
+  it is what says the tile itself leads somewhere. Six leaves carry it now — the recommendation card,
+  the results table, the position card, the Insights call card, the event tile and the Overdue tile —
+  which is the count `LocalOpenStock` exists to keep out of a dozen intermediate signatures.
 
 ## The status line
 

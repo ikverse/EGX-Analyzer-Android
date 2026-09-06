@@ -378,8 +378,10 @@ internal fun SystemPermissions(appState: AppState) {
         // Read on every recomposition rather than remembered: the answer changes on a system page,
         // and this screen is still underneath when the user comes back from it.
         granted = appState.exactAlarmsAllowed(),
-        grantedText = "Exact alarms are allowed, so runs keep to the minute.",
-        missing = "Exact alarms are off. Runs can arrive up to an hour late.",
+        grantedText = "Exact alarms are allowed, so runs keep to the minute and have as long as " +
+            "they need to finish.",
+        missing = "Exact alarms are off. Runs can arrive up to an hour late, and an analysis is " +
+            "cut off after ten minutes - only an exact alarm lets one run to the end.",
         action = "Allow exact alarms",
     ) {
         appState.openExactAlarmSettings()

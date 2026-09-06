@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -225,17 +226,28 @@ private fun EventTile(event: DayEvent, onOpen: () -> Unit, modifier: Modifier = 
     ) {
         Column(Modifier.padding(horizontal = Space.m, vertical = Space.xs)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StockLogo(event.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
-                Text(
-                    event.ticker,
-                    // fill = false so the arrow sits against the end of the ticker rather than out
-                    // at the tile's edge, where it reads as unrelated to it.
-                    Modifier.weight(1f, fill = false),
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // The mark and the code press through to the stock, inside a tile that already
+                // presses through to the trade or the call. Two targets on one tile, and the
+                // smaller is the one that has to be aimed at: the tile is a thing that happened
+                // this session and the ticker is the stock it happened to, which are different
+                // questions and both worth asking from here. The arrow is deliberately outside
+                // this press - it belongs to the tile's own. See LocalOpenStock.
+                val openStock = LocalOpenStock.current
+                Row(
+                    Modifier
+                        .weight(1f, fill = false)
+                        .clickable { openStock(event.ticker) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    StockLogo(event.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                    Text(
+                        event.ticker,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Icon(
                     Icons.AutoMirrored.Outlined.ArrowForward,
                     // Named by the press it belongs to, one level up; announcing the glyph as well

@@ -251,6 +251,9 @@ class FakeAppState(
 
     override fun peakSince(ticker: String, openedOn: LocalDate?): Double? = null
 
+    override suspend fun priceHistory(ticker: String, sessions: Int): List<DailySession> =
+        emptyList()
+
     override fun enterForeground() = Unit
 
     override fun checkForUpdate() = Unit

@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -259,18 +260,30 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
         // at two tiles across on the cover screen the return was being ellipsed away.
         Column(Modifier.padding(horizontal = Space.m, vertical = Space.xs)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StockLogo(view.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
-                Text(
-                    view.ticker,
-                    // fill = false so the arrow sits against the end of the ticker rather than out
-                    // at the tile's edge, where it reads as unrelated to it - the same way the
-                    // arrows on the position card and the Insights call card sit.
-                    Modifier.weight(1f, fill = false),
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // The mark and the code press through to the stock, inside a tile that already
+                // presses through to the trade. Two targets on one tile, as on the day's event
+                // tiles and for the same reason: this tile is one late trade and the ticker is the
+                // stock behind it, and a reader deciding what to do about the first often wants
+                // the second. The arrow stays outside this press - it belongs to the tile's own.
+                // fill = false so the arrow sits against the end of the ticker rather than out at
+                // the tile's edge, where it reads as unrelated to it - the same way the arrows on
+                // the position card and the Insights call card sit. See LocalOpenStock.
+                val openStock = LocalOpenStock.current
+                Row(
+                    Modifier
+                        .weight(1f, fill = false)
+                        .clickable { openStock(view.ticker) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    StockLogo(view.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                    Text(
+                        view.ticker,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Icon(
                     Icons.AutoMirrored.Outlined.ArrowForward,
                     // Named by the press it belongs to, one level up; a reader announcing the

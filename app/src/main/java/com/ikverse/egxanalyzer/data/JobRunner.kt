@@ -81,28 +81,53 @@ class JobRunner(
             }
             .sortedBy { (_, due) -> due }
         return owed.map { (schedule, due) ->
-            val served = when {
-                !ScheduleClock.withinGrace(due, moment) -> schedule.record(
-                    due,
-                    JobOutcome.MISSED,
-                    "Missed by ${lateness(due, moment)}. The next run is the retry.",
+            val served = try {
+                serve(schedule, due, moment, perform)
+            } catch (cancelled: CancellationException) {
+                // The process is being taken away mid-run - most often because whatever was
+                // holding it open was stopped by the system. Written down before the exception
+                // goes on its way, which is the one thing the old code did not do: leaving the
+                // fire unrecorded left it still owed, so every wake inside the two-hour grace
+                // picked it up and paid to send the same chunks again. A run that was cut off has
+                // already spent money, and the honest thing is to say so once rather than retry
+                // it seven more times.
+                record(
+                    schedule.record(
+                        due,
+                        JobOutcome.FAILED,
+                        "Stopped before it finished. The next run is the retry.",
+                    ),
                 )
-
-                // Every schedule left here sends a paid request, so this is the whole of the money
-                // guard: no second switch, no run.
-                !paidWorkAllowed() -> schedule.record(
-                    due,
-                    JobOutcome.SKIPPED,
-                    "Scheduled runs are not allowed to spend cloud credits on this phone.",
-                )
-
-                else -> runWork(schedule, due, perform)
+                throw cancelled
             }
             // Written as each one finishes rather than at the end, so a process killed midway
             // through a list leaves the runs it did manage recorded as done.
             record(served)
             served
         }
+    }
+
+    private suspend fun serve(
+        schedule: AnalysisSchedule,
+        due: Instant,
+        moment: Instant,
+        perform: suspend (AnalysisSchedule, Instant) -> String,
+    ): AnalysisSchedule = when {
+        !ScheduleClock.withinGrace(due, moment) -> schedule.record(
+            due,
+            JobOutcome.MISSED,
+            "Missed by ${lateness(due, moment)}. The next run is the retry.",
+        )
+
+        // Every schedule left here sends a paid request, so this is the whole of the money
+        // guard: no second switch, no run.
+        !paidWorkAllowed() -> schedule.record(
+            due,
+            JobOutcome.SKIPPED,
+            "Scheduled runs are not allowed to spend cloud credits on this phone.",
+        )
+
+        else -> runWork(schedule, due, perform)
     }
 
     private suspend fun runWork(

@@ -1202,7 +1202,18 @@ private fun ScoredCallRow(
                     // On the ticker's line, not beside the block: this row is held at a minimum
                     // height, so a logo beside the column left a fixed gap under itself on every
                     // card however short the name was.
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    //
+                    // The logo and the ticker press together as one target rather than the text
+                    // alone, exactly as they do on the recommendation card: a 12sp glyph beside a
+                    // title is two touch targets where the reader sees one thing. The card's own
+                    // press, where it has one, opens the trade taken on this call - so this is a
+                    // second target on a card that already had one, and the smaller of the two is
+                    // the one that leads to the stock. See LocalOpenStock.
+                    val openStock = LocalOpenStock.current
+                    Row(
+                        Modifier.clickable { openStock(call.ticker) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
                         Text(call.ticker, style = MaterialTheme.typography.titleSmall)
                         Egx33Badge(call.ticker, Modifier.padding(start = Space.s))

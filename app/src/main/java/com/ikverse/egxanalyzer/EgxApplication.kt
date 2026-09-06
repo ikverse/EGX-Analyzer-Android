@@ -19,7 +19,8 @@ import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.PromptStore
 import com.ikverse.egxanalyzer.data.OpinionPromptStore
 import com.ikverse.egxanalyzer.data.RequestTrace
-import com.ikverse.egxanalyzer.data.ScheduledJobWorker
+import com.ikverse.egxanalyzer.data.ScheduledRun
+import com.ikverse.egxanalyzer.data.ScheduledRunService
 import com.ikverse.egxanalyzer.data.SymbolMap
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.TelegramRepository
@@ -118,7 +119,18 @@ class EgxApplication : Application() {
             // is still under way and paid for, and letting an exception about a notification throw
             // it away would be the worst possible trade.
             analysisRunning = { sources, model ->
-                runCatching { AnalysisService.start(this, sources, model) }
+                runCatching {
+                    // While the scheduled service is holding the process there is already a
+                    // foreground service on this notification id, and a second one would mean the
+                    // first to stop takes the other's notification down with it. The run still has
+                    // to say what it is doing, so the notification is replaced rather than a
+                    // second service started.
+                    if (ScheduledRunService.holding) {
+                        notifier.nowRunning(sources, model)
+                    } else {
+                        AnalysisService.start(this, sources, model)
+                    }
+                }
             },
             analysisFinished = { resultId, recommendations ->
                 AnalysisService.stop(this)
@@ -194,7 +206,11 @@ class EgxApplication : Application() {
             state.marketRefreshEnabled ||
             state.tradeWatchWanted
         ) {
-            ScheduledJobWorker.sweep(this)
+            // Through the dispatcher rather than straight at the worker: a launch that finds an
+            // analysis owed - the app opened at 07:20 for a 07:00 schedule, inside its grace -
+            // must not run it under a ten-minute ceiling either. The app is on screen here, which
+            // is its own permission to start the service.
+            ScheduledRun.request(this)
         }
         state
     }

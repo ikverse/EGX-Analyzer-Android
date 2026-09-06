@@ -68,6 +68,15 @@ class AnalysisNotifier(private val context: Context) {
         .setContentIntent(openApp(null))
         .build()
 
+    /**
+     * Replaces [starting] with what the run turned out to be, without a service behind it.
+     *
+     * For a scheduled run, where [ScheduledRunService] is already the foreground service holding
+     * this notification id. Starting a second service to say the same thing would leave two owners
+     * of one notification, and the first to stop would cancel the other's.
+     */
+    fun nowRunning(sources: Int, model: String) = show(running(sources, model))
+
     fun finished(recommendations: Int, resultId: Long) {
         show(
             base()

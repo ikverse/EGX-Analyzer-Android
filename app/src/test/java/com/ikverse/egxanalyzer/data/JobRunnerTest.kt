@@ -5,9 +5,12 @@ import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisSchedule
 import com.ikverse.egxanalyzer.model.JobOutcome
 import com.ikverse.egxanalyzer.model.ScheduleClock
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.fail
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -206,6 +209,36 @@ class JobRunnerTest {
             ).runDue { _, _ -> "ran" }
         }
         assertEquals(listOf(1L), written.map { it.id })
+    }
+
+    /**
+     * The fire is written down even when the run is torn out from under it.
+     *
+     * This is what stopped the retry storm. A run killed mid-request used to leave its fire
+     * unrecorded and therefore still owed, so every wake inside the two-hour grace picked the same
+     * one up and paid to send the same chunks again - eight times over, on a phone refreshing
+     * prices every quarter of an hour. Recorded once, it is not owed a second time.
+     */
+    @Test
+    fun `a run cut off mid-flight is recorded rather than left owed`() {
+        val written = mutableListOf<AnalysisSchedule>()
+        val schedule = schedule()
+        val moment = at("2026-08-20", "07:01")
+        try {
+            runBlocking {
+                runner(written, now = moment, schedules = listOf(schedule)).runDue { _, _ ->
+                    throw CancellationException("stopped")
+                }
+            }
+            fail("The cancellation should have gone on its way.")
+        } catch (expected: CancellationException) {
+            // The caller still has to see it: swallowing it would break structured concurrency.
+        }
+        val served = written.single()
+        assertEquals(JobOutcome.FAILED, served.lastOutcome)
+        assertEquals(at("2026-08-20", "07:00"), served.lastFiredAt)
+        // And with that written, the same fire is no longer owed to the next wake.
+        assertNull(ScheduleClock.unservedFire(served, at("2026-08-20", "07:16")))
     }
 
     private fun runner(

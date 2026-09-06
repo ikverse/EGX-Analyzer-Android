@@ -43,6 +43,7 @@ import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import com.ikverse.egxanalyzer.model.ScoredCall
+import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.SessionDigest
 import com.ikverse.egxanalyzer.model.StockOpinion
 
@@ -319,6 +320,20 @@ interface AppState {
     fun refreshOverdue()
 
     fun peakSince(ticker: String, openedOn: LocalDate?): Double?
+
+    /**
+     * The last [sessions] stored closes for one stock, oldest first.
+     *
+     * The record has held every session it ever downloaded and has never drawn one. `latestPrices`
+     * answers "where is it now" and a call's own session table answers "what did it do inside this
+     * window"; neither answers "what has this stock been doing", which is the question a reader
+     * arrives at the stock sheet with.
+     *
+     * Suspending because it is a disk read: the sheet asks for it once when it opens and draws the
+     * line when it lands, rather than blocking the frame that composed it. Empty for a stock the
+     * feed has never carried, which is the same thing the sheet already says in words.
+     */
+    suspend fun priceHistory(ticker: String, sessions: Int): List<DailySession>
 
     fun enterForeground()
 
