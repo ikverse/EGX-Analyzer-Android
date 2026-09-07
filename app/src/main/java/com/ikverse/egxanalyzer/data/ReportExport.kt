@@ -134,6 +134,60 @@ internal fun saveDatabaseToDownloads(
 }
 
 /**
+ * Writes the kept five-minute archive into Downloads as a CSV.
+ *
+ * **CSV rather than the database file**, which is the opposite choice from Save diagnostics beside
+ * it, and the two are answering different questions. That one hands over a record for somebody to
+ * debug, so the file itself is the point. This is read by whoever wanted the archive in the first
+ * place, in a spreadsheet or a script, and a `.db` there is a step - and an installed tool - between
+ * them and the rows. It is also two orders of magnitude larger than anything else this app writes,
+ * and a copy of the whole file would double it on disk to say the same thing.
+ *
+ * **Streamed a row at a time, never assembled.** The archive passes a million rows inside a year, so
+ * building the text first would be an out-of-memory on the one kind of device this runs on -
+ * `forEachBar` hands them over one at a time for exactly that reason. Buffered, or a million small
+ * writes cross the MediaStore stream a million times.
+ *
+ * `session_date` is written out even though the table does not store it: it is `bar_at` read in UTC,
+ * and a reader who has to derive it themselves is a reader who will get the zone wrong.
+ */
+internal fun writePriceSeriesToDownloads(
+    context: Context,
+    store: PriceSeriesStore,
+): String {
+    // The same reason the diagnostics copy checkpoints: the newest bars sit in a write-ahead side
+    // file until something folds them in, and an export missing this evening's harvest is the shape
+    // of export that looks like it worked.
+    store.checkpoint()
+    val stamp = LocalDate.now().toString()
+    return writeToDownloads(context, "egx-price-series-$stamp.csv", CSV_MIME_TYPE) { out ->
+        out.bufferedWriter().use { writer ->
+            writer.append("ticker,session_date,bar_at_utc,open,high,low,close,volume\n")
+            store.forEachBar { bar ->
+                val at = bar.at.atZone(PriceSeriesStore.ZONE)
+                writer.append(bar.ticker).append(',')
+                    .append(at.toLocalDate().toString()).append(',')
+                    .append(at.toLocalDateTime().toString()).append(',')
+                    .append(bar.open.csv()).append(',')
+                    .append(bar.high.csv()).append(',')
+                    .append(bar.low.csv()).append(',')
+                    .append(bar.close.csv()).append(',')
+                    .append(bar.volume.csv()).append('\n')
+            }
+        }
+    }
+}
+
+/**
+ * A price as a cell, or an empty one where the feed had nothing.
+ *
+ * Empty rather than a zero or a dash, the same rule the spreadsheet export follows: a bar in which
+ * nothing traded reports null, and writing 0 there would put a price of nothing under every stop
+ * loss ever printed for anyone who charts this.
+ */
+private fun Double?.csv(): String = this?.toString().orEmpty()
+
+/**
  * The Downloads write itself, shared by everything that lands a file there.
  *
  * Returns what Downloads actually called the file, which is not what was asked for once a second
@@ -171,6 +225,9 @@ internal fun writeToDownloads(
 }
 
 internal const val DATABASE_MIME_TYPE = "application/octet-stream"
+
+/** A spreadsheet opens it, a script reads it, and nothing has to be installed to do either. */
+internal const val CSV_MIME_TYPE = "text/csv"
 
 /** What Downloads actually called the file, which is not always what was asked for. */
 private fun savedName(resolver: ContentResolver, uri: Uri): String? = runCatching {

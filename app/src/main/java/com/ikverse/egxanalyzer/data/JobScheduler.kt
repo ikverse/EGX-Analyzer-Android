@@ -8,6 +8,7 @@ import com.ikverse.egxanalyzer.model.AnalysisSchedule
 import com.ikverse.egxanalyzer.model.CloseSweep
 import com.ikverse.egxanalyzer.model.MarketRefresh
 import com.ikverse.egxanalyzer.model.ScheduleClock
+import com.ikverse.egxanalyzer.model.SeriesHarvest
 import java.time.Instant
 
 /**
@@ -60,6 +61,15 @@ class JobScheduler(private val context: Context) {
          * happened. See [CloseSweep].
          */
         closeSweep: Boolean,
+        /**
+         * Whether this phone keeps the five-minute archive.
+         *
+         * A third flag rather than a reading of [closeSweep], although the two fire at the same
+         * moment: one is a promise to announce what the session did to a trade and the other is a
+         * promise to copy the session before the feed forgets it, and a phone wanting the second
+         * with no trade notifications on would otherwise book no alarm at all.
+         */
+        priceSeries: Boolean = false,
     ) {
         val pending = fireIntent()
         val now = Instant.now()
@@ -67,6 +77,7 @@ class JobScheduler(private val context: Context) {
             ScheduleClock.nextFireOf(schedules, now),
             if (marketRefresh) MarketRefresh.nextFire(now) else null,
             if (closeSweep) CloseSweep.nextFire(now) else null,
+            if (priceSeries) SeriesHarvest.nextFire(now) else null,
         ).minOrNull()
         if (at == null) {
             alarms.cancel(pending)

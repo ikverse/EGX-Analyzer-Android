@@ -7,16 +7,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +55,7 @@ import com.ikverse.egxanalyzer.model.StockOpinion
 import com.ikverse.egxanalyzer.model.StockScore
 import com.ikverse.egxanalyzer.model.opinionId
 import com.ikverse.egxanalyzer.model.positionId
+import java.time.LocalDate
 import java.util.Locale
 
 /**
@@ -131,12 +136,46 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
     val faults = remember(appState.priceHealth, key) {
         appState.priceHealth.faults.firstOrNull { it.ticker == key }?.faults.orEmpty()
     }
+    // Whose levels the chart draws. The reader's own trade where they hold one - those are the
+    // stop and the targets they are actually running under, snapshotted at the purchase, so
+    // re-running the analysis cannot move a line under a trade already taken - and the newest call's
+    // otherwise. Two channels calling one stock print two different sets, and the newest is the one
+    // a reader opening this sheet today is acting on, which is the same call the action bar acts on.
+    val chartLevels = remember(trades, calls) {
+        val held = trades.firstOrNull(PositionView::open)
+        when {
+            held != null -> ChartLevels(
+                source = "your trade",
+                stopLoss = held.position.stopLoss,
+                entryLow = held.position.entryLow,
+                entryHigh = held.position.entryHigh,
+                target1 = held.position.target1,
+                target2 = held.position.target2,
+                paid = held.position.entryPrice,
+            )
+
+            else -> calls.firstOrNull()?.let { call ->
+                ChartLevels(
+                    source = "⁨${call.channel}⁩ · " + AppDates.DayMonth.format(call.openedOn),
+                    stopLoss = call.stopLoss,
+                    entryLow = call.entryLow,
+                    entryHigh = call.entryHigh,
+                    target1 = call.target1,
+                    target2 = call.target2,
+                    paid = null,
+                )
+            }
+        }?.takeIf(ChartLevels::any)
+    }
+    // Every session anybody named this stock on, which is what the rings on the line mark. A set
+    // because two channels calling it on one morning are one mark on one session.
+    val callDates = remember(calls) { calls.mapTo(mutableSetOf(), ScoredCall::openedOn) }
     // Off the disk rather than out of the report, and after the sheet is already on screen: the
     // rest of this sheet is in memory and must not wait behind a query. An empty list draws no
     // line, which is what a stock the feed has never carried should look like.
     var history by remember(key) { mutableStateOf(emptyList<DailySession>()) }
     LaunchedEffect(key, report) {
-        history = appState.priceHistory(key, HistorySessions)
+        history = appState.priceHistory(key, ChartRange.Widest.since(LocalDate.now()))
     }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -156,7 +195,7 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             StockSheetChips(trades, score, faults)
-            StockSheetPrice(latest, history)
+            StockSheetPrice(latest, history, chartLevels, callDates, appState.pages)
             if (score != null) StockSheetRecord(score)
             if (trades.isNotEmpty()) {
                 StockSheetTrades(trades) { id ->
@@ -240,33 +279,49 @@ private fun StockSheetHeading(
                 }
         }
         if (latest != null) {
+            // The move since the session before it, which is the figure a price is always read
+            // against and the one the sheet never carried. Measured off the stored history rather
+            // than the report, which keeps one session per stock and so has nothing to compare
+            // against.
+            val move = history.dayMove()
             Column(horizontalAlignment = Alignment.End) {
+                // Labelled, because a bare figure at the top of a sheet is a number the reader has
+                // to work out the meaning of - and the label is also where the one thing that
+                // changes its meaning is said: a session still trading is a price, not a close.
+                Text(
+                    if (latest.provisional) "LATEST PRICE" else "LAST CLOSE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Text(
                     formatPrice(latest.session.close),
                     style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
                     color = PriceRole.market,
                 )
-                // The move since the session before it, which is the figure a price is always read
-                // against and the one the sheet never carried. Measured off the stored history
-                // rather than the report, which keeps one session per stock and so has nothing to
-                // compare against. A session still trading says so instead of naming its own date:
-                // the close is going to move, and a date under it reads as settled.
-                val change = history.dayChange()
+                if (move != null) {
+                    // In pounds as well as percent. The app has never printed a price move in money
+                    // anywhere, and on a stock trading at 0.24 a percent is the figure that says
+                    // nothing - the two together are what a holder actually reads.
+                    Text(
+                        formatSignedPrice(move.amount) + " (" + formatPercent(move.percent) + ")",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = TabularFigures,
+                        ),
+                        color = PriceRole.forReturn(move.percent),
+                        textAlign = TextAlign.End,
+                    )
+                }
+                // A session still trading says so instead of naming its own date: the close is
+                // going to move, and a date under it reads as settled.
                 Text(
-                    listOfNotNull(
-                        change?.let(::formatPercent),
-                        if (latest.provisional) {
-                            "still trading"
-                        } else {
-                            AppDates.DayMonth.format(latest.session.date)
-                        },
-                    ).joinToString(" · "),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (change != null) {
-                        PriceRole.forReturn(change)
+                    if (latest.provisional) {
+                        "still trading"
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        (if (move != null) "since " else "") +
+                            AppDates.DayMonth.format(move?.from ?: latest.session.date)
                     },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.End,
                 )
             }
@@ -358,22 +413,134 @@ private fun StockChip(label: String, container: Color, content: Color) {
  * the Settings card, which has the room for it and a count to put it against.
  */
 @Composable
-private fun StockSheetPrice(latest: LatestPrice?, history: List<DailySession>) {
+private fun StockSheetPrice(
+    latest: LatestPrice?,
+    history: List<DailySession>,
+    levels: ChartLevels?,
+    calls: Set<LocalDate>,
+    pages: PageState,
+) {
     if (latest == null && history.isEmpty()) return
+    var range by pages.stockChartRange
+    var showLevels by pages.stockChartLevels
+    // Measured back from the newest session the app holds rather than from today's date. The right
+    // edge of the line is that session whatever the calendar says, so a week counted from today on
+    // a feed three weeks behind would draw an empty box for a stock whose prices are simply old -
+    // and the dates under the line say which week it really is.
+    val visible = remember(history, range) {
+        val anchor = history.lastOrNull()?.date ?: return@remember history
+        val since = range.since(anchor)
+        history.filter { !it.date.isBefore(since) }
+    }
+    val move = remember(visible) { visible.rangeMove() }
+    val shown = if (showLevels) levels else null
     SheetSection {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             SectionLabel("Where it stands")
-            if (history.size > 1) {
+            // What the visible line adds up to, which is the one thing its shape cannot say: the
+            // same climb is three percent or forty depending on a scale the chart deliberately
+            // does not print.
+            if (move != null) {
                 Text(
-                    "${history.size} " + history.size.sessionWord(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    formatPercent(move),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                    color = PriceRole.forReturn(move),
                 )
             }
         }
-        Sparkline(history)
-        latest?.let { DayRange(it.session) }
+        if (visible.count { it.close != null } > 1) {
+            PriceChart(
+                visible,
+                shown,
+                calls,
+                on = MaterialTheme.colorScheme.surfaceContainerHigh,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                ChartCaption(AppDates.DayMonth.format(visible.first().date))
+                if (visible.any { it.date in calls }) ChartCaption("○ a call was made")
+                ChartCaption(AppDates.DayMonth.format(visible.last().date))
+            }
+            // Whose levels these are, which is the one thing a coloured line across a chart cannot
+            // say for itself.
+            if (shown != null) ChartCaption("levels from " + shown.source)
+        } else {
+            // Absent rather than an empty box, which reads as a chart that failed to load. A week
+            // of a stock that has barely traded is a real answer and this is what it looks like.
+            ChartCaption("No sessions stored in this range.")
+        }
+        ChartControls(
+            range = range,
+            onRange = { range = it },
+            levels = if (levels == null) null else showLevels,
+            onLevels = { showLevels = it },
+        )
+        latest?.let {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            DayRange(it.session)
+        }
     }
+}
+
+/**
+ * How far back the line reaches, and whether it carries the levels.
+ *
+ * At the foot of the chart, where every chart a reader has used puts its ranges. One line that
+ * scrolls sideways rather than a row that wraps - five ranges plus the toggle is about 290dp of
+ * controls inside the 355dp a card leaves on the cover screen, so it fits with nothing spare and a
+ * large font scale would otherwise clip a chip off the end. `fadingScrollbar` draws nothing when
+ * there is nothing to scroll, so at every width it fits the row is indistinguishable from a plain
+ * one.
+ *
+ * The levels chip is **absent rather than disabled** where there are none to draw: a stock nobody
+ * has called has no stop and no targets, and a control that answers a press with nothing is worse
+ * than one that is not offered.
+ */
+@Composable
+private fun ChartControls(
+    range: ChartRange,
+    onRange: (ChartRange) -> Unit,
+    levels: Boolean?,
+    onLevels: (Boolean) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().scrollableRow(),
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ChartRange.entries.forEach { option ->
+            FilterChip(
+                selected = option == range,
+                onClick = { onRange(option) },
+                label = { Text(option.label, maxLines = 1) },
+            )
+        }
+        if (levels != null) {
+            // A fixed gap and not a weight: this row scrolls, so its width is unbounded and a
+            // weighted child inside one cannot be measured at all.
+            Spacer(Modifier.width(Space.m))
+            FilterChip(
+                selected = levels,
+                onClick = { onLevels(!levels) },
+                label = { Text("Levels", maxLines = 1) },
+                leadingIcon = {
+                    Icon(
+                        Icons.Outlined.Timeline,
+                        contentDescription = null,
+                        modifier = Modifier.size(IconSize.Inline),
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChartCaption(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /**
@@ -752,18 +919,24 @@ private fun SectionLabel(text: String) {
     )
 }
 
+/** What a stock did between its last two stored sessions, and which one it moved from. */
+private data class DayMove(val amount: Double, val percent: Double, val from: LocalDate)
+
 /**
- * The move from the session before last to the last, in percent.
+ * The move from the session before last to the last.
  *
  * Null wherever the history cannot support one - fewer than two closes, or a previous close of zero
- * - rather than a zero, which would read as a stock that did not move.
+ * - rather than a zero, which would read as a stock that did not move. [DayMove.from] is the
+ * session it moved *from*, because "since 3 Sep" over a close dated the 4th is the only wording
+ * that says what the figure above it measured.
  */
-private fun List<DailySession>.dayChange(): Double? {
-    val closes = takeLast(2).mapNotNull(DailySession::close)
-    if (closes.size < 2) return null
-    val (previous, last) = closes
+private fun List<DailySession>.dayMove(): DayMove? {
+    val priced = takeLast(2).filter { it.close != null }
+    if (priced.size < 2) return null
+    val previous = priced.first().close!!
+    val last = priced.last().close!!
     if (previous <= 0.0) return null
-    return (last - previous) / previous * 100
+    return DayMove(last - previous, (last - previous) / previous * 100, priced.first().date)
 }
 
 /** The band a call asked the reader to buy in, as one figure or two. */
@@ -794,13 +967,28 @@ private fun ScoredCall.offeredWindow(setting: Int): Int = if (isTPlusOne) {
 }
 
 /**
- * How much history the line is drawn from.
+ * A price move with its sign, which [formatPrice] deliberately does not carry.
  *
- * About a quarter of a trading year: long enough that a month of climbing is visibly a month of
- * climbing, short enough that the last fortnight - the part a reader is actually deciding on - is
- * not squeezed into the final centimetre.
+ * Every other price in this app is a level or a close, where a sign would be noise; a move is the
+ * one figure whose direction is half of what it says.
  */
-private const val HistorySessions = 60
+private fun formatSignedPrice(value: Double): String =
+    (if (value > 0) "+" else "") + formatPrice(value)
+
+/**
+ * What the visible line adds up to, end to end, in percent.
+ *
+ * The figure the shape cannot carry: a chart scaled to its own range draws the same climb whether
+ * the stock moved three percent or forty, which is the first thing a reader asks of it.
+ */
+private fun List<DailySession>.rangeMove(): Double? {
+    val priced = filter { it.close != null }
+    if (priced.size < 2) return null
+    val first = priced.first().close!!
+    val last = priced.last().close!!
+    if (first <= 0.0) return null
+    return (last - first) / first * 100
+}
 
 /** Enough recent calls to see who has been saying what, before the list is asked to open. */
 private const val CallsShown = 5

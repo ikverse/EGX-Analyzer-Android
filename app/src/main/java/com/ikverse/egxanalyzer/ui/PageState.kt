@@ -54,6 +54,21 @@ class PageState {
      */
     val todayExpanded: MutableState<Boolean> = mutableStateOf(true)
 
+    /**
+     * How far back the stock sheet's chart is drawn, and whether it carries the levels.
+     *
+     * Here rather than in the sheet for the reason everything else here is: the sheet is composed
+     * inside whichever shell is drawing, so folding the phone would put a reader who had just
+     * pressed 6M back on a month of line. It also outlives the sheet itself, so opening a second
+     * stock keeps the range the reader chose rather than making the choice once per ticker.
+     *
+     * Session-only like the rest of this class, so a launch from cold opens on a month with the
+     * levels showing - which is what those defaults are for.
+     */
+    internal val stockChartRange: MutableState<ChartRange> = mutableStateOf(ChartRange.Default)
+
+    internal val stockChartLevels: MutableState<Boolean> = mutableStateOf(true)
+
     // ── Results ──────────────────────────────────────────────────────────────────────────────
 
     /** The run whose table is open, which needs the whole row and so cannot be held by a card. */

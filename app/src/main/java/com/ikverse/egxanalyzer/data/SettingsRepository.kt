@@ -435,6 +435,56 @@ class SettingsRepository(
     }
 
     /**
+     * Whether this phone keeps the five-minute record of every session it sees.
+     *
+     * Off until it is switched on, and more emphatically than the refresh above: that one adds
+     * traffic to a free feed, this one adds about 86 MB a year to the device. A feature that starts
+     * filling somebody's storage because it shipped is not one anybody agreed to, and this app is
+     * used by people who did not build it.
+     *
+     * Device-local for [marketRefreshEnabled]'s reason and one of its own: the archive itself is
+     * per-device - it lives in a database that is deliberately never backed up or synced - so a
+     * switch that travelled would promise a second phone an archive it does not have.
+     */
+    fun priceSeriesEnabled(): Boolean = preferences.getBoolean(KEY_PRICE_SERIES, false)
+
+    fun savePriceSeriesEnabled(value: Boolean) {
+        preferences.edit().putBoolean(KEY_PRICE_SERIES, value).apply()
+    }
+
+    /**
+     * When a harvest last actually ran, which is what its fire is answered against.
+     *
+     * Its own moment rather than [lastPriceRefreshAt], because the two do different work off the
+     * same endpoint: a price refresh asks for daily rows and stores one line for a whole session, so
+     * a refresh at four o'clock has done nothing at all about that session's bars. Sharing the
+     * moment would have every ordinary refresh stand the harvest down and the archive would quietly
+     * never fill.
+     */
+    fun lastSeriesHarvestAt(): Long = preferences.getLong(KEY_LAST_SERIES_HARVEST_AT, 0L)
+
+    /**
+     * What the last harvest did, and when it said so.
+     *
+     * Written on every fire including the ones that copied nothing, for the reason
+     * [marketRefreshNote] is: silence is how everything that runs while the app is closed fails, and
+     * a line that is never blank is the only way to tell that from the outside. It matters more here
+     * than there - a missed refresh slot is superseded a quarter of an hour later, while a session
+     * this misses ages out of the feed and is gone.
+     */
+    fun seriesHarvestNote(): String? = preferences.getString(KEY_SERIES_HARVEST_NOTE, null)
+
+    fun seriesHarvestNoteAt(): Long = preferences.getLong(KEY_SERIES_HARVEST_NOTE_AT, 0L)
+
+    fun recordSeriesHarvest(note: String, at: Long = System.currentTimeMillis()) {
+        preferences.edit()
+            .putString(KEY_SERIES_HARVEST_NOTE, note)
+            .putLong(KEY_SERIES_HARVEST_NOTE_AT, at)
+            .putLong(KEY_LAST_SERIES_HARVEST_AT, at)
+            .apply()
+    }
+
+    /**
      * What the last market-hours fetch did, and when it said so.
      *
      * Written on every fire including the ones that did nothing, which is the point of it. The
@@ -785,6 +835,10 @@ class SettingsRepository(
         const val KEY_BACKUP_FOLDER = "backup_folder"
         const val KEY_LAST_BACKUP_DAY = "last_backup_day"
         const val KEY_MARKET_REFRESH = "market_refresh_enabled"
+        const val KEY_PRICE_SERIES = "price_series_enabled"
+        const val KEY_LAST_SERIES_HARVEST_AT = "last_series_harvest_at"
+        const val KEY_SERIES_HARVEST_NOTE = "series_harvest_note"
+        const val KEY_SERIES_HARVEST_NOTE_AT = "series_harvest_note_at"
 
         /** Device-local, never synced: what this phone has already said about the feed. */
         const val KEY_FEED_QUIET_REPORTED = "feed_quiet_reported"

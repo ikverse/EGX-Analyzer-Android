@@ -11,6 +11,7 @@ import com.ikverse.egxanalyzer.data.AndroidKeystoreCredentialStore
 import com.ikverse.egxanalyzer.data.CallAlertNotifier
 import com.ikverse.egxanalyzer.data.CloudAnalysisRepository
 import com.ikverse.egxanalyzer.data.IntradayRepository
+import com.ikverse.egxanalyzer.data.PriceSeriesStore
 import com.ikverse.egxanalyzer.data.JobScheduler
 import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.ModelUsageStore
@@ -94,7 +95,11 @@ class EgxApplication : Application() {
         // Built first so the daily repository can call it for a stock no daily feed carries. The
         // two stay separate types - different granularity, different retention, different table -
         // and are joined by one function rather than by either holding the other.
-        val intraday = IntradayRepository(localDataStore, symbols)
+        // Its own database file, deliberately: it is excluded from every backup and from Save
+        // diagnostics by construction rather than by a flag somebody has to remember. See
+        // [PriceSeriesStore].
+        val priceSeries = PriceSeriesStore(this)
+        val intraday = IntradayRepository(localDataStore, symbols, priceSeries = priceSeries)
         LiveAppState(
             context = this,
             settingsRepository = settingsRepository,
@@ -107,6 +112,7 @@ class EgxApplication : Application() {
                 derivedHistory = intraday::dailyHistory,
             ),
             intradayRepository = intraday,
+            priceSeriesStore = priceSeries,
             promptStore = promptStore,
             opinionPromptStore = opinionPromptStore,
             // The app is sideloaded, so nothing else will ever offer it an update.
@@ -140,8 +146,13 @@ class EgxApplication : Application() {
                 AnalysisService.stop(this)
                 if (reason == null) notifier.cancelled() else notifier.failed(reason)
             },
-            schedulesChanged = { schedules, marketRefresh, closeSweep ->
-                JobScheduler(this).rebook(schedules, marketRefresh, closeSweep)
+            schedulesChanged = { schedules, marketRefresh, closeSweep, priceSeriesOn ->
+                JobScheduler(this).rebook(
+                    schedules,
+                    marketRefresh,
+                    closeSweep,
+                    priceSeriesOn,
+                )
             },            dailyCheckChanged = { wanted ->
                 if (wanted) OverdueWorker.schedule(this) else OverdueWorker.cancel(this)
             },
@@ -201,10 +212,12 @@ class EgxApplication : Application() {
             state.analysisSchedules,
             state.marketRefreshEnabled,
             state.tradeWatchWanted,
+            state.priceSeriesEnabled,
         )
         if (state.analysisSchedules.any { it.enabled } ||
             state.marketRefreshEnabled ||
-            state.tradeWatchWanted
+            state.tradeWatchWanted ||
+            state.priceSeriesEnabled
         ) {
             // Through the dispatcher rather than straight at the worker: a launch that finds an
             // analysis owed - the app opened at 07:20 for a 07:00 schedule, inside its grace -

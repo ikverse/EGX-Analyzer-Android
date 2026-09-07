@@ -3,6 +3,7 @@ package com.ikverse.egxanalyzer.data
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.IntradayBar
 import com.ikverse.egxanalyzer.model.Scoring
+import com.ikverse.egxanalyzer.model.SeriesHarvest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -18,7 +19,20 @@ import java.time.ZoneId
 data class UnorderedSession(val ticker: String, val date: LocalDate)
 
 /**
- * The intraday feed, which this app asks two quite different questions of.
+ * What one pass of the archive harvest managed, for the line on screen that reports it.
+ *
+ * [failed] is counted separately from a stock that had nothing to do, because the two look
+ * identical from the outside and only one of them means the phone is quietly falling behind a feed
+ * that will not keep what it is missing.
+ */
+data class SeriesHarvestOutcome(
+    val copied: Int = 0,
+    val bars: Int = 0,
+    val failed: Int = 0,
+)
+
+/**
+ * The intraday feed, which this app asks three quite different questions of.
  *
  * **Ordering a session** ([fetchMissing]): a daily bar gives a high and a low with no sequence, so
  * a session that both offered the entry and reached a target says nothing about which came first.
@@ -29,7 +43,14 @@ data class UnorderedSession(val ticker: String, val date: LocalDate)
  * has no daily history to order. Hourly bars from the same endpoint are aggregated into daily
  * sessions, which are stored as prices rather than as bars and marked [DailySession.derived].
  *
- * The two share the endpoint and nothing else - different granularity, different retention,
+ * **Keeping the session itself** ([harvestSeries]): the two above read bars to answer a question
+ * and store only what the answer needed. This copies the whole five-minute session and keeps it,
+ * because the feed will not - it serves about two months of them ([RETENTION_DAYS]) and then they
+ * are gone permanently. Nothing in the app reads what it writes; it goes into its own database
+ * file, [PriceSeriesStore], and exists so that the record can be asked questions nobody has thought
+ * of yet.
+ *
+ * The three share the endpoint and nothing else - different granularity, different retention,
  * different table, different question. Separate from [PriceRepository] for the same reason it
  * always was: this never merges two feeds and never heals a series.
  */
@@ -37,6 +58,14 @@ class IntradayRepository(
     private val localDataStore: LocalDataStore,
     private val symbolMap: SymbolMap,
     private val endpointTemplate: String = YAHOO_CHART_URL,
+    /**
+     * Where a kept five-minute series is written, or null on a build that keeps none.
+     *
+     * Nullable rather than always present because [harvestSeries] is the one thing here that is
+     * off by default and switched on per device, and because every test of the two questions above
+     * predates it and has no business constructing an archive to ask them.
+     */
+    private val priceSeries: PriceSeriesStore? = null,
 ) {
     /**
      * Fetches bars for whichever of [wanted] have not been asked about yet, and stores them.
@@ -102,6 +131,89 @@ class IntradayRepository(
             .coerceAtLeast(today.minusDays(HOURLY_RANGE_DAYS))
         val bars = fetchBars(symbol, start, today, HOURLY) ?: return emptyList()
         return DailyFromIntraday.aggregate(ticker, bars)
+    }
+
+    /**
+     * Copies the five-minute session of every stock in [tickers] that is behind, and keeps it.
+     *
+     * **One request per stock, not one per session.** The endpoint answers a whole date range at
+     * five-minute granularity, so a phone switching this on for the first time backfills the
+     * feed's entire two-month window in one pass of about a hundred requests, and every evening
+     * after that asks each stock for the one session it is missing. Fetching session by session
+     * would have made the first run sixty times that against a public feed the app is a guest on.
+     *
+     * [finalThrough] is the newest session the exchange has finished with -
+     * `ScheduleClock.lastFinalSession` - and it is the only guard against storing half a day as
+     * though it were a whole one. A harvest that ran at noon would otherwise copy the morning and
+     * mark the session done, and the afternoon would never be fetched because the feed will not
+     * serve it twice and the mark says the day is finished.
+     *
+     * A stock whose request fails keeps its old mark and is simply behind, which the next fire
+     * picks up. The alternative - advancing the mark anyway - would lose those sessions for good,
+     * and this is the one table in the app where "fetch it again tomorrow" is not a remedy.
+     */
+    suspend fun harvestSeries(
+        tickers: Collection<String>,
+        finalThrough: LocalDate,
+        today: LocalDate = LocalDate.now(ZoneId.of(UTC)),
+    ): SeriesHarvestOutcome = coroutineScope {
+        val series = priceSeries ?: return@coroutineScope SeriesHarvestOutcome()
+        if (tickers.isEmpty()) return@coroutineScope SeriesHarvestOutcome()
+        val marks = withContext(Dispatchers.IO) { series.harvestedThrough() }
+        val limit = Semaphore(CONCURRENCY)
+        val outcomes = tickers
+            .distinct()
+            .map { ticker ->
+                async {
+                    limit.withPermit {
+                        harvestOne(series, ticker, marks[ticker], finalThrough, today)
+                    }
+                }
+            }
+            .map { it.await() }
+        SeriesHarvestOutcome(
+            copied = outcomes.count { it != null && it > 0 },
+            bars = outcomes.filterNotNull().sum(),
+            failed = outcomes.count { it == null },
+        )
+    }
+
+    /**
+     * One stock's outstanding sessions: how many bars were stored, or null where the fetch failed.
+     *
+     * Zero and null are deliberately different, exactly as they are in [fetch]. Zero is the feed
+     * answering that it has nothing for those days, which is a real answer and advances the mark so
+     * the days are never asked about again. Null is a request that did not arrive, which must not.
+     */
+    private suspend fun harvestOne(
+        series: PriceSeriesStore,
+        ticker: String,
+        storedThrough: LocalDate?,
+        finalThrough: LocalDate,
+        today: LocalDate,
+    ): Int? {
+        // The ISIN feed only, the same insistence [fetchOne] makes and for the same reason: a
+        // legacy `SYMBOL.CA` symbol ignores `interval` and answers an intraday request with daily
+        // rows, which would be stored here as five-minute bars that are nothing of the kind.
+        val symbol = symbolMap[ticker]?.yahooSymbol ?: return 0
+        if (symbol == legacyFormOf(ticker)) return 0
+        val from = SeriesHarvest.harvestFrom(storedThrough, finalThrough, RETENTION_DAYS, today)
+        // Already current. The common case on a second fire in one evening, and it costs nothing.
+            ?: return 0
+        val bars = fetchBars(symbol, from, finalThrough, INTERVAL) ?: return null
+        val kept = bars.map { bar ->
+            PriceBar(
+                ticker = ticker,
+                at = bar.at,
+                open = bar.open,
+                high = bar.high,
+                low = bar.low,
+                close = bar.close,
+                volume = bar.volume,
+            )
+        }
+        withContext(Dispatchers.IO) { series.saveBars(ticker, kept, finalThrough) }
+        return kept.size
     }
 
     /** True when the session gained bars; false when it was refused, empty, or unreachable. */

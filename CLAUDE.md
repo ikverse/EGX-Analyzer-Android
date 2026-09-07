@@ -88,8 +88,11 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   image it is citing, which produced exclusions naming the wrong card.
 - `data/ConsolidatedParser.kt` — the model's JSON into `ConsolidatedRecommendation`.
 - `model/Scoring.kt` — how a call is judged. See below.
-- `data/IntradayRepository.kt` — five-minute bars for the sessions daily figures cannot order, and
-  hourly bars for the stocks no daily feed carries at all. See below.
+- `data/IntradayRepository.kt` — five-minute bars for the sessions daily figures cannot order,
+  hourly bars for the stocks no daily feed carries at all, and the kept archive below. See below.
+- `data/PriceSeriesStore.kt` + `model/SeriesHarvest.kt` + `model/PriceSeriesSummary.kt` — the
+  five-minute record of every session, copied before the feed forgets it, in a database of its own.
+  See **Keeping the sessions the feed forgets** below.
 - `data/DailyFromIntraday.kt` — bars aggregated into daily sessions, for those stocks. See below.
 - `model/CallSanity.kt` — whether a call's levels can be believed. See below.
 - `model/CallShortlist.kt` — which card is worth a paid question. See below.
@@ -123,8 +126,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `ui/EgxAnalyzerApp.kt` holds `AppHeader` and `AppStatusLine` — the app's name, and the one line
   that says what it is doing or has just done. See **The status line** below.
 - `model/ScheduleClock.kt` + `model/MarketRefresh.kt` + `model/CloseSweep.kt` +
-  `model/AnalysisSchedule.kt` — when the three things this phone does on its own fire, and what the
-  analysis one is. `ScheduleClock.lastFinalSession` is also the one answer to "has that session
+  `model/SeriesHarvest.kt` + `model/AnalysisSchedule.kt` — when the four things this phone does on
+  its own fire, and what the analysis one is. `ScheduleClock.lastFinalSession` is also the one answer to "has that session
   closed", which the scorer and the still-trading flag both read. See below.
 - `model/AnalysisPlan.kt` — what a run covers, said explicitly, so the screen and the clock build
   the same request. See **What this phone does on its own** below.
@@ -148,8 +151,9 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   behalf. See **What back does** below.
 - `ui/StockSheet.kt` — everything the app knows about one ticker, in one sheet. `LocalOpenStock` is
   how a ticker anywhere opens it. See below.
-- `ui/StockTrend.kt` — `Sparkline` and `DayRange`, the two drawings on that sheet: where a stock
-  has been over its last 60 stored sessions, and where its close sits inside its own day.
+- `ui/StockTrend.kt` — `PriceChart` and `DayRange`, the two drawings on that sheet: where a stock
+  has been over the chosen range with the levels it is judged against drawn across it, and where its
+  close sits inside its own day. `ChartRange` is the 1W/1M/2M/3M/6M row under the chart.
 - `model/ApproachAlerts.kt` + `data/ApproachNotifier.kt` — a trade closing on its stop or target 2,
   said while there is still something to decide.
 - `data/SessionDigestNotifier.kt` — what the whole session did, once, after the close.
@@ -1765,7 +1769,7 @@ phone only by plugging it into the machine that built it. It reads one public UR
 
 ## What this phone does on its own
 
-A checkbox for prices, one sweep at the close, and up to four analyses. This is the one feature that
+Two checkboxes, one sweep at the close, and up to four analyses. This is the one feature that
 reverses a rule the app had held since the beginning — that nothing but `OverdueWorker` runs while
 the app is closed.
 
@@ -1796,6 +1800,10 @@ means the whole of what this phone does unattended fits on one screen. `Schedule
   window**, unlike the other two: a refresh slot that is late has been superseded fifteen minutes
   later, while this fire has no successor for a day, so a phone that was asleep at 14:45 still owes
   it at nine that evening.
+- **Keeping the sessions the feed forgets** — `model/SeriesHarvest.kt`, switched on beside the
+  refresh above. One fire a trading day at 14:45 Cairo, which copies every priced stock's
+  five-minute bars into an archive of its own. Free, the same public feed. See **Keeping the
+  sessions the feed forgets** below.
 - **The scheduled analyses** — `model/AnalysisSchedule.kt`, edited in Settings and summarised on
   the Analyze card. At most `AnalysisSchedule.MAX` of them, each with a time, the weekdays it
   keeps, and the chats it froze. Paid, and see the guards below.
@@ -1847,8 +1855,9 @@ that is very nearly but not quite final.
   Hence `lastPriceRefreshAt` beside `lastPriceRefreshDay` — the day cannot answer "since this fire".
 - **AlarmManager is the clock; WorkManager does the work.** WorkManager's delays are a floor and
   not a promise — in Doze a fifteen-minute period becomes whenever the system next feels like it —
-  so `JobScheduler` books one exact alarm at the earliest of the three next fires — a refresh slot,
-  the sweep at the close, or a schedule — and the run that answers it books the next. One alarm
+  so `JobScheduler` books one exact alarm at the earliest of the four next fires — a refresh slot,
+  the sweep at the close, the archive harvest, or a schedule — and the run that answers it books
+  the next. One alarm
   rather than one each: only the nearest matters.
   `setExactAndAllowWhileIdle` where the user has granted `SCHEDULE_EXACT_ALARM`, falling back to
   the inexact form where they have not — the app asks rather than declaring `USE_EXACT_ALARM`,
@@ -1882,6 +1891,82 @@ that is very nearly but not quite final.
   wonders why the prices have not moved.
 - **The two system permissions are shown whether or not they are granted.** A page that goes quiet
   once something is right leaves the reader unable to tell "granted" from "the app forgot to check".
+
+### Keeping the sessions the feed forgets
+
+Every other price in this app is read to answer a question, and only what the answer needed is
+stored. This copies the whole five-minute session and keeps it, because **the feed will not**: it
+serves five-minute bars for about two months (`IntradayRepository.RETENTION_DAYS`, 59, measured) and
+then they are gone, from everyone, permanently. That is the one fact the whole design rests on — a
+session not copied inside that window cannot be recovered by any later request, which is why this is
+a fire on a clock rather than something a screen does when asked. A record that only grows while
+somebody remembers to open the app has holes exactly where the phone was busy, and the holes cannot
+be filled in afterwards.
+
+- **Nothing in the app reads it.** No figure, no rate, no verdict rests on a row here, and switching
+  it off changes nothing on any screen. It exists so the record can be asked questions nobody has
+  thought of yet, and saying that plainly is what keeps it from acquiring a reader later and
+  becoming load-bearing without anyone deciding it should.
+- **Its own database file, `egx_price_series.db`, and that is the design rather than a detail.**
+  `egx_analyzer.db` is zipped whole into every backup, seven of which are kept, and copied whole by
+  Save diagnostics. This table is an order of magnitude larger than everything in that file put
+  together — **measured**: 61 bytes a row `WITHOUT ROWID` against 122 with a rowid and a
+  `session_date` index, so 104 stocks × 54 bars × 250 sessions is 86 MB a year against the 6.4 MB
+  the whole record occupies after two. A table inside it would have turned a daily backup into a
+  daily 86 MB write to somebody's cloud folder. A separate file is excluded from the backup and from
+  diagnostics **by construction** — no flag to set, nothing to remember, and no way for a later
+  change to either of them to quietly start carrying it. `Backup.kt` is untouched by this feature,
+  which is the point.
+- **The trade is stated on the switch, not only here**: what is in this archive is not in a backup,
+  so a lost phone loses it. Survivable in a way the alternative is not, because none of it is
+  evidence — losing it costs a research archive rather than the record of what anybody recommended.
+  Save price series is how a user keeps a copy of their own.
+- **`WITHOUT ROWID`, keyed `(ticker, bar_at)`, and no `session_date` column.** The key is the whole
+  of a row's identity and every read is by it, so the hidden rowid and its second b-tree are pure
+  overhead; the date is `bar_at` read in UTC, derivable in one expression, and storing it would
+  spend a text field on a million rows to save an arithmetic the export does per row anyway. On a
+  table this size those two choices are the difference between 86 MB a year and 172.
+- **One request per stock, not one per session.** The endpoint answers a whole date range at
+  five-minute granularity, so a first run backfills the feed's entire window in about a hundred
+  requests and every evening after that asks each stock for the one session it is missing. Session
+  by session the first run would have been sixty times that against a public feed the app is a guest
+  on.
+- **`harvest_marks` exists because `max(bar_at)` cannot answer it.** A session the feed genuinely has
+  nothing for — a holiday it omits, a stock suspended for a week — comes back empty, so a mark
+  derived from the newest stored bar would never pass it and every harvest from then on would ask
+  about the same empty days forever. The mark advances on a request that was **answered**, whatever
+  the answer contained; a request that *failed* leaves it alone, because this is the one table in
+  the app where "fetch it again tomorrow" is not a remedy. Bars and mark are written in one
+  transaction for the same reason: a mark without its bars skips those sessions for good.
+- **`ScheduleClock.lastFinalSession` is the guard against half a day.** A harvest that ran at noon
+  would copy the morning and mark the session done, and the afternoon would never be fetched — the
+  feed will not serve it twice and the mark says the day is finished. It is the app's one definition
+  of "has that session closed", the same one the scorer and the still-trading flag read.
+- **The ISIN symbol only**, the insistence `fetchOne` and `dailyHistory` already make: a legacy
+  `SYMBOL.CA` symbol ignores `interval` and answers with daily rows, which stored here would be
+  five-minute bars that are nothing of the kind. Measured against the real record on 2026-09-07:
+  **104 of 106 priced tickers can serve them**, none is stuck on a legacy symbol, and the two that
+  cannot (`AIFI`, `ICFC`) are absent from `yahoo_symbols.json` altogether.
+- **Deliberately without a grace window**, as `CloseSweep` is, and it is not stood down by an
+  ordinary price refresh. A refresh asks for daily rows and stores one line for a whole session, so
+  a refresh at four o'clock has done nothing whatever about that session's bars — sharing
+  `lastPriceRefreshAt` would have every refresh stand the harvest down and the archive would quietly
+  never fill. Hence `lastSeriesHarvestAt` beside it.
+- **Off by default, and more emphatically than the refresh above.** That one spends somebody's
+  traffic; this spends about 86 MB a year of their storage, on an app other people use. Device-local
+  and never synced, for `marketRefreshEnabled`'s reason and one of its own: the archive is per-device
+  by construction, so a switch that travelled would promise a second phone an archive it does not
+  have.
+- **The status line is never blank**, the rule the refresh follows and for a sharper reason: a
+  refresh that stops shows up as prices that have not moved, and an archive that stops shows up as
+  nothing at all until somebody goes looking for a session that is no longer anywhere.
+  `seriesHarvestLine` ranks one state above the report of the last copy — switched on, has run, and
+  has still copied nothing — because every other line would file that as a success.
+- **The export is a CSV, which is the opposite choice from Save diagnostics beside it.** That hands
+  over a record for somebody to debug, so the file itself is the point; this is read by whoever
+  wanted the archive, in a spreadsheet or a script, where a `.db` is a step and an installed tool
+  between them and the rows. Streamed a row at a time through `forEachBar` — assembling a million
+  rows first is an out-of-memory on the one kind of device this runs on.
 
 ### Moving off the old job table
 
@@ -2053,10 +2138,10 @@ Two things the app could always have done and never did: go back, and put one st
 - **It states two things that are new, and the rest was only ever scattered.** `StockScore` has been
   computed for every stock since it was written and reached the reader only through the shortlist
   signals and the Ask AI prompt — so "what happens when anybody recommends this stock" was a question
-  the app could answer and no screen asked. `Sparkline` is the other: every price anywhere else in
+  the app could answer and no screen asked. `PriceChart` is the other: every price anywhere else in
   this app is a single figure, so whether a stock has been climbing for a month or fell off a cliff
   last Tuesday was the one thing the record held and no screen drew. It reads
-  `AppState.priceHistory`, which is a **suspending disk read** off `LocalDataStore.allSessions` —
+  `AppState.priceHistory`, which is a **suspending disk read** off `LocalDataStore.sessionsFrom` —
   the report keeps one session per stock, so a line built from it would have a hole wherever nobody
   happened to have made a call — asked for after the sheet is already on screen, so the rest of it
   never waits behind a query. Everything else on the sheet is drawn somewhere else already; what it
@@ -2072,6 +2157,34 @@ Two things the app could always have done and never did: go back, and put one st
   is **capped at five** with a press that counts the rest: a stock the whole channel list likes
   carries thirty, and thirty rows push the record and the trades off the top of a scroll opened to
   compare all three.
+- **The chart carries the levels, and that is what makes it a decision rather than a picture.** The
+  stop, the entry band and both targets sit on the same scale as the price, so the gap between the
+  line's right-hand end and each of them is a length rather than arithmetic done in the head over a
+  column of figures on another card. **Whose levels** is decided the way the rest of the app treats a
+  held stock: the reader's own trade where they hold one — snapshotted at the purchase, so re-running
+  the analysis cannot move a line under a trade already taken — and the newest call's otherwise, with
+  a caption naming which. Behind a `Levels` chip, absent rather than disabled on a stock nobody has
+  called. **The scale may grow to fit them by at most `MaxScaleGrowth` (2.5) of the price's own
+  span**: honouring a target the stock has been nowhere near would flatten a month of real movement,
+  so a level beyond that is pinned to the edge and marked with an arrow, which is the rule
+  `PriceLadder` already follows in the other direction. A **ring on the line wherever a call was
+  made**, in both states — nothing else in the app can show whether the channels name this stock near
+  its tops.
+- **The range row is calendar time and one fetch.** `1W` `1M` `2M` `3M` `6M`, measured back from the
+  **newest session the app holds** rather than from today's date — the right edge of the line is that
+  session whatever the calendar says, and a week counted from today on a feed three weeks behind
+  would draw an empty box for a stock whose prices are merely old. Six months is fetched once when
+  the sheet opens and every shorter range is a slice of it, so no press reads the disk. The row
+  scrolls sideways (`scrollableRow`) because five chips plus the toggle is about 290dp inside the
+  355dp a card leaves on the cover screen — it fits with nothing spare, and a large font scale would
+  otherwise clip a chip off the end. **A weighted child cannot go in that row**: it scrolls, so its
+  width is unbounded and a weight cannot be measured. Both choices live in `PageState`, so folding
+  the phone does not put a reader who has just pressed 6M back on a month of line.
+- **The header names its own figures.** `LAST CLOSE` over the price, or `LATEST PRICE` on a session
+  still trading, and the move under it in **pounds as well as percent** — the app prints a price move
+  in money nowhere else, and on a stock trading at 0.24 the percent is the figure that says nothing.
+  The date reads "since 3 Sep", naming the session the move was measured *from*, which is the only
+  wording that is true over a close dated the 4th.
 - **The action bar is the call card's own two controls, against the newest call.** `AskAiButton` with
   the same confirmation and the same saved-answer sheet, and `TradeAction`, which is the app's only
   way of recording a purchase — this is one more surface asking it, not a second way of asking. A
@@ -2248,6 +2361,12 @@ Ten cards became **seven** on 2026-09-03, and nothing was removed but the price-
 - `local.properties` holds `telegramApiId` / `telegramApiHash` and is gitignored. Absent, the app
   falls back to asking for them, so a fresh checkout still builds.
 - `Uri` is stubbed in unit tests; tests that need inputs use `AnalysisInput.Text`.
+- **There are two databases now, and only one of them is the record.** `egx_analyzer.db` is
+  everything the app knows; `egx_price_series.db` is the five-minute archive, deliberately outside
+  every backup and every diagnostics copy. Nothing reads the second, so a change to `LocalDataStore`
+  never has to think about it — but a change to `Backup.kt` or to Save diagnostics that starts
+  sweeping up "the app's databases" would pull in a file sized in hundreds of megabytes. See
+  **Keeping the sessions the feed forgets**.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
   `onUpgrade`. Currently 27. **Bumping the constant is half of it**: `session_events` was added to
   both hooks and left at 20, so a fresh install had the table and every upgrade silently did not —

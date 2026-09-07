@@ -53,7 +53,13 @@ class ScheduleReceiver : BroadcastReceiver() {
                 val preferences = settings.loadPreferences()
                 val closeSweep = preferences.overdueRemindersEnabled ||
                     preferences.tradeAlertsEnabled
-                JobScheduler(application).rebook(schedules, marketRefresh, closeSweep)
+                val priceSeries = settings.priceSeriesEnabled()
+                JobScheduler(application).rebook(
+                    schedules,
+                    marketRefresh,
+                    closeSweep,
+                    priceSeries,
+                )
                 // Swept while anything is on, and cancelled only when everything is off - the same
                 // shape as the daily check, and for the same reason. Reading only the analysis
                 // side here would take the price refresh down with it silently.
@@ -61,7 +67,14 @@ class ScheduleReceiver : BroadcastReceiver() {
                 // Skipped where the service above took the job, which serves the same sweep with
                 // no ten-minute ceiling over it. Enqueueing the worker as well would be a second
                 // run of the same fires racing the first.
-                if (!started && (schedules.any { it.enabled } || marketRefresh || closeSweep)) {
+                if (!started &&
+                    (
+                        schedules.any { it.enabled } ||
+                            marketRefresh ||
+                            closeSweep ||
+                            priceSeries
+                        )
+                ) {
                     ScheduledJobWorker.sweep(application)
                 }
             } finally {

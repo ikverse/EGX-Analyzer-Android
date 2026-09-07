@@ -13,6 +13,7 @@ import com.ikverse.egxanalyzer.model.RestoreOutcome
 import com.ikverse.egxanalyzer.model.AvailableUpdate
 import com.ikverse.egxanalyzer.model.UpdateState
 import com.ikverse.egxanalyzer.model.PriceHealthReport
+import com.ikverse.egxanalyzer.model.PriceSeriesSummary
 import com.ikverse.egxanalyzer.model.AnalysisAim
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisSchedule
@@ -138,6 +139,9 @@ interface AppState {
     val marketRefreshEnabled: Boolean
     val marketRefreshNote: String?
     val marketRefreshNoteAt: Long
+    val priceSeriesEnabled: Boolean
+    val seriesHarvestNote: String?
+    val seriesHarvestNoteAt: Long
     val paidSchedulesEnabled: Boolean
     val backupFolder: String?
     val chatsRefreshing: Boolean
@@ -175,6 +179,18 @@ interface AppState {
 
     /** Copies this device's saved record into Downloads, and returns the name it landed under. */
     suspend fun saveDatabaseToDownloads(): String
+
+    /**
+     * How much the kept five-minute archive holds.
+     *
+     * Suspending and asked for rather than published as state: it is a count over a table that
+     * reaches a million rows, wanted by one line on one screen, and a phone that has never switched
+     * the archive on should not pay a query on every launch to be told it holds nothing.
+     */
+    suspend fun priceSeriesSummary(): PriceSeriesSummary
+
+    /** Writes that archive to Downloads as a CSV, and returns the name it landed under. */
+    suspend fun exportPriceSeries(): String
 
     /** Whether the chosen backup folder is still one this app may write to. */
     fun holdsBackupFolder(): Boolean
@@ -322,18 +338,22 @@ interface AppState {
     fun peakSince(ticker: String, openedOn: LocalDate?): Double?
 
     /**
-     * The last [sessions] stored closes for one stock, oldest first.
+     * Every stored session for one stock from [from] onward, oldest first.
      *
      * The record has held every session it ever downloaded and has never drawn one. `latestPrices`
      * answers "where is it now" and a call's own session table answers "what did it do inside this
      * window"; neither answers "what has this stock been doing", which is the question a reader
      * arrives at the stock sheet with.
      *
+     * **A date rather than a count of sessions**, because that is what the chart's ranges mean: a
+     * week is the last seven days however many of them the exchange was open. Asked once for the
+     * widest range the chart offers, so pressing 1W after 6M reads no disk.
+     *
      * Suspending because it is a disk read: the sheet asks for it once when it opens and draws the
      * line when it lands, rather than blocking the frame that composed it. Empty for a stock the
      * feed has never carried, which is the same thing the sheet already says in words.
      */
-    suspend fun priceHistory(ticker: String, sessions: Int): List<DailySession>
+    suspend fun priceHistory(ticker: String, from: LocalDate): List<DailySession>
 
     fun enterForeground()
 
@@ -426,6 +446,8 @@ interface AppState {
     fun editSchedules()
 
     fun updateMarketRefreshEnabled(enabled: Boolean)
+
+    fun updatePriceSeriesEnabled(enabled: Boolean)
 
     fun updatePaidSchedulesEnabled(enabled: Boolean)
 

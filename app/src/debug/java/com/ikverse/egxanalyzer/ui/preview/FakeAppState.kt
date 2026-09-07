@@ -84,6 +84,9 @@ class FakeAppState(
     override val marketRefreshEnabled: Boolean = false,
     override val marketRefreshNote: String? = null,
     override val marketRefreshNoteAt: Long = 0L,
+    override val priceSeriesEnabled: Boolean = false,
+    override val seriesHarvestNote: String? = null,
+    override val seriesHarvestNoteAt: Long = 0L,
     override val paidSchedulesEnabled: Boolean = false,
     override val backupFolder: String? = null,
     override val chatsRefreshing: Boolean = false,
@@ -110,6 +113,10 @@ class FakeAppState(
     override suspend fun exportReport(saved: SavedAnalysis) = Unit
 
     override suspend fun saveDatabaseToDownloads(): String = ""
+
+    override suspend fun priceSeriesSummary(): PriceSeriesSummary = PriceSeriesSummary.EMPTY
+
+    override suspend fun exportPriceSeries(): String = ""
 
     override fun holdsBackupFolder(): Boolean = false
 
@@ -251,7 +258,7 @@ class FakeAppState(
 
     override fun peakSince(ticker: String, openedOn: LocalDate?): Double? = null
 
-    override suspend fun priceHistory(ticker: String, sessions: Int): List<DailySession> =
+    override suspend fun priceHistory(ticker: String, from: LocalDate): List<DailySession> =
         emptyList()
 
     override fun enterForeground() = Unit
@@ -345,6 +352,8 @@ class FakeAppState(
     override fun editSchedules() = Unit
 
     override fun updateMarketRefreshEnabled(enabled: Boolean) = Unit
+
+    override fun updatePriceSeriesEnabled(enabled: Boolean) = Unit
 
     override fun updatePaidSchedulesEnabled(enabled: Boolean) = Unit
 

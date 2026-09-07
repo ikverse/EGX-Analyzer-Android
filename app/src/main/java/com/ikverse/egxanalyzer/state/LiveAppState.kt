@@ -58,6 +58,8 @@ import com.ikverse.egxanalyzer.model.PerformanceCalculator
 import com.ikverse.egxanalyzer.data.PortfolioCalculator
 import com.ikverse.egxanalyzer.data.PriceHealth
 import com.ikverse.egxanalyzer.data.PriceRepository
+import com.ikverse.egxanalyzer.data.PriceSeriesStore
+import com.ikverse.egxanalyzer.data.writePriceSeriesToDownloads
 import com.ikverse.egxanalyzer.data.PromptComposer
 import com.ikverse.egxanalyzer.data.PromptStore
 import com.ikverse.egxanalyzer.data.ScheduleMigration
@@ -118,6 +120,7 @@ import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.PriceHealthReport
+import com.ikverse.egxanalyzer.model.PriceSeriesSummary
 import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.PromptVersion
 import com.ikverse.egxanalyzer.model.ResponseTimeout
@@ -131,6 +134,7 @@ import com.ikverse.egxanalyzer.model.RuleSlot
 import com.ikverse.egxanalyzer.model.Sale
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.ScheduleClock
+import com.ikverse.egxanalyzer.model.SeriesHarvest
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.Scoring
@@ -217,6 +221,14 @@ class LiveAppState(
     private val telegramProvider: () -> TelegramRepository,
     private val priceRepository: PriceRepository,
     private val intradayRepository: IntradayRepository,
+    /**
+     * Where the kept five-minute archive lives, or null on a build that keeps none.
+     *
+     * Null in tests and in the previews, like [updateRepository]: nothing here fails without it -
+     * the harvest stands down and the screen reports an empty archive, which is what a phone that
+     * has never switched it on genuinely has.
+     */
+    private val priceSeriesStore: PriceSeriesStore? = null,
     /** The shipped prompt, which every generated version is composed from. */
     private val promptStore: PromptStore,
     /**
@@ -295,7 +307,8 @@ class LiveAppState(
         schedules: List<AnalysisSchedule>,
         marketRefresh: Boolean,
         closeSweep: Boolean,
-    ) -> Unit = { _, _, _ -> },
+        priceSeries: Boolean,
+    ) -> Unit = { _, _, _, _ -> },
     /**
      * Whether this process was started by the clock rather than by its owner.
      *
@@ -1826,7 +1839,7 @@ class LiveAppState(
     }
 
     /**
-     * The last [sessions] stored closes for one stock, oldest first.
+     * Every stored session for one stock from [from] onward, oldest first.
      *
      * Read from the store rather than from the report: the report keeps only the newest session per
      * stock and the sessions inside a judged window, and a line drawn from those would have a hole
@@ -1836,11 +1849,10 @@ class LiveAppState(
      * COMI.CA are one stock, and asking for the raw string would draw an empty chart for half the
      * tickers in the app.
      */
-    override suspend fun priceHistory(ticker: String, sessions: Int): List<DailySession> {
-        if (sessions <= 0) return emptyList()
+    override suspend fun priceHistory(ticker: String, from: LocalDate): List<DailySession> {
         val wanted = Scoring.normalizeTicker(ticker)
         return withContext(Dispatchers.IO) {
-            localDataStore.allSessions(wanted).takeLast(sessions)
+            localDataStore.sessionsFrom(wanted, from)
         }
     }
 
@@ -2699,6 +2711,41 @@ class LiveAppState(
     override var paidSchedulesEnabled by mutableStateOf(settingsRepository.paidSchedulesEnabled())
         private set
 
+    /**
+     * Whether this phone keeps the five-minute record of every session it sees.
+     *
+     * Off until it is switched on, and the reasoning is the price refresh's with one addition: that
+     * one spends somebody's traffic, this one spends about 86 MB a year of their storage. See
+     * `SettingsRepository.priceSeriesEnabled`.
+     */
+    override var priceSeriesEnabled by mutableStateOf(settingsRepository.priceSeriesEnabled())
+        private set
+
+    /** What the last harvest did, and when - never blank once this has run at all. */
+    override var seriesHarvestNote by mutableStateOf(settingsRepository.seriesHarvestNote())
+        private set
+
+    override var seriesHarvestNoteAt by mutableStateOf(settingsRepository.seriesHarvestNoteAt())
+        private set
+
+    /**
+     * How much the archive holds, read off its own database when a screen asks.
+     *
+     * A suspending read rather than a state property, because it is a `COUNT(*)` over a table that
+     * reaches a million rows and only one screen ever wants it. Kept as state it would be a query
+     * every phone paid for on every launch to answer a question almost nobody opens Settings to ask.
+     */
+    override suspend fun priceSeriesSummary(): PriceSeriesSummary = withContext(Dispatchers.IO) {
+        priceSeriesStore?.let { runCatching(it::summary).getOrNull() } ?: PriceSeriesSummary.EMPTY
+    }
+
+    override fun updatePriceSeriesEnabled(enabled: Boolean) {
+        if (enabled == priceSeriesEnabled) return
+        settingsRepository.savePriceSeriesEnabled(enabled)
+        priceSeriesEnabled = enabled
+        rebookSchedules()
+    }
+
     override fun updateMarketRefreshEnabled(enabled: Boolean) {
         if (enabled == marketRefreshEnabled) return
         settingsRepository.saveMarketRefreshEnabled(enabled)
@@ -2795,7 +2842,12 @@ class LiveAppState(
 
     /** Books the alarm for whatever is now nearest, after anything that could have moved it. */
     private fun rebookSchedules() =
-        schedulesChanged(analysisSchedules, marketRefreshEnabled, tradeWatchWanted)
+        schedulesChanged(
+            analysisSchedules,
+            marketRefreshEnabled,
+            tradeWatchWanted,
+            priceSeriesEnabled,
+        )
 
     /**
      * Does whatever the clock owes, then books the next alarm.
@@ -2808,6 +2860,7 @@ class LiveAppState(
     override suspend fun runDueScheduledJobs() {
         runDueMarketRefresh()
         runDueCloseSweep()
+        runDueSeriesHarvest()
         JobRunner(
             schedules = settingsRepository::analysisSchedules,
             record = settingsRepository::recordAnalysisSchedule,
@@ -2823,6 +2876,7 @@ class LiveAppState(
             ?.forEach(scheduleMissed)
         analysisSchedules = settingsRepository.analysisSchedules()
         marketRefreshEnabled = settingsRepository.marketRefreshEnabled()
+        priceSeriesEnabled = settingsRepository.priceSeriesEnabled()
         rebookSchedules()
     }
 
@@ -2892,6 +2946,67 @@ class LiveAppState(
             ?.let(Instant::ofEpochMilli)
         CloseSweep.dueFire(Instant.now(), last) ?: return
         runCatching { refreshPrices(announce = false) }
+    }
+
+    /**
+     * Copying the session into the archive, which is the one thing here that cannot wait a day.
+     *
+     * Ordered after the close sweep and before the analyses: it reaches the same free public feed
+     * the two above it do, it takes a hundred-odd requests rather than a paid one, and what it is
+     * racing is not the market but the feed's own two-month memory. A session missed here is not
+     * late, it is gone.
+     *
+     * Every fire writes a line, including the ones that copied nothing, for the reason the price
+     * refresh does - and more so, because this is the feature whose failure is least visible. A
+     * refresh that stops shows up as prices that have not moved; an archive that stops shows up as
+     * nothing whatever until somebody goes looking for a session that is no longer anywhere.
+     *
+     * [ScheduleClock.lastFinalSession] is what stops a half-traded session being copied as though it
+     * were whole. It is read here rather than inside the repository because it is the same one
+     * definition the scorer and the still-trading flag read, and a second answer to "has that
+     * session closed" is one of the two being wrong.
+     */
+    private suspend fun runDueSeriesHarvest() {
+        if (priceSeriesStore == null) return
+        if (!settingsRepository.priceSeriesEnabled()) return
+        val last = settingsRepository.lastSeriesHarvestAt()
+            .takeIf { it > 0L }
+            ?.let(Instant::ofEpochMilli)
+        SeriesHarvest.dueFire(Instant.now(), last) ?: return
+        val tickers = pricedStocks()
+        val note = try {
+            if (tickers.isEmpty()) {
+                "No stocks to copy"
+            } else {
+                val outcome = intradayRepository.harvestSeries(
+                    tickers,
+                    ScheduleClock.lastFinalSession(),
+                )
+                buildString {
+                    append("Copied ${outcome.bars} bars from ${outcome.copied} stocks")
+                    if (outcome.failed > 0) append(" · ${outcome.failed} did not answer")
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            // The process is going away underneath us. Nothing recorded, so the fire stays owed and
+            // the next wake still owes it - which for this feature matters more than anywhere else,
+            // because the sessions it has not copied are ageing out of the feed while it waits.
+            throw cancelled
+        } catch (error: Exception) {
+            error.message ?: "The copy failed"
+        }
+        settingsRepository.recordSeriesHarvest(note)
+        seriesHarvestNote = note
+        // The moment moving is what the screen watches: `PriceSeriesControls` keys its read of the
+        // archive on it, so the count under the switch is re-read off disk rather than derived from
+        // the outcome above - a figure computed from what this pass added would drift from what is
+        // actually stored on the first write that failed.
+        seriesHarvestNoteAt = settingsRepository.seriesHarvestNoteAt()
+    }
+
+    override suspend fun exportPriceSeries(): String = withContext(Dispatchers.IO) {
+        val store = priceSeriesStore ?: error("This build keeps no price series")
+        writePriceSeriesToDownloads(context, store)
     }
 
     /**
