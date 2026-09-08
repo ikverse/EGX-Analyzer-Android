@@ -47,15 +47,25 @@ import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.SessionDigest
 import com.ikverse.egxanalyzer.model.StockOpinion
+import com.ikverse.egxanalyzer.ui.theme.AccentKey
 
-enum class AppDestination(val label: String, val shortLabel: String) {
-    ANALYZE("Analyze", "AI"),
-    RESULTS("Results", "RS"),
-    INSIGHTS("Insights", "IN"),
+/**
+ * @param accent the hue this page speaks in. Not decoration: each one is a family the figures on
+ *   that page never draw, so a page's identity can never be read as one of its own signals. The
+ *   reasoning for each is on [AccentKey].
+ */
+enum class AppDestination(
+    val label: String,
+    val shortLabel: String,
+    val accent: AccentKey,
+) {
+    ANALYZE("Analyze", "AI", AccentKey.CYAN),
+    RESULTS("Results", "RS", AccentKey.VIOLET),
+    INSIGHTS("Insights", "IN", AccentKey.ROSE),
     // Between what the sources said and how the app is configured: the portfolio is read after the
     // record it is judged against, and it is not a setting.
-    PORTFOLIO("Portfolio", "PF"),
-    SETTINGS("Settings", "ST"),
+    PORTFOLIO("Portfolio", "PF", AccentKey.INDIGO),
+    SETTINGS("Settings", "ST", AccentKey.BRONZE),
 }
 
 enum class AnalysisStatus { IDLE, RUNNING, COMPLETED, FAILED, CANCELLED }

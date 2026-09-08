@@ -40,6 +40,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.ui.theme.CardHue
+import com.ikverse.egxanalyzer.ui.theme.color
 import com.ikverse.egxanalyzer.model.AnalysedChannel
 import com.ikverse.egxanalyzer.model.AnalysisAim
 import com.ikverse.egxanalyzer.model.AnalysisSchedule
@@ -64,7 +66,7 @@ import java.util.Locale
  */
 @Composable
 internal fun SchedulesSection(appState: AppState) {
-    SectionCard(title = "Scheduled analysis", icon = Icons.Outlined.Schedule) {
+    SectionCard(title = "Scheduled analysis", icon = Icons.Outlined.Schedule, accent = CardHue.GREEN.color) {
         val summary = schedulesSummary(
             schedules = appState.analysisSchedules,
             now = Instant.now(),
@@ -115,6 +117,7 @@ internal fun SchedulesSettingsSection(appState: AppState, contentMaxWidth: Dp) {
     ExpandableSection(
         "Scheduled analysis",
         icon = Icons.Outlined.Schedule,
+        accent = CardHue.GREEN.color,
         summary = schedulesSummary(
             schedules = schedules,
             now = now,

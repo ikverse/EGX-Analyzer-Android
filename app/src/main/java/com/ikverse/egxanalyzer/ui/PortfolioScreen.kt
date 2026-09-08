@@ -42,6 +42,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.ui.theme.CardHue
+import com.ikverse.egxanalyzer.ui.theme.color
 import com.ikverse.egxanalyzer.model.PortfolioGroup
 import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.PortfolioStats
@@ -176,6 +178,7 @@ private fun OverdueCard(overdue: List<PositionView>, onOpen: (String) -> Unit) {
     SectionCard(
         title = "Overdue",
         icon = Icons.Outlined.HourglassEmpty,
+        accent = CardHue.AMBER.color,
         about = infoNote(
             "Overdue",
             "Still running past their deadline because you chose to keep them open.",
@@ -406,6 +409,7 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
         title = "Positions",
         icon = Icons.Outlined.AccountBalanceWallet,
         contentInset = Space.s,
+        accent = CardHue.GREEN.color,
     ) {
         if (groups.isEmpty()) {
             Text(

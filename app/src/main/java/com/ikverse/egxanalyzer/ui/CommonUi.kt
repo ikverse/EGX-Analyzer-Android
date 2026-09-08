@@ -1,6 +1,8 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -64,13 +66,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.drawBehind
 import com.ikverse.egxanalyzer.model.isEgx33
+import com.ikverse.egxanalyzer.ui.theme.pageAccent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -170,6 +176,7 @@ internal fun Screen(
     }
     CompositionLocalProvider(LocalViewportTop provides viewportTop) {
     Box(Modifier.fillMaxSize()) {
+        PageWash(scroll)
         if (onRefresh == null) {
             page()
         } else {
@@ -344,6 +351,16 @@ internal fun SubSection(
  *
  * It matters because these nest. Positions is a card holding session cards holding trade cards, and
  * at a full inset per level the innermost card had 285dp of a 411dp screen.
+ *
+ * @param accent this card's own hue, on the tile behind [icon] and on the edge down its left side.
+ *
+ * **A card's accent is chrome and never a figure.** It says which card this is in a column of them;
+ * what a number on it means is still said by the tertiary/error/market roles, which are the same on
+ * every page. So a card may take any hue without the prices on it changing meaning.
+ *
+ * Null takes the page's own, which is what the **first** card on a page should have - the rest name
+ * one, in the order the screens keep. A default of "the page's hue" rather than a grey is what makes
+ * an untouched call site look deliberate rather than unfinished.
  */
 @Composable
 internal fun SectionCard(
@@ -352,14 +369,25 @@ internal fun SectionCard(
     modifier: Modifier = Modifier,
     about: InfoNote? = null,
     contentInset: Dp = Space.l,
+    accent: Color? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val hue = accent ?: pageAccent.ink
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = MaterialTheme.shapes.large,
         border = cardOutline,
     ) {
+        // Drawn behind the content rather than as a `Row` beside it: the edge runs the whole height
+        // of the card, which is not known until everything inside it has been laid out, and a column
+        // that had to reserve width for it would hold that width open on every card in the app.
+        // Clipped by the card's own shape, so it takes the corner radius with it.
+        Box(
+            Modifier.drawBehind {
+                drawRect(hue, size = Size(AccentEdgeWidth.toPx(), size.height))
+            },
+        ) {
         // Vertical only, so the heading band and the content band can be held in by different
         // amounts. Both were one padding on this Column until the nesting above made the two
         // different questions.
@@ -373,12 +401,23 @@ internal fun SectionCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (icon != null) {
-                        Icon(
-                            icon,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(IconSize.Inline),
-                        )
+                        // A tile rather than a bare glyph. An icon tinted on its own is a coloured
+                        // mark on a card; the same icon on a field of its own hue is the card's
+                        // heading having a place, which is what lets a column of cards be told
+                        // apart at the speed they are actually scanned.
+                        Box(
+                            Modifier
+                                .size(AccentTileSize)
+                                .background(hue.copy(alpha = AccentTileAlpha), MaterialTheme.shapes.small),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                icon,
+                                contentDescription = null,
+                                tint = hue,
+                                modifier = Modifier.size(IconSize.Inline),
+                            )
+                        }
                         Spacer(Modifier.width(Space.s))
                     }
                     Text(
@@ -406,8 +445,51 @@ internal fun SectionCard(
                 content = content,
             )
         }
+        }
     }
 }
+
+/**
+ * The page's own hue at the top of the page, faded to nothing.
+ *
+ * An arrival cue and not a paint job: it announces which page this is in the moment it appears and
+ * then gets out of the way, because a permanent tint behind the first card would be one more thing
+ * every card on the page has to be read against.
+ *
+ * **Faded on the scroll rather than pinned**, and the scroll is read inside the draw lambda for the
+ * reason `AppMark`'s phase is: read at composition, every frame of a scroll would recompose the
+ * whole page, where here a frame costs one rectangle repainted.
+ */
+@Composable
+private fun PageWash(scroll: ScrollState) {
+    val wash = pageAccent.wash
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(PageWashHeight)
+            .drawBehind {
+                val left = (1f - scroll.value / size.height).coerceIn(0f, 1f)
+                if (left <= 0f) return@drawBehind
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(wash.copy(alpha = wash.alpha * left), Color.Transparent),
+                    ),
+                )
+            },
+    )
+}
+
+/** How far down the page the wash reaches, and so how far it takes to scroll it away. */
+private val PageWashHeight = 120.dp
+
+/** A hairline of the card's own hue. Wider and it is a stripe the content has to sit clear of. */
+private val AccentEdgeWidth = 3.dp
+
+/** Room for [IconSize.Inline] with a margin, on the tile behind a section card's icon. */
+private val AccentTileSize = 26.dp
+
+/** Enough that the tile is a field of colour, little enough that the glyph on it stays the figure. */
+private const val AccentTileAlpha = 0.16f
 
 /**
  * A settings group that starts closed.
@@ -420,14 +502,24 @@ internal fun ExpandableSection(
     title: String,
     icon: ImageVector? = null,
     /**
-     * Colour for [icon], where the card's own state is what it should be saying.
+     * Colour for [icon], where the card's own **state** is what it should be saying.
      *
-     * `primary` everywhere else, and that is the right default: on a page of settings the icon is a
-     * bullet, and colouring each one would be a page of noise. A session on Insights is different -
-     * how that session went is the card's whole subject, and the icon is where it can be said
-     * before a word is read.
+     * A session on Insights is the case: how that session went is the card's whole subject, and the
+     * icon is where it can be said before a word is read. It outranks [accent] when given, because a
+     * card reporting its own state has something to say that its place in a column does not.
+     *
+     * It used to argue that colouring each icon would be a page of noise, and every card took
+     * `primary`. That was true of a page of identical grey headings and is not true of a tile per
+     * card in a hue the page keeps to - see [accent].
      */
     iconTone: Color? = null,
+    /**
+     * This card's own hue, on the tile behind [icon] and the edge down its left side.
+     *
+     * [SectionCard.accent]'s rule exactly, and for the reason given there: chrome, never a figure.
+     * Null takes the page's own, which is what the first card on a page should have.
+     */
+    accent: Color? = null,
     modifier: Modifier = Modifier,
     initiallyExpanded: Boolean = false,
     /** One line under the title saying what is inside, so a closed card still informs. */
@@ -476,6 +568,7 @@ internal fun ExpandableSection(
 ) {
     var localExpanded by remember { mutableStateOf(initiallyExpanded) }
     val expanded = expandedState ?: localExpanded
+    val hue = accent ?: pageAccent.ink
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -484,7 +577,12 @@ internal fun ExpandableSection(
         shape = MaterialTheme.shapes.large,
         border = cardOutline,
     ) {
-        Column {
+        Column(
+            // SectionCard's edge, drawn the same way and for the same reason.
+            Modifier.drawBehind {
+                drawRect(hue, size = Size(AccentEdgeWidth.toPx(), size.height))
+            },
+        ) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -495,12 +593,22 @@ internal fun ExpandableSection(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (icon != null) {
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        tint = iconTone ?: MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(IconSize.Inline),
-                    )
+                    // SectionCard's tile, so a group heading and a card heading are the same object
+                    // at a glance. iconTone wins where a card is reporting its own state.
+                    val ink = iconTone ?: hue
+                    Box(
+                        Modifier
+                            .size(AccentTileSize)
+                            .background(ink.copy(alpha = AccentTileAlpha), MaterialTheme.shapes.small),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            tint = ink,
+                            modifier = Modifier.size(IconSize.Inline),
+                        )
+                    }
                     Spacer(Modifier.width(Space.s))
                 }
                 Column(Modifier.weight(1f)) {

@@ -914,7 +914,8 @@ trade is then managed, in whatever state it has reached.
   `secondary` is a hue that means nothing in this app. Amber is **added** to the palette rather than
   borrowed from it, because every scheme role is already spoken for — see `ExtraColors` and
   `LocalExtraColors` in `theme/Theme.kt`, provided by `EgxAnalyzerTheme` so it follows the app's own
-  light/dark setting rather than the system's. The overdue pill keeps `errorContainer`: amber says
+  light/dark setting rather than the system's. Note `primary` is no longer the app's voice on every
+  page — see **A hue per page** below. The overdue pill keeps `errorContainer`: amber says
   out of time, red says and you are late.
 - **Positions is one card, holding its own filters and every session card inside it.** It was a
   loose `titleLarge` heading, then the filter shelf, then a run of cards, all sitting directly on
@@ -2356,6 +2357,61 @@ Ten cards became **seven** on 2026-09-03, and nothing was removed but the price-
   one irreversible button on the page should not sit at the end of a run of buttons that are not, and
   its note says to take a backup first.
 
+## A hue per page
+
+Every destination speaks in one colour, and the colour reaches four places: the wash at the top of
+the page, the app's mark, the destination's own navigation indicator, and `primary`/`secondary` —
+which is what carries it into the section cards, the chips, the checkboxes and the radios without a
+parameter being threaded anywhere. Added 2026-09-08.
+
+- **The whole scheme rests on `market` having been split out of `primary` earlier.** While `primary`
+  meant both "the market got here" and "this is the app speaking", nothing could be done to it
+  without moving a price. `PriceRole` reads `tertiary`, `error`, `ExtraColors.market` and
+  `onSurface`, and `withAccent` touches none of them — so a page may have a hue and a figure still
+  means the same thing on all five screens.
+- **Each hue was chosen against what its own page draws**, not by taste. Analyze is `CYAN` and draws
+  no prices at all; Results is `VIOLET`, because a report is the model speaking and `AiButton` is
+  never drawn on that screen; Insights is `ROSE`, the one family no figure anywhere uses, because it
+  draws every other hue plus the violet pill; Portfolio is `INDIGO`, since it draws no market blue
+  while green, red and amber are busy; Settings is `BRONZE`, which draws no prices at all. The
+  reasoning is on `AccentKey` and the check is `no page accent is one of the signal colours`.
+- **`withAccent` is the mechanism and `DestinationScreen` is the one place it is applied** — the same
+  function both shells build a page through. Not around the whole shell, because the header's status
+  line and any sheet raised over the top are not on a page and must not take the hue of whatever
+  happens to be behind them.
+- **The navigation bar is outside every page's theme, so it asks each destination for its own.**
+  `accentFor(destination.accent, LocalDarkTheme.current)`, in both `PillItem` and `AppRail`. Reading
+  `secondaryContainer` out there would give all five slots Analyze's cyan.
+- **All five destinations wear their hue at rest, not only the selected one** (`RestingIconAlpha`,
+  0.62). The bar is where the mapping between a colour and a page is learned and it can only teach
+  it by showing all five; what says where you are is the filled indicator and a hue at full
+  strength, which is a larger difference than the grey-to-colour one it replaced.
+- **`AppMark` takes its hues as a parameter for the same reason the bar does.** It is drawn in the
+  header and over the rail, both outside a page, so a mark reading the local would wear cyan on all
+  five pages.
+- **A card has its own hue on top of the page's**, on the tile behind its icon and the 3px edge down
+  its left side — `SectionCard.accent` and `ExpandableSection.accent`, both defaulting to the page's.
+  The **first card on a page takes the page's hue** by passing nothing, and the rest name a
+  `CardHue`. This reverses `iconTone`'s old note that colouring each icon would be a page of noise:
+  that was true of a page of identical grey headings and is not true of a tile per card in hues the
+  page keeps to. `iconTone` still outranks `accent`, because a card reporting its own state has
+  something to say that its place in a column does not.
+- **A card accent is chrome and never a figure**, exactly as the page's is. What a number means is
+  still said by tertiary/error/market/expired, which is why a card may take any hue at all.
+- **The Ask AI pill runs violet → the page's hue.** The model announcing itself is the same
+  announcement everywhere; where it was asked from is not. It also settles the one collision in the
+  scheme: a violet page and a violet pill cannot be confused when the pill is the only object
+  *travelling out of* violet. Pinned by `the pill begins in violet on every page and ends in the
+  page's own hue`, which fails in both directions — a ramp that followed the accent whole would read
+  as five unrelated buttons, and one pinned whole would undo the feature.
+- **The light theme's hues are not the dark theme's**, for the reason `market` was darkened for the
+  light theme: on a near-white card the dark values come out between 1.5:1 and 2.5:1. Every light
+  accent ink and every `CardHue` clears 4.5:1 on both the page and a card. The saturation pass that
+  came with this took the light `tertiary`, `error` and `expired` **down** rather than up for the
+  same reason — brighter versions measured 3.8–4.4:1, and every one of them is a price.
+- **`PageWash` reads the scroll inside the draw lambda**, the rule `AppMark`'s phase already
+  followed: read at composition it would recompose the whole page on every frame of a scroll.
+
 ## Gotchas
 
 - `local.properties` holds `telegramApiId` / `telegramApiHash` and is gitignored. Absent, the app
@@ -2532,12 +2588,14 @@ Ten cards became **seven** on 2026-09-03, and nothing was removed but the price-
 - **The action's edge is a gradient in its own colours, and the bar's beside it is not.** Both are
   `FloatingSurface`, so they are the same material; they are deliberately not the same edge, because
   two identically outlined slabs at the foot of the screen said nothing about which of them did
-  anything. `ExtraColors.actionLine` carries it, and it has **its own stops rather than
+  anything. `PageAccent.actionLine` carries it, and it has **its own stops rather than
   `actionFill`'s** for the reason `aiLine` has its own beside `aiFill`: the fill sits *inside* the
   line, so a line in the fill's colours is a line against itself and disappears. What it has to read
   against is the page scrolling behind the button — dark on one theme, near-white on the other — so
   the stops invert between the two while the hue does not. The hues are the aurora's own, in the
-  aurora's own order (cyan, blue, teal), rather than a fourth set invented for the edge.
+  aurora's own order, rather than a fourth set invented for the edge — derived per page from the
+  seed table rather than written out five times, so the relationship between a page's fill, edge and
+  aurora is stated once.
 - **The edge is 0.74 against the ground's 0.84, and its hues run about a third under the aurora's.**
   It shipped opaque and full-strength on the argument that an edge letting the page through stops
   holding the shape — which was wrong on the device: it read as a bright cyan wire around the button,
@@ -2547,7 +2605,9 @@ Ten cards became **seven** on 2026-09-03, and nothing was removed but the price-
   with is solid, every stop in a ramp shares one alpha (a ramp that fades along its length reads as
   a mistake), and the edge shares no stop with the fill, which is the slip that produces an invisible
   edge: reaching for `actionFill` when adding the gradient, because it is right there and already
-  the right family.
+  the right family. **Every case sweeps all five accents in both themes**, since the ramps are
+  derived per page now and a property that holds for the one hue somebody looked at is exactly the
+  kind that quietly fails on the other four.
 - **Only the ready state wears it.** Running keeps the red `aiStop` hairline: that is the only state
   where pressing cancels, and no edge in the action's own colours could say so — the moving fill
   says a model is working, which is a different sentence. Blocked keeps the neutral outline every

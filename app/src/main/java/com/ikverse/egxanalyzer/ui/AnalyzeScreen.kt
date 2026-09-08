@@ -67,6 +67,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.ui.theme.CardHue
+import com.ikverse.egxanalyzer.ui.theme.color
 import com.ikverse.egxanalyzer.model.AnalysisChunking
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisInput
@@ -75,6 +77,7 @@ import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import com.ikverse.egxanalyzer.ui.theme.extraColors
+import com.ikverse.egxanalyzer.ui.theme.pageAccent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -125,6 +128,11 @@ internal fun AnalyzeScreen(appState: AppState) {
             val big = LocalWindowWidth.current != WindowWidth.COMPACT
             val actionModifier = Modifier.height(if (big) BigActionHeight else ActionHeight)
             val ai = extraColors
+            // The page's own hue, which on this page is cyan - the colour this button already wore.
+            // Read from the accent rather than from `ExtraColors` so that the rule is the one
+            // stated rather than a coincidence: **the screen's action wears the page's hue**, and a
+            // floating action added to any other destination gets that page's without being told.
+            val accent = pageAccent
             val running = appState.analysisStatus == AnalysisStatus.RUNNING
             // One instance across both branches, so the mark keeps turning through the moment a run
             // starts rather than restarting from nothing there.
@@ -132,20 +140,20 @@ internal fun AnalyzeScreen(appState: AppState) {
             // The halo falls outside the surface, so it goes on the modifier the surface is given
             // rather than inside the shape's clip. The fill goes inside, where the flat tint was.
             val haloed = actionModifier.drawBehind {
-                drawAiHalo(ai.actionGlow, ActionCorner.toPx(), motion.breath())
+                drawAiHalo(accent.actionGlow, ActionCorner.toPx(), motion.breath())
             }
-            val teal = remember(ai.actionFill) { Brush.horizontalGradient(ai.actionFill) }
+            val teal = remember(accent.actionFill) { Brush.horizontalGradient(accent.actionFill) }
             // The edge, in the same family and its own stops - see ExtraColors.actionLine for why
             // it cannot simply be the fill: the fill sits inside this line.
-            val actionEdge = remember(ai.actionLine) { Brush.horizontalGradient(ai.actionLine) }
+            val actionEdge = remember(accent.actionLine) { Brush.horizontalGradient(accent.actionLine) }
             // Read in the draw lambda rather than the composable body: read at composition the
             // drifts would recompose this screen sixty times a second, where here a frame costs a
             // repaint and nothing else.
             val fill = Modifier.drawBehind {
                 if (running) {
                     drawActionAurora(
-                        ai.actionAuroraBase,
-                        ai.actionAurora,
+                        accent.actionAuroraBase,
+                        accent.actionAurora,
                         motion.lights(size.width, size.height),
                     )
                 } else {
@@ -156,7 +164,7 @@ internal fun AnalyzeScreen(appState: AppState) {
                 AnalyzeAction(
                     onClick = { scope.launch { appState.cancelAnalysis() } },
                     container = Color.Transparent,
-                    content = ai.onAction,
+                    content = accent.onAction,
                     // No halo here. The aurora is what says the control is alive, and a glow around
                     // a button this wide lights the whole foot of the screen.
                     modifier = actionModifier,
@@ -209,7 +217,7 @@ internal fun AnalyzeScreen(appState: AppState) {
                         // substantial of the three.
                         MaterialTheme.colorScheme.surfaceContainerHigh
                     },
-                    content = if (ready) ai.onAction else MaterialTheme.colorScheme.onSurfaceVariant,
+                    content = if (ready) accent.onAction else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = if (ready) haloed else actionModifier,
                     painted = fill.takeIf { ready },
                     stretch = !big,
@@ -305,6 +313,7 @@ internal fun AnalyzeScreen(appState: AppState) {
                     title = "Content types",
                     icon = Icons.Outlined.TextFields,
                     modifier = Modifier.fillMaxHeight(),
+                    accent = CardHue.VIOLET.color,
                 ) {
                     // Wraps rather than switching, because the threshold it replaces had the fold
                     // exactly backwards. It was measured against the card's own content width, and
@@ -349,6 +358,7 @@ internal fun AnalyzeScreen(appState: AppState) {
                     title = "Recommendation target date",
                     icon = Icons.Outlined.CalendarMonth,
                     modifier = Modifier.fillMaxHeight(),
+                    accent = CardHue.AMBER.color,
                 ) {
                     RecommendationDateOption(
                         selected = appState.analysisMode == AnalysisMode.NEXT_DAY,
@@ -551,6 +561,7 @@ private fun MessagesPreview(
     SectionCard(
         title = "Messages preview",
         icon = Icons.Outlined.Preview,
+        accent = CardHue.PINK.color,
         about = infoNote(
             "Messages preview",
             "Selected Telegram chats are collected automatically for the resolved source window.",

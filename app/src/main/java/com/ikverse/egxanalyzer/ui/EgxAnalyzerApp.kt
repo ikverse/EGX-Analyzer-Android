@@ -71,6 +71,7 @@ import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailDefaults
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -128,7 +129,9 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.R
-import com.ikverse.egxanalyzer.ui.theme.extraColors
+import com.ikverse.egxanalyzer.ui.theme.LocalDarkTheme
+import com.ikverse.egxanalyzer.ui.theme.PageTheme
+import com.ikverse.egxanalyzer.ui.theme.accentFor
 import kotlin.math.roundToInt
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
@@ -316,6 +319,7 @@ fun EgxAnalyzerApp(appState: AppState) {
                         label = "mark size",
                     )
                     AppMark(
+                        accentFor(appState.destination.accent, LocalDarkTheme.current).markAurora,
                         Modifier.offset {
                             // Grown around its own centre rather than from its top-left corner: an
                             // icon laid out from the anchor would put every extra dp below the line
@@ -482,7 +486,7 @@ private fun AppHeader(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (onMarkAnchor == null) {
-                    AppMark()
+                    AppMark(accentFor(appState.destination.accent, LocalDarkTheme.current).markAurora)
                 } else {
                     // The mark's place, held open so the name and the status line sit exactly where
                     // they would with the glyph in the row. The glyph itself is drawn by the shell,
@@ -551,10 +555,18 @@ private fun AppHeader(
  * The tint underneath is the flat `primary` this mark used to be. Nothing normally sees it, since
  * `SrcIn` replaces it wholesale; it is what the mark falls back to rather than a blank space if the
  * blend is ever refused.
+ *
+ * @param hues the current page's aurora, passed in rather than read from a local: this is drawn in
+ *   the header and over the rail, both of which sit outside any page's theme, so a mark that read
+ *   the local would wear Analyze's cyan on all five pages. Given the destination's own, the app's
+ *   name is the first thing on the screen to say where you are.
  */
 @Composable
-private fun AppMark(modifier: Modifier = Modifier, markSize: Dp = AppMarkSize) {
-    val hues = extraColors.markAurora
+private fun AppMark(
+    hues: List<Color>,
+    modifier: Modifier = Modifier,
+    markSize: Dp = AppMarkSize,
+) {
     val sweep = rememberInfiniteTransition(label = "mark aurora")
     val phase by sweep.animateFloat(
         initialValue = 0f,
@@ -771,6 +783,9 @@ private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
         AppDestination.entries.forEachIndexed { index, destination ->
             if (index > 0) Spacer(Modifier.height(RailItemGap))
             val selected = appState.destination == destination
+            // The pill's colours, on the rail's own item. See PillItem for why every destination
+            // wears its own hue here rather than only the selected one.
+            val accent = accentFor(destination.accent, LocalDarkTheme.current)
             NavigationRailItem(
                 selected = selected,
                 // Pressing the destination you are already on means "back to the top" - the same
@@ -780,6 +795,13 @@ private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
                 },
                 icon = { NavigationIcon(destination, selected) },
                 label = { Text(destination.label) },
+                colors = NavigationRailItemDefaults.colors(
+                    selectedIconColor = accent.ink,
+                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                    indicatorColor = accent.soft,
+                    unselectedIconColor = accent.ink.copy(alpha = RestingIconAlpha),
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
             )
         }
     }
@@ -854,6 +876,9 @@ private fun PillItem(
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
+    // The bar is shell chrome and sits outside any page's theme, so it asks each destination for its
+    // own hue rather than reading `secondaryContainer` - which out here is still Analyze's.
+    val accent = accentFor(destination.accent, LocalDarkTheme.current)
     Column(
         modifier.fillMaxHeight()
             .selectable(selected = selected, role = Role.Tab, onClick = onClick),
@@ -863,18 +888,25 @@ private fun PillItem(
         Box(
             Modifier.size(IndicatorWidth, IndicatorHeight)
                 .background(
-                    if (selected) colors.secondaryContainer else Color.Transparent,
+                    if (selected) accent.soft else Color.Transparent,
                     CircleShape,
                 ),
             contentAlignment = Alignment.Center,
         ) {
             // A size down from the rail's, which has the room for it. At the pill's height an icon
             // over a label needs the smaller glyph or the label clips.
+            //
+            // **Every destination wears its own hue here, not only the one you are on.** The bar is
+            // where the mapping between a colour and a page is learned, and it can only teach it by
+            // showing all five at once. The unselected four are held back to RestingIconAlpha so
+            // that the bar still says where you are: the difference between them and the selected
+            // item is the filled indicator behind it and a hue at full strength, which is a larger
+            // difference than the grey-to-colour one it replaces.
             NavigationIcon(
                 destination,
                 selected,
                 BarIconSize,
-                if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant,
+                if (selected) accent.ink else accent.ink.copy(alpha = RestingIconAlpha),
             )
         }
         Spacer(Modifier.height(IndicatorLabelGap))
@@ -895,6 +927,14 @@ private val IndicatorHeight = 34.dp
 
 /** Close enough that the icon and its name read as one item, far enough that they do not touch. */
 private val IndicatorLabelGap = 3.dp
+
+/**
+ * How far the four destinations you are not on are held back.
+ *
+ * Enough that the selected one still leads the bar, not so far that the other four stop being
+ * colours - at much under this they grey out and the bar goes back to being a legend for one page.
+ */
+private const val RestingIconAlpha = 0.62f
 
 @Composable
 private fun NavigationIcon(
@@ -1170,12 +1210,18 @@ private fun DestinationScreen(
     CompositionLocalProvider(
         LocalScrollToTop provides (request?.takeIf { it.first == destination }?.second ?: 0),
     ) {
-        when (destination) {
-            AppDestination.ANALYZE -> AnalyzeScreen(appState)
-            AppDestination.RESULTS -> ResultsScreen(appState)
-            AppDestination.INSIGHTS -> InsightsScreen(appState)
-            AppDestination.PORTFOLIO -> PortfolioScreen(appState)
-            AppDestination.SETTINGS -> SettingsScreen(appState)
+        // The page's own hue, put into `primary` and `secondary` for the length of this page and no
+        // further. Here rather than around the whole shell, because the header's status line and any
+        // sheet raised over the top are not on a page and should not take the hue of whatever
+        // happens to be behind them.
+        PageTheme(destination.accent) {
+            when (destination) {
+                AppDestination.ANALYZE -> AnalyzeScreen(appState)
+                AppDestination.RESULTS -> ResultsScreen(appState)
+                AppDestination.INSIGHTS -> InsightsScreen(appState)
+                AppDestination.PORTFOLIO -> PortfolioScreen(appState)
+                AppDestination.SETTINGS -> SettingsScreen(appState)
+            }
         }
     }
 }

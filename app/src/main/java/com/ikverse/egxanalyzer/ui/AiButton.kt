@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.ui.theme.extraColors
+import com.ikverse.egxanalyzer.ui.theme.pageAccent
 import kotlin.math.abs
 
 /**
@@ -98,7 +99,11 @@ private fun FilledPill(
     phaseKey: Any?,
 ) {
     val ai = extraColors
-    val motion = rememberAiMotion(ai.aiFill, phaseKey)
+    // Violet at the first stop wherever this is pressed, and the page's hue at the last: the model
+    // announcing itself is the same every time, and where it was asked from is not. See
+    // `PageAccent.aiFill`.
+    val accent = pageAccent
+    val motion = rememberAiMotion(accent.aiFill, phaseKey)
 
     Pill(
         label = label,
@@ -121,13 +126,14 @@ private fun FilledPill(
 @Composable
 private fun OutlinedPill(label: String, onClick: () -> Unit, modifier: Modifier, enabled: Boolean) {
     val ai = extraColors
+    val accent = pageAccent
     Pill(
         label = label,
         onClick = onClick,
         enabled = enabled,
         textColor = ai.aiText,
         spark = ai.aiSparkOnCard,
-        painted = Modifier.border(OutlineWidth, Brush.horizontalGradient(ai.aiLine), CircleShape),
+        painted = Modifier.border(OutlineWidth, Brush.horizontalGradient(accent.aiLine), CircleShape),
         inset = AiPadding - 1.dp,
         modifier = modifier,
     )

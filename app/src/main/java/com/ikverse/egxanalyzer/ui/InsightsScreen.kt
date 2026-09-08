@@ -62,6 +62,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ikverse.egxanalyzer.ui.theme.CardHue
+import com.ikverse.egxanalyzer.ui.theme.color
 import com.ikverse.egxanalyzer.model.PerformanceCalculator
 import com.ikverse.egxanalyzer.model.Ambiguity
 import com.ikverse.egxanalyzer.model.CallOrder
@@ -602,6 +604,7 @@ private fun ColumnScope.RecordSplits(splits: List<RecordSplit>) {
     ExpandableSection(
         title = "Does it matter?",
         icon = Icons.Outlined.HelpOutline,
+        accent = CardHue.BLUE.color,
         summary = "${stateable.size} ${if (stateable.size == 1) "question" else "questions"} " +
             "the record can answer about itself",
         about = infoNote(
