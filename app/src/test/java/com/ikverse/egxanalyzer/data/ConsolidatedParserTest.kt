@@ -74,8 +74,10 @@ class ConsolidatedParserTest {
         assertEquals(1, stocks.size)
         val stock = stocks.single()
         assertEquals("SCEM", stock.stockCode)
-        assertNull(stock.stockNameEnglish)
-        assertEquals("اسمنت سيناء", stock.stockNameArabic)
+        // The response carries no English name at all; the catalog's is used regardless of what
+        // the model did or did not write, which is the whole point of naming here.
+        assertEquals("Sinai Cement Co. (S.A.E)", stock.stockNameEnglish)
+        assertEquals("أسمنت سيناء", stock.stockNameArabic)
         assertEquals(2, stock.dataPoints.size)
 
         val watching = stock.dataPoints.first()
@@ -101,8 +103,8 @@ class ConsolidatedParserTest {
         assertEquals(2, rows.size)
         assertEquals("إسأل فني", rows.first().sourceName)
         assertEquals(listOf("s1"), rows.first().sourceIds)
-        // Falls back to the ticker when the model supplies no English name.
-        assertEquals("SCEM", rows.first().companyName)
+        // Carries the catalog's name down into the flattened rows as well.
+        assertEquals("Sinai Cement Co. (S.A.E)", rows.first().companyName)
         assertEquals("BUY", rows.first().signal)
         assertEquals(86.5, rows.first().entryLow!!, 0.001)
         // A single buy_price fills both bounds of the entry.

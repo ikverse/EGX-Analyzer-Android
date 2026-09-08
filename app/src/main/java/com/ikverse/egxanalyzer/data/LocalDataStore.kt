@@ -496,36 +496,43 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         )
     }
 
-    private fun Cursor.toPosition() = Position(
-        id = getString(getColumnIndexOrThrow("id")),
-        ticker = getString(getColumnIndexOrThrow("ticker")),
-        companyEnglish = nullableString("name_en"),
-        companyArabic = nullableString("name_ar"),
-        channel = nullableString("channel"),
-        recommendationDate = LocalDate.parse(getString(getColumnIndexOrThrow("recommendation_date"))),
-        entryPrice = getDouble(getColumnIndexOrThrow("entry_price")),
-        entryDate = LocalDate.parse(getString(getColumnIndexOrThrow("entry_date"))),
-        exitPrice = nullableDouble(getColumnIndexOrThrow("exit_price")),
-        exitDate = nullableString("exit_date")?.let(LocalDate::parse),
-        exitPrice1 = nullableDouble(getColumnIndexOrThrow("exit_price_1")),
-        exitDate1 = nullableString("exit_date_1")?.let(LocalDate::parse),
-        exitPrice2 = nullableDouble(getColumnIndexOrThrow("exit_price_2")),
-        exitSplitPct = nullableDouble(getColumnIndexOrThrow("exit_split_pct")),
-        closedManually = getInt(getColumnIndexOrThrow("closed_manually")) == 1,
-        entryLow = nullableDouble(getColumnIndexOrThrow("entry_low")),
-        entryHigh = nullableDouble(getColumnIndexOrThrow("entry_high")),
-        target1 = nullableDouble(getColumnIndexOrThrow("target1")),
-        target2 = nullableDouble(getColumnIndexOrThrow("target2")),
-        stopLoss = nullableDouble(getColumnIndexOrThrow("stop_loss")),
-        windowSessions = getInt(getColumnIndexOrThrow("window_sessions")),
-        windowCustom = getInt(getColumnIndexOrThrow("window_custom")) == 1,
-        isTPlusOne = getInt(getColumnIndexOrThrow("is_t_plus_one")) == 1,
-        keepOpen = getInt(getColumnIndexOrThrow("keep_open")) == 1,
-        keepOpenNote = nullableString("keep_open_note"),
-        openedAt = Instant.ofEpochMilli(getLong(getColumnIndexOrThrow("opened_at"))),
-        updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
-        updatedBy = getString(getColumnIndexOrThrow("updated_by")),
-    )
+    private fun Cursor.toPosition(): Position {
+        val ticker = getString(getColumnIndexOrThrow("ticker"))
+        // Named on the way out rather than on the way in, so the trades already open - which stored
+        // whatever the model called the stock on the day they were taken - read back under the same
+        // name as everything else, with no migration to write.
+        val names = EgxCatalog.namesFor(ticker, nullableString("name_en"), nullableString("name_ar"))
+        return Position(
+            id = getString(getColumnIndexOrThrow("id")),
+            ticker = ticker,
+            companyEnglish = names.english,
+            companyArabic = names.arabic,
+            channel = nullableString("channel"),
+            recommendationDate = LocalDate.parse(getString(getColumnIndexOrThrow("recommendation_date"))),
+            entryPrice = getDouble(getColumnIndexOrThrow("entry_price")),
+            entryDate = LocalDate.parse(getString(getColumnIndexOrThrow("entry_date"))),
+            exitPrice = nullableDouble(getColumnIndexOrThrow("exit_price")),
+            exitDate = nullableString("exit_date")?.let(LocalDate::parse),
+            exitPrice1 = nullableDouble(getColumnIndexOrThrow("exit_price_1")),
+            exitDate1 = nullableString("exit_date_1")?.let(LocalDate::parse),
+            exitPrice2 = nullableDouble(getColumnIndexOrThrow("exit_price_2")),
+            exitSplitPct = nullableDouble(getColumnIndexOrThrow("exit_split_pct")),
+            closedManually = getInt(getColumnIndexOrThrow("closed_manually")) == 1,
+            entryLow = nullableDouble(getColumnIndexOrThrow("entry_low")),
+            entryHigh = nullableDouble(getColumnIndexOrThrow("entry_high")),
+            target1 = nullableDouble(getColumnIndexOrThrow("target1")),
+            target2 = nullableDouble(getColumnIndexOrThrow("target2")),
+            stopLoss = nullableDouble(getColumnIndexOrThrow("stop_loss")),
+            windowSessions = getInt(getColumnIndexOrThrow("window_sessions")),
+            windowCustom = getInt(getColumnIndexOrThrow("window_custom")) == 1,
+            isTPlusOne = getInt(getColumnIndexOrThrow("is_t_plus_one")) == 1,
+            keepOpen = getInt(getColumnIndexOrThrow("keep_open")) == 1,
+            keepOpenNote = nullableString("keep_open_note"),
+            openedAt = Instant.ofEpochMilli(getLong(getColumnIndexOrThrow("opened_at"))),
+            updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
+            updatedBy = getString(getColumnIndexOrThrow("updated_by")),
+        )
+    }
 
     private fun Cursor.nullableString(column: String): String? =
         getColumnIndexOrThrow(column).let { if (isNull(it)) null else getString(it) }
@@ -1875,7 +1882,12 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
                 timeHorizon = item.nullableString("timeHorizon"),
                 indicators = item.optJSONArray("indicators")?.strings().orEmpty(),
             )
-        },
+        }
+            // Named again on the way out, not just as the run wrote them. Reports saved before the
+            // consolidated contract have no nested occurrences to rebuild, so this flat list is
+            // what their detail screen draws - and it was still showing whatever the model called
+            // the stock on the day the report was made.
+            .map(EgxCatalog::enrich),
         modelExclusions = runCatching {
             ConsolidatedParser.exclusions(optString("rawResponse"))
         }.getOrDefault(emptyList()),

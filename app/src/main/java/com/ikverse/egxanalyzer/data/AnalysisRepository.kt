@@ -147,10 +147,24 @@ class CloudAnalysisRepository(
                 val (recommendations, warnings) =
                     validateRecommendations(request, parsed.recommendations)
                 if (warnings.isEmpty() || attempt >= appPreferences.correctionRetries) {
+                    val named = recommendations.map {
+                        if (appPreferences.catalogEnrichmentEnabled) EgxCatalog.enrich(it) else it
+                    }
+                    // Recorded, not warned about: a warning here would buy a correction request,
+                    // and there is nothing for the model to correct - the catalog is what is short.
+                    // Silence was the reason this went unnoticed for so long. QNBA has been in
+                    // every other report for months under a different invented name each time, and
+                    // nothing anywhere said the catalog had never heard of it.
+                    val unnamed = named.map(RecommendationResult::ticker)
+                        .distinct()
+                        .filter { EgxCatalog.find(it) == null }
+                        .sorted()
+                    if (unnamed.isNotEmpty()) {
+                        notes += "Not in the EGX catalog, so left without a company name: " +
+                            unnamed.joinToString(", ") + "."
+                    }
                     return@withContext parsed.copy(
-                        recommendations = recommendations.map {
-                            if (appPreferences.catalogEnrichmentEnabled) EgxCatalog.enrich(it) else it
-                        },
+                        recommendations = named,
                         diagnostics = AnalysisDiagnostics(
                             sourceWindowStart = request.sourceWindowStart,
                             sourceWindowEnd = request.sourceWindowEnd,

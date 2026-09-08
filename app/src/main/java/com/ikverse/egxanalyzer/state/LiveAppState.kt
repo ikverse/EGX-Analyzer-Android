@@ -1866,6 +1866,7 @@ class LiveAppState(
     private var foregroundStarted = false
 
     init {
+        syncCatalogEnrichment()
         adoptLegacyPhrases()
         // Before the first sync, or this device's own settings would look like an empty install's
         // and be quietly overwritten by the other phone's rather than merged with them.
@@ -3488,7 +3489,19 @@ class LiveAppState(
     private fun persistPreferences(value: AppPreferences) {
         settingsRepository.savePreferences(value)
         appPreferences = settingsRepository.loadPreferences()
+        syncCatalogEnrichment()
         publishSettings()
+    }
+
+    /**
+     * Hands the catalog the preference that governs it.
+     *
+     * The naming now happens where a report is parsed and where a position is read, and neither has
+     * preferences to hand - so the switch lives on the catalog and is set from here, from every
+     * path that can change it: this device's own settings screen, and the other phone's by sync.
+     */
+    private fun syncCatalogEnrichment() {
+        EgxCatalog.enrichmentEnabled = appPreferences.catalogEnrichmentEnabled
     }
 
     /**
@@ -3538,6 +3551,7 @@ class LiveAppState(
         val tradeWatchWas = tradeWatchWanted
         settingsRepository.adopt(snapshot)
         appPreferences = settingsRepository.loadPreferences()
+        syncCatalogEnrichment()
         // The Analyze screen seeds its content types from the preference at launch, which on a
         // reinstalled phone happens before this arrives. Left alone it would show the shipped
         // default until the next restart - and what it is being set to is the user's own choice.

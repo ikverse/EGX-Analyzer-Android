@@ -65,11 +65,23 @@ object ConsolidatedParser {
                 // Every occurrence rejected means nothing is left to recommend - whether they were
                 // rejected for their date or for carrying no price.
                 if (occurrences.isEmpty() && distinct.isNotEmpty()) continue
+                // The cards, the portfolio and the scorer all read their names from here, and
+                // none of them ever saw the catalog: enrichment was applied only to the flattened
+                // `recommendations` list, which the screens do not use. That is why AMOC could be
+                // "Alexandria Mineral Oils" in one report and "Amouk" in the next with a catalog
+                // sitting right there holding its name. Because this parse is re-run from the
+                // stored response every time a report is loaded, reports already saved pick the
+                // catalog's names up too, with no rerun and no migration.
+                val names = EgxCatalog.namesFor(
+                    code,
+                    stock.string("stock_name_en"),
+                    stock.string("stock_name_ar"),
+                )
                 add(
                     ConsolidatedRecommendation(
                         stockCode = code,
-                        stockNameEnglish = stock.string("stock_name_en"),
-                        stockNameArabic = stock.string("stock_name_ar"),
+                        stockNameEnglish = names.english,
+                        stockNameArabic = names.arabic,
                         mentionCount = stock.optInt("mention_count", 0),
                         rank = stock.optInt("rank", index + 1),
                         notesSummary = stock.string("notes_summary"),
