@@ -1104,7 +1104,6 @@ private fun ResultDetail(
 ) {
     var detail by remember { mutableStateOf<Pair<ConsolidatedRecommendation, RecommendationDataPoint>?>(null) }
     var showTrace by remember { mutableStateOf(false) }
-    var openImage by remember { mutableStateOf<Int?>(null) }
     // The model cites sources by Telegram id; the channel name lives on the stored trace.
     val channelNames = remember(saved.id) {
         saved.result.sources
@@ -1123,6 +1122,9 @@ private fun ResultDetail(
     // query that is hiding rows, which is what makes it clearable here.
     var search by remember(saved.id, stockFilter) { mutableStateOf(stockFilter) }
     var filtersOpen by remember(saved.id) { mutableStateOf(false) }
+    // Support, resistance and the two dates, under every row. Session-only and per report, like the
+    // filters above it: asking to see them is about the report being read now, not a preference.
+    var showContext by remember(saved.id) { mutableStateOf(false) }
 
     val stocks = remember(saved.id, shownTimings, shownChannels, search, channelNames) {
         // Timing and channel narrow the rows; the search narrows the stocks, because a name belongs
@@ -1218,6 +1220,16 @@ private fun ResultDetail(
                         }
                     }
                 }
+                // Only beside the table. The compact layout draws cards, which carry every figure
+                // already, so a toggle for four of them would report a state nothing acts on.
+                if (!compact) {
+                    FilterChip(
+                        selected = showContext,
+                        onClick = { showContext = !showContext },
+                        label = { Text("Context") },
+                        modifier = Modifier.height(FilterControlHeight),
+                    )
+                }
                 // Hard against the right edge and apart from the filters: it closes the report
                 // rather than narrowing it, and sitting in the row with them it held the leftmost
                 // slot - the one the eye starts at, which belongs to what the table is searched by.
@@ -1253,9 +1265,8 @@ private fun ResultDetail(
                     RecommendationTable(
                         stocks = stocks,
                         channelFor = { messageId -> channelNames[messageId] },
-                        imagePathFor = { ref -> saved.result.imagePathFor(ref) },
-                        onOpenImage = { ref -> openImage = ref },
                         onSelectPoint = { stock, point -> detail = stock to point },
+                        showContext = showContext,
                         toolbar = { Toolbar(compact = false) },
                     )
                 } else {
@@ -1297,9 +1308,6 @@ private fun ResultDetail(
             trades = trades,
             onDismiss = { detail = null },
         )
-    }
-    openImage?.let { ref ->
-        SourceImageViewer(saved.result.imagePathFor(ref), ref, onDismiss = { openImage = null })
     }
 }
 
