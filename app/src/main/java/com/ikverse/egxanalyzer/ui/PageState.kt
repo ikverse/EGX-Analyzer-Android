@@ -81,6 +81,7 @@ class PageState {
     val resultsDate: MutableState<String?> = mutableStateOf(null)
     val resultsStock: MutableState<String> = mutableStateOf("")
     val resultsOrder: MutableState<RunOrder> = mutableStateOf(RunOrder.RUN_NEWEST)
+    val resultsFiltersOpen: MutableState<Boolean> = mutableStateOf(false)
 
     // ── Insights ─────────────────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,7 @@ class PageState {
     val insightsChannels: MutableState<Set<String>> = mutableStateOf(emptySet())
     val insightsOutcomes: MutableState<Set<String>> = mutableStateOf(emptySet())
     val insightsStock: MutableState<String> = mutableStateOf("")
+    val insightsFiltersOpen: MutableState<Boolean> = mutableStateOf(false)
 
     // ── Portfolio ────────────────────────────────────────────────────────────────────────────
 
@@ -98,21 +100,10 @@ class PageState {
 
     val portfolioDate: MutableState<String?> = mutableStateOf(null)
     val portfolioStock: MutableState<String> = mutableStateOf("")
+    val portfolioFiltersOpen: MutableState<Boolean> = mutableStateOf(false)
 
     // ── What is narrowing a tab ──────────────────────────────────────────────────────────────
 
-    /**
-     * Whether anything on [destination] is hiding rows from the reader.
-     *
-     * Here rather than in each screen because two things now ask it: the screen, to light its own
-     * Filters chip and offer Clear filters, and the shell, to decide what a back press means. Three
-     * screens each stating their own version of the predicate is three that agree until one gains a
-     * filter and the other reader of it silently stops seeing it.
-     *
-     * **Sorts are not filters and are left out**, which is the rule the screens already followed:
-     * [resultsOrder] changes what is read first and hides nothing, so a back press has no business
-     * resetting it and a chip has no business reporting it.
-     */
     /**
      * The stock box this page filters by, or null for a page that has no such list.
      *
@@ -131,6 +122,55 @@ class PageState {
         AppDestination.ANALYZE, AppDestination.SETTINGS -> null
     }
 
+    /**
+     * Whether [destination]'s filter sheet is open, or null for a page that has no filters.
+     *
+     * The same shape [stockFilter] has, and it is read from the same place: the header draws the
+     * icon that opens the sheet, and the screen underneath draws what is inside it. Neither can
+     * hold the flag - the header does not know what a page filters by, and the screen is composed
+     * below the icon that opens it - so it lives out here with the rest of the page's own state.
+     *
+     * Held here rather than remembered in the sheet for this class's founding reason as well: a
+     * fold disposes the screen whole, and a sheet that was open would close itself on the way.
+     */
+    fun filtersOpen(destination: AppDestination): MutableState<Boolean>? = when (destination) {
+        AppDestination.RESULTS -> resultsFiltersOpen
+        AppDestination.INSIGHTS -> insightsFiltersOpen
+        AppDestination.PORTFOLIO -> portfolioFiltersOpen
+        AppDestination.ANALYZE, AppDestination.SETTINGS -> null
+    }
+
+    /**
+     * Whether one of the filters that lives **in the sheet** is narrowing [destination].
+     *
+     * What lights the dot on the header's filter icon, and deliberately not [filtersActive]: the
+     * stock box is its own indicator - it stays on screen while it holds text - so a dot lit by it
+     * would report something the reader is already looking at, and would go on reporting it after
+     * they had cleared everything else. It is the distinction the old filter shelf drew between
+     * its `active` and its `folded`, asked here because the icon is drawn above the screen that
+     * knows the answer.
+     */
+    fun filtersInSheet(destination: AppDestination): Boolean = when (destination) {
+        AppDestination.RESULTS ->
+            resultsChannels.value.isNotEmpty() || resultsDate.value != null
+        AppDestination.INSIGHTS ->
+            insightsChannels.value.isNotEmpty() || insightsOutcomes.value.isNotEmpty()
+        AppDestination.PORTFOLIO -> portfolioDate.value != null
+        AppDestination.ANALYZE, AppDestination.SETTINGS -> false
+    }
+
+    /**
+     * Whether anything on [destination] is hiding rows from the reader.
+     *
+     * Here rather than in each screen because two things now ask it: the sheet, to offer Clear
+     * filters, and the shell, to decide what a back press means. Three screens each stating their
+     * own version of the predicate is three that agree until one gains a filter and the other
+     * reader of it silently stops seeing it.
+     *
+     * **Sorts are not filters and are left out**, which is the rule the screens already followed:
+     * [resultsOrder] changes what is read first and hides nothing, so a back press has no business
+     * resetting it and the sheet's dot has no business reporting it.
+     */
     fun filtersActive(destination: AppDestination): Boolean = when (destination) {
         AppDestination.RESULTS ->
             resultsChannels.value.isNotEmpty() ||

@@ -73,6 +73,19 @@ internal fun PortfolioScreen(appState: AppState) {
         onRefresh = { scope.launch { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
     ) {
+        // Above the early return below, which is the whole reason it is composed this high up: the
+        // filter icon in the page header is there whether or not a single trade has been recorded,
+        // and a sheet that composed only for a record with trades in it would be an icon that
+        // opened nothing. With nothing recorded the dates section drops itself and the sheet is the
+        // order alone. See FilterSheet.
+        //
+        // **Titled `Filter positions`, and that is not decoration.** The date and the order narrow
+        // the Positions card and nothing else: Your record and Overdue are built from the whole
+        // portfolio on purpose, so a date picked here cannot hide a trade that is late. The shelf
+        // this replaced said as much by sitting inside the card it filtered; a sheet opened from
+        // the page header would be claiming the page, so the title is what says it now.
+        PositionFilterSheet(portfolio.groups, appState)
+
         if (portfolio.isEmpty) {
             EmptyState(
                 icon = Icons.Outlined.AccountBalanceWallet,
@@ -106,6 +119,44 @@ internal fun PortfolioScreen(appState: AppState) {
         PortfolioSummary(portfolio.stats)
 
         PositionSection(groups = portfolio.groups, appState = appState)
+    }
+}
+
+/**
+ * What narrows the Positions card, in the sheet the page header's filter icon opens.
+ *
+ * Separate from [PositionSection] only because that section is drawn below an early return for an
+ * empty record and this cannot be - see the call site. It reads the same `PageState` entries the
+ * section reads, so the two cannot drift.
+ */
+@Composable
+private fun PositionFilterSheet(groups: List<PortfolioGroup>, appState: AppState) {
+    var dateFilter by appState.pages.portfolioDate
+    val allDates = remember(groups) {
+        groups.map { it.recommendationDate.toString() }.distinct().sortedDescending()
+    }
+    FilterSheet(
+        open = appState.pages.portfolioFiltersOpen,
+        // The shell asks the same question to decide what a back press means, so the predicate
+        // lives on PageState and both read it there. See PageState.filtersActive.
+        active = appState.pages.filtersActive(AppDestination.PORTFOLIO),
+        onClearAll = { appState.pages.clearFilters(AppDestination.PORTFOLIO) },
+        title = "Filter positions",
+    ) {
+        SingleSelectSection(
+            label = "Dates",
+            options = allDates,
+            selected = dateFilter,
+            onSelect = { dateFilter = it },
+        )
+        // Below the rule, outside the clear-all, exactly as in Results: an order is not something a
+        // list can be cleared of, and resetting it would look like a filter had gone missing.
+        SortSection(
+            options = PortfolioOrder.entries,
+            selected = appState.appPreferences.portfolioOrder,
+            label = PortfolioOrder::label,
+            onSelect = appState::updatePortfolioOrder,
+        )
     }
 }
 
@@ -393,12 +444,12 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
     // Asked once per report: a trade whose analysis was deleted has no call left to open.
     val scoredCalls = remember(appState.performance) { appState.performance.callIds }
 
-    // One card holding the whole section - its heading, the filters at the top of it, and every
-    // session card inside. It was a loose heading, then a filter shelf, then a run of cards, all
-    // sitting directly on the page, and the shelf's fill was close enough to a card's that the two
-    // read as one background: the section had no edge of its own to say where it began or ended.
-    // A card gives it one, and the filters are unambiguously *its* filters rather than something
-    // floating above the next thing down.
+    // One card holding the whole section - its heading and every session card inside. It was a
+    // loose heading, then a filter shelf, then a run of cards, all sitting directly on the page,
+    // and the shelf's fill was close enough to a card's that the two read as one background: the
+    // section had no edge of its own to say where it began or ended. A card gives it one. The
+    // filters themselves have left for the sheet above, which is titled after this card for the
+    // reason written there.
     // The one card on the tab whose children are cards, so it holds them in by Space.s rather than
     // the Space.l a card of controls uses. Three frames stood between the page and a trade - this
     // card, the session card, the trade card - each paying a full inset and each drawing its own
@@ -416,39 +467,6 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             return@SectionCard
-        }
-
-        val allDates = remember(groups) {
-            groups.map { it.recommendationDate.toString() }.distinct().sortedDescending()
-        }
-        FilterBar(
-            // The shell asks the same question to decide what a back press means, so the predicate
-            // lives on PageState and both read it there. See PageState.filtersActive.
-            active = appState.pages.filtersActive(AppDestination.PORTFOLIO),
-            // The date alone. The stock box is in the page header now and shows its own text
-            // while it is narrowing anything, so a chip lit by it would be reporting something the
-            // reader is already looking at.
-            folded = dateFilter != null,
-            onClearAll = { appState.pages.clearFilters(AppDestination.PORTFOLIO) },
-            // The one bar that does not sit on the page's well: it lives inside the Positions card,
-            // so it has to lift off a surface that is already a step up. `surfaceContainer` here -
-            // the card's own colour - would be a shelf that had simply stopped scrolling.
-            floatingColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ) {
-            SingleSelectFilter(
-                label = "dates",
-                options = allDates,
-                selected = dateFilter,
-                onSelect = { dateFilter = it },
-            )
-            // Outside the clear-all, exactly as in Results: an order is not something a list can be
-            // cleared of, and resetting it would look like a filter had gone missing.
-            SortFilter(
-                options = PortfolioOrder.entries,
-                selected = order,
-                label = PortfolioOrder::label,
-                onSelect = appState::updatePortfolioOrder,
-            )
         }
 
         // Filtered here rather than in the calculator. The whole record has other readers - the overdue

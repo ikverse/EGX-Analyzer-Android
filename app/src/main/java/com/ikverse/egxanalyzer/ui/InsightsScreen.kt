@@ -180,20 +180,20 @@ internal fun InsightsScreen(appState: AppState) {
         // whole record whatever the filters below say, and it is absent until a session has prices.
         TodayCard(appState)
 
-        // Above the empty state below on purpose: filters that vanish when they match nothing leave
-        // the reader looking at "nothing matches" with no way to undo it.
-        FilterBar(
+        // The sheet is drawn from the page rather than beside the list it narrows - it is modal,
+        // so where it is composed decides nothing about where it appears, only that the page that
+        // owns these controls is the page that states them. Its icon is in the header, and carries
+        // a dot whenever one of these is on, which is what used to be a chip reading "Filters on"
+        // above the empty state.
+        FilterSheet(
+            open = appState.pages.insightsFiltersOpen,
             // The shell asks the same question to decide what a back press means, so the predicate
             // lives on PageState and both read it there. See PageState.filtersActive.
             active = appState.pages.filtersActive(AppDestination.INSIGHTS),
-            // Only the folded pair. The stock box is in the page header now and shows its own
-            // text while it is narrowing anything, so a chip lit by it would be reporting
-            // something the reader is already looking at.
-            folded = channels.isNotEmpty() || outcomes.isNotEmpty(),
             onClearAll = { appState.pages.clearFilters(AppDestination.INSIGHTS) },
         ) {
-            MultiSelectFilter(
-                label = "channels",
+            MultiSelectSection(
+                label = "Channels",
                 options = everyChannel,
                 selected = channels,
                 onToggle = { name ->
@@ -201,8 +201,8 @@ internal fun InsightsScreen(appState: AppState) {
                 },
                 onClear = { channels = emptySet() },
             )
-            MultiSelectFilter(
-                label = "outcomes",
+            MultiSelectSection(
+                label = "Outcomes",
                 options = OutcomeFilters.keys.toList(),
                 selected = outcomes,
                 onToggle = { name ->
@@ -210,10 +210,10 @@ internal fun InsightsScreen(appState: AppState) {
                 },
                 onClear = { outcomes = emptySet() },
             )
-            // Outside the clear-all, exactly as on Results and the Portfolio: an order is not
-            // something a list can be cleared of, and resetting it would look like a filter had
-            // silently gone missing.
-            SortFilter(
+            // Below the rule, outside the clear-all, exactly as on Results and the Portfolio: an
+            // order is not something a list can be cleared of, and resetting it would look like a
+            // filter had silently gone missing.
+            SortSection(
                 options = CallOrder.entries,
                 selected = callOrder,
                 label = CallOrder::label,

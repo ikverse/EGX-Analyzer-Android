@@ -124,8 +124,12 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   `CommonUi.kt` also holds `ActionPill` and `DisclosureButton`, the two kinds of button a card is
   allowed to carry. See **A button on a card is one of two things** under Gotchas.
 - `ui/PageHeader.kt` — the page's own name and icon at the top of every screen, shrinking as the
-  page is read, and the page's stock filter, which arrives with the collapsed bar. It replaced the
-  `EGX Analyzer` band on 2026-09-09. See **The page header** below.
+  page is read, and the two controls that arrive with the collapsed bar: the page's stock filter,
+  and the icon that opens the rest of its filters. It replaced the `EGX Analyzer` band on
+  2026-09-09. See **The page header** below.
+- `ui/Filters.kt` — `FilterSheet` and its sections, which is where a page's filters live since
+  2026-09-09; `FilterRow` and the chip-and-menu filters beside it, still used by the in-report
+  toolbar. See **A page's filters live in a sheet** under Gotchas.
 - `ui/EgxAnalyzerApp.kt` holds `AppStatusLine` — the one line that says what the app is doing or
   has just done, drawn by `Screen` under the page's own title. See **The status line** below.
 - `model/ScheduleClock.kt` + `model/MarketRefresh.kt` + `model/CloseSweep.kt` +
@@ -922,12 +926,13 @@ trade is then managed, in whatever state it has reached.
   light/dark setting rather than the system's. Note `primary` is no longer the app's voice on every
   page — see **A hue per page** below. The overdue pill keeps `errorContainer`: amber says
   out of time, red says and you are late.
-- **Positions is one card, holding its own filters and every session card inside it.** It was a
-  loose `titleLarge` heading, then the filter shelf, then a run of cards, all sitting directly on
-  the page — a section with no edge of its own to say where it began or ended, which is how the
-  shelf's fill came to read as continuous with the card beneath it. A `SectionCard` gives it one,
-  and the filters inside it are unambiguously *its* filters rather than something floating above
-  whatever comes next. The heading drops from `titleLarge` to the `titleMedium` every other card on
+- **Positions is one card, holding every session card inside it.** It was a loose `titleLarge`
+  heading, then a filter shelf, then a run of cards, all sitting directly on the page — a section
+  with no edge of its own to say where it began or ended, which is how the shelf's fill came to
+  read as continuous with the card beneath it. A `SectionCard` gives it one. The filters left for
+  the header's sheet on 2026-09-09 and took the last of that argument with them; what survives of
+  it is the sheet's title, **Filter positions**, which is how a control reached from the page
+  header still says it narrows this card and not the record above it. The heading drops from `titleLarge` to the `titleMedium` every other card on
   the tab uses, which is the point: Overdue, What happened and Your record are cards, and Positions
   was the one section pretending to be a page. **The session cards inside take
   `surfaceContainerHigh`** — a card within a card goes one step up or it is the same fill as its
@@ -2324,10 +2329,14 @@ along with the rounded well the page used to sit in.
   heading on a page in one column an inset in from the card edges, and the title used to sit in it.
   It cannot now: the icon takes the page-edge inset and the name sits to the right of it. The title
   left the page to become chrome, so it stopped obeying a rule about text on a page.
-- **The search icon arrives with the collapsed bar**, over the last 40% of the shrink, and is not
-  pressable until it has finished arriving — a tap aimed at the page must not land on a glyph that
-  is fading in. At rest the page name is the only thing up there, which is the point of the change;
-  a control that had to be present always would be a title bar with things in it again.
+- **The two icons arrive with the collapsed bar**, over the last 40% of the shrink, and are not
+  pressable until they have finished arriving — a tap aimed at the page must not land on a glyph
+  that is fading in. At rest the page name is the only thing up there, which is the point of the
+  change; a control that had to be present always would be a title bar with things in it again.
+  **The one exception is a page that is filtered**, where both are on screen from the first frame —
+  see **A page's filters live in a sheet** under Gotchas for why that exception exists and what it
+  costs. `HeaderAction` draws either of them, so the fade, the press target and the "not pressable
+  until 1" rule are stated once.
 
 ### The stock filter, moved into the header
 
@@ -2337,10 +2346,11 @@ along with the rounded well the page used to sit in.
   it narrows changed. It is **not** a catalog lookup and it opens no stock sheet — that was tried
   first and rejected on 2026-09-09, and `StockLookup`, `DirectoryStock` and `AppState.stockDirectory`
   went with it.
-- **The three shelves lost their box**, so a `FilterBar` on those pages is now the Filters chip
-  alone. `FilterBar.search` survives as a parameter because the in-report toolbar on Results still
-  passes one — that box is a different control, inside a report card, narrowing that report's own
-  table.
+- **The three shelves lost their box**, which left each of them a Filters chip alone — a loose
+  one-control row above every list, floating on a shadow, to open a panel. That is what took the
+  shelf itself away a day later; see **A page's filters live in a sheet** under Gotchas. The in-report toolbar on
+  Results keeps its own box, because that one is a different control inside a report card,
+  narrowing that report's own table.
 - **`PageState.stockFilter(destination)` is what decides whether a page has one**, the same shape
   `filtersActive` has and for the same reason: the question is asked from outside the screen that
   owns the answer. Analyze and Settings answer null and get **no search icon at all** — an icon
@@ -2854,57 +2864,62 @@ parameter being threaded anywhere. Added 2026-09-08.
   its call cards and the source trace, so a card-wide toggle would close the whole report on a tap
   landing in the gap between any two of them. The footer row — a `DisclosureButton`, which replaced
   a full-width filled button doing the same job as the card under it — is what closes it again.
-- **A page's filters sit on a shelf, not on the page.** `FilterBar` wraps them in a
-  `surfaceContainerLow` surface — deliberately a step *below* the `surfaceContainer` cards it
-  filters and above the `background` well they sit on, so it reads as a shelf the controls stand on
-  rather than as another card competing with the record. No title: the chips name themselves. It was
-  a bare `FlowRow` between two cards, which is the one loose element on pages otherwise built of
-  them, and on a 411dp cover screen four controls plus a text button wrapped into three ragged
-  lines. **The fill is transparent, and that is the second attempt** — it was `surfaceContainerLow`
-  on the sound-sounding reasoning that a shelf sits a step below the cards it filters, which is
-  wrong about this palette: the well is `#0B0F14`, that shelf was `#11161C`, a card is `#151A21`.
-  Six units apart, so a shelf immediately above a card read as one continuous background with a
-  hairline through it, which is exactly what got reported. No fill cannot make that mistake, and it
-  is also what lets the same shelf sit on the page ground on two tabs and inside a card on the
-  third. **Clear filters sat inside that flow**, so it landed wherever the wrap put it and moved
-  every time a chip's label changed — `All channels` becoming `2 channels` is enough to shift it.
-  Pinned hard right now, where its appearing and disappearing costs the layout nothing.
-- **One layout at every width: the search box, then a Filters chip, and nothing else on the line.**
-  It shipped as two — everything on one line when it fitted, folded when it did not — and the wide
-  form was the wrong answer even where it fitted: a shelf carrying four controls and a button is a
-  toolbar the reader has to read before they can ignore it, on a page whose subject is underneath
-  it. Two controls is a line that gets scanned rather than read, and it is the same line on both
-  panels, so the tab does not rearrange itself when the phone opens. The controls open onto a line
-  of their own — **one line that scrolls sideways, not a row that wraps**. Three chips fit a cover
-  screen only while their labels are short: the panel has 355dp inside it on Insights and Results and
-  323 on the Portfolio, where the Positions card costs it another 32, and `Source record, best first`
-  alone takes Insights past 385. Wrapping made the panel two lines tall for one long label;
-  `scrollableRow` keeps it one at every width, and `fadingScrollbar` draws nothing when there is
-  nothing to scroll, so the short case is indistinguishable from a plain row and the 606dp panel
-  never scrolls at all. `FilterBar`'s content takes a `RowScope` for that reason where `FilterRow`
-  keeps its `FlowRow` — the in-report toolbar shares its row with a Hide button and is a different
-  shape. The fold is the pattern that toolbar already used, chip label included, applied at every
-  width here rather than only on a cover screen. **The search never folds**: Results
-  and the Portfolio both carry the same comment, that it is "the control someone arrives at the
-  screen already knowing they want".
-- **The search box is elastic and it took a fix to `StockFilterField` to become so.** That composable
-  ended its chain with `.width(StockFieldWidth)`, which beat anything a caller passed — so the
-  `weight(1f)` around it did nothing and it sat at 150dp on a 606dp line with the rest spent on
-  nothing. Its own height and width are applied **first** now, then the caller's, so 150dp stays the
-  default for the in-report toolbar that shares a row with other controls, and `FilterBar` overrides
-  it. The bar hands the modifier down (`search: (Modifier) -> Unit`) the way `ResponsiveRows` hands
-  one to its items, rather than trusting each call site to remember: the bar owns how wide that box
-  is. It comes out at roughly 245dp on the cover screen, 504 on the unfolded Fold, 572 on the tablet.
-- **`Clear filters` lives in the panel, not on the line**, which is the price of holding that line to
-  two controls: with the panel shut and a filter on, clearing means opening it first. The chip reads
-  "Filters on" so it is never a surprise, and the search box keeps its own cross for the case that
-  comes up most.
-- **`folded` is separate from `active`, and that is the whole of why the chip is honest.** `active`
-  offers Clear filters; `folded` lights the chip and counts only the controls actually hidden. A
-  chip reading "Filters on" because of the search box beside it would be reporting something the
-  reader is already looking at — and would go on reporting it after they had cleared everything
-  else. **`FilterRow` survives** and is still what the in-report toolbar uses: that one lives inside
-  the report card and already solved this, and a shelf nested in a card is chrome inside chrome.
+- **A page's filters live in a sheet the header opens, not on a shelf on the page.** The page
+  header's filter icon opens a `ModalBottomSheet` holding that page's filters; it replaced
+  `FilterBar` on 2026-09-09, the day after the stock box left that shelf for the header.
+- **What was wrong with the shelf was what the stock box left behind.** `FilterBar` was a search box
+  and a Filters chip on one line, standing off the page on a shadow once a scroll had pushed it to
+  the top. Take the box away and it is a chip alone: a loose one-control row above every list, and
+  the row was the cheapest thing on it to keep — the chip opened a panel of three more chips, each
+  of which opened a menu. Three levels deep for a question the reader asks in one press. The lift,
+  the pin, the clamp against the parent's foot, `LocalViewportTop`, the transparent-until-floating
+  fill and its `floatingColor` override all existed to make that one row behave on a scroll, and
+  all of it went.
+- **The trigger is in the header and the content is on the page, and neither could hold the other.**
+  The header does not know what a page filters by — channels come off `savedResults`, dates off the
+  trades — and the screen is composed below the icon that opens it. So the flag lives on
+  `PageState.filtersOpen(destination)`, which is exactly the shape `stockFilter(destination)` has
+  and for the same reason. It is also why it survives a fold, where a `remember` inside the sheet
+  would not: see the head of `PageState`.
+- **A sheet, not a panel hanging off the header.** A sheet already means one thing here — the longer
+  version of the thing that was pressed, which is what `StockSheet` and `InfoSheet` are — and a
+  panel over a scrolling page would have to re-solve, in a second place, the pinning the shelf was
+  written to solve. The width is the rest of it: the choices are **shown open**, as chips under a
+  heading, where the shelf had room only for a chip that opened a menu. `MultiSelectSection`,
+  `SingleSelectSection` and `SortSection` are that; `MultiSelectFilter` and its siblings stay in the
+  file because the in-report toolbar still uses them, inside a card where there is no room for
+  anything else.
+- **The `All` chip leads every section and is selected while nothing else is.** "Untouched means
+  everything" is the rule the menus had to state in words; on a surface with room for it, it is just
+  the first chip.
+- **The sort is below a rule, under its own heading, and there is no `All` in it.** An order is not
+  a filter: it hides nothing, `filtersActive` leaves it out and Clear filters does not touch it. On
+  the shelf it sat on the same line as the filters and was kept out of the clear-all by a comment no
+  reader could see. And a list is always in *some* order, so there is nothing for an `All` to mean.
+- **`Clear filters` is on the title's line, not at the foot.** The sections are as long as the page
+  has channels, and a button under them is one the reader has to scroll to in order to undo
+  something they can see from the top. It is offered on `filtersActive`, which counts the stock box
+  too, because clearing means clearing.
+- **The dot on the icon is `filtersInSheet`, not `filtersActive`, and that distinction is the whole
+  of why it is honest** — it is the same one the shelf drew between `folded` and `active`. The stock
+  box reports itself by staying open; a dot lit by it would report something the reader is already
+  looking at, and would go on reporting it after they had cleared everything else.
+- **A filtered page keeps both header icons on screen from the first frame of the collapse**, and
+  that is the one place this bends the rule that at rest the page name is the only thing up there.
+  The sheet is modal, so with the icons faded out a page narrowed to two channels sits at the top of
+  its scroll with nothing on it saying so — and the reader's next thought is that rows have gone
+  missing, which is exactly what the shelf's lit chip existed to prevent. It costs the empty header
+  only on pages the reader has actually filtered.
+- **Every sheet is composed outside the guard its shelf sat inside.** Results drew its shelf only
+  with runs on the page; the Portfolio drew its own inside the Positions card, below the early
+  return for an empty record — which is why `PositionFilterSheet` is split out of `PositionSection`
+  and called above that return. The icon in the header is there either way, so a sheet that composed
+  only sometimes would be an icon that opened nothing. The sections drop themselves when they have
+  no options, so an empty page opens on the sort alone.
+- **The Portfolio's sheet is titled `Filter positions`.** Its date and its order narrow the Positions
+  card; Your record and Overdue are built from the whole portfolio on purpose, so a date picked here
+  cannot hide a trade that is late. The shelf said that by sitting inside the card it filtered. A
+  sheet reached from the page header would be claiming the page, so the title says it instead.
 - **`AdaptivePanes` is the only "side by side, or stacked when it will not fit" rule in the app**, and
   a second one would be a second threshold, a second fallback and a second gap to keep in step. A
   pair of equals is that helper with `mainWeight = 1f`, not a layout of its own — which is how

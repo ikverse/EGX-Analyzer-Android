@@ -120,52 +120,44 @@ internal fun ResultsScreen(appState: AppState) {
                 .distinct()
                 .sortedDescending()
         }
-        if (appState.savedResults.isNotEmpty()) {
-            // Room between the page's title and the shelf under it. On the column's own 12 the bar
-            // sat right beneath the headline and read as part of it rather than as the first thing
-            // on the page - and it is the one row here that never scrolls away, so it is the row
-            // that can least afford to look crowded. A spacer rather than padding on the bar: the
-            // bar measures its own position to pin itself, and anything wrapped around it either
-            // travels with it or becomes the parent it clamps against.
-            Spacer(Modifier.height(Space.xs))
-            FilterBar(
-                // The shell asks the same question to decide what a back press means, so the
-                // predicate lives on PageState and both read it there. See PageState.filtersActive.
-                active = appState.pages.filtersActive(AppDestination.RESULTS),
-                // Only the folded pair. The stock box is in the page header now and shows its
-                // own text while it is narrowing anything, so a chip lit by it would be reporting
-                // something the reader is already looking at.
-                folded = channelFilter.isNotEmpty() || dateFilter != null,
-                onClearAll = { appState.pages.clearFilters(AppDestination.RESULTS) },
-            ) {
-                MultiSelectFilter(
-                    label = "channels",
-                    options = allChannels,
-                    selected = channelFilter,
-                    onToggle = { name ->
-                        channelFilter = if (name in channelFilter) {
-                            channelFilter - name
-                        } else {
-                            channelFilter + name
-                        }
-                    },
-                    onClear = { channelFilter = emptySet() },
-                )
-                SingleSelectFilter(
-                    label = "dates",
-                    options = allDates,
-                    selected = dateFilter,
-                    onSelect = { dateFilter = it },
-                )
-                // Deliberately outside the filters' clear-all: an order is not something a list
-                // can be cleared of, and resetting it would look like a filter had gone missing.
-                SortFilter(
-                    options = RunOrder.entries,
-                    selected = order,
-                    label = RunOrder::label,
-                    onSelect = { order = it },
-                )
-            }
+        // Outside the "are there any runs" guard the shelf was inside, because the control that
+        // opens it is now in the header and is there whether or not the page has anything on it -
+        // an icon that opened nothing would be a dead control. With no runs the sections have no
+        // options and drop themselves, and the sheet is the order alone.
+        FilterSheet(
+            open = appState.pages.resultsFiltersOpen,
+            // The shell asks the same question to decide what a back press means, so the
+            // predicate lives on PageState and both read it there. See PageState.filtersActive.
+            active = appState.pages.filtersActive(AppDestination.RESULTS),
+            onClearAll = { appState.pages.clearFilters(AppDestination.RESULTS) },
+        ) {
+            MultiSelectSection(
+                label = "Channels",
+                options = allChannels,
+                selected = channelFilter,
+                onToggle = { name ->
+                    channelFilter = if (name in channelFilter) {
+                        channelFilter - name
+                    } else {
+                        channelFilter + name
+                    }
+                },
+                onClear = { channelFilter = emptySet() },
+            )
+            SingleSelectSection(
+                label = "Dates",
+                options = allDates,
+                selected = dateFilter,
+                onSelect = { dateFilter = it },
+            )
+            // Below the rule, outside the filters' clear-all: an order is not something a list can
+            // be cleared of, and resetting it would look like a filter had gone missing.
+            SortSection(
+                options = RunOrder.entries,
+                selected = order,
+                label = RunOrder::label,
+                onSelect = { order = it },
+            )
         }
         val shown = remember(appState.savedResults, dateFilter, channelFilter, stockFilter, order) {
             // Normalized once for the whole list rather than once per run: the same question is put

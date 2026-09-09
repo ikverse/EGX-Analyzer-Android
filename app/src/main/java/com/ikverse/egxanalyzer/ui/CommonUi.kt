@@ -251,6 +251,12 @@ internal fun Screen(
                 // PageState.stockFilter.
                 search = appState.pages.stockFilter(destination),
                 current = appState.destination == destination,
+                // The flag the filter icon sets; the page below draws the sheet it opens. Null
+                // where the page has no filters at all. See PageState.filtersOpen.
+                filters = appState.pages.filtersOpen(destination),
+                // Only the filters that live in the sheet, so the dot never reports the stock box
+                // the reader can already see. See PageState.filtersInSheet.
+                filtered = appState.pages.filtersInSheet(destination),
             )
             // Under the header rather than above it, because the header is the top of the window
             // now. Above the page's own content, so a run starting does not push the first card
