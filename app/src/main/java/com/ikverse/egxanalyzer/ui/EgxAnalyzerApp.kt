@@ -777,6 +777,13 @@ private fun AppContent(appState: AppState, rail: Boolean) {
         modifier = Modifier.fillMaxSize().windowInsetsPadding(
             WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
         ),
+        // **Zero, because the modifier above has already done all of it.** Left at its default of
+        // `systemBars`, the Scaffold reports whatever that modifier did not consume - which is
+        // exactly the top inset this layout deliberately leaves unconsumed - and `padding(padding)`
+        // below then applies it a second time on top of the one `PageHeader` applies itself. That
+        // is a status bar's worth of empty band above every page, and it also puts the page's own
+        // background back below the status bar, which is the band this change existed to remove.
+        contentWindowInsets = WindowInsets(0.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
     ) { padding ->
         // No chrome above the page any more - no name band, no progress hairline, no status

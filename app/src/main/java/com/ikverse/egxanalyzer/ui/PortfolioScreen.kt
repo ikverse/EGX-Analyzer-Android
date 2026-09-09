@@ -425,13 +425,11 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
             // The shell asks the same question to decide what a back press means, so the predicate
             // lives on PageState and both read it there. See PageState.filtersActive.
             active = appState.pages.filtersActive(AppDestination.PORTFOLIO),
-            // The date alone. The search box is on show even on a cover screen, so a chip lit by it
-            // would be reporting something the reader is already looking at.
+            // The date alone. The stock box is in the page header now and shows its own text
+            // while it is narrowing anything, so a chip lit by it would be reporting something the
+            // reader is already looking at.
             folded = dateFilter != null,
             onClearAll = { appState.pages.clearFilters(AppDestination.PORTFOLIO) },
-            // Never folded away: it is the control someone arrives at the screen already knowing they
-            // want, and the only one that can empty the list on a keystroke.
-            search = { m -> StockFilterField(stockFilter, { stockFilter = it }, modifier = m) },
             // The one bar that does not sit on the page's well: it lives inside the Positions card,
             // so it has to lift off a surface that is already a step up. `surfaceContainer` here -
             // the card's own colour - would be a shelf that had simply stopped scrolling.

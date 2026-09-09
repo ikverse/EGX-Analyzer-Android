@@ -186,13 +186,11 @@ internal fun InsightsScreen(appState: AppState) {
             // The shell asks the same question to decide what a back press means, so the predicate
             // lives on PageState and both read it there. See PageState.filtersActive.
             active = appState.pages.filtersActive(AppDestination.INSIGHTS),
-            // Only the folded pair. The search box is on show even on a cover screen, so a chip
-            // lit by it would be reporting something the reader is already looking at.
+            // Only the folded pair. The stock box is in the page header now and shows its own
+            // text while it is narrowing anything, so a chip lit by it would be reporting
+            // something the reader is already looking at.
             folded = channels.isNotEmpty() || outcomes.isNotEmpty(),
             onClearAll = { appState.pages.clearFilters(AppDestination.INSIGHTS) },
-            // Never folded away: it is the control someone arrives at this tab already knowing
-            // they want, which is the same reason it leads on Results and the Portfolio.
-            search = { m -> StockFilterField(stock, { stock = it }, modifier = m) },
         ) {
             MultiSelectFilter(
                 label = "channels",

@@ -135,7 +135,6 @@ import com.ikverse.egxanalyzer.model.Sale
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.SeriesHarvest
-import com.ikverse.egxanalyzer.model.DirectoryStock
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.Scoring
@@ -364,16 +363,6 @@ class LiveAppState(
     override var promptHistory by mutableStateOf(settingsRepository.promptHistory())
         private set
     override var catalogMessage by mutableStateOf("${EgxCatalog.size()} seed stocks available offline.")
-        private set
-
-    /**
-     * The catalog as the header's search box reads it, republished whenever the catalog changes.
-     *
-     * `EgxCatalog` is a mutable object rather than state, so nothing recomposes when it is restored
-     * or refreshed. This is the snapshot that does, and it is rebuilt at the two points that already
-     * announce the same event through [catalogMessage] - launch, and a refresh.
-     */
-    override var stockDirectory by mutableStateOf(readStockDirectory())
         private set
     // Seeded from disk rather than empty: the picker is the only safe way to choose a model, and a
     // list that died with the process meant every cold start offered a text field instead.
@@ -1894,7 +1883,6 @@ class LiveAppState(
             val stored = localDataStore.stocks()
             EgxCatalog.restore(stored)
             catalogMessage = "${EgxCatalog.size()} stocks available offline."
-            stockDirectory = readStockDirectory()
             // Only when nothing has been downloaded yet, so a launch never waits on the network.
             if (stored.isEmpty()) refreshEgxCatalog()
         }
@@ -2522,16 +2510,6 @@ class LiveAppState(
         saveAppPreferences(appPreferences.copy(catalogEnrichmentEnabled = enabled))
     }
 
-    /**
-     * The catalog flattened to what a screen may see.
-     *
-     * `EgxStock` lives in `data` and carries aliases and merge rules that no screen has any use for,
-     * and `ui` may not import `data` in any case. See [DirectoryStock].
-     */
-    private fun readStockDirectory(): List<DirectoryStock> = EgxCatalog.entries().map {
-        DirectoryStock(ticker = it.ticker, nameEnglish = it.nameEnglish, nameArabic = it.nameArabic)
-    }
-
     override suspend fun refreshEgxCatalog() {
         catalogMessage = "Refreshing the public EGX catalog…"
         catalogMessage = try {
@@ -2539,7 +2517,6 @@ class LiveAppState(
             // Stored so correct company names survive a restart instead of falling back to the
             // seed list, which covers only a handful of large caps.
             localDataStore.saveStocks(EgxCatalog.entries())
-            stockDirectory = readStockDirectory()
             "${EgxCatalog.size()} stocks available; $downloaded entries downloaded."
         } catch (error: Exception) {
             "Catalog refresh failed; ${EgxCatalog.size()} offline seed stocks remain available. " +

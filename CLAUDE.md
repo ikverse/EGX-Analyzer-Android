@@ -124,10 +124,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   `CommonUi.kt` also holds `ActionPill` and `DisclosureButton`, the two kinds of button a card is
   allowed to carry. See **A button on a card is one of two things** under Gotchas.
 - `ui/PageHeader.kt` — the page's own name and icon at the top of every screen, shrinking as the
-  page is read, with the stock search that arrives with the collapsed bar. It replaced the
+  page is read, and the page's stock filter, which arrives with the collapsed bar. It replaced the
   `EGX Analyzer` band on 2026-09-09. See **The page header** below.
-- `ui/StockLookup.kt` — what that search box offers for what has been typed, ranked. `StockSearch`
-  in `ui/StockSearch.kt` is still the matcher underneath, shared with the three in-page filters.
 - `ui/EgxAnalyzerApp.kt` holds `AppStatusLine` — the one line that says what the app is doing or
   has just done, drawn by `Screen` under the page's own title. See **The status line** below.
 - `model/ScheduleClock.kt` + `model/MarketRefresh.kt` + `model/CloseSweep.kt` +
@@ -2331,36 +2329,66 @@ along with the rounded well the page used to sit in.
   is fading in. At rest the page name is the only thing up there, which is the point of the change;
   a control that had to be present always would be a title bar with things in it again.
 
-### The stock search
+### The stock filter, moved into the header
 
-- **A lookup, not a filter, and that distinction decides everything about it.** The boxes on
-  Results, Insights and Portfolio narrow a list already on the screen. This asks *which stock*, is
-  answered from the catalog, finds a stock nobody has ever recommended, and opens `StockSheet` —
-  which is why it is on Analyze, a page with no list to narrow at all. The three in-page filters are
-  untouched and stay where they are.
-- **`StockSearch` is still the matcher**, so `المصريه` finds `المصرية للاتصالات` here exactly as it
-  does in those filters. `StockLookup` adds only the ranking: ticker-prefix, then ticker-anywhere,
-  then a name, ties keeping the catalog's order — which is roughly by size, so the large cap a
-  reader is likelier to mean comes first. Capped at 30.
-- **An empty query offers nothing**, which is the one place it disagrees with `StockSearch.matches`.
-  There a blank query is "not a question" and hides nothing, because it narrows something already
-  visible; here nothing is on screen until this answers, and 200 rows over the page is not an
-  answer.
-- **`AppState.stockDirectory` is the catalog flattened to what a screen may see** — ticker and the
-  two names, as `model/StockDirectory.kt`. `EgxStock` lives in `data`, carries aliases and merge
-  rules no screen has any use for, and `ui` may not import `data` in any case. `LiveAppState`
-  republishes it at the two points that already announce the same event through `catalogMessage`:
-  the restore from disk on launch, and a refresh. `EgxCatalog` is a mutable object rather than
-  state, so nothing would recompose without this snapshot.
-- **Back closes the box** through a local `BackHandler`, which takes the press ahead of the shell's
-  `goBack` — closing what is open on the screen is what that press means while a keyboard is up.
-  The state is per page, so swiping to another tab leaves it behind rather than carrying it along.
+- **It is the page's own filter, not a lookup.** Results, Insights and the Portfolio each drew a
+  stock box on their filter shelf; the header's icon opens that same box, over the same state
+  (`PageState.resultsStock` and its two siblings) with the same matcher under it. Nothing about what
+  it narrows changed. It is **not** a catalog lookup and it opens no stock sheet — that was tried
+  first and rejected on 2026-09-09, and `StockLookup`, `DirectoryStock` and `AppState.stockDirectory`
+  went with it.
+- **The three shelves lost their box**, so a `FilterBar` on those pages is now the Filters chip
+  alone. `FilterBar.search` survives as a parameter because the in-report toolbar on Results still
+  passes one — that box is a different control, inside a report card, narrowing that report's own
+  table.
+- **`PageState.stockFilter(destination)` is what decides whether a page has one**, the same shape
+  `filtersActive` has and for the same reason: the question is asked from outside the screen that
+  owns the answer. Analyze and Settings answer null and get **no search icon at all** — an icon
+  opening a box that narrows nothing is a control the page cannot honour.
+- **The box is the indicator as well as the control.** It stays open while the query is non-empty
+  and the close button clears as well as closes, so a page narrowed to one stock always has the box
+  on screen saying so. Without that a filtered page with no visible box is a page that looks as
+  though it has lost its other rows. It is also why the header is **held collapsed** while the box
+  is open: most pages stop scrolling once a filter is narrowing them, and an expanding title would
+  otherwise take back the row being typed into.
+- **The `folded` flag on those three shelves still leaves the stock box out**, for its original
+  reason restated: the box shows its own text while it is narrowing anything, so a chip lit by it
+  would report something the reader is already looking at.
+
+### The bug that opening it shipped with
+
+Pressing the icon on any tab but the first walked the reader back towards Analyze, one tab per
+press. Worth writing down, because nothing in it was broken and every part behaved correctly.
+
+- **The box grew out of the icon's corner** — `expandHorizontally(expandFrom = Alignment.End)`.
+  That starts the content at zero width with its **end** pinned, so on the first frame the field is
+  laid out with its left edge most of a screen to the left of the window.
+- **The focus request fired on exactly that frame.** A `BasicTextField` taking focus asks every
+  scrollable ancestor to bring its rect into view, and the outermost of those is
+  `DestinationPager`. It scrolled left to reveal a rect sitting off the start edge, landed on the
+  previous page, and the pager published that page as an arrival.
+- **Both ends are fixed**, deliberately rather than whichever one was cheaper: the transition is a
+  plain cross-fade so the field is full width from its first frame, and the focus waits for the
+  transition **and** the pager **and** the destination before it is requested. Either alone leaves
+  the trap armed for the next person who animates this row.
+- It is the trap `revealIfOnScreen` is written against, arriving through the focus system rather
+  than through a reveal. **Guarding on the destination alone does not catch it** — that was the
+  first fix and it changed nothing, because the page is current and the tabs are settled at the
+  moment the icon is pressed. What was wrong was the frame, not the page.
 
 ### The system bars blend into the page
 
 - **The page runs up behind the status bar.** The `Scaffold` pads every side but the top
   (`safeDrawing.only(Horizontal + Bottom)`), so the page's own background and the accent wash at the
-  top of it carry on up behind the clock and the battery. With the name band gone, a
+  top of it carry on up behind the clock and the battery.
+- **`contentWindowInsets = WindowInsets(0.dp)` is not tidying, and leaving it out shipped both
+  faults at once.** A `Scaffold` reports through its `paddingValues` whatever its
+  `contentWindowInsets` names and the modifier chain has not consumed - and the default is
+  `systemBars`, of which this layout deliberately leaves the **top** unconsumed. So `padding(padding)`
+  applied a status bar's height that `PageHeader` was already applying itself: a bar's worth of
+  empty band above every page, *and* the page's own background pushed back below the status bar,
+  which is precisely the band this change existed to remove. One value fixes both because they were
+  one fault. With the name band gone, a
   `surfaceContainer` strip over a `background` page is a seam across the top of every screen and
   nothing up there justifies one. `PageHeader` pads itself by the top inset, reading `safeDrawing`
   rather than `statusBars` so a tall cutout is cleared too. `PageWash` grew from 120dp to 160dp to

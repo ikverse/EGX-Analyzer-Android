@@ -113,6 +113,24 @@ class PageState {
      * [resultsOrder] changes what is read first and hides nothing, so a back press has no business
      * resetting it and a chip has no business reporting it.
      */
+    /**
+     * The stock box this page filters by, or null for a page that has no such list.
+     *
+     * Read by [Screen], which draws that box in the page header rather than on the filter shelf -
+     * one control per page, in one place, wherever the page keeps its state. Analyze and Settings
+     * answer null and so get no search icon at all: an icon that opened a box narrowing nothing
+     * would be a control the page cannot honour.
+     *
+     * The same shape [filtersActive] has and for the same reason - the question is asked from
+     * outside the screen that owns the answer, so the answer lives here.
+     */
+    fun stockFilter(destination: AppDestination): MutableState<String>? = when (destination) {
+        AppDestination.RESULTS -> resultsStock
+        AppDestination.INSIGHTS -> insightsStock
+        AppDestination.PORTFOLIO -> portfolioStock
+        AppDestination.ANALYZE, AppDestination.SETTINGS -> null
+    }
+
     fun filtersActive(destination: AppDestination): Boolean = when (destination) {
         AppDestination.RESULTS ->
             resultsChannels.value.isNotEmpty() ||

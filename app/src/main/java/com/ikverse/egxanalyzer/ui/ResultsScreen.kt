@@ -132,16 +132,11 @@ internal fun ResultsScreen(appState: AppState) {
                 // The shell asks the same question to decide what a back press means, so the
                 // predicate lives on PageState and both read it there. See PageState.filtersActive.
                 active = appState.pages.filtersActive(AppDestination.RESULTS),
-                // Only the folded pair. The search box is on show even on a cover screen, so a chip
-                // lit by it would be reporting something the reader is already looking at.
+                // Only the folded pair. The stock box is in the page header now and shows its
+                // own text while it is narrowing anything, so a chip lit by it would be reporting
+                // something the reader is already looking at.
                 folded = channelFilter.isNotEmpty() || dateFilter != null,
                 onClearAll = { appState.pages.clearFilters(AppDestination.RESULTS) },
-                // Never folded away, for the reason it leads inside a report too: it is the control
-                // someone arrives at the screen already knowing they want, and the only one that
-                // can empty the list on a single keystroke.
-                search = { m ->
-                    StockFilterField(stockFilter, { stockFilter = it }, modifier = m)
-                },
             ) {
                 MultiSelectFilter(
                     label = "channels",

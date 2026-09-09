@@ -247,8 +247,10 @@ internal fun Screen(
                 // A lambda, not a value. Read here it would be this function recomposing on every
                 // frame of a collapse, and this function composes the whole page.
                 collapse = { (taken.floatValue / travel).coerceIn(0f, 1f) },
-                directory = appState.stockDirectory,
-                onOpenStock = appState::openStock,
+                // The page's own stock filter, or null where the page has no list to narrow. See
+                // PageState.stockFilter.
+                search = appState.pages.stockFilter(destination),
+                current = appState.destination == destination,
             )
             // Under the header rather than above it, because the header is the top of the window
             // now. Above the page's own content, so a run starting does not push the first card
