@@ -566,8 +566,18 @@ private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
     ) {
         // The app's mark, in the gap `RailTopInset` was already holding open above the destinations.
         // This is the only place in the app it is drawn now - see the rail shell.
+        //
+        // **Nothing in here may fill the rail's width**, and this Box did until 3.6.2 - it is what
+        // broke the unfolded layout the day the mark moved in. Material sizes a `NavigationRail`
+        // with `widthIn(min = ContainerWidth)`, a floor rather than a width, so a child that fills
+        // it stretches the rail to whatever it was measured against - and `NavigationSuiteScaffold-
+        // Layout` measures the navigation suite against the whole window, then gives the page
+        // `width - railWidth`. The rail became the screen and the page was measured at zero: five
+        // destinations centred on an empty display, with no page beside them at all. It cannot be
+        // seen on a phone, where there is no rail; only the Fold opened shows it. The column here
+        // already centres its children, so the mark needs no width of its own.
         Box(
-            Modifier.fillMaxWidth().height(RailTopInset),
+            Modifier.height(RailTopInset),
             contentAlignment = Alignment.Center,
         ) {
             AppMark(accentFor(appState.destination.accent, LocalDarkTheme.current).markAurora)

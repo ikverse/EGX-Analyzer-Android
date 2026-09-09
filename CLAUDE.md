@@ -2893,6 +2893,17 @@ parameter being threaded anywhere. Added 2026-09-08.
   its call cards and the source trace, so a card-wide toggle would close the whole report on a tap
   landing in the gap between any two of them. The footer row — a `DisclosureButton`, which replaced
   a full-width filled button doing the same job as the card under it — is what closes it again.
+- **Nothing inside the `NavigationRail` may fill its width, and one `fillMaxWidth()` took the whole
+  unfolded layout out.** Material sizes a rail with `widthIn(min = ContainerWidth)` — a floor, not a
+  width — so a child that fills the width stretches the rail to whatever it is measured against.
+  `NavigationSuiteScaffoldLayout` measures the navigation suite against the entire window and then
+  hands the page `width - railWidth`, so the rail became the screen and the page was measured at
+  zero: five destinations centred on an empty display. It arrived with the app mark on 2026-09-09,
+  as `Box(Modifier.fillMaxWidth().height(RailTopInset))` holding the mark in the rail's top gap, and
+  was fixed in 3.6.2 by deleting that one call — the rail's column centres its children already.
+  **A phone cannot show this**: there is no rail on the compact layout, so it shipped through a
+  release that was checked folded, and only the Fold opened shows it. Anything new drawn in the rail
+  wants a bounded width for the same reason.
 - **A page's filters live in a sheet the header opens, not on a shelf on the page.** The page
   header's filter icon opens a `ModalBottomSheet` holding that page's filters; it replaced
   `FilterBar` on 2026-09-09, the day after the stock box left that shelf for the header.
