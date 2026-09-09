@@ -383,14 +383,10 @@ private val darkSeeds = mapOf(
         neighbour = Color(0xFFC24A93), deep = Color(0xFF3A2E8C), mid = Color(0xFF5B45D6),
         ground = Color(0xFF1A1042),
     ),
-    // Dusty rather than hot. It shipped a magenta and read as the loudest thing on the one page
-    // whose subject is a verdict - so it is taken down in saturation and up in lightness, which
-    // keeps every separation it had (23 degrees off the stop red, 66 off Settings' bronze) and
-    // takes it from 5.35:1 on a card to 7.10:1.
     AccentKey.ROSE to AccentSeed(
-        base = Color(0xFFE38DB6), ink = Color(0xFFE38DB6), onBase = Color(0xFF33091D),
-        neighbour = Color(0xFF9B7CFF), deep = Color(0xFF8E4C6C), mid = Color(0xFFA85C86),
-        ground = Color(0xFF2A1420),
+        base = Color(0xFFF2569C), ink = Color(0xFFF2569C), onBase = Color(0xFF33091D),
+        neighbour = Color(0xFF9B7CFF), deep = Color(0xFF7A1F4C), mid = Color(0xFFB93372),
+        ground = Color(0xFF2A0A1B),
     ),
     AccentKey.INDIGO to AccentSeed(
         base = Color(0xFF5C7CFA), ink = Color(0xFF5C7CFA), onBase = Color(0xFF0A1440),
@@ -415,13 +411,10 @@ private val lightSeeds = mapOf(
         neighbour = Color(0xFFC93379), deep = Color(0xFF2E2278), mid = Color(0xFF4A3BB8),
         ground = Color(0xFF170F3A),
     ),
-    // The dark theme's move made on this theme's own terms: softened toward the same dusty red,
-    // and still dark enough to carry text on a white card at 5.64:1. `mid` is the pill's last stop
-    // and holds white at 8.46:1.
     AccentKey.ROSE to AccentSeed(
-        base = Color(0xFFBE5A85), ink = Color(0xFFA8446F), onBase = Color.White,
-        neighbour = Color(0xFF6B4EE0), deep = Color(0xFF5E2440), mid = Color(0xFF7E3352),
-        ground = Color(0xFF24101A),
+        base = Color(0xFFC93379), ink = Color(0xFFB32C6C), onBase = Color.White,
+        neighbour = Color(0xFF6B4EE0), deep = Color(0xFF6B1440), mid = Color(0xFF9E2258),
+        ground = Color(0xFF260A18),
     ),
     AccentKey.INDIGO to AccentSeed(
         base = Color(0xFF3D5BD9), ink = Color(0xFF3450C4), onBase = Color.White,
