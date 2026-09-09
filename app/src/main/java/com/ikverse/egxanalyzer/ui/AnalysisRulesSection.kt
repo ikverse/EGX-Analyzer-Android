@@ -18,7 +18,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -172,7 +171,7 @@ private fun WordingList(
             }
         }
 
-        OutlinedButton(onClick = onAdd, modifier = Modifier.fillMaxWidth()) {
+        SettingsButton(onClick = onAdd, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(IconSize.Inline))
             Spacer(Modifier.width(Space.s))
             Text("Add wording")

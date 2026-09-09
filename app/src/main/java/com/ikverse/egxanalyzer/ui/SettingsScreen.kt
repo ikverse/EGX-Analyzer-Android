@@ -34,7 +34,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.OutlinedTextField
@@ -225,7 +224,7 @@ internal fun SettingsScreen(appState: AppState) {
                 )
                 if (appState.cloudConfiguration.provider.endpointPresets.isNotEmpty()) {
                     Box {
-                        OutlinedButton(onClick = { endpointMenuOpen = true }) {
+                        SettingsButton(onClick = { endpointMenuOpen = true }) {
                             Text("Choose endpoint region")
                         }
                         DropdownMenu(
@@ -266,19 +265,20 @@ internal fun SettingsScreen(appState: AppState) {
                     horizontalArrangement = Arrangement.spacedBy(Space.s),
                     verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
-                    Button(
+                    SettingsButton(
                         enabled = appState.busyLabel == null,
+                        filled = true,
                         onClick = {
                             val entered = credential
                             credential = ""
                             scope.launch { appState.saveSettings(entered) }
                         },
                     ) { Text("Save and verify") }
-                    OutlinedButton(onClick = appState::resetProviderConfiguration) {
+                    SettingsButton(onClick = appState::resetProviderConfiguration) {
                         Text("Reset provider")
                     }
                     if (appState.cloudConfiguration.hasCredential) {
-                        OutlinedButton(onClick = appState::removeCredential) {
+                        SettingsButton(onClick = appState::removeCredential) {
                             Text("Remove credential")
                         }
                     }
@@ -327,7 +327,7 @@ internal fun SettingsScreen(appState: AppState) {
             ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 Box {
-                    OutlinedButton(onClick = { languageMenuOpen = true }) {
+                    SettingsButton(onClick = { languageMenuOpen = true }) {
                         Text("Output language: ${appState.appPreferences.analysisLanguage.displayName}")
                     }
                     DropdownMenu(
@@ -436,11 +436,17 @@ internal fun SettingsScreen(appState: AppState) {
                     checked = appState.appPreferences.catalogEnrichmentEnabled,
                     onCheckedChange = appState::updateCatalogEnrichment,
                 )
-                OutlinedButton(onClick = {
+                SettingsButton(onClick = {
                     scope.launch { appState.refreshEgxCatalog() }
                 }) {
-                    Icon(Icons.Outlined.CloudDownload, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
+                    // Sized, where it used to take Material's 24dp default: inside a button that
+                    // is now 32dp tall the glyph was all but touching both edges.
+                    Icon(
+                        Icons.Outlined.CloudDownload,
+                        contentDescription = null,
+                        modifier = Modifier.size(IconSize.Inline),
+                    )
+                    Spacer(Modifier.width(Space.s))
                     Text("Refresh EGX catalog")
                 }
                 Text(
@@ -487,7 +493,7 @@ internal fun SettingsScreen(appState: AppState) {
             )
             if (appState.availableModels.isNotEmpty()) {
                 Box {
-                    OutlinedButton(onClick = { askModelMenuOpen = true }) { Text("Choose model") }
+                    SettingsButton(onClick = { askModelMenuOpen = true }) { Text("Choose model") }
                     DropdownMenu(
                         expanded = askModelMenuOpen,
                         onDismissRequest = { askModelMenuOpen = false },
@@ -628,12 +634,12 @@ internal fun SettingsScreen(appState: AppState) {
                         horizontalArrangement = Arrangement.spacedBy(Space.s),
                         verticalArrangement = Arrangement.spacedBy(Space.s),
                     ) {
-                        OutlinedButton(onClick = {
+                        SettingsButton(onClick = {
                             scope.launch { appState.refreshTelegramChats() }
                         }) { Text("Refresh chats") }
                         // Through runAction like everywhere else: signing out tears down the
                         // Telegram client, and without the busy label nothing on screen says so.
-                        OutlinedButton(
+                        SettingsButton(
                             enabled = appState.busyLabel == null,
                             onClick = {
                                 scope.launch {
@@ -876,7 +882,7 @@ internal fun SettingsScreen(appState: AppState) {
                 ),
             ) {
                 Box {
-                    OutlinedButton(onClick = { themeMenuOpen = true }) {
+                    SettingsButton(onClick = { themeMenuOpen = true }) {
                         Text("Theme: ${appState.appPreferences.themeMode.displayName}")
                     }
                     DropdownMenu(
@@ -949,10 +955,11 @@ internal fun SettingsScreen(appState: AppState) {
                         "and nothing is deleted.",
                 ),
             ) {
-                Button(
+                SettingsButton(
                     onClick = { scope.launch { appState.syncReports() } },
                     enabled = appState.telegramAuthState.step == TelegramAuthStep.READY &&
                         appState.busyLabel == null,
+                    filled = true,
                 ) { Text("Sync now") }
                 if (appState.telegramAuthState.step != TelegramAuthStep.READY) {
                     Text(
@@ -1017,7 +1024,7 @@ internal fun SettingsScreen(appState: AppState) {
                         "sync cannot bring back what it has been told to forget.",
                 ),
             ) {
-                OutlinedButton(
+                SettingsButton(
                     onClick = { confirmDeleteAll = true },
                     enabled = appState.savedResults.isNotEmpty(),
                 ) {
@@ -1090,7 +1097,7 @@ private fun DiagnosticsControl(appState: AppState) {
                 "separately by Android Keystore and have never been part of it.",
         ),
     ) {
-        OutlinedButton(
+        SettingsButton(
             enabled = !saving,
             onClick = {
                 scope.launch {
@@ -1170,7 +1177,10 @@ private fun UpdateControls(appState: AppState) {
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Button(onClick = { appState.downloadUpdate(state.update) }) { Text("Download") }
+                SettingsButton(
+                    onClick = { appState.downloadUpdate(state.update) },
+                    filled = true,
+                ) { Text("Download") }
             }
 
             is UpdateState.Downloading -> {
@@ -1201,13 +1211,14 @@ private fun UpdateControls(appState: AppState) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Button(
+                SettingsButton(
+                    filled = true,
                     onClick = {
                         // Read at the tap as well as on resume: whichever way the permission was
                         // granted, the button must do the right thing the moment it is pressed.
                         if (appState.canInstallUpdates()) {
                             appState.installUpdate(state.file)
-                            return@Button
+                            return@SettingsButton
                         }
                         // A refusal here was invisible: Android closed the page without a word and
                         // the phone looked like it had ignored the button.
@@ -1233,11 +1244,11 @@ private fun UpdateControls(appState: AppState) {
             horizontalArrangement = Arrangement.spacedBy(Space.s),
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
-            OutlinedButton(enabled = !busy, onClick = appState::checkForUpdate) {
+            SettingsButton(enabled = !busy, onClick = appState::checkForUpdate) {
                 Text(if (state is UpdateState.Idle) "Check for updates" else "Check again")
             }
             if (state is UpdateState.Available || state is UpdateState.Ready) {
-                OutlinedButton(
+                SettingsButton(
                     onClick = { appState.releasesPageIntent()?.let(context::startActivity) },
                 ) { Text("Release page") }
             }
@@ -1354,7 +1365,7 @@ private fun ModelUsageSection(appState: AppState) {
                 )
             }
         }
-        OutlinedButton(onClick = appState::clearModelUsage) {
+        SettingsButton(onClick = appState::clearModelUsage) {
             Icon(Icons.Outlined.Delete, contentDescription = null)
             Spacer(Modifier.width(6.dp))
             Text("Clear token usage")

@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -72,7 +71,8 @@ internal fun infoNote(title: String, vararg paragraphs: String) =
  *   [SectionCard] with an explanation ends up with a taller header than the cards beside it that
  *   have none. Dense keeps the footprint at the icon's size - the same bare-glyph treatment
  *   `SubSection` already gives its chevron - so the heading lines up. Left `false` for a settings
- *   row, where the full target is wanted and nothing is being aligned to.
+ *   row, which sizes the button down to [SettingRow]'s own target instead: a real button, at the
+ *   height of the switch beside it rather than at either extreme.
  */
 @Composable
 internal fun InfoButton(
@@ -151,16 +151,18 @@ internal fun InfoSheet(note: InfoNote, onDismiss: () -> Unit) {
 private val ChevronGutter: Dp = IconSize.Action
 
 /**
- * The leading column a control stands in, as wide as the widest of them.
+ * The touch target a settings row's question mark gets.
  *
- * A switch is 52dp wide, and every setting here is now one. The column is kept rather than folded
- * into the switch's own width so that a row built by hand - a button, a slider - can stand in the
- * same place and start its label where the switch rows start theirs.
+ * Not [IconButton]'s own 48dp, which is a third taller than anything it sits beside: a switch is
+ * 32dp and a [SettingsButton] is 32dp, so the full target made every row that had an explanation
+ * taller than every row that did not - one list of settings at two heights, and the taller ones
+ * picked out by nothing more meaningful than having a paragraph behind them. 36dp is the largest
+ * that does not do that, and it is still a target rather than a bare glyph.
  */
-private val ControlColumn: Dp = 52.dp
+private val InfoTarget: Dp = 36.dp
 
 /**
- * One line of a settings card: whatever the control is, and its explanation in the card's gutter.
+ * One line of a settings card: whatever the control is, its explanation, and where the control sits.
  *
  * Written because the question marks had drifted. [SettingToggle] and [SettingLabel] put theirs at
  * the trailing edge; the four rows built by hand - Save diagnostics, Restore from a backup, Fetch
@@ -170,16 +172,36 @@ private val ControlColumn: Dp = 52.dp
  *
  * The caller decides what stretches: give the element that should fill the line a `weight(1f)`, or
  * add a weighted [Spacer] after a button so the question mark is pushed to the edge.
+ *
+ * @param trailing the control, when the row is a label with something to set beside it. It is drawn
+ *   **after** the question mark and hard against the card's inset, which is the column the heading's
+ *   own chevron stands in - so every switch down a card lines up under it. The question mark then
+ *   sits inboard of the control, next to the words it explains rather than past the thing it does
+ *   not. Null for an action row, whose button carries its own label and leads: there is no text
+ *   beside it to align, and a button pushed to the trailing edge would leave the line empty.
  */
 @Composable
 internal fun SettingRow(
     modifier: Modifier = Modifier,
     about: InfoNote? = null,
+    trailing: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         content()
-        about?.let { InfoButton(it, Modifier.padding(end = ChevronGutter)) }
+        about?.let {
+            InfoButton(
+                it,
+                Modifier
+                    // Outside the size and not inside it: padding applied after would eat the
+                    // target down to 12dp rather than move it. Only a row that ends at the question
+                    // mark spends the gutter - where a control follows, the control is what has to
+                    // reach the chevron's column, and padding the glyph holds it short of it.
+                    .padding(end = if (trailing == null) ChevronGutter else 0.dp)
+                    .size(InfoTarget),
+            )
+        }
+        trailing?.invoke(this)
     }
 }
 
@@ -195,6 +217,13 @@ internal fun SettingRow(
  * phone to act on its own, which is a distinction the page could not carry: two shapes of control
  * down one list of settings read as two kinds of list, not as heavy settings and light ones.
  *
+ * **The name leads and the switch trails.** The switch used to lead, which put every label 52dp in
+ * from the card's edge - past the heading above it, past the sentences under it, past the buttons on
+ * the same card - so the one column a settings card is actually read down, the names of the
+ * settings, was the only column on it that started nowhere in particular. The names now start where
+ * everything else on the card starts, and the switches make their own column at the trailing edge,
+ * under the heading's chevron.
+ *
  * @param about absent for a setting whose label is the whole of it. Most have one; "Text messages"
  *   in the content-type list does not, and giving it a question mark to open two words would be
  *   worse than the paragraph this replaces.
@@ -208,15 +237,16 @@ internal fun SettingToggle(
     about: InfoNote? = null,
     enabled: Boolean = true,
 ) {
-    SettingRow(modifier, about) {
-        Box(Modifier.width(ControlColumn), contentAlignment = Alignment.CenterStart) {
-            Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
-        }
+    SettingRow(
+        modifier,
+        about,
+        trailing = { Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled) },
+    ) {
         Text(
             label,
             modifier = Modifier
                 .weight(1f)
-                .padding(start = Space.m, end = Space.s),
+                .padding(end = Space.s),
             style = MaterialTheme.typography.bodyLarge,
         )
     }

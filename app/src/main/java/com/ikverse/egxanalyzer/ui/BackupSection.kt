@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -77,7 +76,7 @@ fun BackupControls(appState: AppState) {
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
                 verticalArrangement = Arrangement.spacedBy(Space.s),
             ) {
-                OutlinedButton(
+                SettingsButton(
                     enabled = !busy,
                     onClick = {
                         scope.launch {
@@ -99,10 +98,10 @@ fun BackupControls(appState: AppState) {
                 ) {
                     Text(if (busy) "Working…" else "Back up now")
                 }
-                OutlinedButton(enabled = !busy, onClick = { chooseFolder.launch(null) }) {
+                SettingsButton(enabled = !busy, onClick = { chooseFolder.launch(null) }) {
                     Text(if (holdsFolder) "Change folder" else "Choose a folder")
                 }
-                OutlinedButton(enabled = !busy, onClick = { pickBackup.launch(arrayOf("*/*")) }) {
+                SettingsButton(enabled = !busy, onClick = { pickBackup.launch(arrayOf("*/*")) }) {
                     Text("Restore from a backup")
                 }
             }

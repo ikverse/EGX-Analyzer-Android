@@ -2,7 +2,6 @@ package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -129,7 +128,7 @@ internal fun PricesSubSection(appState: AppState) {
                     "fetching again cannot bring the old one back.",
             ),
         ) {
-            OutlinedButton(
+            SettingsButton(
                 onClick = { scope.launch { appState.refreshPrices() } },
                 enabled = !appState.pricesRefreshing,
             ) {
@@ -220,7 +219,7 @@ private fun PriceSeriesControls(appState: AppState) {
                     "to use it. It can be a large file: a year of bars is over a million rows.",
             ),
         ) {
-            OutlinedButton(
+            SettingsButton(
                 enabled = !exporting,
                 onClick = {
                     scope.launch {

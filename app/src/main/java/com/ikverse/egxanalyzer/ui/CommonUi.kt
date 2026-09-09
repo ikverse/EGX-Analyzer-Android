@@ -1,99 +1,104 @@
 package com.ikverse.egxanalyzer.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.animation.core.animate
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import kotlinx.coroutines.launch
-import kotlin.math.max
-import kotlin.math.min
-import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.ui.res.painterResource
-import com.ikverse.egxanalyzer.R
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.draw.drawBehind
+import com.ikverse.egxanalyzer.R
 import com.ikverse.egxanalyzer.model.isEgx33
 import com.ikverse.egxanalyzer.ui.theme.pageAccent
+import java.time.LocalDate
+import kotlin.math.max
+import kotlin.math.min
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.style.TextAlign
-import java.time.LocalDate
+import kotlinx.coroutines.launch
 
 /**
  * Standard page frame: the page's own name at the top, shrinking as the page is read.
@@ -974,6 +979,61 @@ private val ActionRing = 1.dp
  * as two bright wires on a dark card - the same fault the action's own edge was taken down for.
  */
 private const val ActionRingAlpha = 0.5f
+
+/**
+ * An action on a settings card, at the size a settings card wants.
+ *
+ * Material's own button is 40dp tall with 24dp of padding on each side, which is the size of a
+ * button that is the point of the screen it is on. Down a list of settings it is not: it is one row
+ * among twenty, standing beside switches 32dp tall, and at the default it was the heaviest thing on
+ * a card whose subject is the words next to it. [PillHeight] and [Space.m] put it at the height
+ * every other button in this app is already drawn at.
+ *
+ * It stays an [OutlinedButton] rather than becoming an [ActionPill], and the two are different
+ * things rather than one thing drawn twice. A pill sits **on a card about one call or one trade**
+ * and takes the page's own hue to say that pressing it changes the record. These sit on a page of
+ * settings, several to a card, half of them opening a picker rather than changing anything - and a
+ * column of cyan rings down Settings would be the page of coloured glyphs the question mark is
+ * muted to avoid.
+ *
+ * `labelMedium`, which is what both card buttons already carry: at this height Material's
+ * `labelLarge` is a 14sp line in a 32dp box, and the button reads as the text having outgrown it.
+ *
+ * This is the pass of 2026-09-03 finished. It stopped at the cards and left Settings, Channels,
+ * Backup and Schedules holding about forty buttons in the old mixed state.
+ *
+ * @param filled the card's own primary action, where it has one - Save and verify, Sync now,
+ *   Download. It carries **both** shapes rather than leaving the filled ones at Material's height,
+ *   because they share a row with the outlined ones: Save and verify stands in a `FlowRow` beside
+ *   Reset provider and Remove credential, and a row 40dp tall at one end and 32 at the other reads
+ *   as a layout fault rather than as an emphasis. Which button is filled is unchanged; only how
+ *   tall the row is.
+ */
+@Composable
+internal fun SettingsButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    filled: Boolean = false,
+    content: @Composable RowScope.() -> Unit,
+) {
+    // Ahead of Material's own `defaultMinSize`, which raises a minimum only where nothing has set
+    // one - so this wins by being applied first, and the button is not fighting a 40dp floor it can
+    // never get under.
+    val sized = modifier.heightIn(min = PillHeight)
+    val padding = PaddingValues(horizontal = Space.m)
+    // The row is held rather than passed through: `ProvideTextStyle` takes a plain composable, so
+    // inside it the button's own `RowScope` is out of scope and an icon's `align` would not resolve.
+    val label: @Composable RowScope.() -> Unit = {
+        val row = this
+        ProvideTextStyle(MaterialTheme.typography.labelMedium) { row.content() }
+    }
+    if (filled) {
+        Button(onClick, sized, enabled, contentPadding = padding, content = label)
+    } else {
+        OutlinedButton(onClick, sized, enabled, contentPadding = padding, content = label)
+    }
+}
 
 /**
  * The button that opens or closes a section of the card it sits on, and does nothing else.

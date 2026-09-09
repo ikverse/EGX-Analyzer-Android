@@ -122,7 +122,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `ui/CommonUi.kt` holds `Figure` and `FigureGroup`, and `ui/DesignSystem.kt` holds `AppDates` —
   the one figure layout and the one set of date patterns, for every screen that draws either.
   `CommonUi.kt` also holds `ActionPill` and `DisclosureButton`, the two kinds of button a card is
-  allowed to carry. See **A button on a card is one of two things** under Gotchas.
+  allowed to carry, and `SettingsButton`, the one a settings page carries. See **A button on a card
+  is one of two things** under Gotchas.
 - `ui/PageHeader.kt` — the page's own name and icon at the top of every screen, shrinking as the
   page is read, and the two controls that arrive with the collapsed bar: the page's stock filter,
   and the icon that opens the rest of its filters. It replaced the `EGX Analyzer` band on
@@ -2513,10 +2514,14 @@ app's.
   (`ExpandableSection`, `SectionCard` and `SubSection` all take an `about`), where it is reachable
   without opening the card at all. `WordingFlowNote` and `GeneratedPromptNote` are exported for
   exactly that — the words belong to the section that owns them, the heading belongs to Settings.
-- **`SettingToggle` leads with its control, switch or checkbox alike.** Fifteen hand-built rows had
+- **`SettingToggle` leads with its name and trails with its switch.** Fifteen hand-built rows had
   drifted into a checkbox leading here, a switch trailing there, and two gaps between control and
-  label. Which control is used says how heavy the setting is — a switch arms the phone to act
-  unattended — never where it sits.
+  label; the first pass at this made the control lead in every case, which levelled them and put
+  every label 52dp in from the card's edge — past the heading above it, past the sentences under it,
+  past the buttons on the same card. So the one column a settings card is actually read down, the
+  names of the settings, was the only column on it that started nowhere in particular. Since
+  2026-09-09 the name starts where everything else on the card starts and the switches make their
+  own column at the trailing edge, under the heading's chevron.
 - **`SettingLabel` defaults to `labelLarge` and takes `bodyLarge` for a value.** A version number and
   a slider's current reading were body type before they gained a question mark; shrinking a figure to
   make room for the affordance beside it is the affordance changing what it was added to explain.
@@ -2524,20 +2529,32 @@ app's.
   there.** Four rows had been built by hand - Save diagnostics, Restore from a backup, Fetch prices
   now, Add a schedule - and each put its question mark immediately after the button, where
   `SettingToggle` and `SettingLabel` put theirs at the trailing edge: the same affordance in two
-  places on one card, so neither read as a column. A row that carries one also holds open
-  `ChevronGutter`, the 24dp `ExpandableSection` spends on its chevron, because the group's own
-  question mark sits *before* that chevron - without the gutter the headings' column and the
-  contents' column stand 24dp apart down a page made almost entirely of those two things. The
-  gutter is spent only on a row that has a question mark, so nothing else gives up any width.
-- **`SettingToggle` draws its checkbox 14dp left of where Material puts it.** That padding is inside
-  the touch target, so a card whose buttons, text and sliders all start at the card's own edge had
-  its checkboxes starting 14dp further in - the one thing on the page not lining up with the rest.
-  The target keeps its full 48dp and overhangs the card's own padding by that much, so pressing it
-  is unchanged - shifted rather than resized, because forcing the size from outside puts the
-  constraints on the wrong side of Material's internal padding and draws the box against the corner
-  of its cell instead of in the middle. Both
-  controls then stand in one `ControlColumn` as wide as the switch, which is what puts a checkbox's
-  label and a switch's label at the same place; left to themselves the two sat 16dp apart.
+  places on one card, so neither read as a column. Where the row has a **control**, the question
+  mark now sits inboard of it — next to the words it explains rather than past the thing it does
+  not — and the control takes the trailing edge; where the row ends at the question mark, as an
+  action row does, the mark keeps the edge and holds open `ChevronGutter`, the 24dp
+  `ExpandableSection` spends on its chevron, because the group's own question mark sits *before*
+  that chevron. The gutter is spent only on a row that ends at a question mark, so nothing else
+  gives up any width — and a row with a switch must not spend it, or the switch stops short of the
+  chevron's column by exactly that much. **What this costs** is that a toggle row's question mark no
+  longer lines up with the heading's, since the switch now stands in the column the heading's
+  chevron does; the marks down the body of a card still line up with each other.
+- **`SettingRow` sizes that question mark to 36dp rather than `IconButton`'s 48.** A switch is 32dp
+  and a `SettingsButton` is 32dp, so the full touch target made every row with an explanation taller
+  than every row without — one list of settings at two heights, and the taller ones picked out by
+  nothing more meaningful than having a paragraph behind them. The padding goes **outside** the
+  size and not inside it: applied after, it eats the target down to 12dp rather than moving it.
+- **`ControlColumn` is gone, and so is the nudge that went with it.** It was a 52dp leading column
+  the control stood in, wide as a switch, so that a row built by hand could start its label where a
+  switch row started its own — and beside it `SettingToggle` shifted its checkbox 14dp left of where
+  Material draws it, because a card whose buttons, text and sliders all began at the card's own edge
+  had its checkboxes beginning 14dp further in. Both were answers to the control leading. With the
+  switch at the trailing edge there is no leading column left to align to: labels start at the
+  card's own inset, which is what everything else on the card already did.
+- **An action row keeps its button leading.** A button carries its own label, so there is no text
+  beside it to align and nothing for the trailing edge to line up with — pushed there it would
+  leave the line empty. Which is why `SettingRow.trailing` is null on those rows rather than being
+  handed the button.
 - **Five kinds of text deliberately stayed on the page**, and the distinction is what stops this
   becoming a way to hide things: an `AlertDialog`'s body, because a confirmation *is* its
   explanation; live status and error lines, which report a state rather than a rule; empty states,
@@ -2855,9 +2872,21 @@ parameter being threaded anywhere. Added 2026-09-08.
   aurora and a tier above anything drawn on a card (see the entries above); and an `AlertDialog`'s
   buttons, which are Material's convention rather than this app's. **The pills are 32dp and the
   touch target is still 48**, through `minimumInteractiveComponentSize` — the trick the Ask AI pill
-  already used, and the reason a smaller button here costs nothing to press. Settings, Channels,
-  Backup and Schedules were left out of the pass on 2026-09-03 and still hold ~40 buttons in the
-  old mixed state.
+  already used, and the reason a smaller button here costs nothing to press. Settings, Backup and
+  Prices were finished on 2026-09-09 by `SettingsButton`, the bullet below. **Channels is
+  deliberately still Material's own**: its eight `Button`s are the steps of the Telegram sign-in,
+  each the sole action of the card it is on and correctly the point of that screen.
+- **`SettingsButton` is the third kind, for a page of settings rather than a card about one call.**
+  `PillHeight` and `Space.m` against Material's 40dp and 24, and `labelMedium` like both card
+  buttons — at the default it was the heaviest thing on a card whose subject is the words beside it,
+  standing next to switches 32dp tall. It stays an `OutlinedButton` rather than becoming an
+  `ActionPill`: a pill takes the page's own hue to say that pressing it changes the record, and a
+  column of cyan rings down Settings is the page of coloured glyphs the question mark is muted to
+  avoid. It carries a `filled` flag for the four card primaries — Save and verify, Sync now,
+  Download, Install — **because they share a row with the outlined ones**, and a `FlowRow` 40dp tall
+  at one end and 32 at the other reads as a layout fault rather than as emphasis. Which button is
+  filled did not change; only how tall the row is. `AlertDialog` buttons stay Material's, the same
+  exception the card pills make.
 - **A report card opens on a press anywhere, and only while it is shut.** `Card(onClick = …,
   enabled = !expanded)` in `SavedAnalysisCard`, with `disabledContainerColor` pinned to the same
   fill so "disabled" does not read as greyed out. Open, that card holds the report's own toolbar,

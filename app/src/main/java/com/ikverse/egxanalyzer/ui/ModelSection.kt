@@ -26,7 +26,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -286,7 +285,7 @@ private fun ModelPickerSheet(appState: AppState, onDismiss: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            OutlinedButton(
+            SettingsButton(
                 onClick = { scope.launch { appState.loadCloudModels() } },
                 enabled = !appState.modelListLoading,
                 modifier = Modifier.fillMaxWidth(),
