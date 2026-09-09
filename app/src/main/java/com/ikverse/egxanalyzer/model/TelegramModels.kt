@@ -26,6 +26,14 @@ data class TelegramChat(
     val id: Long,
     val title: String,
     val kind: ChatKind,
+    /**
+     * Where this chat's profile photo sits on the device, or null when Telegram has none for it or
+     * has not handed it over yet.
+     *
+     * A path rather than the bytes: Telegram already stores the file, and a list of a hundred chats
+     * has no business holding a hundred bitmaps alive to draw thirty-six pixels each.
+     */
+    val photoPath: String? = null,
 )
 
 data class TelegramSourceBatch(

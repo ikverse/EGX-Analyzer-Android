@@ -34,6 +34,16 @@ class FakeAppState(
     override val credentialVerified: Boolean? = null,
     override val promptHistory: List<PromptSnapshot> = emptyList(),
     override val catalogMessage: String = "",
+    // Enough to fill the header's search panel in a preview, and enough to show it folding an
+    // Arabic spelling: typing `المصريه` finds the entry spelled with the tied ta.
+    override val stockDirectory: List<DirectoryStock> = listOf(
+        DirectoryStock("COMI", "Commercial International Bank", "البنك التجاري الدولي"),
+        DirectoryStock("HRHO", "EFG Holding", "المجموعة المالية هيرميس"),
+        DirectoryStock("ETEL", "Telecom Egypt", "المصرية للاتصالات"),
+        DirectoryStock("SWDY", "Elsewedy Electric", "السويدي إليكتريك"),
+        DirectoryStock("TMGH", "Talaat Moustafa Group", "مجموعة طلعت مصطفى"),
+        DirectoryStock("ABUK", "Abu Qir Fertilizers", "أبو قير للأسمدة"),
+    ),
     override val availableModels: List<CloudModelInfo> = emptyList(),
     override val modelUsage: List<ModelUsageRecord> = emptyList(),
     override val modelListLoading: Boolean = false,

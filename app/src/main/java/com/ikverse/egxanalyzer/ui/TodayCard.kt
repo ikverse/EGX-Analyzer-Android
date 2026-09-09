@@ -1,6 +1,5 @@
 package com.ikverse.egxanalyzer.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -226,17 +225,15 @@ private fun EventTile(event: DayEvent, onOpen: () -> Unit, modifier: Modifier = 
     ) {
         Column(Modifier.padding(horizontal = Space.m, vertical = Space.xs)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // The mark and the code press through to the stock, inside a tile that already
-                // presses through to the trade or the call. Two targets on one tile, and the
-                // smaller is the one that has to be aimed at: the tile is a thing that happened
-                // this session and the ticker is the stock it happened to, which are different
-                // questions and both worth asking from here. The arrow is deliberately outside
-                // this press - it belongs to the tile's own. See LocalOpenStock.
-                val openStock = LocalOpenStock.current
+                // The ticker is **not** a second target here, and this tile is one of the two
+                // places that is true - see the Overdue tile for the other. Both are the smallest
+                // tiles in the app, and a target inside a target that small is one the reader hits
+                // by accident on the way to the tile's own press rather than one they aim at. The
+                // trade or call this opens carries the ticker press itself, so the stock is a step
+                // further off and not out of reach. The Row and its weight stay: fill = false is
+                // what keeps the arrow against the end of the ticker. See LocalOpenStock.
                 Row(
-                    Modifier
-                        .weight(1f, fill = false)
-                        .clickable { openStock(event.ticker) },
+                    Modifier.weight(1f, fill = false),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     StockLogo(event.ticker, LogoSize.Row, Modifier.padding(end = Space.s))

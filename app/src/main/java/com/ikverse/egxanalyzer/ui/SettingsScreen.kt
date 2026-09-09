@@ -162,7 +162,8 @@ internal fun SettingsScreen(appState: AppState) {
     )
 
     Screen(
-        title = "Settings",
+        appState = appState,
+        destination = AppDestination.SETTINGS,
     ) {
         // One card for everything a run depends on, in the order a run uses it: which model,
         // what is sent to it, the wording it is told about, the prompt that carries it, and

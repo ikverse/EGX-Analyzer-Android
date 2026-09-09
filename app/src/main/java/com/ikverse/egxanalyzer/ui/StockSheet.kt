@@ -167,9 +167,15 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
             }
         }?.takeIf(ChartLevels::any)
     }
-    // Every session anybody named this stock on, which is what the rings on the line mark. A set
-    // because two channels calling it on one morning are one mark on one session.
-    val callDates = remember(calls) { calls.mapTo(mutableSetOf(), ScoredCall::openedOn) }
+    // Every session anybody named this stock on, which is what the rings on the line mark, and who
+    // named it - the chart marks the session and the readout under a thumb says whose it was. Two
+    // channels calling it on one morning are one mark, counted rather than one of them picked.
+    val callDates = remember(calls) {
+        calls.groupBy(ScoredCall::openedOn).mapValues { (_, made) ->
+            val channels = made.map(ScoredCall::channel).distinct()
+            if (channels.size == 1) "⁨${channels.first()}⁩ called it" else "${channels.size} sources called it"
+        }
+    }
     // Off the disk rather than out of the report, and after the sheet is already on screen: the
     // rest of this sheet is in memory and must not wait behind a query. An empty list draws no
     // line, which is what a stock the feed has never carried should look like.
@@ -417,7 +423,8 @@ private fun StockSheetPrice(
     latest: LatestPrice?,
     history: List<DailySession>,
     levels: ChartLevels?,
-    calls: Set<LocalDate>,
+    /** Which sessions carry a call, and who made it, by session. */
+    calls: Map<LocalDate, String>,
     pages: PageState,
 ) {
     if (latest == null && history.isEmpty()) return
@@ -434,6 +441,10 @@ private fun StockSheetPrice(
     }
     val move = remember(visible) { visible.rangeMove() }
     val shown = if (showLevels) levels else null
+    // Kept after the finger lifts, and cleared by changing the range - which is a `remember` keyed
+    // on what is drawn rather than a rule anybody had to write. A reading the reader took on
+    // purpose is theirs until they ask a different question.
+    var touched by remember(visible) { mutableStateOf<DailySession?>(null) }
     SheetSection {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             SectionLabel("Where it stands")
@@ -452,13 +463,42 @@ private fun StockSheetPrice(
             PriceChart(
                 visible,
                 shown,
-                calls,
+                calls.keys,
                 on = MaterialTheme.colorScheme.surfaceContainerHigh,
+                selected = touched,
+                onSelect = { touched = it },
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                ChartCaption(AppDates.DayMonth.format(visible.first().date))
-                if (visible.any { it.date in calls }) ChartCaption("○ a call was made")
-                ChartCaption(AppDates.DayMonth.format(visible.last().date))
+            // The readout takes the dates' own line rather than appearing above it: a caption that
+            // arrived on touch would push the chart up under the finger that asked for it.
+            val reading = touched
+            if (reading?.close != null) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                ) {
+                    Text(
+                        AppDates.DayMonth.format(reading.date) + " · " +
+                            formatPrice(reading.close),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = TabularFigures,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    // What the reader is looking at is a ring on the line; naming the source is
+                    // what turns it from a mark into the reason that session is on the chart.
+                    val since = visible.moveTo(reading)
+                    ChartCaption(
+                        calls[reading.date]
+                            ?: since?.let { formatPercent(it) + " since " + AppDates.DayMonth.format(visible.first().date) }
+                            ?: "",
+                    )
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    ChartCaption(AppDates.DayMonth.format(visible.first().date))
+                    if (visible.any { it.date in calls }) ChartCaption("○ a call was made")
+                    ChartCaption(AppDates.DayMonth.format(visible.last().date))
+                }
             }
             // Whose levels these are, which is the one thing a coloured line across a chart cannot
             // say for itself.
@@ -981,6 +1021,14 @@ private fun formatSignedPrice(value: Double): String =
  * The figure the shape cannot carry: a chart scaled to its own range draws the same climb whether
  * the stock moved three percent or forty, which is the first thing a reader asks of it.
  */
+/** What the line had done by the touched session, measured from the left-hand end of the range. */
+private fun List<DailySession>.moveTo(session: DailySession): Double? {
+    val first = firstOrNull { it.close != null }?.close ?: return null
+    val close = session.close ?: return null
+    if (first <= 0.0) return null
+    return (close - first) / first * 100
+}
+
 private fun List<DailySession>.rangeMove(): Double? {
     val priced = filter { it.close != null }
     if (priced.size < 2) return null

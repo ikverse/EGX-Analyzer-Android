@@ -1,6 +1,8 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,7 +11,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -21,7 +25,10 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
@@ -32,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.DailySession
 import java.time.LocalDate
 import java.time.Period
+import kotlin.math.roundToInt
 
 /**
  * How far back the chart is drawn, as a reader thinks of it.
@@ -129,6 +137,10 @@ internal fun PriceChart(
     levels: ChartLevels?,
     calls: Set<LocalDate>,
     on: Color,
+    /** The session under the reader's thumb, drawn with a crosshair. Null until one is touched. */
+    selected: DailySession?,
+    /** Reports what was touched, so the caption under the chart can read it out. */
+    onSelect: (DailySession) -> Unit,
     modifier: Modifier = Modifier,
     height: Dp = ChartHeight,
 ) {
@@ -206,10 +218,43 @@ internal fun PriceChart(
     }
 
     val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
+    val chosen = remember(points, selected) {
+        selected?.let { session -> points.indexOfFirst { it.date == session.date } }
+            ?.takeIf { it >= 0 }
+    }
+    // Snapped to whole sessions rather than slid between them: a close is one figure a day, and a
+    // price read off the gap between two of them is a price nobody quoted.
+    // Read through the composition rather than captured by the gesture blocks. `pointerInput` is
+    // keyed on the points, so it does not restart when the selection changes - a lambda captured
+    // when the chart was first drawn would go on comparing against the index chosen *then*, which
+    // is a haptic tick and a state write on every pixel of a drag rather than on every session.
+    val pick by rememberUpdatedState<(Float, Float) -> Unit> { x, width ->
+        val step = width / (points.size - 1)
+        val index = (x / step).roundToInt().coerceIn(points.indices)
+        if (index != chosen) {
+            // The tick the platform uses for dragging a text handle, which is what this is: a
+            // marker being moved along a track, one stop at a time.
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onSelect(points[index])
+        }
+    }
     Canvas(
         modifier
             .fillMaxWidth()
             .height(height)
+            // Two detectors rather than one gesture loop, and the split is what keeps the sheet
+            // scrollable. A tap reads without claiming anything; a drag is claimed only once the
+            // finger has moved **horizontally** past touch slop, so a straight-down swipe over a
+            // 150dp band still scrolls the sheet behind it instead of scrubbing the line.
+            .pointerInput(points) {
+                detectTapGestures { offset -> pick(offset.x, size.width.toFloat()) }
+            }
+            .pointerInput(points) {
+                detectHorizontalDragGestures(
+                    onDragStart = { offset -> pick(offset.x, size.width.toFloat()) },
+                ) { change, _ -> pick(change.position.x, size.width.toFloat()) }
+            }
             .semantics {
                 contentDescription = "${points.size} sessions, " +
                     formatPrice(closes.first()) + " to " + formatPrice(closes.last()) +
@@ -287,6 +332,22 @@ internal fun PriceChart(
             radius = LatestDot.toPx(),
             center = Offset(size.width, y(closes.last())),
         )
+
+        // The crosshair is drawn over everything: it is the one thing on this chart that is under
+        // the reader's own finger, and a guide crossing it would read as part of the price.
+        chosen?.let { index ->
+            val at = Offset(index * step, y(closes[index]))
+            drawLine(
+                color = markColor,
+                start = Offset(at.x, 0f),
+                end = Offset(at.x, size.height),
+                strokeWidth = GuideStroke.toPx(),
+            )
+            // Filled and ringed in the surface, so it stands clear of the line it sits on whichever
+            // way the line happens to be running through it.
+            drawCircle(color = on, radius = TouchDot.toPx() + RingStroke.toPx(), center = at)
+            drawCircle(color = lineColor, radius = TouchDot.toPx(), center = at)
+        }
 
         val placed = layoutChartLabels(
             (labels + edges).map { y(it.value) },
@@ -465,6 +526,9 @@ private val CallRing = 4.dp
 private val RingStroke = 1.5.dp
 
 private val LatestDot = 3.5.dp
+
+/** Bigger than the latest dot: it is under a fingertip and has to be found by eye beside it. */
+private val TouchDot = 4.5.dp
 
 private val LabelInset = 2.dp
 

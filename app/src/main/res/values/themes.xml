@@ -1,9 +1,15 @@
 <resources>
     <style name="Theme.EGXAnalyzer" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:navigationBarColor">#0B0F14</item>
-        <item name="android:statusBarColor">#0B0F14</item>
+        <!--
+          No statusBarColor, navigationBarColor or windowLightStatusBar here. The app is edge to
+          edge, so from API 35 the platform ignores the first two outright and draws the bars
+          transparent over whatever the app has painted - which is now the page itself, carrying its
+          own accent wash up behind the clock. The three values that used to be here painted a
+          #0B0F14 strip belonging to neither palette and forced light-on-dark icons on a theme the
+          user can set to Light. Which way the glyphs read is decided in `MainActivity`, from the
+          app's own resolved theme rather than the system's.
+        -->
         <item name="android:windowActionModeOverlay">true</item>
         <!--
           The launch window, which the platform draws itself from API 31 - minSdk here - so this

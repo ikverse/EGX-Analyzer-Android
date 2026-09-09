@@ -1,6 +1,15 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.core.animate
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import kotlinx.coroutines.launch
+import kotlin.math.max
+import kotlin.math.min
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -86,15 +95,38 @@ import androidx.compose.ui.text.style.TextAlign
 import java.time.LocalDate
 
 /**
- * Standard page frame: a large title that scrolls away with the content.
+ * Standard page frame: the page's own name at the top, shrinking as the page is read.
  *
- * The title scrolls rather than sitting in a fixed app bar so these screens, which are long, get
- * the full height on a phone.
+ * The title used to be the first line inside the scroll, under a band that said `EGX Analyzer` on
+ * all five tabs. The band is gone as of 2026-09-09 and this is what replaced it - see [PageHeader],
+ * which explains the shrink, and `AppContent`, which explains why there is no chrome above it any
+ * more.
+ *
+ * **The header eats the scroll before the page moves.** [HeaderCollapseTravel] of every downward
+ * gesture goes into the collapse first and is not passed on, which is the whole reason there is a
+ * `NestedScrollConnection` here rather than an arithmetic on `scroll.value`: a header that merely
+ * shrank *as* the page scrolled would move the content at twice the speed of the finger for the
+ * first 40dp, because the page rises by whatever height the header gives up on top of its own
+ * travel.
+ *
+ * **It grows back only with the page at its top.** Expanding on any upward delta would pop the
+ * title open in the middle of a long page, and - on the three screens that pull to refresh - would
+ * fight the gesture: this connection is the outer one, so it sees a downward drag before
+ * `PullToRefreshBox` does. Gated on `scroll.value == 0` the two take their turns in the order a
+ * reader expects, the header first and then the refresh.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun Screen(
-    title: String,
+    /** For the header's stock search, the status line, and the progress hairline under it. */
+    appState: AppState,
+    /**
+     * Which page this is - the title and the icon both come from it.
+     *
+     * Taken rather than a `title` string so that the name at the top of the page and the label in
+     * the navigation cannot drift apart: there is one of each, on [AppDestination].
+     */
+    destination: AppDestination,
     /** Stays put while the page scrolls. The content reserves room so it never covers anything. */
     floatingAction: (@Composable () -> Unit)? = null,
     /** Given, the page pulls down to refresh. Its spinner is [refreshing]. */
@@ -106,6 +138,35 @@ internal fun Screen(
     // Where the scrolling area begins on screen, so anything inside it can pin itself there. A
     // table header has no other way to know how far it has been scrolled past.
     var viewportTop by remember { mutableFloatStateOf(0f) }
+    // How much of the header has been taken, in pixels, between 0 and [HeaderCollapseTravel].
+    //
+    // Written from the scroll callback below and read in two places: [PageHeader]'s own
+    // composition, and the wash's draw lambda. Never read in this function's composition - the page
+    // under it would then recompose on every frame of a collapse.
+    val travel = with(LocalDensity.current) { HeaderCollapseTravel.toPx() }
+    val taken = remember { mutableFloatStateOf(0f) }
+    val headerScroll = remember(travel, scroll) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                return when {
+                    // Reading on: the header shrinks before the page underneath is asked to move.
+                    delta < 0f && taken.floatValue < travel -> {
+                        val used = max(delta, -(travel - taken.floatValue))
+                        taken.floatValue -= used
+                        Offset(0f, used)
+                    }
+                    // Back at the top: the title comes back before anything else takes the gesture.
+                    delta > 0f && taken.floatValue > 0f && scroll.value == 0 -> {
+                        val used = min(delta, taken.floatValue)
+                        taken.floatValue -= used
+                        Offset(0f, used)
+                    }
+                    else -> Offset.Zero
+                }
+            }
+        }
+    }
     // The bottom bar gets out of the way while a page is being read, and comes back the moment it is
     // pulled back up. Taken from this page's own scroll position rather than from the gesture, so
     // scrolling a list inside a card - the chat list, the source list - leaves the bar alone.
@@ -118,15 +179,15 @@ internal fun Screen(
         var mark = scroll.value
         var lastMax = scroll.maxValue
         snapshotFlow { scroll.value to scroll.maxValue }.collect { (offset, max) ->
-            // **Only a still page is read as a gesture.** Hiding the chrome makes the header
-            // collapse, which gives this page a taller viewport, which shortens `maxValue` - and at
-            // the foot of a page a shorter `maxValue` clamps the offset down by the height the
-            // header just gave up. That drop is not a reader pulling the page back; it is the page
-            // growing under them. Read as a gesture it showed the chrome again, which shrank the
-            // viewport, which pushed the offset back down, which hid it again - the two pieces of
-            // chrome flickering in and out for as long as a finger was moving, and never settling
-            // hidden. So a frame where the extent changed only re-marks where the page is: the
-            // watcher picks up again from there once the header has finished moving.
+            // **Only a still page is read as a gesture.** The header collapsing gives this page a
+            // taller viewport, which shortens `maxValue` - and at the foot of a page a shorter
+            // `maxValue` clamps the offset down by the height the header just gave up. That drop is
+            // not a reader pulling the page back; it is the page growing under them. Read as a
+            // gesture it showed the chrome again, which shrank the viewport, which pushed the
+            // offset back down, which hid it again - the chrome flickering for as long as a finger
+            // was moving, and never settling hidden. So a frame where the extent changed only
+            // re-marks where the page is: the watcher picks up again from there once the header has
+            // finished moving.
             if (max != lastMax) {
                 lastMax = max
                 mark = offset
@@ -146,9 +207,13 @@ internal fun Screen(
     // Pressing the destination already showing means "take me back to the top". Animated rather
     // than jumped, so it reads as the page travelling rather than as the content being replaced -
     // and the watcher above brings the navigation back on its own as the offset passes the slop.
+    // The header comes back with it: the scroll that took it is being undone, so leaving it
+    // collapsed would strand the one piece of chrome the press is aimed at.
     val scrollToTop = LocalScrollToTop.current
     LaunchedEffect(scrollToTop) {
-        if (scrollToTop > 0) scroll.animateScrollTo(0)
+        if (scrollToTop <= 0) return@LaunchedEffect
+        launch { animate(taken.floatValue, 0f) { value, _ -> taken.floatValue = value } }
+        scroll.animateScrollTo(0)
     }
 
     // The bar floats over the page, so the page has to hold its own content out from under it.
@@ -170,19 +235,45 @@ internal fun Screen(
                 ),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            Text(title, Modifier.padding(start = PageTextInset), style = MaterialTheme.typography.headlineLarge)
             content()
         }
     }
     CompositionLocalProvider(LocalViewportTop provides viewportTop) {
-    Box(Modifier.fillMaxSize()) {
-        PageWash(scroll)
-        if (onRefresh == null) {
-            page()
-        } else {
-            // The gesture wraps only the scrolling page: a floating button that slid down with the
-            // indicator would look like it had come loose.
-            PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh) { page() }
+    Box(Modifier.fillMaxSize().nestedScroll(headerScroll)) {
+        PageWash(scroll) { taken.floatValue }
+        Column(Modifier.fillMaxSize()) {
+            PageHeader(
+                destination = destination,
+                // A lambda, not a value. Read here it would be this function recomposing on every
+                // frame of a collapse, and this function composes the whole page.
+                collapse = { (taken.floatValue / travel).coerceIn(0f, 1f) },
+                directory = appState.stockDirectory,
+                onOpenStock = appState::openStock,
+            )
+            // Under the header rather than above it, because the header is the top of the window
+            // now. Above the page's own content, so a run starting does not push the first card
+            // down the screen.
+            if (appState.busyLabel != null) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+            // One line for everything the app is doing or has just done. It sat in the app-name
+            // band until that band was removed; it is here, on the page, because the page starts at
+            // the top of the window now and there is nowhere above it left to be. Still outside the
+            // scroll, so a message can never land off screen.
+            AppStatusLine(
+                appState = appState,
+                onDismiss = appState::consumeStatusMessage,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = Space.l),
+            )
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                if (onRefresh == null) {
+                    page()
+                } else {
+                    // The gesture wraps only the scrolling page: a floating button that slid down
+                    // with the indicator would look like it had come loose.
+                    PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh) { page() }
+                }
+            }
         }
         floatingAction?.let {
             if (compact) {
@@ -196,11 +287,6 @@ internal fun Screen(
                 // bar gone it takes the bar's own place, on the bar's own PillBottomMargin, rather
                 // than hovering over the hole it left. The travel is exactly NavBarFootprint, which
                 // is what makes it land there and not near there.
-                //
-                // This is the rule `toastClearance` in the shell already follows, for the same
-                // reason and in the same words - "so a toast raised on a scrolled page does not
-                // hang over the gap where the bar used to be". The action was the one piece of
-                // floating chrome not following it.
                 val liftedClear = NavBarFootprint + PillBottomMargin
                 val lift by animateDpAsState(
                     if (navBarVisible.value) liftedClear else PillBottomMargin,
@@ -461,14 +547,16 @@ internal fun SectionCard(
  * whole page, where here a frame costs one rectangle repainted.
  */
 @Composable
-private fun PageWash(scroll: ScrollState) {
+private fun PageWash(scroll: ScrollState, taken: () -> Float) {
     val wash = pageAccent.wash
     Box(
         Modifier
             .fillMaxWidth()
             .height(PageWashHeight)
             .drawBehind {
-                val left = (1f - scroll.value / size.height).coerceIn(0f, 1f)
+                // What the header ate counts as scroll here, or the wash would sit at full strength
+                // through the whole collapse and only begin to fade once the page itself moved.
+                val left = (1f - (scroll.value + taken()) / size.height).coerceIn(0f, 1f)
                 if (left <= 0f) return@drawBehind
                 drawRect(
                     Brush.verticalGradient(
@@ -479,8 +567,15 @@ private fun PageWash(scroll: ScrollState) {
     )
 }
 
-/** How far down the page the wash reaches, and so how far it takes to scroll it away. */
-private val PageWashHeight = 120.dp
+/**
+ * How far down the page the wash reaches, and so how far it takes to scroll it away.
+ *
+ * Measured from the top of the *window* rather than from the top of the content, since the page
+ * runs up behind the status bar now - see `AppContent`. The extra 40dp over the old 120 is roughly
+ * the bar it has to cover before it starts on the page, so the tint fades over the same stretch of
+ * reading as it did rather than appearing to burn off faster.
+ */
+private val PageWashHeight = 160.dp
 
 /** A hairline of the card's own hue. Wider and it is a stripe the content has to sit clear of. */
 private val AccentEdgeWidth = 3.dp

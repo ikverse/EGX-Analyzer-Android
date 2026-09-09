@@ -1,11 +1,14 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -374,7 +378,7 @@ private fun ChannelCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            KindBadge(channel)
+            ChatAvatar(channel)
             Column(Modifier.weight(1f)) {
                 // Not truncated: chats can differ only by a trailing emoji, so cutting the name
                 // short can make two different chats look identical.
@@ -405,6 +409,43 @@ private fun ChannelCard(
             }
             Checkbox(checked = channel.selected, onCheckedChange = null)
         }
+    }
+}
+
+/**
+ * The head of a chat row: the chat's own picture, where Telegram has one.
+ *
+ * Falls back to [KindBadge] rather than to initials on a colour. The glyph is what made a list of a
+ * dozen chats sortable in the first place, and a chat with no picture is better served by the badge
+ * that says what kind it is than by a coloured letter that says nothing.
+ *
+ * Selection has to survive the swap. The badge carries it as a fill, which a photograph cannot do,
+ * so here it is a ring - still down the left edge, where every row starts, and still only confirming
+ * what the card's own colour and the checkbox already say.
+ */
+@Composable
+private fun ChatAvatar(channel: ChannelSelection) {
+    val photo = rememberTelegramImage(channel.photoPath, maxPixels = AvatarPixels)
+    if (photo == null) {
+        KindBadge(channel)
+        return
+    }
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        border = if (channel.selected) {
+            BorderStroke(AvatarRing, MaterialTheme.colorScheme.primary)
+        } else {
+            null
+        },
+        modifier = Modifier.size(AvatarSize),
+    ) {
+        Image(
+            bitmap = photo,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 
@@ -441,6 +482,20 @@ private fun KindBadge(channel: ChannelSelection) {
 
 /** Big enough to read as an avatar rather than a stray icon, small enough for a two-line row. */
 private val BadgePadding = 8.dp
+
+/** Derived from the badge rather than restated, so a picture leaves the row exactly as it was. */
+private val AvatarSize = IconSize.Inline + BadgePadding * 2
+
+/** Thick enough to read as chosen at 36dp; a hairline round a photograph disappears into it. */
+private val AvatarRing = 2.dp
+
+/**
+ * Telegram's small profile photo is 160px square, so this decodes it whole.
+ *
+ * Sampling it down to fit a 36dp box lands under the pixels a 3x screen actually draws, and a
+ * blurred avatar reads as a broken one rather than as a small one.
+ */
+private const val AvatarPixels = 256
 
 private fun ChatKind.icon(): ImageVector = when (this) {
     ChatKind.CHANNEL -> Icons.Outlined.Campaign

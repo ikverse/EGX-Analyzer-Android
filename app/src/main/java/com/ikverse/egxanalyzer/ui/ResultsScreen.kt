@@ -97,7 +97,8 @@ import kotlin.math.roundToInt
 internal fun ResultsScreen(appState: AppState) {
     val scope = rememberCoroutineScope()
     Screen(
-        title = "Results",
+        appState = appState,
+        destination = AppDestination.RESULTS,
         onRefresh = { scope.launch { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
     ) {

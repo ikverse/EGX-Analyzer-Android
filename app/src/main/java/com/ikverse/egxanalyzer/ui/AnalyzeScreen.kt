@@ -59,7 +59,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -123,7 +122,8 @@ internal fun AnalyzeScreen(appState: AppState) {
     // opened app tells someone who has done nothing wrong that something is broken.
     var attempted by remember { mutableStateOf(false) }
     Screen(
-        title = "Analyze",
+        appState = appState,
+        destination = AppDestination.ANALYZE,
         floatingAction = {
             val big = LocalWindowWidth.current != WindowWidth.COMPACT
             val actionModifier = Modifier.height(if (big) BigActionHeight else ActionHeight)
@@ -170,13 +170,11 @@ internal fun AnalyzeScreen(appState: AppState) {
                     modifier = actionModifier,
                     painted = fill,
                     stretch = !big,
-                    // The one red left on the button, and a hairline of it. The moving fill says a
-                    // model is working, which is not the same as saying what pressing this does -
-                    // and with the spinner gone the label was carrying that on its own. It keeps
-                    // the red rather than the ready state's gradient for that reason: this is the
-                    // only state where pressing cancels, and no edge in the action's own colours
-                    // could say so.
-                    outline = SolidColor(ai.aiStop),
+                    // The page's own hairline, the same edge the ready state wears, so the button
+                    // keeps one line round it through all three of its states. What a press does
+                    // here is the label's job: a red edge on a button whose fill is already moving
+                    // read as a warning about the run rather than as a control.
+                    outline = actionEdge,
                     // The mark rather than a spinner, turning once every few seconds: the fill
                     // moving under it is what reports the run is alive. A spinner on top of that is
                     // one control saying "waiting" twice.

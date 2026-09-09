@@ -123,8 +123,13 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   the one figure layout and the one set of date patterns, for every screen that draws either.
   `CommonUi.kt` also holds `ActionPill` and `DisclosureButton`, the two kinds of button a card is
   allowed to carry. See **A button on a card is one of two things** under Gotchas.
-- `ui/EgxAnalyzerApp.kt` holds `AppHeader` and `AppStatusLine` — the app's name, and the one line
-  that says what it is doing or has just done. See **The status line** below.
+- `ui/PageHeader.kt` — the page's own name and icon at the top of every screen, shrinking as the
+  page is read, with the stock search that arrives with the collapsed bar. It replaced the
+  `EGX Analyzer` band on 2026-09-09. See **The page header** below.
+- `ui/StockLookup.kt` — what that search box offers for what has been typed, ranked. `StockSearch`
+  in `ui/StockSearch.kt` is still the matcher underneath, shared with the three in-page filters.
+- `ui/EgxAnalyzerApp.kt` holds `AppStatusLine` — the one line that says what the app is doing or
+  has just done, drawn by `Screen` under the page's own title. See **The status line** below.
 - `model/ScheduleClock.kt` + `model/MarketRefresh.kt` + `model/CloseSweep.kt` +
   `model/SeriesHarvest.kt` + `model/AnalysisSchedule.kt` — when the four things this phone does on
   its own fire, and what the analysis one is. `ScheduleClock.lastFinalSession` is also the one answer to "has that session
@@ -2223,6 +2228,23 @@ Two things the app could always have done and never did: go back, and put one st
   `PriceLadder` already follows in the other direction. A **ring on the line wherever a call was
   made**, in both states — nothing else in the app can show whether the channels name this stock near
   its tops.
+- **The line is read by touching it.** A tap or a drag along the chart picks the nearest session -
+  **snapped to whole sessions**, because a close is one figure a day and a price read off the gap
+  between two of them is a price nobody quoted - and the caption under the chart becomes
+  `4 Sep · 86.40 · +12.4% since 12 Jun`, or names the source where that session carries a call. It
+  **replaces the dates' own line** rather than appearing above it: a caption that arrived on touch
+  would push the chart up under the finger that asked for it. The reading **stays after the finger
+  lifts** and is cleared by changing the range, which is a `remember` keyed on what is drawn rather
+  than a rule anybody had to write.
+- **Two gesture detectors, and the split is what keeps the sheet scrollable.** `detectTapGestures`
+  reads without claiming anything; `detectHorizontalDragGestures` claims only once the finger has
+  moved **horizontally** past touch slop, so a straight-down swipe over a 150dp band still scrolls
+  the sheet behind it. `pick` is held in a `rememberUpdatedState` because `pointerInput` is keyed on
+  the points and does not restart when the selection changes - a lambda captured when the chart was
+  first drawn would go on comparing against the index chosen *then*, which is a haptic tick and a
+  state write on every pixel of a drag rather than on every session crossed. The tick is
+  `HapticFeedbackType.TextHandleMove`, the platform's own for a marker being dragged along a track,
+  and it is the only haptic in the app.
 - **The range row is calendar time and one fetch.** `1W` `1M` `2M` `3M` `6M`, measured back from the
   **newest session the app holds** rather than from today's date — the right edge of the line is that
   session whatever the calendar says, and a week counted from today on a feed three weeks behind
@@ -2250,20 +2272,130 @@ Two things the app could always have done and never did: go back, and put one st
   Results, on a position card inside a card, on the day's event tiles on two tabs, and in a table
   row — threading it would add a parameter to a dozen signatures to reach six leaves. It sits beside `LocalWindowWidth`, which is where the
   shell already publishes what every screen may need and no screen owns.
-- **A tile that already presses somewhere keeps its press, and the ticker becomes a second target
-  inside it.** That was the rule the other way round until 2026-09-07 — the ticker was a target only
-  where nothing else was — which left the day's event tiles and the Overdue tiles as the two places a
-  stock could be looked at and not opened. Two targets on one tile, and the smaller has to be aimed
-  at: the tile is one thing that happened and the ticker is the stock it happened to, and a reader
+- **A card that already presses somewhere keeps its press, and the ticker becomes a second target
+  inside it — but only where the card has room for two.** That was the rule the other way round until
+  2026-09-07 — the ticker was a target only where nothing else was — which left several places a
+  stock could be looked at and not opened. Two targets on one card, and the smaller has to be aimed
+  at: the card is one thing that happened and the ticker is the stock it happened to, and a reader
   deciding about the first often wants the second. The **arrow stays outside** the inner press, since
-  it is what says the tile itself leads somewhere. Six leaves carry it now — the recommendation card,
-  the results table, the position card, the Insights call card, the event tile and the Overdue tile —
-  which is the count `LocalOpenStock` exists to keep out of a dozen intermediate signatures.
+  it is what says the card itself leads somewhere. **Four leaves carry it** — the recommendation
+  card, the results table, the position card and the Insights call card — which is the count
+  `LocalOpenStock` exists to keep out of a dozen intermediate signatures.
+- **The two tile grids are the exception, and were the rule until 2026-09-08.** The Overdue tiles
+  and the day's event tiles had the inner press and lost it: they are the smallest things in the app
+  that lead anywhere — 150dp and 170dp minimums, two or three across a cover screen — and the ticker
+  sits at the leading edge, exactly where a thumb reaching for the tile lands. The owner reported
+  missing the trade and getting the stock sheet instead, often enough to ask for it back. A target
+  that is hit on the way to another target is not a second affordance, it is the first one made
+  unreliable. Nothing is unreachable: both tiles open a trade or a call, and both of those carry the
+  ticker press. Size is what decides this, not what kind of thing the card is — a tile grid gets one
+  target, a full-width card can hold two.
+
+## The page header
+
+Every screen is topped by its own name and the destination's own icon, shrinking into a bar as the
+page is read. It replaced the band that said `EGX Analyzer` above all five tabs, removed 2026-09-09
+along with the rounded well the page used to sit in.
+
+- **The band said the same two words on every tab and cost a row of the window to do it**, while
+  what a reader actually needs at the top — which page this is — was the first line *inside* the
+  scroll and left the moment they read anything. The two swapped places: the page name is the
+  header, and it is the thing that stays.
+- **One title shrinking, not two cross-fading.** Material's large app bar fades a big title out and
+  a small one in, which is two titles briefly drawn over each other. `PageHeader` interpolates the
+  size (30sp → 20sp), the tracking and the icon (30dp → 22dp) on one collapse fraction, so the name
+  gets smaller and stays put. It costs a recomposition of that row per frame of the collapse and
+  nothing below it, because `collapse` is passed as a **lambda** — read at `Screen`'s call site it
+  would recompose the whole page instead. Same rule `PageWash` follows from the draw phase.
+- **The header eats the scroll rather than riding it.** A `NestedScrollConnection` in `Screen`
+  consumes the first `HeaderCollapseTravel` (40dp) of every downward gesture before the page is
+  offered any of it. Without that the content moves at twice the speed of the finger over those
+  40dp, because the page rises by whatever height the header gives up *on top of* its own travel.
+- **It grows back only with the page at its top.** Expanding on any upward delta pops the title open
+  mid-page, and on the three screens that pull to refresh it would fight the gesture — this
+  connection is the outer one, so it sees a drag before `PullToRefreshBox` does. Gated on
+  `scroll.value == 0` the two take turns in the order a reader expects: the header first, then the
+  refresh. Pressing the tab you are already on expands it alongside the scroll, or the press would
+  strand the one piece of chrome it is aimed at.
+- **The title and icon both come from `AppDestination`.** `Screen` takes the destination rather than
+  a title string, reads `label` and `selectedIcon`, and tints the glyph `primary` — which inside a
+  page is that page's hue. So the glyph at the top of Analyze and the lit glyph in the navigation
+  are one drawing in one cyan and cannot drift. The **selected** icon, because the page you are
+  looking at is the selected one.
+- **The page name left the text column, and that is a real cost.** `PageTextInset` puts every
+  heading on a page in one column an inset in from the card edges, and the title used to sit in it.
+  It cannot now: the icon takes the page-edge inset and the name sits to the right of it. The title
+  left the page to become chrome, so it stopped obeying a rule about text on a page.
+- **The search icon arrives with the collapsed bar**, over the last 40% of the shrink, and is not
+  pressable until it has finished arriving — a tap aimed at the page must not land on a glyph that
+  is fading in. At rest the page name is the only thing up there, which is the point of the change;
+  a control that had to be present always would be a title bar with things in it again.
+
+### The stock search
+
+- **A lookup, not a filter, and that distinction decides everything about it.** The boxes on
+  Results, Insights and Portfolio narrow a list already on the screen. This asks *which stock*, is
+  answered from the catalog, finds a stock nobody has ever recommended, and opens `StockSheet` —
+  which is why it is on Analyze, a page with no list to narrow at all. The three in-page filters are
+  untouched and stay where they are.
+- **`StockSearch` is still the matcher**, so `المصريه` finds `المصرية للاتصالات` here exactly as it
+  does in those filters. `StockLookup` adds only the ranking: ticker-prefix, then ticker-anywhere,
+  then a name, ties keeping the catalog's order — which is roughly by size, so the large cap a
+  reader is likelier to mean comes first. Capped at 30.
+- **An empty query offers nothing**, which is the one place it disagrees with `StockSearch.matches`.
+  There a blank query is "not a question" and hides nothing, because it narrows something already
+  visible; here nothing is on screen until this answers, and 200 rows over the page is not an
+  answer.
+- **`AppState.stockDirectory` is the catalog flattened to what a screen may see** — ticker and the
+  two names, as `model/StockDirectory.kt`. `EgxStock` lives in `data`, carries aliases and merge
+  rules no screen has any use for, and `ui` may not import `data` in any case. `LiveAppState`
+  republishes it at the two points that already announce the same event through `catalogMessage`:
+  the restore from disk on launch, and a refresh. `EgxCatalog` is a mutable object rather than
+  state, so nothing would recompose without this snapshot.
+- **Back closes the box** through a local `BackHandler`, which takes the press ahead of the shell's
+  `goBack` — closing what is open on the screen is what that press means while a keyboard is up.
+  The state is per page, so swiping to another tab leaves it behind rather than carrying it along.
+
+### The system bars blend into the page
+
+- **The page runs up behind the status bar.** The `Scaffold` pads every side but the top
+  (`safeDrawing.only(Horizontal + Bottom)`), so the page's own background and the accent wash at the
+  top of it carry on up behind the clock and the battery. With the name band gone, a
+  `surfaceContainer` strip over a `background` page is a seam across the top of every screen and
+  nothing up there justifies one. `PageHeader` pads itself by the top inset, reading `safeDrawing`
+  rather than `statusBars` so a tall cutout is cleared too. `PageWash` grew from 120dp to 160dp to
+  cover the bar before it starts on the page, so the tint fades over the same stretch of reading.
+- **The page is no longer set into anything**, so the well's rounded top corners and `wellOutline`
+  went with the band that made them read as an inset panel. A radius against the top of the window
+  is a curve against the frame of the screen, and a hairline there is a line under the status bar.
+- **The bar glyphs follow the app's own theme, not the phone's**, set from `EgxAnalyzerTheme` where
+  `themeMode` is already resolved. `enableEdgeToEdge()` with no arguments follows
+  `isSystemInDarkTheme` — the *system's* setting — so forcing **Light** in Settings on a phone set
+  to dark left white glyphs on a near-white page: an invisible clock, and nothing in the code saying
+  anything was wrong. It matters more now that the page is drawn behind them. The activity comes
+  from `LocalContext`, the way the fold does in `EgxAnalyzerApp`: null in a `@Preview`, which simply
+  means there is no window to set.
+- **`themes.xml` carries no `statusBarColor`, `navigationBarColor` or `windowLightStatusBar`.** From
+  API 35 the platform ignores the first two under edge to edge, and all three were painting or
+  forcing values (`#0B0F14`, light-on-dark) belonging to neither palette.
+
+### What went with the band
+
+- **`AppHeader` is gone**, and with it the whole travelling-mark mechanism: anchors in window
+  coordinates, `onMarkAnchor` threaded through `AppContent`, and two animations, all so one glyph
+  could be in the header and slide into the rail as that header collapsed. The mark is drawn inside
+  `AppRail` now, in the gap `RailTopInset` was already holding open, and **only there** — on a phone
+  it is not drawn at all. The app's name and artwork left the phone UI; the launcher icon and the
+  notification glyph are unchanged, which is where that artwork still earns its keep.
+- **`headerVisible` is gone.** Nothing leaves with the navigation pill any more; the page header is
+  pinned and the pill still hides on its own signal.
+- **The progress hairline moved onto the page**, under the header, where the status line is.
 
 ## The status line
 
-One line in the header says what the app is doing and what it has just done. It was a floating toast
-at the foot of the screen until 2026-08-25.
+One line says what the app is doing and what it has just done. It was a floating toast at the foot
+of the screen until 2026-08-25, then a row in the app-name band until that band was removed on
+2026-09-09.
 
 - **It moved because of where it was, not how it looked.** An app that reports something after
   almost every tap was answering from the far end of the screen from the button that had been
@@ -2287,23 +2419,25 @@ at the foot of the screen until 2026-08-25.
   somewhere else — a provider's refusal is often the only account of why nothing happened. The
   timer is a `LaunchedEffect` keyed on the message, so a second outcome cancels the first one's
   clock rather than clearing the new line early.
-- **Beside the name where there is width, under it where there is not**, on `LocalWindowWidth`
-  rather than on the header's own measurement: the shell already works the width out to choose a
-  rail or a bar, and that value is published precisely so two parts of the app cannot disagree about
-  where the line falls. Below 600dp the cover screen has under 200dp spare after a 22sp title, which
-  is most of these messages truncated, so the line drops to a row of its own there.
-- **The row fills the width and the arrangement does the aligning.** Capping it instead left it
-  stranded mid-header on the wide layout: a capped row inside a weighted slot sits at the start of
-  that slot, not at its end.
-- **It animates height as well as opacity.** On the compact layout the line has a row of its own, so
-  a plain fade makes the header jump a line taller the instant a message lands — which reads as the
-  page twitching rather than as an announcement.
+- **`Screen` draws it now, under the page's own name**, on a row of its own on every layout. The
+  band it used to sit in is gone and the page starts at the top of the window, so there is nowhere
+  above the page left to be. What mattered about its old home survives: it is **outside the scroll**,
+  so a message landing while the reader is halfway down a page is never announced off screen. The
+  wide layout's "beside the name where there is width" rule went with the name — there is no name to
+  sit beside, and `alignEnd` with it.
+- **The move put it inside the page's theme**, so the working spinner and an undo's label — the two
+  things on this line allowed to carry `primary` — wear the hue of the page they were raised on
+  rather than cyan everywhere. That is the accent scheme working as written: what a figure means
+  never moves, and chrome takes the colour of where it is.
+- **It animates height as well as opacity.** The line has a row of its own, so a plain fade makes
+  the page jump a line the instant a message lands — which reads as the content twitching rather
+  than as an announcement.
 - **It carries at most one action, and only on something destructive.** `StatusMessage.undo` is a
   word the reader can press to take back what the line has just reported, and it is a slot on this
   line rather than a snackbar **deliberately** - the floating toast was removed on 2026-08-25 because
   it answered from the far end of the screen from the button that had been pressed, and bringing one
-  back for this would undo that on purpose. The line already says what happened, sits where the app's
-  own name is, and clears itself after four seconds, which is exactly the shape an undo wants. Two
+  back for this would undo that on purpose. The line already says what happened, sits at the top of
+  the page, and clears itself after four seconds, which is exactly the shape an undo wants. Two
   paths offer one: recording a sale (`reopenPosition`, which restores the row it was handed rather
   than one read back, and carries a newer stamp so the sale is undone on other devices too) and Keep
   Open. Everything else is an edit the reader can simply make again, and a button after every
@@ -2311,8 +2445,7 @@ at the foot of the screen until 2026-08-25.
   **not** dismissable by tapping the row, or the offer would be thrown away by the gesture meant to
   read it.
 - **The tone is one tinted glyph and never the text.** Colouring the words would make every routine
-  confirmation the loudest thing on screen, and this line now sits beside the app's own name, which
-  is the last place that should flash. Same rule the toast followed.
+  confirmation the loudest thing on screen. Same rule the toast followed.
 - **Wording.** Sentence case, no trailing full stop, an ellipsis only on something still running,
   and `·` only between counts — `Priced 40/42 · 2 unpriced · 1 stale` is what it is for, where
   `Key verified · 8 models` was using it to join a clause to a count. One event gets one wording:
@@ -2428,9 +2561,9 @@ parameter being threaded anywhere. Added 2026-09-08.
   while green, red and amber are busy; Settings is `BRONZE`, which draws no prices at all. The
   reasoning is on `AccentKey` and the check is `no page accent is one of the signal colours`.
 - **`withAccent` is the mechanism and `DestinationScreen` is the one place it is applied** — the same
-  function both shells build a page through. Not around the whole shell, because the header's status
-  line and any sheet raised over the top are not on a page and must not take the hue of whatever
-  happens to be behind them.
+  function both shells build a page through. Not around the whole shell, because a sheet raised over
+  the top is not on a page and must not take the hue of whatever happens to be behind it. The status
+  line **is** on a page since 2026-09-09 and does take it — see **The status line**.
 - **The navigation bar is outside every page's theme, so it asks each destination for its own.**
   `accentFor(destination.accent, LocalDarkTheme.current)`, in both `PillItem` and `AppRail`. Reading
   `secondaryContainer` out there would give all five slots Analyze's cyan.
@@ -2439,8 +2572,8 @@ parameter being threaded anywhere. Added 2026-09-08.
   it by showing all five; what says where you are is the filled indicator and a hue at full
   strength, which is a larger difference than the grey-to-colour one it replaced.
 - **`AppMark` takes its hues as a parameter for the same reason the bar does.** It is drawn in the
-  header and over the rail, both outside a page, so a mark reading the local would wear cyan on all
-  five pages.
+  rail, outside every page's theme, so a mark reading the local would wear cyan on all five pages.
+  Since 2026-09-09 that is the only place it is drawn at all — see **What went with the band**.
 - **A card has its own hue on top of the page's**, on the tile behind its icon and the 3px edge down
   its left side — `SectionCard.accent` and `ExpandableSection.accent`, both defaulting to the page's.
   The **first card on a page takes the page's hue** by passing nothing, and the rest name a
@@ -2462,7 +2595,9 @@ parameter being threaded anywhere. Added 2026-09-08.
   came with this took the light `tertiary`, `error` and `expired` **down** rather than up for the
   same reason — brighter versions measured 3.8–4.4:1, and every one of them is a price.
 - **`PageWash` reads the scroll inside the draw lambda**, the rule `AppMark`'s phase already
-  followed: read at composition it would recompose the whole page on every frame of a scroll.
+  followed: read at composition it would recompose the whole page on every frame of a scroll. The
+  header's collapse fraction is passed as a lambda for the same reason, and the wash counts it as
+  scroll so the tint does not sit at full strength through the whole collapse.
 
 ## Gotchas
 

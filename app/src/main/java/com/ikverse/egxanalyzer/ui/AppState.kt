@@ -46,6 +46,7 @@ import java.time.LocalDate
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.SessionDigest
+import com.ikverse.egxanalyzer.model.DirectoryStock
 import com.ikverse.egxanalyzer.model.StockOpinion
 import com.ikverse.egxanalyzer.ui.theme.AccentKey
 
@@ -97,6 +98,15 @@ interface AppState {
     val credentialVerified: Boolean?
     val promptHistory: List<PromptSnapshot>
     val catalogMessage: String
+    /**
+     * Every stock the catalog knows, for the search box in the page header.
+     *
+     * Republished whenever the catalog itself changes - restored from disk on launch, downloaded by
+     * a refresh - so a screen never has to ask a repository what a stock is called. It is the
+     * catalog rather than the record on purpose: the header's box is a lookup, not a filter, so it
+     * finds a stock nobody has ever recommended. See [StockLookup].
+     */
+    val stockDirectory: List<DirectoryStock>
     val availableModels: List<CloudModelInfo>
     val modelUsage: List<ModelUsageRecord>
     val modelListLoading: Boolean

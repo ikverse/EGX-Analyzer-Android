@@ -48,6 +48,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,6 +65,7 @@ import java.security.SecureRandom
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.concurrent.ConcurrentHashMap
 
 class TelegramRepository(
     private val context: Context,
@@ -75,6 +77,16 @@ class TelegramRepository(
     private var client = TdlClient.create()
     private val clientJobs = mutableListOf<Job>()
     private val chatCache = linkedMapOf<Long, Chat>()
+
+    /**
+     * Where each fetched profile photo landed, keyed by Telegram's file id.
+     *
+     * By file id rather than by chat: a chat that changes its picture is handed a new id, so the new
+     * one is fetched instead of the old path being served for as long as the app is open. Concurrent
+     * because the photos are fetched several at a time.
+     */
+    private val chatPhotos = ConcurrentHashMap<Int, String>()
+    private var photoJob: Job? = null
     private val _authState = MutableStateFlow(TelegramAuthState())
     private val _chats = MutableStateFlow<List<TelegramChat>>(emptyList())
 
@@ -137,6 +149,7 @@ class TelegramRepository(
         preferences.edit().remove(KEY_API_ID).apply()
         secretStore.removeSecret(KEY_API_HASH)
         chatCache.clear()
+        clearChatPhotos()
         _chats.value = emptyList()
         client = TdlClient.create()
         startClientCollectors()
@@ -189,6 +202,7 @@ class TelegramRepository(
     suspend fun logout() {
         execute { client.logOut() }
         chatCache.clear()
+        clearChatPhotos()
         _chats.value = emptyList()
     }
 
@@ -211,6 +225,7 @@ class TelegramRepository(
             chatCache[id] = client.getChat(id).requireValue<Chat>()
         }
         publishChats()
+        refreshChatPhotos()
     }
 
     suspend fun collectSources(
@@ -820,8 +835,8 @@ class TelegramRepository(
         }
     }
 
-    private suspend fun download(fileId: Int): File {
-        val downloaded = client.downloadFile(fileId, 16, 0, 0, true)
+    private suspend fun download(fileId: Int, priority: Int = DOWNLOAD_PRIORITY): File {
+        val downloaded = client.downloadFile(fileId, priority, 0, 0, true)
             .requireValue<dev.g000sha256.tdl.dto.File>()
         require(downloaded.local.isDownloadingCompleted && downloaded.local.path.isNotBlank()) {
             "Telegram media download did not complete."
@@ -1017,8 +1032,73 @@ class TelegramRepository(
                         fallback = if (kind == ChatKind.DIRECT) "Deleted account" else chat.id.toString(),
                     ),
                     kind = kind,
+                    photoPath = chat.photo?.small?.let(::storedPhoto),
                 )
             }
+    }
+
+    /**
+     * Where this file's profile photo should be on the device, or null while it still has to come.
+     *
+     * Telegram's own snapshot of the file is read first, because it downloads most chat photos by
+     * itself and asking again for one it is already holding is a round trip for nothing. That
+     * snapshot dates from whenever the chat was fetched, though, so anything downloaded since is
+     * only in the map.
+     *
+     * Deliberately not checked against the disk, since this runs for every chat on every publish and
+     * a publish happens per chat as the list loads. Telegram prunes its cache on its own schedule,
+     * and a path that has gone stale costs nothing at the screen - the decode comes back empty and
+     * the row draws its kind glyph. [refreshChatPhotos] is where a pruned photo is fetched again.
+     */
+    private fun storedPhoto(file: dev.g000sha256.tdl.dto.File): String? {
+        val path = file.local.path
+        if (file.local.isDownloadingCompleted && path.isNotBlank()) return path
+        return chatPhotos[file.id]
+    }
+
+    /**
+     * Fetches the profile photos the chat list is missing, behind the list itself.
+     *
+     * Never awaited by [refreshChats]. The chats are what the refresh was for, and a hundred small
+     * downloads must not hold them off the screen - so the rows arrive with their kind glyph and
+     * swap to a picture as each batch lands, which is why this republishes as it goes rather than
+     * once at the end. Only chats in the main list are worth fetching, since [publishChats] draws no
+     * others.
+     */
+    private fun refreshChatPhotos() {
+        photoJob?.cancel()
+        photoJob = scope.launch {
+            val missing = chatCache.values
+                .toList()
+                .filter { mainListOrder(it) != null }
+                .mapNotNull { it.photo?.small }
+                // The disk check belongs here rather than in [storedPhoto]: this is the one pass
+                // that can do something about a photo Telegram has since pruned.
+                .filter { file -> storedPhoto(file)?.let { File(it).isFile } != true }
+            missing.chunked(PHOTO_BATCH).forEach { batch ->
+                val landed = coroutineScope {
+                    batch
+                        .map { file ->
+                            async {
+                                // A photo that will not download is not worth a word to the user:
+                                // the row it belongs to already reads correctly with its glyph.
+                                runCatching { download(file.id, PHOTO_PRIORITY) }
+                                    .onSuccess { chatPhotos[file.id] = it.path }
+                                    .isSuccess
+                            }
+                        }
+                        .awaitAll()
+                }
+                if (landed.any { it }) publishChats()
+            }
+        }
+    }
+
+    /** Forgets the fetched photos along with the chats they belong to. */
+    private fun clearChatPhotos() {
+        photoJob?.cancel()
+        photoJob = null
+        chatPhotos.clear()
     }
 
     /** Where the chat sits in the main list, or null when it is not in it at all. */
@@ -1050,6 +1130,20 @@ class TelegramRepository(
         const val KEY_DATABASE_ENCRYPTION = "telegram_database_encryption"
         /** How many chats each `loadChats` call pulls from the server. */
         const val CHAT_PAGE_SIZE = 100
+
+        /** Media a run is waiting on. */
+        const val DOWNLOAD_PRIORITY = 16
+
+        /**
+         * Profile photos yield to everything else Telegram is carrying.
+         *
+         * They decorate a list that reads correctly without them, so a run collecting messages must
+         * never find itself queued behind a hundred avatars.
+         */
+        const val PHOTO_PRIORITY = 1
+
+        /** How many profile photos are fetched at once before the list is redrawn. */
+        const val PHOTO_BATCH = 8
 
         /** The desktop applies no limit; this is high enough to be one in name only. */
         const val MAX_CHATS = 1_000

@@ -1,6 +1,10 @@
 package com.ikverse.egxanalyzer.ui.theme
 
+import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.core.view.WindowCompat
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.SideEffect
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -383,10 +387,14 @@ private val darkSeeds = mapOf(
         neighbour = Color(0xFFC24A93), deep = Color(0xFF3A2E8C), mid = Color(0xFF5B45D6),
         ground = Color(0xFF1A1042),
     ),
+    // Dusty rather than hot. It shipped a magenta and read as the loudest thing on the one page
+    // whose subject is a verdict - so it is taken down in saturation and up in lightness, which
+    // keeps every separation it had (23 degrees off the stop red, 66 off Settings' bronze) and
+    // takes it from 5.35:1 on a card to 7.10:1.
     AccentKey.ROSE to AccentSeed(
-        base = Color(0xFFF2569C), ink = Color(0xFFF2569C), onBase = Color(0xFF33091D),
-        neighbour = Color(0xFF9B7CFF), deep = Color(0xFF7A1F4C), mid = Color(0xFFB93372),
-        ground = Color(0xFF2A0A1B),
+        base = Color(0xFFE38DB6), ink = Color(0xFFE38DB6), onBase = Color(0xFF33091D),
+        neighbour = Color(0xFF9B7CFF), deep = Color(0xFF8E4C6C), mid = Color(0xFFA85C86),
+        ground = Color(0xFF2A1420),
     ),
     AccentKey.INDIGO to AccentSeed(
         base = Color(0xFF5C7CFA), ink = Color(0xFF5C7CFA), onBase = Color(0xFF0A1440),
@@ -411,10 +419,13 @@ private val lightSeeds = mapOf(
         neighbour = Color(0xFFC93379), deep = Color(0xFF2E2278), mid = Color(0xFF4A3BB8),
         ground = Color(0xFF170F3A),
     ),
+    // The dark theme's move made on this theme's own terms: softened toward the same dusty red,
+    // and still dark enough to carry text on a white card at 5.64:1. `mid` is the pill's last stop
+    // and holds white at 8.46:1.
     AccentKey.ROSE to AccentSeed(
-        base = Color(0xFFC93379), ink = Color(0xFFB32C6C), onBase = Color.White,
-        neighbour = Color(0xFF6B4EE0), deep = Color(0xFF6B1440), mid = Color(0xFF9E2258),
-        ground = Color(0xFF260A18),
+        base = Color(0xFFBE5A85), ink = Color(0xFFA8446F), onBase = Color.White,
+        neighbour = Color(0xFF6B4EE0), deep = Color(0xFF5E2440), mid = Color(0xFF7E3352),
+        ground = Color(0xFF24101A),
     ),
     AccentKey.INDIGO to AccentSeed(
         base = Color(0xFF3D5BD9), ink = Color(0xFF3450C4), onBase = Color.White,
@@ -610,6 +621,27 @@ fun EgxAnalyzerTheme(
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
+    }
+    // **The system bars read this app's theme, not the phone's.** The window is edge to edge and
+    // the page now runs up behind the status bar, so the platform's clock and battery are drawn on
+    // whatever this app has painted there and have to be legible against it.
+    //
+    // `enableEdgeToEdge()` with no arguments follows `isSystemInDarkTheme` - the *system's* setting
+    // - which is right until somebody uses the app's own Theme setting. Forcing Light on a phone
+    // set to dark left white glyphs on a near-white page: an invisible clock, and no way to tell
+    // from the code that anything was wrong. `themeMode` is resolved a few lines up and is the only
+    // answer that is ever correct here.
+    //
+    // The activity comes from the composition rather than a parameter, the way the fold does in
+    // `EgxAnalyzerApp`: null in a `@Preview`, which simply means there is no window to set.
+    val activity = LocalContext.current as? Activity
+    if (activity != null) {
+        SideEffect {
+            val window = activity.window
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            controller.isAppearanceLightStatusBars = !darkTheme
+            controller.isAppearanceLightNavigationBars = !darkTheme
+        }
     }
     CompositionLocalProvider(
         LocalExtraColors provides if (darkTheme) DarkExtras else LightExtras,

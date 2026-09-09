@@ -1,6 +1,5 @@
 package com.ikverse.egxanalyzer.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -69,7 +68,8 @@ internal fun PortfolioScreen(appState: AppState) {
     val portfolio = appState.portfolio
 
     Screen(
-        title = "Portfolio",
+        appState = appState,
+        destination = AppDestination.PORTFOLIO,
         onRefresh = { scope.launch { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
     ) {
@@ -263,19 +263,17 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
         // at two tiles across on the cover screen the return was being ellipsed away.
         Column(Modifier.padding(horizontal = Space.m, vertical = Space.xs)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // The mark and the code press through to the stock, inside a tile that already
-                // presses through to the trade. Two targets on one tile, as on the day's event
-                // tiles and for the same reason: this tile is one late trade and the ticker is the
-                // stock behind it, and a reader deciding what to do about the first often wants
-                // the second. The arrow stays outside this press - it belongs to the tile's own.
-                // fill = false so the arrow sits against the end of the ticker rather than out at
-                // the tile's edge, where it reads as unrelated to it - the same way the arrows on
-                // the position card and the Insights call card sit. See LocalOpenStock.
-                val openStock = LocalOpenStock.current
+                // The ticker is **not** a second target here, and this tile is one of the two
+                // places that is true - see the day's event tiles for the other. Both are the
+                // smallest tiles in the app, two or three across on a cover screen, and the
+                // ticker sits at the leading edge where a thumb reaching for the tile's own press
+                // lands on it: the owner reported missing the trade and getting the stock sheet
+                // instead, repeatedly. Nothing is unreachable, because the trade this opens
+                // carries the ticker press itself. The Row and its weight stay - fill = false is
+                // what sits the arrow against the end of the ticker rather than out at the tile's
+                // edge, where it reads as unrelated to it. See LocalOpenStock.
                 Row(
-                    Modifier
-                        .weight(1f, fill = false)
-                        .clickable { openStock(view.ticker) },
+                    Modifier.weight(1f, fill = false),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     StockLogo(view.ticker, LogoSize.Row, Modifier.padding(end = Space.s))

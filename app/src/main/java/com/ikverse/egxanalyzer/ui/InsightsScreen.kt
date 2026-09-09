@@ -112,7 +112,8 @@ internal fun InsightsScreen(appState: AppState) {
     val newsWindow = remember(appState.opinionSettingsRevision) { appState.opinionNewsWindowDays() }
 
     Screen(
-        title = "Insights",
+        appState = appState,
+        destination = AppDestination.INSIGHTS,
         onRefresh = { scope.launch { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
     ) {

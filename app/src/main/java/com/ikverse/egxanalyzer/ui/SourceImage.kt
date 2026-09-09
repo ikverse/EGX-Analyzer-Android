@@ -44,13 +44,15 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Decodes a stored source image, downscaled, off the main thread.
+ * Decodes an image out of Telegram's storage, downscaled, off the main thread.
  *
  * Returns null rather than throwing when the file has gone: these paths point into Telegram's own
- * storage, which it prunes on its own schedule, so a saved analysis can outlive its images.
+ * storage, which it prunes on its own schedule, so a saved analysis can outlive its images and a
+ * chat can outlive its picture. Shared with the chat list, whose profile photos come out of the
+ * same cache and would otherwise want a second decoder saying the same thing.
  */
 @Composable
-private fun rememberSourceImage(path: String?, maxPixels: Int): ImageBitmap? {
+internal fun rememberTelegramImage(path: String?, maxPixels: Int): ImageBitmap? {
     val bitmap by produceState<ImageBitmap?>(null, path, maxPixels) {
         value = withContext(Dispatchers.IO) {
             runCatching {
@@ -78,7 +80,7 @@ internal fun SourceImageThumbnail(
     size: Dp = 40.dp,
     onOpen: () -> Unit,
 ) {
-    val bitmap = rememberSourceImage(path, maxPixels = 256)
+    val bitmap = rememberTelegramImage(path, maxPixels = 256)
     if (bitmap == null) {
         Text(
             reference?.let { "#$it" } ?: "—",
@@ -108,7 +110,7 @@ internal fun SourceImageThumbnail(
 @Composable
 internal fun SourceImageViewer(path: String?, reference: Int?, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        val bitmap = rememberSourceImage(path, maxPixels = 4096)
+        val bitmap = rememberTelegramImage(path, maxPixels = 4096)
         var scale by remember { mutableFloatStateOf(1f) }
         var offset by remember { mutableStateOf(Offset.Zero) }
 

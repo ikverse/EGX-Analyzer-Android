@@ -8,14 +8,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.CornerBasedShape
-import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -85,7 +81,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
@@ -104,18 +99,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
@@ -124,15 +113,12 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.R
 import com.ikverse.egxanalyzer.ui.theme.LocalDarkTheme
 import com.ikverse.egxanalyzer.ui.theme.PageTheme
 import com.ikverse.egxanalyzer.ui.theme.accentFor
-import kotlin.math.roundToInt
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import androidx.window.layout.WindowLayoutInfo
@@ -216,19 +202,6 @@ fun EgxAnalyzerApp(appState: AppState) {
     appState.openStockTicker?.let { ticker ->
         StockSheet(ticker, appState, onDismiss = appState::closeStock)
     }
-    // Whether the header is on screen, worked out once above both shells.
-    //
-    // It leaves on the same scroll that takes the floating pill and comes back with it, and it stays
-    // put whenever the app has something to say - the status line lives in it, so a message landing
-    // on a scrolled page would otherwise be announced off screen.
-    //
-    // Read here rather than inside `AppContent` because the rail's mark travels against the same
-    // signal from outside the header entirely (see the rail branch below), and two copies of this
-    // rule would let the two part company mid-travel. It costs the shell nothing that was not
-    // already being paid: `AppContent` has always read both of these properties.
-    val headerVisible = navBarVisible.value ||
-        appState.busyLabel != null ||
-        appState.statusMessage != null
     // What each page has open lives on AppState rather than anywhere below this line - see
     // PageState, which explains why the two shells below cannot hold it between them.
     CompositionLocalProvider(
@@ -241,98 +214,35 @@ fun EgxAnalyzerApp(appState: AppState) {
         LocalOpenStock provides remember(appState) { appState::openStock },
     ) {
         if (rail) {
-            // **The mark does not leave with the header here.** On the phone the header collapses
-            // and takes the name, the status line and the mark up out of the window together, which
-            // is right: there is nowhere else on that layout for a mark to be. Beside a rail there
-            // is - the rail's own top gap, which `RailTopInset` already holds open so that the rail
-            // reads as the header band turning the corner. With the band gone the mark is what is
-            // left holding that corner, so it travels left into the gap and stays put there, at the
-            // height it already had, rather than vanishing along with the words.
+            // **The mark lives in the rail, and only in the rail.** It used to be drawn in the
+            // header beside the app's name and travel across into the rail's top gap as that header
+            // collapsed - a whole mechanism of anchors, window coordinates and two animations,
+            // existing so one glyph could be in two places. With the name band gone there is only
+            // one place left for it, `RailTopInset` is already holding that place open, and the
+            // travel had nothing to travel from. It is drawn inside `AppRail` now.
             //
-            // It is therefore drawn **here** and not in the header: it has to outlive a collapse,
-            // and it has to cross the start edge of the content pane, which is exactly where the
-            // rail ends and what the pane clips at.
-            var railWidth by remember { mutableIntStateOf(0) }
-            var shellOrigin by remember { mutableStateOf(Offset.Zero) }
-            // Where the header holds the mark's place. Window coordinates, measured off the slot the
-            // header leaves rather than worked out from its paddings: a figure derived from the
-            // header's own arithmetic would be wrong the first time a status line, a font scale or a
-            // cutout changed how tall that row is. Null until the first layout, and nothing is drawn
-            // until then - a mark placed at the origin for one frame is a glyph flashing in the
-            // corner of every cold start.
-            var markAnchor by remember { mutableStateOf<Offset?>(null) }
-            val dockedSize = with(density) { AppMarkRailSize.roundToPx() }
-            Box(Modifier.fillMaxSize().onGloballyPositioned { shellOrigin = it.positionInWindow() }) {
-                NavigationSuiteScaffoldLayout(
-                    navigationSuite = {
-                        AppRail(appState, Modifier.onSizeChanged { railWidth = it.width })
-                    },
-                    navigationSuiteType = NavigationSuiteType.NavigationRail,
+            // On the phone there is no rail, so the mark is not drawn at all: the page's own name
+            // and icon are what the top of the window says. The launcher icon and the notification
+            // glyph are unchanged, which is where the artwork still earns its keep.
+            NavigationSuiteScaffoldLayout(
+                navigationSuite = { AppRail(appState) },
+                navigationSuiteType = NavigationSuiteType.NavigationRail,
+            ) {
+                // The suite scaffold used to paint this; the layout does not. Without it the
+                // window background shows through behind the system bars as a pale band. It is the
+                // chrome colour, because this is what shows behind the rail and behind the gesture
+                // strip; the page drawn on top of it paints its own.
+                Surface(
+                    // The layout does not do this for us the way the full NavigationSuiteScaffold
+                    // does, and without it the page keeps clear of the gesture strip that the rail
+                    // beside it is already holding: a second empty band, the width of the strip, in
+                    // the chrome colour, between the bottom of the page and the first row of icons.
+                    Modifier.fillMaxSize().consumeWindowInsets(
+                        NavigationRailDefaults.windowInsets.only(WindowInsetsSides.Start),
+                    ),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
                 ) {
-                    // The suite scaffold used to paint this; the layout does not. Without it the
-                    // window background shows through behind the status and navigation bars as a
-                    // pale band. It is the chrome colour rather than the page's, because this is
-                    // what shows behind the system bars, and through the rounded corners where the
-                    // page stops short of them.
-                    Surface(
-                        // The layout does not do this for us the way the full NavigationSuiteScaffold
-                        // does, and without it the page keeps clear of the gesture strip that the
-                        // rail beside it is already holding: a second empty band, the width of the
-                        // strip, in the chrome colour, between the bottom of the page and the first
-                        // row of icons.
-                        Modifier.fillMaxSize().consumeWindowInsets(
-                            NavigationRailDefaults.windowInsets.only(WindowInsetsSides.Start),
-                        ),
-                        color = MaterialTheme.colorScheme.surfaceContainer,
-                    ) {
-                        AppContent(
-                            appState,
-                            rail = true,
-                            headerVisible = headerVisible,
-                            // Recorded only while the header is at rest showing. It reports on every
-                            // layout pass, and a collapse is a run of them: left ungated, the anchor
-                            // would be dragged upward frame by frame as the header left, and the
-                            // mark would set off from wherever the header had got to rather than
-                            // from where it sits.
-                            onMarkAnchor = { if (headerVisible) markAnchor = it },
-                        )
-                    }
-                }
-                val anchor = markAnchor
-                if (anchor != null && railWidth > 0) {
-                    // The mark keeps the *height* it has in the header, which is what puts it in
-                    // the rail's top gap rather than level with the first destination. What moves
-                    // is x, and what changes on the way is the size: beside the name the mark is
-                    // sized to the name, and once the name has gone it is the only thing left
-                    // holding that corner, so it grows into the job.
-                    val restX = (railWidth - dockedSize) / 2
-                    val travelled by animateIntAsState(
-                        if (headerVisible) (anchor.x - shellOrigin.x).roundToInt() else restX,
-                        // The header's own tween, so the two are one movement rather than two
-                        // pieces of chrome leaving at slightly different moments.
-                        animationSpec = tween(HeaderMoveMilliseconds),
-                        label = "mark travel",
-                    )
-                    val size by animateDpAsState(
-                        if (headerVisible) AppMarkSize else AppMarkRailSize,
-                        animationSpec = tween(HeaderMoveMilliseconds),
-                        label = "mark size",
-                    )
-                    AppMark(
-                        accentFor(appState.destination.accent, LocalDarkTheme.current).markAurora,
-                        Modifier.offset {
-                            // Grown around its own centre rather than from its top-left corner: an
-                            // icon laid out from the anchor would put every extra dp below the line
-                            // it shares with the title, and swell downward out of the rail's gap
-                            // instead of filling it.
-                            val grown = ((size - AppMarkSize) / 2).roundToPx()
-                            IntOffset(
-                                travelled,
-                                (anchor.y - shellOrigin.y).roundToInt() - grown,
-                            )
-                        },
-                        markSize = size,
-                    )
+                    AppContent(appState, rail = true)
                 }
             }
         } else {
@@ -345,9 +255,7 @@ fun EgxAnalyzerApp(appState: AppState) {
                     Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.surfaceContainer,
                 ) {
-                    // No anchor: on this layout the mark is drawn inside the header and leaves with
-                    // it, because there is no rail for it to travel into.
-                    AppContent(appState, rail = false, headerVisible = headerVisible)
+                    AppContent(appState, rail = false)
                 }
                 FloatingNavBar(appState, Modifier.align(Alignment.BottomCenter))
             }
@@ -409,134 +317,19 @@ private val BarLabelSize = 11.sp
 private val RailTopInset = 62.dp
 
 /**
- * Sized to the name beside it rather than to the navigation grid, which it does not belong to - a
- * little over the title's own height, so the mark reads as the anchor of the row instead of as one
- * more letter in it.
- */
-private val AppMarkSize = 28.dp
-
-/**
- * What the mark grows to once it has docked in the rail.
+ * How big the mark stands in the rail's top gap.
  *
- * In the header it is sized to the name beside it. In the rail's top gap there is no name: it is the
- * only thing left holding that corner, against a column of 28dp glyphs, and at the name's size it
- * reads as a sixth destination that has lost its label. A size up separates it from the grid without
- * making it artwork again.
+ * It has no name beside it to be sized to any more - it is the only thing holding that corner,
+ * against a column of 28dp glyphs, and at a glyph's size it reads as a sixth destination that has
+ * lost its label. A size up separates it from the grid without making it artwork again.
  */
 private val AppMarkRailSize = 36.dp
 
 /**
- * The wide header's vertical padding, against [HeaderPadding] on the phone.
- *
- * The status line sits beside the name here rather than under it, so the band is one row either way
- * - and a row of chrome that is the same height on a 40-line window as on a 20-line one is spending
- * a larger share of a screen that has more to show.
- */
-private val WideHeaderPadding = 8.dp
-
-/** The phone header's vertical padding, where the status line stacks under the name and needs it. */
-private val HeaderPadding = 12.dp
-
-/**
- * Says which app this is, and what it is doing, above whatever page is showing.
- *
- * It leaves on the same scroll that takes the navigation and comes back with it, on both layouts -
- * see the call site, which explains why one signal drives the two. The mark is the launcher artwork
- * reduced to a single shape: the full tile in the rail read as a sticker among the flat navigation
- * glyphs, and it only ever appeared on the wide layout, where this says the same thing on both.
- *
- * @param onMarkAnchor given beside a rail, and what makes the mark outlast this header. The row
- *   holds the mark's place open with a spacer and reports where that place is; the shell draws the
- *   real mark over the top and slides it into the rail as this collapses. Null on the phone, where
- *   the mark is drawn inline and leaves with everything else.
- *
- * **The status line lives here now**, where a floating toast used to carry it. Two things put it
- * here. It was the only piece of chrome that had to be lifted clear of the navigation bar and
- * lowered again as that bar came and went, which is a whole mechanism existing to keep one
- * transient message off one transient bar. And an app that says something after almost every tap
- * was answering from the far end of the screen from the button that had just been pressed - on the
- * unfolded panel, the better part of a foot away from it.
- *
- * @see AppStatusLine for what it draws, and [StatusStage] for how long each kind stays.
- */
-@Composable
-private fun AppHeader(
-    appState: AppState,
-    onDismissStatus: () -> Unit,
-    onMarkAnchor: ((Offset) -> Unit)? = null,
-) {
-    // A step up from the page it sits on, which separates it without a rule underneath as well.
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        // The window's own width, not this header's, and not measured again here: the shell already
-        // works it out to choose a rail or a bar, and LocalWindowWidth is published so that two
-        // parts of the app cannot disagree about where the line falls.
-        val beside = LocalWindowWidth.current != WindowWidth.COMPACT
-        // No arrangement spacing: the gap above a message belongs to the message, and spacing here
-        // would hold 6dp open under the name on every idle compact header. It is applied inside the
-        // line instead, where it collapses along with it.
-        Column(
-            Modifier.fillMaxWidth().padding(
-                horizontal = 16.dp,
-                vertical = if (beside) WideHeaderPadding else HeaderPadding,
-            ),
-        ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (onMarkAnchor == null) {
-                    AppMark(accentFor(appState.destination.accent, LocalDarkTheme.current).markAurora)
-                } else {
-                    // The mark's place, held open so the name and the status line sit exactly where
-                    // they would with the glyph in the row. The glyph itself is drawn by the shell,
-                    // over this, and reported to it from here.
-                    Spacer(
-                        Modifier
-                            .size(AppMarkSize)
-                            .onGloballyPositioned { onMarkAnchor(it.positionInWindow()) },
-                    )
-                }
-                Text(
-                    stringResource(R.string.app_name),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                // Beside the name where there is width for it, taking the surplus rather than a
-                // share of it - the name is what it is, and everything left over is the message's.
-                // Below 600dp the cover screen has under 200dp spare after a 22sp title, which is
-                // most of these messages truncated, so there the line drops underneath instead.
-                if (beside) {
-                    AppStatusLine(
-                        appState = appState,
-                        alignEnd = true,
-                        onDismiss = onDismissStatus,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-            if (!beside) {
-                AppStatusLine(
-                    appState = appState,
-                    alignEnd = false,
-                    onDismiss = onDismissStatus,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-    }
-}
-
-/**
  * The app's own mark, with the aurora moving through it.
  *
- * One composable for both layouts: inline in the phone's header, and drawn over the shell on the
- * wide one so it can outlive the header and travel into the rail. A second copy for the travelling
- * one is how the two would end up different marks.
- *
- * @param markSize [AppMarkSize] in a header, where the name sets it, animated up to [AppMarkRailSize]
- *   by the shell as the mark docks in the rail. The gradient is measured off the glyph, so the sweep
- *   stays the same length of travel through the mark at either size.
+ * Drawn once, in the rail's top gap, and only on the layout that has a rail. It used to be drawn
+ * in the header as well and animated between the two; see the rail shell for why that is gone.
  *
  * **The gradient is painted through the glyph rather than into the asset.** `ic_egx_notification` is
  * a one-colour vector and stays one; the layer below it is drawn, then a rectangle of the brush is
@@ -565,7 +358,7 @@ private fun AppHeader(
 private fun AppMark(
     hues: List<Color>,
     modifier: Modifier = Modifier,
-    markSize: Dp = AppMarkSize,
+    markSize: Dp = AppMarkRailSize,
 ) {
     val sweep = rememberInfiniteTransition(label = "mark aurora")
     val phase by sweep.animateFloat(
@@ -620,15 +413,7 @@ private const val MarkSweepMilliseconds = 12_000
 /** How many marks wide the ramp is. Enough that no more than one of its three hues is ever inside. */
 private const val MarkSweepSpan = 3f
 
-/**
- * How long the header takes to leave or return.
- *
- * Deliberately brief. See the note at the call site: this is also how long the page's own scroll
- * watcher spends ignoring the reader, because the movement changes the extent it reads.
- */
-private const val HeaderMoveMilliseconds = 180
-
-/** Between the name and a message sitting under it, on the layout where one does. */
+/** Between the header above the line and the first card under it. */
 private val StatusLineGap = 6.dp
 
 /**
@@ -645,13 +430,21 @@ private val StatusLineGap = 6.dp
  *
  * Whether it worked is carried by one tinted glyph, exactly as the toast carried it. Colouring the
  * text would make every routine confirmation the loudest thing on a screen that raises one after
- * almost every tap - and this line now sits beside the app's own name, which is the last place that
- * should flash.
+ * almost every tap.
+ *
+ * **It is drawn by [Screen] now, under the page's own name**, rather than in a band above the page.
+ * The band is gone and the page starts at the top of the window, so there is nowhere above the page
+ * left to be. It is still outside the scroll, which is the property that mattered: a message landing
+ * while the reader is halfway down a page is never announced off screen.
+ *
+ * One thing did change with the move. This sits inside the page's theme, so the working spinner and
+ * an undo's label - the two things on this line allowed to carry `primary` - wear the hue of the
+ * page they were raised on rather than cyan everywhere. That is the accent scheme working as
+ * written: what a figure means never moves, and chrome takes the colour of where it is.
  */
 @Composable
-private fun AppStatusLine(
+internal fun AppStatusLine(
     appState: AppState,
-    alignEnd: Boolean,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -666,11 +459,9 @@ private fun AppStatusLine(
     }
     AnimatedVisibility(
         visible = text != null && stage != null,
-        // Height as well as opacity. On the compact layout the line has a row of its own, so
-        // without this the header jumps a line taller the instant a message lands and shorter again
-        // when it clears - which reads as the page below it twitching rather than as an
-        // announcement. On the wide layout the row is already as tall as the title beside it, so
-        // the expansion costs nothing there.
+        // Height as well as opacity. The line has a row of its own, so without this the page jumps
+        // a line the instant a message lands and again when it clears - which reads as the content
+        // twitching rather than as an announcement.
         enter = fadeIn() + expandVertically(),
         exit = fadeOut() + shrinkVertically(),
         modifier = modifier,
@@ -697,14 +488,11 @@ private fun AppStatusLine(
                         Modifier.clickable(onClick = onDismiss)
                     },
                 )
-                // Inside the animated content, so the gap under the name arrives and leaves with
-                // the message rather than being held open under an idle header.
-                .padding(top = if (alignEnd) 0.dp else StatusLineGap)
-                // Full width so the arrangement below can push the line against the header's end on
-                // the wide layout. Capping the width instead left it stranded mid-header: a capped
-                // row inside a weighted slot sits at the start of that slot, not at its end.
+                // Inside the animated content, so the gap arrives and leaves with the message
+                // rather than being held open under an idle header.
+                .padding(top = StatusLineGap)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp, if (alignEnd) Alignment.End else Alignment.Start),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.Start),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             StatusGlyph(glyph)
@@ -712,7 +500,7 @@ private fun AppStatusLine(
                 label,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
+                textAlign = TextAlign.Start,
                 // Two lines is the ceiling, as it was on the toast. Anything needing more than that
                 // is a screen, not a status line, and a provider's own error can run to a paragraph.
                 maxLines = 2,
@@ -771,15 +559,20 @@ private val RailItemGap = 16.dp
 
 @Composable
 private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
-    // Material leaves a rail the page's own colour; this one carries the header's, so the two meet
-    // as one piece of chrome around the page rather than as a rail that has vanished into it.
-    // Destinations only - the app's mark is drawn over this rather than in it, so that it can be in
-    // the header while there is one and here once the header has gone. See the rail shell.
+    // Material leaves a rail the page's own colour; this one is the chrome, so it reads as a band
+    // down the side of the page rather than as a rail that has vanished into it.
     NavigationRail(
         modifier = modifier,
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
     ) {
-        Spacer(Modifier.height(RailTopInset))
+        // The app's mark, in the gap `RailTopInset` was already holding open above the destinations.
+        // This is the only place in the app it is drawn now - see the rail shell.
+        Box(
+            Modifier.fillMaxWidth().height(RailTopInset),
+            contentAlignment = Alignment.Center,
+        ) {
+            AppMark(accentFor(appState.destination.accent, LocalDarkTheme.current).markAurora)
+        }
         AppDestination.entries.forEachIndexed { index, destination ->
             if (index > 0) Spacer(Modifier.height(RailItemGap))
             val selected = appState.destination == destination
@@ -953,12 +746,7 @@ private fun NavigationIcon(
 }
 
 @Composable
-private fun AppContent(
-    appState: AppState,
-    rail: Boolean,
-    headerVisible: Boolean,
-    onMarkAnchor: ((Offset) -> Unit)? = null,
-) {
+private fun AppContent(appState: AppState, rail: Boolean) {
     // Arriving somewhere new with the navigation still hidden reads as the bar having gone missing,
     // and the page that hid it is no longer on screen to bring it back.
     val navBarVisible = LocalNavBarVisible.current
@@ -977,97 +765,50 @@ private fun AppContent(
     }
 
     Scaffold(
-        // The navigation suite draws edge to edge, so the content keeps itself clear of the status
-        // bar and any cutout.
-        modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
+        // **Every side but the top.** The page runs up behind the status bar on purpose, so that
+        // its own background and the accent wash at the top of it carry on up behind the clock and
+        // the battery instead of stopping under a strip of chrome in a different colour. With the
+        // app-name band gone there is nothing up there to justify a band: a `surfaceContainer`
+        // strip over a `background` page is a seam across the top of every screen.
+        //
+        // What keeps the title out from under the clock is [PageHeader], which pads itself by the
+        // top inset. It reads `safeDrawing` rather than `statusBars` so a tall cutout is cleared
+        // too.
+        modifier = Modifier.fillMaxSize().windowInsetsPadding(
+            WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
+        ),
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            // The header gets out of the way on the same scroll that takes the pill, and comes back
-            // with it. One signal for both: two rules would let the two pieces of chrome leave at
-            // slightly different moments, which reads as them coming loose from each other rather
-            // than as the page filling the window. Unlike the pill it is laid out in this column
-            // rather than floating over the page, so the well grows into the room it leaves - which
-            // is why it collapses its height as well as fading, and collapses towards the top so the
-            // name travels up out of the window rather than sinking behind the well.
-            //
-            // Never hidden while the app has something to say. The status line lives in this header,
-            // so a message landing on a page that has been scrolled down would otherwise be
-            // announced off screen - and a failure is the one kind that arrives unbidden.
-            //
-            // **Beside a rail it hides too.** It did not, on the reasoning that there is no pill
-            // over there to leave with and a header vanishing alone would be the only thing moving -
-            // which was true of a header that left alone, and stopped being true once the mark
-            // survived it. `Screen` has always written the flag regardless of layout, so the wide
-            // layout needed nothing new to drive this; what it needed was somewhere for the mark to
-            // go, and the rail's own top gap is it. See the rail shell.
-            AnimatedVisibility(
-                visible = headerVisible,
-                // A short tween rather than the default spring, and the reason is not the look of
-                // it. This animates the height of the page below, so every frame of it moves the
-                // extent that `Screen`'s watcher is reading - and that watcher stands down for as
-                // long as the extent keeps changing. A spring's tail would leave it standing down
-                // well after the header had visibly finished; a fixed tween bounds the deaf window
-                // to the movement itself.
-                enter = fadeIn(tween(HeaderMoveMilliseconds)) +
-                    expandVertically(tween(HeaderMoveMilliseconds), expandFrom = Alignment.Top),
-                exit = shrinkVertically(tween(HeaderMoveMilliseconds), shrinkTowards = Alignment.Top) +
-                    fadeOut(tween(HeaderMoveMilliseconds)),
-            ) {
-                AppHeader(
-                    appState,
-                    onDismissStatus = appState::consumeStatusMessage,
-                    onMarkAnchor = onMarkAnchor,
-                )
-            }
-            // Above the well rather than inside it, so a run starting does not push the rounded
-            // edge down the screen. The bar carries no label any more - the header above it names
-            // what is running, and the two said the same thing a few pixels apart.
-            if (appState.busyLabel != null) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
-            }
-            // The page sits in the chrome the way a card sits on the page, and takes the corner
-            // radius the cards themselves use. The hairline is what keeps that edge drawn when a
-            // card scrolls up under it, since a card is the same colour as the chrome around it.
-            //
-            // Beside a rail the end corner is squared as well, so the only radius left on the well
-            // is the one where it meets the rail. On the phone both top corners round away from the
-            // window's own edges, which is what sets the page into the chrome. On the wide layout
-            // those two corners are not the same kind of corner: the start edge is where the rail
-            // stops and there is chrome behind it for a radius to reveal, while the end edge runs
-            // along the side of the window, where a curve reads as the page shrinking away from the
-            // frame rather than as a corner of anything.
-            val squared = CornerSize(0.dp)
-            val wellShape = MaterialTheme.shapes.large.copy(
-                topEnd = if (rail) squared else MaterialTheme.shapes.large.topEnd,
-                bottomStart = squared,
-                bottomEnd = squared,
-            )
-            Surface(
-                Modifier.fillMaxWidth().weight(1f)
-                    .wellOutline(wellShape, MaterialTheme.colorScheme.outlineVariant),
-                color = MaterialTheme.colorScheme.background,
-                shape = wellShape,
-            ) {
-                if (rail) {
-                    // Screens cross-fade and rise slightly, so changing destination reads as moving
-                    // somewhere rather than the content being swapped underneath. Beside a rail the
-                    // destinations are a column of buttons rather than a row of pages, and sliding
-                    // between them sideways would answer a gesture this layout does not offer.
-                    AnimatedContent(
-                        targetState = appState.destination,
-                        transitionSpec = {
-                            (fadeIn(initialAlpha = 0.4f) + slideInVertically { it / 24 })
-                                .togetherWith(fadeOut())
-                                .using(SizeTransform(clip = false))
-                        },
-                        label = "destination",
-                    ) { destination ->
-                        DestinationScreen(destination, appState)
-                    }
-                } else {
-                    DestinationPager(appState)
+        // No chrome above the page any more - no name band, no progress hairline, no status
+        // line. The first two are gone; the third moved on to the page, under its own title. See
+        // `Screen`, and [AppStatusLine] for what the move cost.
+        //
+        // The page is no longer *set into* anything either, so the rounded top corners and the
+        // hairline round them have gone with the band that made them read as an inset panel. A
+        // radius against the top of the window is a curve against the frame of the screen, and a
+        // hairline there is a line under the status bar.
+        Surface(
+            Modifier.padding(padding).fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            if (rail) {
+                // Screens cross-fade and rise slightly, so changing destination reads as moving
+                // somewhere rather than the content being swapped underneath. Beside a rail the
+                // destinations are a column of buttons rather than a row of pages, and sliding
+                // between them sideways would answer a gesture this layout does not offer.
+                AnimatedContent(
+                    targetState = appState.destination,
+                    transitionSpec = {
+                        (fadeIn(initialAlpha = 0.4f) + slideInVertically { it / 24 })
+                            .togetherWith(fadeOut())
+                            .using(SizeTransform(clip = false))
+                    },
+                    label = "destination",
+                ) { destination ->
+                    DestinationScreen(destination, appState)
                 }
+            } else {
+                DestinationPager(appState)
             }
         }
     }
@@ -1227,67 +968,14 @@ private fun DestinationScreen(
 }
 
 /**
- * The page well's edge, drawn on every side but the bottom.
- *
- * A Surface border strokes the whole shape, and the bottom of this one runs along the foot of the
- * window, where a line reads as the frame of the screen rather than as the edge of the page. The
- * other three sides still earn their place: a card scrolled up under the header is the same colour as
- * the chrome, and without the top edge there is nothing to say where the page starts.
- *
- * **The two top corners are read separately**, because on the wide layout they are no longer the
- * same corner - see the call site. One radius for both was true while they matched and would have
- * drawn a curve on the end corner the Surface underneath had already squared, which is a hairline
- * lifting off the fill it is supposed to edge. A corner with no radius is a plain right angle
- * rather than an arc of nothing: `arcTo` over a zero-sized rectangle is not a defined instruction.
- *
- * Start and end are resolved against the layout direction rather than taken as left and right. That
- * assumption was harmless while the two matched and is exactly the sort of thing that fails on one
- * device, in one language, long after anyone remembers this function exists.
- */
-private fun Modifier.wellOutline(
-    shape: CornerBasedShape,
-    color: Color,
-    width: Dp = 1.dp,
-): Modifier = drawWithContent {
-    drawContent()
-    val stroke = width.toPx()
-    // Half the stroke, so the line lands inside the bounds the way a border does rather than
-    // straddling them and losing its outer half to the clip.
-    val edge = stroke / 2
-    val start = shape.topStart.toPx(size, this)
-    val end = shape.topEnd.toPx(size, this)
-    val ltr = layoutDirection == LayoutDirection.Ltr
-    val left = if (ltr) start else end
-    val right = if (ltr) end else start
-    val path = Path().apply {
-        // Up the left side, across the top, and back down the right - left open at the bottom.
-        moveTo(edge, size.height)
-        lineTo(edge, edge + left)
-        if (left > 0f) {
-            arcTo(Rect(edge, edge, edge + 2 * left, edge + 2 * left), 180f, 90f, false)
-        }
-        lineTo(size.width - edge - right, edge)
-        if (right > 0f) {
-            arcTo(
-                Rect(size.width - edge - 2 * right, edge, size.width - edge, edge + 2 * right),
-                270f,
-                90f,
-                false,
-            )
-        }
-        lineTo(size.width - edge, size.height)
-    }
-    drawPath(path, color, style = Stroke(stroke))
-}
-
-/**
- * How long a confirmation stays in the header before it clears itself.
+ * How long a confirmation stays on the line before it clears itself.
  *
  * Material's own short snackbar, which is what these messages used to be shown for.
  */
 private const val StatusDoneMilliseconds = 4_000L
 
-private val AppDestination.icon: ImageVector
+/** Read by the navigation, on both layouts. */
+internal val AppDestination.icon: ImageVector
     get() = when (this) {
         AppDestination.ANALYZE -> Icons.Outlined.AutoGraph
         AppDestination.RESULTS -> Icons.Outlined.Assessment
@@ -1298,7 +986,9 @@ private val AppDestination.icon: ImageVector
         AppDestination.SETTINGS -> Icons.Outlined.Settings
     }
 
-private val AppDestination.selectedIcon: ImageVector
+/** Read by the navigation and by [PageHeader], which is what puts the page's own glyph beside its
+ * name. One property, so the two cannot disagree about what a destination looks like. */
+internal val AppDestination.selectedIcon: ImageVector
     get() = when (this) {
         AppDestination.ANALYZE -> Icons.Filled.AutoGraph
         AppDestination.RESULTS -> Icons.Filled.Assessment
