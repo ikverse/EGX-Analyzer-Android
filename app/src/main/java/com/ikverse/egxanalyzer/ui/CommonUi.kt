@@ -78,6 +78,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -262,7 +263,21 @@ internal fun Screen(
             // now. Above the page's own content, so a run starting does not push the first card
             // down the screen.
             if (appState.busyLabel != null) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
+                LinearProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary,
+                    // A tint of the page's own hue rather than Material's grey track, so the bar is
+                    // one line with a light running through it rather than a grey rail with a
+                    // coloured piece on it.
+                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = BusyTrackAlpha),
+                    strokeCap = StrokeCap.Round,
+                    // Material punches a gap either side of the moving piece, which on a bar this
+                    // wide reads as three separate bars rather than as one thing in motion.
+                    gapSize = 0.dp,
+                    // Held to the page's own margin. Edge to edge it was the one thing on the
+                    // screen touching the frame, on a page whose every card is inset - which is
+                    // what made it read as a system bar dropped on top rather than as the app's.
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.l),
+                )
             }
             // One line for everything the app is doing or has just done. It sat in the app-name
             // band until that band was removed; it is here, on the page, because the page starts at
@@ -368,6 +383,14 @@ internal val LocalScrollToTop = compositionLocalOf { 0 }
  * left of every heading under it and the page looks unaligned.
  */
 internal val PageTextInset = Space.l
+
+/**
+ * The unlit part of the busy bar: the page's hue, most of the way down.
+ *
+ * Faint enough that an idle stretch of the bar is a hint of the line rather than a second object,
+ * and the eye follows the one lit piece travelling along it.
+ */
+private const val BusyTrackAlpha = 0.14f
 
 /** Enough movement to be a scroll rather than a wobble, so the bar does not flicker on a nudge. */
 private val NavBarScrollSlop = 6.dp

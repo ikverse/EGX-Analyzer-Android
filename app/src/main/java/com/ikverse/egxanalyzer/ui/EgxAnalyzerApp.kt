@@ -68,7 +68,6 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailDefaults
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -428,19 +427,20 @@ private val StatusLineGap = 6.dp
  * whatever it opens arrives. What it does not suppress is a failure: an action that produced nothing
  * has to say why somewhere, and there is nowhere else.
  *
- * Whether it worked is carried by one tinted glyph, exactly as the toast carried it. Colouring the
- * text would make every routine confirmation the loudest thing on a screen that raises one after
- * almost every tap.
+ * Whether it worked is carried by one tinted glyph, exactly as the toast carried it - a tick or a
+ * cross, and nothing while the run is still going, because the bar over this line is already saying
+ * that. Colouring the text would make every routine confirmation the loudest thing on a screen that
+ * raises one after almost every tap.
  *
  * **It is drawn by [Screen] now, under the page's own name**, rather than in a band above the page.
  * The band is gone and the page starts at the top of the window, so there is nowhere above the page
  * left to be. It is still outside the scroll, which is the property that mattered: a message landing
  * while the reader is halfway down a page is never announced off screen.
  *
- * One thing did change with the move. This sits inside the page's theme, so the working spinner and
- * an undo's label - the two things on this line allowed to carry `primary` - wear the hue of the
- * page they were raised on rather than cyan everywhere. That is the accent scheme working as
- * written: what a figure means never moves, and chrome takes the colour of where it is.
+ * One thing did change with the move. This sits inside the page's theme, so an undo's label - the
+ * one thing on this line allowed to carry `primary` - wears the hue of the page it was raised on
+ * rather than cyan everywhere. That is the accent scheme working as written: what a figure means
+ * never moves, and chrome takes the colour of where it is.
  */
 @Composable
 internal fun AppStatusLine(
@@ -530,11 +530,10 @@ internal fun AppStatusLine(
 @Composable
 private fun StatusGlyph(stage: StatusStage) {
     when (stage) {
-        StatusStage.WORKING -> CircularProgressIndicator(
-            modifier = Modifier.size(StatusGlyphSize),
-            strokeWidth = 2.dp,
-            color = MaterialTheme.colorScheme.primary,
-        )
+        // Nothing at all. A run already has the bar under the header travelling for it, and a
+        // 14dp spinner beside the words was the same fact drawn a second time - two small moving
+        // things a line apart, neither of them the one the eye should follow.
+        StatusStage.WORKING -> Unit
         StatusStage.DONE -> Icon(
             Icons.Outlined.CheckCircle,
             // The message says what happened; a reader announcing the tone as well says it twice.
