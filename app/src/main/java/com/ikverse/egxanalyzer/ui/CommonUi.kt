@@ -579,8 +579,8 @@ internal fun SectionCard(
  * every card on the page has to be read against.
  *
  * **Faded on the scroll rather than pinned**, and the scroll is read inside the draw lambda for the
- * reason `AppMark`'s phase is: read at composition, every frame of a scroll would recompose the
- * whole page, where here a frame costs one rectangle repainted.
+ * reason [PageHeader]'s collapse is passed as a lambda: read at composition, every frame of a
+ * scroll would recompose the whole page, where here a frame costs one rectangle repainted.
  */
 @Composable
 private fun PageWash(scroll: ScrollState, taken: () -> Float) {

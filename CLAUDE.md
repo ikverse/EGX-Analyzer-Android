@@ -2422,10 +2422,37 @@ press. Worth writing down, because nothing in it was broken and every part behav
 
 - **`AppHeader` is gone**, and with it the whole travelling-mark mechanism: anchors in window
   coordinates, `onMarkAnchor` threaded through `AppContent`, and two animations, all so one glyph
-  could be in the header and slide into the rail as that header collapsed. The mark is drawn inside
-  `AppRail` now, in the gap `RailTopInset` was already holding open, and **only there** — on a phone
-  it is not drawn at all. The app's name and artwork left the phone UI; the launcher icon and the
-  notification glyph are unchanged, which is where that artwork still earns its keep.
+  could be in the header and slide into the rail as that header collapsed. The mark moved into
+  `AppRail`, in the gap `RailTopInset` was already holding open — and then went as well, the same
+  day, once it could be seen there: see the two bullets below. The app's name and artwork have left
+  the UI on both layouts; the launcher icon and the notification glyph are unchanged, which is where
+  that artwork still earns its keep.
+- **`AppMark` is gone, and the gap it stood in is not.** `ic_egx_notification` is three ascending
+  bars and a rising arrow, and the three destinations under it are `AutoGraph`, `Assessment` and
+  `Insights` — so in the rail it was a **fourth chart glyph at the head of a column of chart
+  glyphs**, unlabelled among labelled ones, wearing the current page's own aurora, which is the hue
+  of the one item beside it drawn at full strength. `AppMarkRailSize`'s own note had already named
+  the failure — *"at a glyph's size it reads as a sixth destination that has lost its label"* — and
+  answered it with 36dp against 28, which is not a difference. Sizing was never the fault: what it
+  was there to say, `PageHeader` now says on both layouts in the page's name and its own glyph, so
+  the mark was the third cyan chart glyph across one corner. `MarkSweepMilliseconds` and
+  `MarkSweepSpan` went with it. `RailTopInset` stays, because what it does is drop the first icon
+  level with the heading beside it, and that is unaffected by whether anything fills it.
+  `PageAccent.markAurora` is left in the theme and is now read only by `ActionPaletteTest`.
+- **The rail is on `background`, not `surfaceContainer`.** It was the chrome colour so that it read
+  as the band turning the corner down the side of the page — and with the band gone that left a slab
+  in the one colour every `SectionCard` is also drawn in: a full-height card beside a page of cards,
+  roughly twice as light as the page between them, with no divider and nothing saying which of the
+  two was chrome. It is the same seam the top edge was cleared of, stood on its end, and the
+  argument is the one already written there. On the page's own ground the destinations stand on the
+  page and what separates it is its cards' own inset.
+- **The two shell grounds went with it**, and one of them was still drawing a band: `Surface` in
+  both shells and `Scaffold.containerColor` are `background` now. The `Scaffold`'s content is padded
+  out of the horizontal and bottom safe-drawing insets, so what its container paints is the strip
+  behind the gesture bar — in `surfaceContainer` that was a full-width band about 20dp tall along
+  the foot of **every** page, which is exactly what the top of the window had just been cleared of.
+  They stay painted rather than left transparent, because the theme parents
+  `Theme.Material.Light` and the window background behind them is very nearly white.
 - **`headerVisible` is gone.** Nothing leaves with the navigation pill any more; the page header is
   pinned and the pill still hides on its own signal.
 - **The progress hairline moved onto the page**, under the header, where the status line is.
@@ -2626,9 +2653,11 @@ parameter being threaded anywhere. Added 2026-09-08.
   0.62). The bar is where the mapping between a colour and a page is learned and it can only teach
   it by showing all five; what says where you are is the filled indicator and a hue at full
   strength, which is a larger difference than the grey-to-colour one it replaced.
-- **`AppMark` takes its hues as a parameter for the same reason the bar does.** It is drawn in the
-  rail, outside every page's theme, so a mark reading the local would wear cyan on all five pages.
-  Since 2026-09-09 that is the only place it is drawn at all — see **What went with the band**.
+- **The app's mark is no longer drawn on any page**, so nothing outside the navigation reads an
+  accent from outside a page's theme any more. It took its hues as a parameter for the bar's own
+  reason — drawn over the rail, outside every page's theme, a mark reading the local would have worn
+  cyan on all five pages — and wearing the page's hue is what put it in the lit destination's own
+  colour directly above it. See **What went with the band**.
 - **A card has its own hue on top of the page's**, on the tile behind its icon and the 3px edge down
   its left side — `SectionCard.accent` and `ExpandableSection.accent`, both defaulting to the page's.
   The **first card on a page takes the page's hue** by passing nothing, and the rest name a
@@ -2649,10 +2678,11 @@ parameter being threaded anywhere. Added 2026-09-08.
   accent ink and every `CardHue` clears 4.5:1 on both the page and a card. The saturation pass that
   came with this took the light `tertiary`, `error` and `expired` **down** rather than up for the
   same reason — brighter versions measured 3.8–4.4:1, and every one of them is a price.
-- **`PageWash` reads the scroll inside the draw lambda**, the rule `AppMark`'s phase already
-  followed: read at composition it would recompose the whole page on every frame of a scroll. The
-  header's collapse fraction is passed as a lambda for the same reason, and the wash counts it as
-  scroll so the tint does not sit at full strength through the whole collapse.
+- **`PageWash` reads the scroll inside the draw lambda**: read at composition it would recompose
+  the whole page on every frame of a scroll. The header's collapse fraction is passed as a lambda
+  for the same reason, and the wash counts it as scroll so the tint does not sit at full strength
+  through the whole collapse. `AppMark`'s aurora phase was the third reader of this rule until the
+  mark went; the rule is the same one, and the next always-on animation drawn over a page wants it.
 
 ## Gotchas
 
