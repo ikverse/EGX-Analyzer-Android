@@ -59,9 +59,13 @@ object ConsolidatedParser {
                 if (distinct.size > all.size) {
                     notes += "$code dropped ${distinct.size - all.size} occurrence(s) carrying no price."
                 }
-                val occurrences = all.filter {
-                    SourceDateGate.accepts(it.visibleSourceDate, targetDate)
-                }
+                // Numbered after every drop above, not before: the index is what an edit is
+                // anchored to, and one assigned before the repeats and the priceless rows were
+                // removed would name a slot the reader can never see. It is stable because the
+                // response it is derived from never changes.
+                val occurrences = all
+                    .filter { SourceDateGate.accepts(it.visibleSourceDate, targetDate) }
+                    .mapIndexed { slot, point -> point.copy(parseIndex = slot) }
                 // Every occurrence rejected means nothing is left to recommend - whether they were
                 // rejected for their date or for carrying no price.
                 if (occurrences.isEmpty() && distinct.isNotEmpty()) continue

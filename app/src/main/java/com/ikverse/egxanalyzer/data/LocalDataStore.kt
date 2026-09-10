@@ -30,6 +30,9 @@ import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.Quote
 import com.ikverse.egxanalyzer.model.CallState
 import com.ikverse.egxanalyzer.model.TradeState
+import com.ikverse.egxanalyzer.model.EditField
+import com.ikverse.egxanalyzer.model.RecommendationEdit
+import com.ikverse.egxanalyzer.model.RecommendationEdits
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.ExcludedSource
 import com.ikverse.egxanalyzer.model.SavedAnalysis
@@ -1434,6 +1437,28 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         .use { cursor -> buildSet { while (cursor.moveToNext()) add(cursor.getString(0)) } }
 
     /**
+     * Every report held here and how many times it has been corrected, for the sync to compare.
+     *
+     * The revision is read out of the payload rather than kept in a column of its own: it moves
+     * only when the payload does, and a column would be a second place for it to be written and so
+     * a place for the two to disagree. A payload that will not parse reports revision zero, which
+     * makes it the loser of every comparison - an unreadable report is not a copy anything should
+     * be overwritten with.
+     */
+    fun savedReportRevisions(): Map<String, Long> = readableDatabase
+        .rawQuery("SELECT request_id, payload FROM analyses", null)
+        .use { cursor ->
+            buildMap {
+                while (cursor.moveToNext()) {
+                    val revision = runCatching {
+                        JSONObject(cursor.getString(1)).optLong("editRevision", 0)
+                    }.getOrDefault(0L)
+                    put(cursor.getString(0), revision)
+                }
+            }
+        }
+
+    /**
      * Every run as it was stored, without reading a single payload.
      *
      * For the restore, which copies runs out of a backup and into here. Deliberately not [results]:
@@ -1458,6 +1483,11 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
                             model = cursor.getString(2),
                             completedAt = cursor.getString(3),
                             payload = cursor.getString(4),
+                            // Read back off the payload rather than counted here, so a backup
+                            // carries the same revision the sync would have compared.
+                            editRevision = runCatching {
+                                JSONObject(cursor.getString(4)).optLong("editRevision", 0)
+                            }.getOrDefault(0L),
                         ),
                     )
                 }
@@ -1467,9 +1497,14 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
     /**
      * Stores a run that arrived from another device.
      *
-     * Ignores one already held rather than replacing it: a saved run never changes, so the copy on
-     * disk and the copy in the cloud are the same thing, and overwriting could only lose a repair
-     * made locally. Returns whether anything was actually added.
+     * Ignores one already held **unless it carries a newer correction**. A run's extraction never
+     * changes, so the copy on disk and the copy in the cloud are the same reading of the same
+     * messages; what the reader has since corrected in it is the one thing that moves, and
+     * [editRevision] is how a copy says it holds more of that than this one does. Anything at or
+     * below the revision held here is ignored, which keeps the ordinary case - the same report
+     * arriving again - free and unable to lose a correction made on this device.
+     *
+     * Returns whether anything was actually written.
      */
     fun adoptResult(
         requestId: String,
@@ -1477,18 +1512,29 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         model: String,
         completedAt: String,
         payload: String,
-    ): Boolean = writableDatabase.insertWithOnConflict(
-        "analyses",
-        null,
-        ContentValues().apply {
+        editRevision: Long = 0,
+    ): Boolean {
+        val values = ContentValues().apply {
             put("request_id", requestId)
             put("provider", provider)
             put("model", model)
             put("completed_at", completedAt)
             put("payload", payload)
-        },
-        SQLiteDatabase.CONFLICT_IGNORE,
-    ) != -1L
+        }
+        val held = savedReportRevisions()[requestId]
+            ?: return writableDatabase.insertWithOnConflict(
+                "analyses", null, values, SQLiteDatabase.CONFLICT_IGNORE,
+            ) != -1L
+        // A copy no newer than the one on disk is ignored, which is what "a saved run never
+        // changes" used to mean for every copy. What changed is that a run's *corrections* do, so a
+        // higher revision is the one case where overwriting is right - and only the payload moves.
+        // `source_reads` is left alone deliberately: it is this device's own cache of what it read
+        // out of each message, keyed by the prompt rather than by the report, and it is nobody
+        // else's to replace.
+        if (editRevision <= held) return false
+        writableDatabase.update("analyses", values, "request_id = ?", arrayOf(requestId))
+        return true
+    }
 
     /**
      * How many saved runs the last [results] call could not read back.
@@ -1791,6 +1837,99 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         writableDatabase.delete("analyses", "request_id = ?", arrayOf(requestId))
     }
 
+    /**
+     * Records one correction against a saved report and hands back the report as it now reads.
+     *
+     * The payload is edited **in place as JSON** rather than decoded and written out again, so
+     * every key this build does not understand - a field a later version added - survives the
+     * write. Only two of them move: the list of corrections, and the revision that makes an edited
+     * report syncable at all.
+     *
+     * An edit that says nothing is a removal, which is what the sheet hands back when the reader
+     * puts every field they touched back to what the model read.
+     */
+    fun saveResultEdit(id: Long, edit: RecommendationEdit): AnalysisResult? {
+        val payload = payloadOf(id) ?: return null
+        val kept = payload.storedEdits().filterNot { it.key == edit.key }
+        val next = if (edit.isEmpty) kept else kept + edit
+        payload.put("edits", JSONArray().apply { next.forEach { put(it.toJson()) } })
+        payload.put("editRevision", payload.optLong("editRevision", 0) + 1)
+        return writePayload(id, payload)
+    }
+
+    /**
+     * Puts a report back to what the model read, and hands it back.
+     *
+     * The revision still rises: undoing a correction is a change other devices have to be told
+     * about, and one that lowered the revision would be overwritten by the very copy it was
+     * undoing.
+     */
+    fun clearResultEdits(id: Long): AnalysisResult? {
+        val payload = payloadOf(id) ?: return null
+        payload.put("edits", JSONArray())
+        payload.put("editRevision", payload.optLong("editRevision", 0) + 1)
+        return writePayload(id, payload)
+    }
+
+    private fun payloadOf(id: Long): JSONObject? = readableDatabase
+        .query("analyses", arrayOf("payload"), "id = ?", arrayOf(id.toString()), null, null, null)
+        .use { cursor ->
+            if (!cursor.moveToFirst()) null else runCatching {
+                JSONObject(cursor.getString(0))
+            }.getOrNull()
+        }
+
+    private fun writePayload(id: Long, payload: JSONObject): AnalysisResult? {
+        writableDatabase.update(
+            "analyses",
+            ContentValues().apply { put("payload", payload.toString()) },
+            "id = ?",
+            arrayOf(id.toString()),
+        )
+        return runCatching { payload.toAnalysisResult() }.getOrNull()
+    }
+
+    /**
+     * Forgets what a run read out of particular messages, so the next run reads them afresh.
+     *
+     * The root of a misread ticker, rather than one of its symptoms. A run writes down what it read
+     * of each source so the next one need not pay to read it again, and that stored reading still
+     * carries the wrong code - so correcting the report and leaving the reading alone would have
+     * tomorrow's run adopt the same mistake, for free, with nothing on screen to say why. Dropping
+     * the reading costs one message being sent to the model again and is the only way the
+     * correction reaches further than this report.
+     */
+    fun forgetSourceReads(requestId: String, sourceIds: Set<String>) {
+        if (sourceIds.isEmpty()) return
+        readableDatabase.query(
+            "analyses",
+            arrayOf("id", "source_reads"),
+            "request_id = ? AND source_reads IS NOT NULL",
+            arrayOf(requestId),
+            null,
+            null,
+            null,
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) return
+            val id = cursor.getLong(0)
+            val stored = runCatching { JSONObject(cursor.getString(1)) }.getOrNull() ?: return
+            val sources = stored.optJSONObject("sources") ?: return
+            sourceIds.forEach(sources::remove)
+            writableDatabase.update(
+                "analyses",
+                ContentValues().apply {
+                    if (sources.length() == 0) {
+                        putNull("source_reads")
+                    } else {
+                        put("source_reads", stored.put("sources", sources).toString())
+                    }
+                },
+                "id = ?",
+                arrayOf(id.toString()),
+            )
+        }
+    }
+
     fun deleteResult(id: Long) {
         // Read back before the row goes: the opinions are keyed on the request id, and after the
         // delete there is nothing left to look it up from.
@@ -1853,6 +1992,12 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         put("imagePaths", JSONArray(imagePaths))
         put("rawResponse", rawResponse)
         put("completedAt", completedAt.toString())
+        // Beside the response rather than folded into it. The response is the record of what the
+        // model said and must stay exactly as it answered; these are what the reader has since
+        // corrected, and they travel with the report because a correction that reached one phone
+        // only is a bug waiting to be reported.
+        put("editRevision", editRevision)
+        put("edits", JSONArray().apply { edits.forEach { put(it.toJson()) } })
         put("recommendations", JSONArray().apply {
             recommendations.forEach { recommendation ->
                 put(JSONObject().apply {
@@ -1897,111 +2042,229 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         })
     }
 
-    private fun JSONObject.toAnalysisResult() = AnalysisResult(
-        requestId = getString("requestId"),
-        inquiryReplyCount = optInt("inquiryReplyCount"),
-        analysisMode = optString("analysisMode")
-            .takeIf(String::isNotBlank)
-            ?.let { runCatching { AnalysisMode.valueOf(it) }.getOrDefault(AnalysisMode.NEXT_DAY) }
-            ?: AnalysisMode.NEXT_DAY,
-        recommendationTargetDate = nullableString("recommendationTargetDate")
-            ?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
-        diagnostics = optJSONObject("diagnostics")?.let { value ->
-            AnalysisDiagnostics(
-                sourceWindowStart = value.nullableString("sourceWindowStart")
-                    ?.let { runCatching { Instant.parse(it) }.getOrNull() },
-                sourceWindowEnd = value.nullableString("sourceWindowEnd")
-                    ?.let { runCatching { Instant.parse(it) }.getOrNull() },
-                inputCount = value.optInt("inputCount"),
-                acceptedInputCount = value.optInt("acceptedInputCount"),
-                correctionAttempted = value.optBoolean("correctionAttempted"),
-                durationMilliseconds = value.optLong("durationMilliseconds"),
-                promptId = value.optString("promptId").takeIf(String::isNotBlank),
-                promptSchemaVersion = value.optInt("promptSchemaVersion").takeIf { it > 0 },
-                promptRuleIds = value.optJSONArray("promptRuleIds")
-                    ?.let { array -> (0 until array.length()).map(array::getString) }
-                    .orEmpty(),
-                validationWarnings = value.optJSONArray("validationWarnings")?.strings().orEmpty(),
-                excludedSources = value.optJSONArray("excludedSources")?.objects()?.map {
-                    ExcludedSource(it.optString("sourceId"), it.optString("reason"))
-                }.orEmpty(),
-                requestCount = value.optInt("requestCount"),
-                imagesSent = value.optInt("imagesSent"),
-                reusedSources = value.optInt("reusedSources"),
-                promptTokens = value.optLong("promptTokens"),
-                completionTokens = value.optLong("completionTokens"),
-                totalTokens = value.optLong("totalTokens"),
-                unreportedTokenRequests = value.optInt("unreportedTokenRequests"),
-                unaccountedImages = value.optJSONArray("unaccountedImages")?.objects()?.map {
-                    UnaccountedImage(
-                        reference = it.optInt("reference"),
-                        sourceId = it.nullableString("sourceId"),
-                        caption = it.nullableString("caption"),
-                    )
-                }.orEmpty(),
-            )
-        } ?: AnalysisDiagnostics(),
-        imagePaths = optJSONArray("imagePaths")?.strings().orEmpty(),
-        rawResponse = optString("rawResponse"),
-        // Rebuilt from the stored response rather than persisted separately, so the nested
-        // occurrences can never drift from the response they came from - and analyses saved before
-        // this existed still gain them. Responses predating the consolidated contract yield none.
-        consolidated = runCatching {
-            ConsolidatedParser.parse(
-                optString("rawResponse"),
-                nullableString("recommendationTargetDate")
-                    ?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
-            )
-        }
-            .getOrDefault(emptyList()),
-        completedAt = Instant.parse(getString("completedAt")),
-        recommendations = getJSONArray("recommendations").objects().map { item ->
-            RecommendationResult(
-                ticker = item.optString("ticker"),
-                companyName = item.optString("companyName"),
-                companyNameArabic = item.nullableString("companyNameArabic"),
-                sourceName = item.optString("sourceName"),
-                targetDate = item.nullableString("targetDate")?.let(LocalDate::parse),
-                timing = item.nullableString("timing"),
-                entryLow = item.nullableDouble("entryLow"),
-                entryHigh = item.nullableDouble("entryHigh"),
-                takeProfit1 = item.nullableDouble("takeProfit1"),
-                takeProfit2 = item.nullableDouble("takeProfit2"),
-                stopLoss = item.nullableDouble("stopLoss"),
-                notesArabic = item.nullableString("notesArabic"),
-                sourceIds = item.optJSONArray("sourceIds")?.strings().orEmpty(),
-                signal = item.optString("signal", "HOLD"),
-                confidence = item.nullableDouble("confidence"),
-                riskLevel = item.nullableString("riskLevel"),
-                timeHorizon = item.nullableString("timeHorizon"),
-                indicators = item.optJSONArray("indicators")?.strings().orEmpty(),
-            )
-        }
-            // Named again on the way out, not just as the run wrote them. Reports saved before the
-            // consolidated contract have no nested occurrences to rebuild, so this flat list is
-            // what their detail screen draws - and it was still showing whatever the model called
-            // the stock on the day the report was made.
-            .map(EgxCatalog::enrich),
-        modelExclusions = runCatching {
-            ConsolidatedParser.exclusions(optString("rawResponse"))
-        }.getOrDefault(emptyList()),
-        selectedChannels = optJSONArray("selectedChannels")?.objects()?.map { item ->
-            AnalysedChannel(item.optLong("id"), cleanChannelName(item.optString("name")))
-        }.orEmpty(),
-        sources = getJSONArray("sources").objects().map { item ->
-            SourceTrace(
-                sourceId = item.getString("sourceId"),
-                channelId = item.nullableLong("channelId"),
-                // Folded on read as well as on write: analyses saved before this carry the raw title, and
-                // would otherwise keep counting as a separate source forever.
-                channelName = cleanChannelName(item.getString("channelName")),
-                messageId = item.nullableLong("messageId"),
-                timestamp = Instant.parse(item.getString("timestamp")),
-                contentType = AnalysisContentType.valueOf(item.getString("contentType")),
-                preview = item.optString("preview"),
-            )
-        },
-    )
+    private fun JSONObject.toAnalysisResult(): AnalysisResult {
+        val edits = storedEdits()
+        // What every ticker in this report was corrected to, so the flat list below can be brought
+        // along. It is what `recommendedTickers` reads, and a stale code left in it would go on
+        // asking the price feed for a stock nobody ever recommended.
+        val renamed = edits.mapNotNull { edit ->
+            edit.stockCode?.let { edit.originalStockCode to it }
+        }.toMap()
+        return AnalysisResult(
+            requestId = getString("requestId"),
+            inquiryReplyCount = optInt("inquiryReplyCount"),
+            analysisMode = optString("analysisMode")
+                .takeIf(String::isNotBlank)
+                ?.let { runCatching { AnalysisMode.valueOf(it) }.getOrDefault(AnalysisMode.NEXT_DAY) }
+                ?: AnalysisMode.NEXT_DAY,
+            recommendationTargetDate = nullableString("recommendationTargetDate")
+                ?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+            diagnostics = optJSONObject("diagnostics")?.let { value ->
+                AnalysisDiagnostics(
+                    sourceWindowStart = value.nullableString("sourceWindowStart")
+                        ?.let { runCatching { Instant.parse(it) }.getOrNull() },
+                    sourceWindowEnd = value.nullableString("sourceWindowEnd")
+                        ?.let { runCatching { Instant.parse(it) }.getOrNull() },
+                    inputCount = value.optInt("inputCount"),
+                    acceptedInputCount = value.optInt("acceptedInputCount"),
+                    correctionAttempted = value.optBoolean("correctionAttempted"),
+                    durationMilliseconds = value.optLong("durationMilliseconds"),
+                    promptId = value.optString("promptId").takeIf(String::isNotBlank),
+                    promptSchemaVersion = value.optInt("promptSchemaVersion").takeIf { it > 0 },
+                    promptRuleIds = value.optJSONArray("promptRuleIds")
+                        ?.let { array -> (0 until array.length()).map(array::getString) }
+                        .orEmpty(),
+                    validationWarnings = value.optJSONArray("validationWarnings")?.strings().orEmpty(),
+                    excludedSources = value.optJSONArray("excludedSources")?.objects()?.map {
+                        ExcludedSource(it.optString("sourceId"), it.optString("reason"))
+                    }.orEmpty(),
+                    requestCount = value.optInt("requestCount"),
+                    imagesSent = value.optInt("imagesSent"),
+                    reusedSources = value.optInt("reusedSources"),
+                    promptTokens = value.optLong("promptTokens"),
+                    completionTokens = value.optLong("completionTokens"),
+                    totalTokens = value.optLong("totalTokens"),
+                    unreportedTokenRequests = value.optInt("unreportedTokenRequests"),
+                    unaccountedImages = value.optJSONArray("unaccountedImages")?.objects()?.map {
+                        UnaccountedImage(
+                            reference = it.optInt("reference"),
+                            sourceId = it.nullableString("sourceId"),
+                            caption = it.nullableString("caption"),
+                        )
+                    }.orEmpty(),
+                )
+            } ?: AnalysisDiagnostics(),
+            imagePaths = optJSONArray("imagePaths")?.strings().orEmpty(),
+            rawResponse = optString("rawResponse"),
+            // Rebuilt from the stored response rather than persisted separately, so the nested
+            // occurrences can never drift from the response they came from - and analyses saved before
+            // this existed still gain them. Responses predating the consolidated contract yield none.
+            //
+            // The reader's own corrections go on last, over the parse rather than into it: that is what
+            // lets the model's answer stay untouched while every screen reading this list - the cards,
+            // the table, the spreadsheet, the scorer, the alerts, the price fetching - sees the
+            // corrected figures with no change of its own. See `RecommendationEdit`.
+            consolidated = runCatching {
+                RecommendationEdits.apply(
+                    ConsolidatedParser.parse(
+                        optString("rawResponse"),
+                        nullableString("recommendationTargetDate")
+                            ?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+                    ),
+                    edits,
+                ) { code, english, arabic ->
+                    EgxCatalog.namesFor(code, english, arabic).let { it.english to it.arabic }
+                }
+            }.getOrDefault(emptyList()),
+            edits = edits,
+            editRevision = optLong("editRevision", 0),
+            completedAt = Instant.parse(getString("completedAt")),
+            recommendations = getJSONArray("recommendations").objects().map { item ->
+                RecommendationResult(
+                    ticker = item.optString("ticker"),
+                    companyName = item.optString("companyName"),
+                    companyNameArabic = item.nullableString("companyNameArabic"),
+                    sourceName = item.optString("sourceName"),
+                    targetDate = item.nullableString("targetDate")?.let(LocalDate::parse),
+                    timing = item.nullableString("timing"),
+                    entryLow = item.nullableDouble("entryLow"),
+                    entryHigh = item.nullableDouble("entryHigh"),
+                    takeProfit1 = item.nullableDouble("takeProfit1"),
+                    takeProfit2 = item.nullableDouble("takeProfit2"),
+                    stopLoss = item.nullableDouble("stopLoss"),
+                    notesArabic = item.nullableString("notesArabic"),
+                    sourceIds = item.optJSONArray("sourceIds")?.strings().orEmpty(),
+                    signal = item.optString("signal", "HOLD"),
+                    confidence = item.nullableDouble("confidence"),
+                    riskLevel = item.nullableString("riskLevel"),
+                    timeHorizon = item.nullableString("timeHorizon"),
+                    indicators = item.optJSONArray("indicators")?.strings().orEmpty(),
+                )
+            }
+                // Named again on the way out, not just as the run wrote them. Reports saved before the
+                // consolidated contract have no nested occurrences to rebuild, so this flat list is
+                // what their detail screen draws - and it was still showing whatever the model called
+                // the stock on the day the report was made.
+                //
+                // Corrected first, then named: `enrich` reads the catalog by ticker, so moving the code
+                // is the whole of what this needs to do and the names follow for free.
+                .map { row -> renamed[row.ticker]?.let { row.copy(ticker = it) } ?: row }
+                .map(EgxCatalog::enrich),
+            modelExclusions = runCatching {
+                ConsolidatedParser.exclusions(optString("rawResponse"))
+            }.getOrDefault(emptyList()),
+            selectedChannels = optJSONArray("selectedChannels")?.objects()?.map { item ->
+                AnalysedChannel(item.optLong("id"), cleanChannelName(item.optString("name")))
+            }.orEmpty(),
+            sources = getJSONArray("sources").objects().map { item ->
+                SourceTrace(
+                    sourceId = item.getString("sourceId"),
+                    channelId = item.nullableLong("channelId"),
+                    // Folded on read as well as on write: analyses saved before this carry the raw title, and
+                    // would otherwise keep counting as a separate source forever.
+                    channelName = cleanChannelName(item.getString("channelName")),
+                    messageId = item.nullableLong("messageId"),
+                    timestamp = Instant.parse(item.getString("timestamp")),
+                    contentType = AnalysisContentType.valueOf(item.getString("contentType")),
+                    preview = item.optString("preview"),
+                )
+            },
+        )
+    }
+
+    /**
+     * One correction, on the wire and on disk.
+     *
+     * Absent keys rather than explicit nulls, so an edit that says nothing about a field takes no
+     * room and reads back as saying nothing about it - which is the distinction [EditField] exists
+     * to keep, and one `putNullable` would erase.
+     */
+    private fun RecommendationEdit.toJson(): JSONObject = JSONObject().apply {
+        put("originalStockCode", originalStockCode)
+        put("pointIndex", pointIndex)
+        put("fingerprint", fingerprint)
+        putIfSet("stockCode", stockCode)
+        putIfSet("stockNameEnglish", stockNameEnglish)
+        putIfSet("stockNameArabic", stockNameArabic)
+        putIfSet("notesSummary", notesSummary)
+        putIfSet("date", date?.toString())
+        putIfSet("effectiveDateBasis", effectiveDateBasis)
+        putIfSet("visibleSourceDate", visibleSourceDate)
+        putIfSet("dateEvidence", dateEvidence)
+        putIfSet("timingEvidence", timingEvidence)
+        putIfSet("sourceMessageId", sourceMessageId)
+        putIfSet("sourceImageRef", sourceImageRef)
+        putIfSet("recommendationEvidence", recommendationEvidence)
+        putIfSet("recommendationType", recommendationType)
+        putIfSet("buyPrice", buyPrice)
+        putIfSet("buyPriceLow", buyPriceLow)
+        putIfSet("buyPriceHigh", buyPriceHigh)
+        putIfSet("target1", target1)
+        putIfSet("target2", target2)
+        putIfSet("stopLoss", stopLoss)
+        putIfSet("support", support)
+        putIfSet("resistance", resistance)
+        putIfSet("notesArabic", notesArabic)
+        if (cleared.isNotEmpty()) put("cleared", JSONArray(cleared.map { it.name }))
+        put("editedAt", editedAt)
+        put("editedBy", editedBy)
+    }
+
+    private fun JSONObject.putIfSet(key: String, value: Any?) {
+        if (value != null) put(key, value)
+    }
+
+    /**
+     * The corrections stored against this report, dropping any this build cannot read.
+     *
+     * An edit that will not parse is skipped rather than defaulted, the rule a settled verdict
+     * follows: the call then simply reads as the model left it, which is what the reader sees
+     * before they correct anything, and is recoverable. A cleared field naming a value this build
+     * does not know is dropped on its own, costing that one clearing rather than the whole edit.
+     */
+    private fun JSONObject.storedEdits(): List<RecommendationEdit> =
+        optJSONArray("edits")?.objects()?.mapNotNull { item ->
+            runCatching {
+                RecommendationEdit(
+                    originalStockCode = item.getString("originalStockCode"),
+                    pointIndex = item.getInt("pointIndex"),
+                    fingerprint = item.optString("fingerprint"),
+                    stockCode = item.nullableString("stockCode"),
+                    stockNameEnglish = item.nullableString("stockNameEnglish"),
+                    stockNameArabic = item.nullableString("stockNameArabic"),
+                    notesSummary = item.nullableString("notesSummary"),
+                    date = item.nullableString("date")
+                        ?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+                    effectiveDateBasis = item.nullableString("effectiveDateBasis"),
+                    visibleSourceDate = item.nullableString("visibleSourceDate"),
+                    dateEvidence = item.nullableString("dateEvidence"),
+                    timingEvidence = item.nullableString("timingEvidence"),
+                    sourceMessageId = item.nullableString("sourceMessageId"),
+                    sourceImageRef = if (item.has("sourceImageRef")) {
+                        item.optInt("sourceImageRef")
+                    } else {
+                        null
+                    },
+                    recommendationEvidence = item.nullableString("recommendationEvidence"),
+                    recommendationType = item.nullableString("recommendationType"),
+                    buyPrice = item.nullableDouble("buyPrice"),
+                    buyPriceLow = item.nullableDouble("buyPriceLow"),
+                    buyPriceHigh = item.nullableDouble("buyPriceHigh"),
+                    target1 = item.nullableDouble("target1"),
+                    target2 = item.nullableDouble("target2"),
+                    stopLoss = item.nullableDouble("stopLoss"),
+                    support = item.nullableDouble("support"),
+                    resistance = item.nullableDouble("resistance"),
+                    notesArabic = item.nullableString("notesArabic"),
+                    cleared = item.optJSONArray("cleared")?.strings().orEmpty()
+                        .mapNotNull { name ->
+                            runCatching { EditField.valueOf(name) }.getOrNull()
+                        }.toSet(),
+                    editedAt = item.optLong("editedAt"),
+                    editedBy = item.optString("editedBy"),
+                )
+            }.getOrNull()
+        }.orEmpty()
 
     private fun JSONObject.putNullable(key: String, value: Any?) {
         put(key, value ?: JSONObject.NULL)

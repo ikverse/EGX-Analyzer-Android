@@ -3,6 +3,7 @@ package com.ikverse.egxanalyzer.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -10,6 +11,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -17,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
@@ -40,9 +43,12 @@ internal fun OccurrenceSheet(
     channel: String? = null,
     /** Records what the user did about this call. Absent, the sheet is read-only. */
     trades: TradeBook? = null,
+    /** Corrects what the model read off the card. Absent, the figures cannot be changed. */
+    editor: CallEditor? = null,
     onDismiss: () -> Unit,
 ) {
     var viewingImage by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
     val held = trades?.heldFor(stock, point)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -55,10 +61,24 @@ internal fun OccurrenceSheet(
                 .padding(bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                Text(stock.stockCode, style = MaterialTheme.typography.headlineSmall)
-                stock.stockNameArabic?.let {
-                    Text(it, style = MaterialTheme.typography.bodyMedium)
+            Row(verticalAlignment = Alignment.Top) {
+                Column(
+                    Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(Space.xs),
+                ) {
+                    Text(stock.stockCode, style = MaterialTheme.typography.headlineSmall)
+                    stock.stockNameArabic?.let {
+                        Text(it, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                // The same correction the card offers, reached from the table's own route into a
+                // call. One entrance drawn twice rather than two entrances: both open `CallEditor`.
+                if (editor != null) {
+                    if (editor.editFor(stock, point) != null) {
+                        EditedChip { editing = true }
+                    } else {
+                        TextButton(onClick = { editing = true }) { Text("Edit") }
+                    }
                 }
             }
 
@@ -134,6 +154,9 @@ internal fun OccurrenceSheet(
                 )
             }
         }
+    }
+    if (editing && editor != null) {
+        EditCallSheet(stock, point, editor, onDismiss = { editing = false })
     }
     if (viewingImage) {
         SourceImageViewer(imagePath, point.sourceImageRef, onDismiss = { viewingImage = false })

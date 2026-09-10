@@ -35,15 +35,12 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Forum
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -180,10 +177,15 @@ internal fun ResultsScreen(appState: AppState) {
             val searching = stockFilter.isNotBlank()
             EmptyState(
                 icon = Icons.Outlined.Assessment,
-                title = if (searching) "No runs mention ${stockFilter.trim()}" else "No runs match these filters",
+                // The company, not the code the filter holds: the reader picked a listing from the
+                // catalog, so the app can say back what they picked. See TickerPicker.name.
+                title = if (searching) {
+                    "No runs mention ${TickerPicker.name(stockFilter)}"
+                } else {
+                    "No runs match these filters"
+                },
                 detail = if (searching) {
-                    "No saved analysis holds a stock by that code or name. " +
-                        "Clear the stock filter to see the rest."
+                    "No saved analysis holds that stock. Clear the stock filter to see the rest."
                 } else {
                     "Clear a filter to see the rest of your saved analyses."
                 },
@@ -250,6 +252,10 @@ internal fun ResultsScreen(appState: AppState) {
                         trades = remember(appState, saved.id) {
                             TradeBook(appState, saved.result.recommendationTargetDate)
                         },
+                        // Keyed on the report itself rather than only its id: an edit rewrites the
+                        // stored run, so a holder remembered across that would go on offering the
+                        // reader the values they have just corrected.
+                        editor = remember(appState, saved) { CallEditor(appState, saved) },
                         expanded = expanded,
                         onExpandedChange = { open ->
                             openRun = if (open) saved.id else null
@@ -733,6 +739,8 @@ private fun SavedAnalysisCard(
     stack: StackPosition? = null,
     /** Records what the user did about the calls in this run. */
     trades: TradeBook,
+    /** Corrects what the model read off the cards in this run. */
+    editor: CallEditor,
     /** Held by the screen, which needs it to give an open report a row of its own. */
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
@@ -879,34 +887,35 @@ private fun SavedAnalysisCard(
                     }
                 }
                 Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = "More actions")
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text(if (showReport) "Hide report" else "Show report") },
-                            leadingIcon = { Icon(Icons.Outlined.Description, contentDescription = null) },
+                    MoreButton(onClick = { menuOpen = true })
+                    AppMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        AppMenuItem(
+                            if (showReport) "Hide report" else "Show report",
+                            Icons.Outlined.Description,
                             onClick = { onShowReportChange(!showReport); menuOpen = false },
                         )
-                        DropdownMenuItem(
-                            text = { Text("Share") },
-                            leadingIcon = { Icon(Icons.Outlined.Share, contentDescription = null) },
+                        AppMenuItem(
+                            "Share",
+                            Icons.Outlined.Share,
                             onClick = { menuOpen = false; onShare() },
                         )
-                        DropdownMenuItem(
-                            text = { Text("Save to Downloads") },
-                            leadingIcon = { Icon(Icons.Outlined.Download, contentDescription = null) },
+                        AppMenuItem(
+                            "Save to Downloads",
+                            Icons.Outlined.Download,
                             onClick = { menuOpen = false; onSaveLocally() },
                         )
-                        DropdownMenuItem(
-                            text = { Text("Send as Excel") },
-                            leadingIcon = { Icon(Icons.Outlined.TableChart, contentDescription = null) },
+                        AppMenuItem(
+                            "Send as Excel",
+                            Icons.Outlined.TableChart,
                             onClick = { menuOpen = false; onExport() },
                         )
-                        DropdownMenuItem(
-                            text = { Text("Delete") },
-                            leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
+                        // Four things that can be done again and one that cannot, and the fifth is
+                        // the only one that needs saying before it is pressed.
+                        AppMenuItem(
+                            "Delete",
+                            Icons.Outlined.Delete,
                             onClick = { menuOpen = false; confirmDelete = true },
+                            destructive = true,
                         )
                     }
                 }
@@ -992,6 +1001,7 @@ private fun SavedAnalysisCard(
                     peakFor,
                     traceRoot,
                     trades,
+                    editor,
                     stockFilter = stockFilter,
                     onHide = { onExpandedChange(false) },
                 )
@@ -1098,6 +1108,7 @@ private fun ResultDetail(
     peakFor: (String, LocalDate?) -> Double?,
     traceRoot: File,
     trades: TradeBook,
+    editor: CallEditor,
     /** What the screen is searching for, which this report opens already narrowed to. */
     stockFilter: String,
     onHide: () -> Unit,
@@ -1280,6 +1291,7 @@ private fun ResultDetail(
                                 channelFor = { messageId -> channelNames[messageId] },
                                 imagePathFor = { ref -> saved.result.imagePathFor(ref) },
                                 trades = trades,
+                                editor = editor,
                             )
                         }
                     }
@@ -1306,6 +1318,7 @@ private fun ResultDetail(
             peak = peakFor(stock.stockCode, point.date),
             channel = channelNames[point.sourceMessageId],
             trades = trades,
+            editor = editor,
             onDismiss = { detail = null },
         )
     }

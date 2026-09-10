@@ -120,6 +120,7 @@ internal fun InfoSheet(note: InfoNote, onDismiss: () -> Unit) {
         Column(
             Modifier
                 .fillMaxWidth()
+                .sheetDragSlop()
                 .scrollableColumn()
                 .padding(horizontal = Space.l)
                 .padding(bottom = Space.xl),

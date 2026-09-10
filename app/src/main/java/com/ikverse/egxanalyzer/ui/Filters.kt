@@ -21,7 +21,6 @@ import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -91,7 +90,7 @@ internal fun MultiSelectFilter(
                 )
             },
         )
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        AppMenu(expanded = open, onDismissRequest = { open = false }) {
             options.forEach { option ->
                 DropdownMenuItem(
                     text = {
@@ -170,7 +169,7 @@ internal fun CheckedSetFilter(
                 )
             },
         )
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        AppMenu(expanded = open, onDismissRequest = { open = false }) {
             options.forEach { option ->
                 DropdownMenuItem(
                     text = {
@@ -231,7 +230,7 @@ internal fun SingleSelectFilter(
                 )
             },
         )
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        AppMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
                 text = { Text("All $label") },
                 onClick = {
@@ -287,7 +286,7 @@ internal fun <T> SortFilter(
                 )
             },
         )
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        AppMenu(expanded = open, onDismissRequest = { open = false }) {
             options.forEach { option ->
                 DropdownMenuItem(
                     text = { Text(label(option)) },
@@ -359,6 +358,7 @@ internal fun FilterSheet(
         Column(
             Modifier
                 .fillMaxWidth()
+                .sheetDragSlop()
                 .scrollableColumn()
                 .padding(horizontal = Space.l)
                 .padding(bottom = Space.xl),

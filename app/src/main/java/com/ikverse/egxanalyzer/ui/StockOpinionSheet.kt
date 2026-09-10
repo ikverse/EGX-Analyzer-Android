@@ -63,6 +63,7 @@ internal fun StockOpinionSheet(
         Column(
             Modifier
                 .fillMaxWidth()
+                .sheetDragSlop()
                 .scrollableColumn()
                 .padding(horizontal = Space.l)
                 .padding(bottom = Space.xl),

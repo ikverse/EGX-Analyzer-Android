@@ -459,7 +459,7 @@ object PerformanceCalculator {
             ticker = ticker,
             companyEnglish = stock.stockNameEnglish,
             companyArabic = stock.stockNameArabic,
-            channel = channelNames[sourceMessageId]?.trim()?.takeIf(String::isNotBlank) ?: UNKNOWN,
+            channel = channelNames[sourceMessageId]?.trim()?.takeIf(String::isNotBlank) ?: UNKNOWN_CHANNEL,
             channelId = channelIds[sourceMessageId],
             openedOn = openedOn,
             // Kept exactly as the source printed them. Rounding here reached the scorer, not just
@@ -915,7 +915,14 @@ object PerformanceCalculator {
         sessions = sessions,
     )
 
-    private const val UNKNOWN = "Unknown"
+    /**
+     * What a call whose channel cannot be worked out is filed under.
+     *
+     * Public because it is part of a call's identity: `opinionId` and `alertId` are built from it,
+     * so anything that has to find a stored answer for a call has to spell it the same way. Two
+     * spellings would be a key that matches nothing, which fails silently.
+     */
+    const val UNKNOWN_CHANNEL = "Unknown"
 }
 
 /** Every ticker named by any saved analysis; the rest cannot be scored, so pricing them is waste. */

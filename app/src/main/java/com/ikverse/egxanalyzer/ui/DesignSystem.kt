@@ -43,8 +43,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlin.math.abs
@@ -497,6 +501,81 @@ fun Modifier.scrollableColumn(): Modifier {
 fun Modifier.scrollableRow(): Modifier {
     val state = rememberScrollState()
     return this.fadingScrollbar(state, horizontal = true).horizontalScroll(state)
+}
+
+/**
+ * How far a downward drag has to travel over a sheet's content before the sheet takes it as
+ * "close me".
+ *
+ * Far enough that pulling a record back up at its top is never read as a dismissal, short enough
+ * that a deliberate push down still closes the sheet in the one gesture. Material's own sheet
+ * dismisses on **56dp** of travel or a flick of **125dp/s**, whichever arrives first - both read
+ * off `BottomSheetDefaults` in material3 1.4.0 - so a push has to cover this and then the 56dp
+ * behind it, which is about a finger's width twice over and cannot be reached by accident.
+ */
+private val SheetDragSlop = 64.dp
+
+/**
+ * Holds a sheet still while the thing inside it is being read.
+ *
+ * `ModalBottomSheet` hands every downward drag its content could not use straight to the sheet,
+ * and the sheet settles to hidden on 56dp of travel or on a flick of 125dp/s - the flick being the
+ * half that bites. Content already scrolled to its top gives back every pixel of a pull downwards,
+ * so the ordinary gesture for "let me see the start again" was closing the sheet under the
+ * reader's finger.
+ *
+ * **The thresholds themselves cannot be raised.** `rememberModalBottomSheetState` takes neither;
+ * they reach a `SheetState` only through `rememberSheetState`, which is `internal` to material3 -
+ * compiling a call to it against 1.4.0 fails outright. So the distance is held out here instead,
+ * in front of the sheet. Raising them would also have been the blunter fix: they govern the drag
+ * handle too, and a handle that has to be dragged half a screen is a handle that looks stuck.
+ *
+ * **On the scroller, not on the whole sheet.** The drag handle, a fixed heading and an action bar
+ * are dragged on purpose and still dismiss from the first pixel; only the band a reader scrolls
+ * has to prove what a drag over it means.
+ *
+ * The slop is re-armed the moment the content actually scrolls, so a long record read back to its
+ * top arrives there with the whole of [SheetDragSlop] in hand rather than having spent it on the
+ * way, and re-armed again when the gesture ends - it is per-drag, never a budget that runs down
+ * over a sitting.
+ *
+ * Place it **before** the scroll modifier. It has to be the scroller's parent connection to be
+ * offered what the scroller could not use, and placed after it would be a child that never hears.
+ */
+@Composable
+fun Modifier.sheetDragSlop(): Modifier {
+    val slop = with(LocalDensity.current) { SheetDragSlop.toPx() }
+    val connection = remember(slop) {
+        object : NestedScrollConnection {
+            /** What is left of this gesture's [SheetDragSlop], in pixels. */
+            var left = slop
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                // The content moved, so this gesture is reading: anything left over is the far end
+                // of a scroll rather than the start of a pull, and the slop starts again from there.
+                if (consumed.y != 0f) left = slop
+                if (available.y <= 0f) return Offset.Zero
+                val taken = min(available.y, left)
+                left -= taken
+                return Offset(0f, taken)
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                // A flick that never spent the distance must not close the sheet either, or the
+                // distance would be for nothing. Held only while the sheet is still where it
+                // started: once the slop is spent it has been moving under the finger, and a sheet
+                // left part way down is worse than one that closes.
+                val hold = left > 0f && available.y > 0f
+                left = slop
+                return if (hold) available else Velocity.Zero
+            }
+        }
+    }
+    return this.nestedScroll(connection)
 }
 
 /**

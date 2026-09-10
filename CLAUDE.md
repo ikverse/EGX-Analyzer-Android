@@ -136,6 +136,9 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   page is read, and the two controls that arrive with the collapsed bar: the page's stock filter,
   and the icon that opens the rest of its filters. It replaced the `EGX Analyzer` band on
   2026-09-09. See **The page header** below.
+- `ui/TickerPicker.kt` + `ui/PageStocks.kt` — the catalog under that stock filter: which listings to
+  offer somebody typing, with the ones the tab actually holds first, and where that set comes from
+  for each tab. See **The stock filter, moved into the header** below.
 - `ui/Filters.kt` — `FilterSheet` and its sections, which is where a page's filters live since
   2026-09-09; `FilterRow` and the chip-and-menu filters beside it, still used by the in-report
   toolbar. See **A page's filters live in a sheet** under Gotchas.
@@ -2438,6 +2441,18 @@ Two things the app could always have done and never did: go back, and put one st
   unreliable. Nothing is unreachable: both tiles open a trade or a call, and both of those carry the
   ticker press. Size is what decides this, not what kind of thing the card is — a tile grid gets one
   target, a full-width card can hold two.
+- **A sheet holds still while its content is read - `Modifier.sheetDragSlop`.** `ModalBottomSheet`
+  hands a downward drag its content could not use straight to the sheet, and the sheet hides on
+  56dp of travel or a flick of 125dp/s. A record already scrolled to its top uses none of the pull,
+  so "let me see the start again" was closing the stock sheet under the reader's finger - reported
+  2026-09-11. The two thresholds are settable only through `rememberSheetState`, which is `internal`
+  to material3, so a 64dp slop is held in front of the sheet instead: a nested-scroll connection on
+  the scroller swallows that much downward drag, and the leftover fling velocity with it, before the
+  sheet is allowed to move. It re-arms whenever the content actually scrolls, so a long record read
+  back to its top arrives with the whole 64dp in hand. **On the scroller and not on the sheet**, and
+  not by raising the thresholds, because both of those also govern the drag handle - a handle that
+  has to be dragged half a screen is a handle that looks stuck. All six sheets with a scroller carry
+  it: the stock sheet, the filter sheet, Info, Channel score, Stock opinion and Edit call.
 
 ## The page header
 
@@ -2485,12 +2500,39 @@ along with the rounded well the page used to sit in.
 
 ### The stock filter, moved into the header
 
-- **It is the page's own filter, not a lookup.** Results, Insights and the Portfolio each drew a
-  stock box on their filter shelf; the header's icon opens that same box, over the same state
-  (`PageState.resultsStock` and its two siblings) with the same matcher under it. Nothing about what
-  it narrows changed. It is **not** a catalog lookup and it opens no stock sheet — that was tried
-  first and rejected on 2026-09-09, and `StockLookup`, `DirectoryStock` and `AppState.stockDirectory`
-  went with it.
+- **It is the page's own filter, and since 2026-09-11 it is picked rather than typed.** Results,
+  Insights and the Portfolio each drew a stock box on their filter shelf; the header's icon opens
+  that same box, over the same state (`PageState.resultsStock` and its two siblings). What reaches
+  that state changed: typing narrows a list of catalog listings (`TickerPicker`, `TickerPickerList`)
+  and only a **pick** filters the page, so the filter always holds a real EGX ticker.
+- **Free text was the fault it fixes.** A reader could narrow a page to `comi`, to `Commercia`, or
+  to a misremembered spelling that matched nothing at all, and the page answered every one of those
+  with an empty list indistinguishable from having no runs. A pick can only be a listing the
+  exchange actually has, which is also what lets the empty states name the **company** —
+  `TickerPicker.name` — instead of echoing whatever was in the box.
+- **This is still not the lookup that was rejected on 2026-09-09.** That one *replaced* filtering:
+  the box searched a directory and a press opened a stock sheet, and `StockLookup`, `DirectoryStock`
+  and `AppState.stockDirectory` went with it. Here a press filters the page, and the sheet is a
+  **trailing arrow on a row**, drawn only where the app holds a record worth opening — a listing
+  nobody has ever analysed has no score, no calls and no trades, so `StockSheet` would open on a
+  shell.
+- **The arrow is at the end of the row and deliberately not on the logo.** The logo sits at the
+  leading edge, which is where a thumb reaching for the row lands — the exact failure the Overdue
+  and event tiles lost their inner ticker press over on 2026-09-08. A target hit on the way to
+  another target is not a second affordance.
+- **`pageStocks(appState, destination)` is what the list leads with.** The stocks the tab actually
+  holds — runs for Results, scored calls for Insights, positions for the Portfolio — group under
+  **On this page**, the rest of the catalog under **All other stocks**. It lives outside the three
+  screens for `filtersActive`'s reason: the question is asked from above the screen that owns the
+  answer. Passed to `PageHeader` as a **lambda** and called once when the list opens, or every page
+  would subscribe to all three records and walk them on every recomposition.
+- **The list is a `Popup` whose content covers the window below the field**, with a scrim under the
+  card that takes every press aimed past it. Drawn as a sibling of the header it would be painted
+  under the page; drawn inside it, clipped to a 56dp bar. `focusable = false` is what keeps the
+  keyboard up, and it is why back is still answered by `PageHeader`'s own `BackHandler`.
+- **The box closes onto the pick rather than back to the title.** `PickedStock` draws the mark, the
+  code and the company in the bar, and pressing it reopens the picker. The X and back clear the
+  page; a press past the list is "never mind" and keeps what was already picked.
 - **The three shelves lost their box**, which left each of them a Filters chip alone — a loose
   one-control row above every list, floating on a shadow, to open a panel. That is what took the
   shelf itself away a day later; see **A page's filters live in a sheet** under Gotchas. The in-report toolbar on
@@ -2500,9 +2542,9 @@ along with the rounded well the page used to sit in.
   `filtersActive` has and for the same reason: the question is asked from outside the screen that
   owns the answer. Analyze and Settings answer null and get **no search icon at all** — an icon
   opening a box that narrows nothing is a control the page cannot honour.
-- **The box is the indicator as well as the control.** It stays open while the query is non-empty
-  and the close button clears as well as closes, so a page narrowed to one stock always has the box
-  on screen saying so. Without that a filtered page with no visible box is a page that looks as
+- **The box is the indicator as well as the control.** It stays open while a stock is picked and
+  the close button clears as well as closes, so a page narrowed to one stock always has the box on
+  screen saying so — and it now says it in the company's own name rather than in what was typed. Without that a filtered page with no visible box is a page that looks as
   though it has lost its other rows. It is also why the header is **held collapsed** while the box
   is open: most pages stop scrolling once a filter is narrowing them, and an expanding title would
   otherwise take back the row being typed into.

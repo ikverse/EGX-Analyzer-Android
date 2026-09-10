@@ -540,13 +540,15 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
             EmptyState(
                 icon = Icons.Outlined.AccountBalanceWallet,
                 title = if (searching) {
-                    "No trades in ${stockFilter.trim()}"
+                    // The company rather than the code, as Results says it: the filter holds a
+                    // listing the reader picked. See TickerPicker.name.
+                    "No trades in ${TickerPicker.name(stockFilter)}"
                 } else {
                     "Nothing called on $dateFilter"
                 },
                 detail = if (searching) {
-                    "Nothing you recorded is a holding in a stock by that code or name. Clear the " +
-                        "stock filter to see the rest of your positions."
+                    "Nothing you recorded is a holding in that stock. Clear the stock filter to " +
+                        "see the rest of your positions."
                 } else {
                     "No trade you recorded belongs to that session. Clear the filter to see the " +
                         "rest of your positions."

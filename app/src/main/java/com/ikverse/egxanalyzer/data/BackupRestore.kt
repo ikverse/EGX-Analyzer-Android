@@ -100,13 +100,22 @@ fun positionsToRestore(mine: List<SyncedPosition>, backup: List<SyncedPosition>)
 /**
  * Which runs a restore should take: whatever this device is missing, minus what it has buried.
  *
- * A union like the sync's, because a saved run never changes and there is nothing to merge. The
- * subtraction that matters is [buried] - a report deleted here but not yet published as a tombstone.
- * That delete is a decision already taken and still in flight, and restoring over it would undo it
- * silently, leaving a tombstone about to be published for a report that is on disk again.
+ * A report this device does not hold, and a report it holds at an **older revision** - the reader's
+ * own corrections are the one thing about a run that moves, and a correction the backup carries and
+ * this device does not is as missing as a whole report. Nothing is ever lost to this: a revision at
+ * or below the one held is not taken, so a restore cannot roll a correction back.
+ *
+ * The subtraction that matters is [buried] - a report deleted here but not yet published as a
+ * tombstone. That delete is a decision already taken and still in flight, and restoring over it
+ * would undo it silently, leaving a tombstone about to be published for a report on disk again.
  */
-fun runsToRestore(held: Set<String>, buried: Set<String>, backup: List<SyncedRun>): List<SyncedRun> =
-    backup.filter { it.requestId !in held && it.requestId !in buried }
+fun runsToRestore(
+    held: Map<String, Long>,
+    buried: Set<String>,
+    backup: List<SyncedRun>,
+): List<SyncedRun> = backup.filter { run ->
+    run.requestId !in buried && run.editRevision > (held[run.requestId] ?: -1)
+}
 
 /**
  * Which generated prompts a restore should take. A union, keyed the way the channel keys them.

@@ -41,14 +41,19 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
@@ -88,6 +93,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.R
@@ -263,6 +269,10 @@ internal fun Screen(
                 // Only the filters that live in the sheet, so the dot never reports the stock box
                 // the reader can already see. See PageState.filtersInSheet.
                 filtered = appState.pages.filtersInSheet(destination),
+                // A lambda, for `collapse`'s reason turned the other way round: reading the runs,
+                // the calls or the positions here would subscribe every page to all three and walk
+                // them on every recomposition. The picker calls it once, when its list opens.
+                stocksOnPage = { pageStocks(appState, destination) },
             )
             // Under the header rather than above it, because the header is the top of the window
             // now. Above the page's own content, so a run starting does not push the first card
@@ -1345,3 +1355,107 @@ internal fun Figure(
         }
     }
 }
+
+/**
+ * Every dropdown in the app, and the only place a menu's surface is described.
+ *
+ * Twelve bare `DropdownMenu`s were the last piece of this app still wearing Material's factory
+ * look: a 4dp-cornered slab of `surfaceContainer` with no edge, floating over cards drawn at 14dp
+ * with a hairline. One menu restyled and eleven not is worse than none restyled, so the container
+ * lives here and every call site takes it - the overflow menus on the three cards, and the nine
+ * select-style menus on Filters and Settings, which change in appearance only.
+ *
+ * The edge is [cardOutline], the same hairline a card and the page well are drawn with, for the
+ * reason given there: the edge of a menu and the edge of what it opened over should be one line
+ * rather than two that happen to agree. `surfaceContainerHigh` rather than the default, because a
+ * menu has to sit clearly above the card it covers; the shadow lifts it rather than a tint, which
+ * a see-through surface would only show the card through.
+ */
+@Composable
+internal fun AppMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    offset: DpOffset = DpOffset(0.dp, 0.dp),
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        modifier = modifier,
+        offset = offset,
+        shape = MaterialTheme.shapes.large,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = cardOutline,
+        shadowElevation = MenuShadow,
+        content = content,
+    )
+}
+
+/**
+ * One row of an [AppMenu].
+ *
+ * [IconSize.Inline] leading icons, which is what every other icon-beside-text in this app is set
+ * at; the menu default is [IconSize.Action], sized for something with a touch target of its own,
+ * and a 24dp glyph beside a 14sp label made a five-item menu read as a column of buttons.
+ *
+ * [destructive] is the point of having this at all. Every one of these menus ends in the one action
+ * that cannot be undone - Remove, Delete - drawn in exactly the ink of Share and Edit above it. The
+ * error hue is the only thing on the row that says which press is the one to be careful about.
+ */
+@Composable
+internal fun AppMenuItem(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    destructive: Boolean = false,
+) {
+    val ink = if (destructive) {
+        MaterialTheme.colorScheme.error
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    DropdownMenuItem(
+        text = { Text(text, style = MaterialTheme.typography.bodyMedium) },
+        leadingIcon = {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(IconSize.Inline))
+        },
+        onClick = onClick,
+        colors = MenuDefaults.itemColors(
+            textColor = ink,
+            leadingIconColor = if (destructive) ink else MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    )
+}
+
+/**
+ * The ⋮ that opens one, at one size.
+ *
+ * The three cards carrying an overflow menu had drifted to two buttons: a 24dp one holding a 20dp
+ * glyph on the call card, and Material's 48dp default on the other two. The same control doing the
+ * same job in the same corner cannot be two sizes.
+ *
+ * 40dp, which is neither of them. The 24dp one left a 20dp glyph in 2dp of air - a mark rather than
+ * a control, and the reason the timing pill beside it looked enormous. The 48dp default is a
+ * screen's worth of button in the corner of a card, and it is 48dp of *drawn* width for no reason:
+ * `IconButton` already expands its touch target to the platform minimum through
+ * `minimumInteractiveComponentSize`, so the visual size is free to be what the card wants. 40dp
+ * leaves 10dp of air around the glyph, which is what makes it read as pressable.
+ */
+@Composable
+internal fun MoreButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    IconButton(onClick, modifier.size(MoreButtonSize)) {
+        Icon(
+            Icons.Outlined.MoreVert,
+            contentDescription = "More actions",
+            modifier = Modifier.size(IconSize.Inline),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Drawn size only. The touch target stays at the platform minimum, which is larger. */
+private val MoreButtonSize = 40.dp
+
+/** Enough to read as floating over a card without the card showing through it. */
+private val MenuShadow = 8.dp

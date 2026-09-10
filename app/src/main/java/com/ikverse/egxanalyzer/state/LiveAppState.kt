@@ -132,6 +132,13 @@ import com.ikverse.egxanalyzer.model.RuleScope
 import com.ikverse.egxanalyzer.model.RuleSet
 import com.ikverse.egxanalyzer.model.RuleSlot
 import com.ikverse.egxanalyzer.model.Sale
+import com.ikverse.egxanalyzer.model.RecommendationEdit
+import com.ikverse.egxanalyzer.model.RecommendationDataPoint
+import com.ikverse.egxanalyzer.model.CallIdentity
+import com.ikverse.egxanalyzer.model.callSlot
+import com.ikverse.egxanalyzer.model.identity
+import com.ikverse.egxanalyzer.model.sourceIdsFor
+import com.ikverse.egxanalyzer.ui.CatalogStock
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.SeriesHarvest
@@ -3658,9 +3665,13 @@ class LiveAppState(
         syncPromptVersions()
 
         val remote = telegramRepository.listSyncedReports()
-        val local = localDataStore.savedRequestIds()
+        val local = localDataStore.savedReportRevisions()
         val deleted = telegramRepository.listTombstones()
-        val actions = syncActions(local, remote.keys, deleted)
+        val actions = syncActions(
+            local = local,
+            remote = remote.mapValues { (_, report) -> report.editRevision },
+            deleted = deleted,
+        )
         val toUpload = actions.upload
         val toDownload = actions.download
 
@@ -3677,10 +3688,11 @@ class LiveAppState(
 
         var downloaded = 0
         toDownload.forEach { requestId ->
-            val fileId = remote[requestId] ?: return@forEach
-            val run = telegramRepository.downloadReport(fileId) ?: return@forEach
+            val held = remote[requestId] ?: return@forEach
+            val run = telegramRepository.downloadReport(held.fileId) ?: return@forEach
             if (localDataStore.adoptResult(
                     run.requestId, run.provider, run.model, run.completedAt, run.payload,
+                    run.editRevision,
                 )
             ) {
                 downloaded++
@@ -3714,6 +3726,7 @@ class LiveAppState(
         model = model,
         completedAt = result.completedAt.toString(),
         payload = localDataStore.storedJsonOf(result),
+        editRevision = result.editRevision,
     )
 
     /**
@@ -3769,12 +3782,14 @@ class LiveAppState(
         adoptedPrompts.forEach { localDataStore.rememberPromptVersion(it) }
 
         val adoptedRuns = runsToRestore(
-            held = localDataStore.savedRequestIds(),
+            held = localDataStore.savedReportRevisions(),
             buried = localDataStore.pendingDeletions(),
             backup = record.runs,
         )
         adoptedRuns.forEach {
-            localDataStore.adoptResult(it.requestId, it.provider, it.model, it.completedAt, it.payload)
+            localDataStore.adoptResult(
+                it.requestId, it.provider, it.model, it.completedAt, it.payload, it.editRevision,
+            )
         }
 
         val rules = adoptedRules.size
@@ -4239,6 +4254,194 @@ class LiveAppState(
      * The intent is recorded before the row goes, so a delete survives being offline, a crash, or
      * Telegram being slow: the next sync buries it in the channel and every other device drops it.
      */
+    /**
+     * Records a correction to one extracted occurrence, and follows it wherever it leads.
+     *
+     * The correction itself is an overlay on the report - see `RecommendationEdit` - so everything
+     * derived from the extraction comes right on the next recompute with nothing here to do about
+     * it: the cards, the table, the spreadsheet, every rate on Insights, the alerts, and which
+     * tickers the price feed is asked about. What this function is for is the four things that are
+     * **not** derived, each of which is a copy taken at some earlier moment.
+     *
+     * - **The AI opinion is deleted rather than re-filed.** It is keyed on ticker, session and
+     *   channel, so a corrected ticker orphans it - but re-keying it would be worse than losing it.
+     *   The answer is about the wrong company: it read that company's news, rated that company's
+     *   levels, and forecast that company's next three months. It is wrong, not misfiled.
+     * - **A trade is re-keyed, and only when the reader asks.** `positionId` is derived from the
+     *   ticker and the session, so a corrected ticker cannot leave the trade where it is; the new
+     *   row is written and the old one buried, which is how a removal already travels between
+     *   devices. Behind an explicit choice because it is the one thing here that touches money, and
+     *   the reader may have bought the stock the model named rather than the one on the card.
+     * - **The stored reading is dropped.** This is the root rather than a symptom: a run writes down
+     *   what it read of each message so the next one need not pay to read it again, and that
+     *   reading still carries the wrong ticker. Left alone, tomorrow's run would adopt the same
+     *   misread for free and put it back into a fresh report.
+     * - **Prices are refreshed**, so the corrected ticker has a history to be scored on. Free: it is
+     *   the same public feed the Fetch prices button reads.
+     *
+     * Frozen verdicts in `settled_calls` need nothing. `settledKey` is a fingerprint of the ticker,
+     * the levels and the window, so a corrected call asks under a key that has never been written
+     * and is scored from scratch; the row left behind names a call nothing will ask about again.
+     * Pruning by ticker would take the verdicts of every *other* call on that stock with it.
+     */
+    override fun editRecommendation(
+        saved: SavedAnalysis,
+        edit: RecommendationEdit,
+        correctTrade: Boolean,
+    ) {
+        val before = saved.result.callSlot(edit.originalStockCode, edit.pointIndex) ?: return
+        val stamped = edit.copy(editedAt = System.currentTimeMillis(), editedBy = deviceName)
+        val updated = localDataStore.saveResultEdit(saved.id, stamped) ?: return
+        val after = updated.callSlot(edit.originalStockCode, edit.pointIndex)
+
+        // Read before anything else is rewritten: both are derived from the values being changed,
+        // and the old pair is what every stale key was filed under. Null on an occurrence the model
+        // left undated, which nothing can have been filed against - so the correction is still
+        // recorded and there is simply nothing to follow it with.
+        val was = before.identity(saved.result)
+        val now = after?.identity(updated)
+        val movedCall = was != null && now != null &&
+            (now.ticker != was.ticker || now.openedOn != was.openedOn)
+
+        if (movedCall && was != null) {
+            // Keyed on the call the opinion was given about, which no longer exists.
+            val orphaned = opinionId(was.ticker, was.openedOn, was.channel)
+            localDataStore.deleteStockOpinion(orphaned)
+            opinions = opinions - orphaned
+            // The row saying this call had already been announced as reaching its buy zone. It
+            // describes a band on a different stock; left behind it would silence the corrected
+            // call's first crossing, which is the one worth hearing about.
+            localDataStore.saveCallAlertSeen(emptyMap(), forgotten = setOf(orphaned))
+        }
+
+        if (correctTrade && was != null) correctTradeOn(was, now, after?.point)
+
+        // Only the message this occurrence was read out of. The rest of the run's reading is about
+        // other cards and was not wrong.
+        val reads = saved.result.sourceIdsFor(before.point.sourceMessageId)
+        if (reads.isNotEmpty()) localDataStore.forgetSourceReads(saved.result.requestId, reads)
+
+        reloadResults(saved.id)
+        val named = now?.ticker ?: was?.ticker ?: before.stock.stockCode
+        statusMessage = StatusMessage(
+            if (movedCall && was != null && now != null) {
+                "${was.ticker} corrected to ${now.ticker}"
+            } else {
+                "$named updated"
+            },
+            succeeded = true,
+            undo = StatusUndo("Undo") { clearRecommendationEdits(saved) },
+        )
+        publishReport(saved.id)
+        appScope.launch {
+            recomputePerformance()
+            recomputePortfolio()
+            // A corrected ticker is usually one this device has never priced, and a call with no
+            // prices behind it is one no rate can count. Silent, because the reader asked for a
+            // correction rather than for a fetch, and the line above already reports what they did.
+            runCatching { refreshPrices(announce = false) }
+            recomputePerformance()
+        }
+    }
+
+    /** Puts a report back to what the model read. Offered as the undo on every correction. */
+    override fun clearRecommendationEdits(saved: SavedAnalysis) {
+        if (localDataStore.clearResultEdits(saved.id) == null) return
+        reloadResults(saved.id)
+        statusMessage = StatusMessage("Report back to what the model read", succeeded = true)
+        publishReport(saved.id)
+        appScope.launch {
+            recomputePerformance()
+            recomputePortfolio()
+        }
+    }
+
+    private fun reloadResults(keep: Long) {
+        savedResults = localDataStore.results()
+        unreadableResults = localDataStore.unreadableResults
+        selectedResult = savedResults.firstOrNull { it.id == keep } ?: selectedResult
+    }
+
+    /**
+     * Sends the corrected report to the channel, without making the reader wait for it.
+     *
+     * The same shape a position revision travels in and for the same reason: it is already saved,
+     * so a failure costs nothing - the next sync compares revisions and finds this one still
+     * unpublished. It is why an edited report needs a revision at all; reports are otherwise a
+     * union, and a union has no way to say that one copy is newer than another.
+     */
+    private fun publishReport(id: Long) {
+        val run = savedResults.firstOrNull { it.id == id }?.toSyncedRun() ?: return
+        publish { telegramRepository.uploadReport(run) }
+    }
+
+    /**
+     * Moves the trade taken on a corrected call, or brings its copied levels up to date.
+     *
+     * A trade snapshots the call's levels at the moment Bought was pressed, deliberately, so that
+     * re-running an analysis can never move a trade already taken. A **correction** is the one case
+     * that rule was not written for: the levels it snapshotted were misread, and leaving them is
+     * leaving the trade permanently describing a call nobody made.
+     */
+    private fun correctTradeOn(
+        was: CallIdentity,
+        now: CallIdentity?,
+        after: RecommendationDataPoint?,
+    ) {
+        val held = localDataStore.positions()
+            .firstOrNull { it.id == positionId(was.ticker, was.openedOn) }
+            ?: return
+        val at = System.currentTimeMillis()
+        val ticker = now?.ticker ?: held.ticker
+        val openedOn = now?.openedOn ?: held.recommendationDate
+        val moved = held.copy(
+            ticker = ticker,
+            recommendationDate = openedOn,
+            id = positionId(ticker, openedOn),
+            companyEnglish = now?.companyEnglish ?: held.companyEnglish,
+            companyArabic = now?.companyArabic ?: held.companyArabic,
+            entryLow = after?.buyPriceLow ?: after?.buyPrice ?: held.entryLow,
+            entryHigh = after?.buyPriceHigh ?: after?.buyPrice ?: held.entryHigh,
+            target1 = after?.target1 ?: held.target1,
+            target2 = after?.target2 ?: held.target2,
+            stopLoss = after?.stopLoss ?: held.stopLoss,
+            updatedAt = at,
+            updatedBy = deviceName,
+        )
+        localDataStore.savePosition(moved, unknown = localDataStore.unknownFor(held.id))
+        publishPosition(moved, deleted = false)
+        if (moved.id != held.id) {
+            // Buried rather than dropped, the rule every other removal follows: a row that simply
+            // vanished would be uploaded back by the next device still holding it, and the reader
+            // would end up with the trade filed under both tickers.
+            localDataStore.buryPosition(held.id, at, deviceName)
+            publishPosition(held.copy(updatedAt = at, updatedBy = deviceName), deleted = true)
+            // Both are keyed on the position id, so the move orphans them. Dropped rather than
+            // carried across: what they hold is what the reader was last told about a trade on a
+            // different stock, and the corrected trade deserves to be reported on afresh.
+            localDataStore.savePositionStatusSeen(emptyMap(), forgotten = setOf(held.id))
+            localDataStore.saveApproachSeen(
+                emptyMap(),
+                forgotten = localDataStore.approachSeen().keys
+                    .filter { it.startsWith(held.id) }
+                    .toSet(),
+            )
+        }
+        positions = localDataStore.positions()
+    }
+
+    /**
+     * The catalog as the ticker picker needs it, which is every listing rather than every priced one.
+     *
+     * The reader correcting a misread code is often correcting it to a stock this device has never
+     * priced and no report has ever named - that is exactly the case where the model had nothing to
+     * check itself against - so narrowing this to what the record already knows would hide the
+     * answer most of the time.
+     */
+    override fun stockCatalog(): List<CatalogStock> = EgxCatalog.entries().map {
+        CatalogStock(it.ticker, it.nameEnglish, it.nameArabic)
+    }
+
     override fun deleteResult(result: SavedAnalysis) {
         localDataStore.recordDeletion(result.result.requestId)
         localDataStore.deleteResult(result.id)

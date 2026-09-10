@@ -5,11 +5,12 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * Syncing reports is a union, not a merge.
+ * Syncing reports is a union over what a run *read*, and newest-wins over what has been corrected.
  *
- * A saved run never changes after it is written, so two devices can never disagree about one: the
- * only question is who is missing it. That is what makes it safe to upload automatically and to
- * pull without asking what to keep.
+ * A run's extraction never changes after it is written, so for an untouched report the only
+ * question is still who is missing it. What the reader has corrected in it does change, and that is
+ * the one thing two devices can disagree about - so the revision decides, and it is in the file
+ * name so that deciding costs no downloads.
  */
 class ReportSyncTest {
 
@@ -23,26 +24,100 @@ class ReportSyncTest {
 
     @Test
     fun `each side is told only what it is missing`() {
-        val (upload, download) = syncPlan(local = setOf("a", "b"), remote = setOf("b", "c"))
+        val actions = syncActions(
+            local = mapOf("a" to 0L, "b" to 0L),
+            remote = mapOf("b" to 0L, "c" to 0L),
+            deleted = emptySet(),
+        )
 
-        assertEquals(setOf("a"), upload)
-        assertEquals(setOf("c"), download)
+        assertEquals(setOf("a"), actions.upload)
+        assertEquals(setOf("c"), actions.download)
     }
 
     @Test
     fun `nothing moves when both sides already agree`() {
-        val (upload, download) = syncPlan(local = setOf("a", "b"), remote = setOf("b", "a"))
+        val actions = syncActions(
+            local = mapOf("a" to 0L, "b" to 0L),
+            remote = mapOf("b" to 0L, "a" to 0L),
+            deleted = emptySet(),
+        )
 
-        assertEquals(emptySet<String>(), upload)
-        assertEquals(emptySet<String>(), download)
+        assertEquals(emptySet<String>(), actions.upload)
+        assertEquals(emptySet<String>(), actions.download)
     }
 
     @Test
     fun `a first device uploads everything and downloads nothing`() {
-        val (upload, download) = syncPlan(local = setOf("a", "b"), remote = emptySet())
+        val actions = syncActions(
+            local = mapOf("a" to 0L, "b" to 0L),
+            remote = emptyMap(),
+            deleted = emptySet(),
+        )
 
-        assertEquals(setOf("a", "b"), upload)
-        assertEquals(emptySet<String>(), download)
+        assertEquals(setOf("a", "b"), actions.upload)
+        assertEquals(emptySet<String>(), actions.download)
+    }
+
+    /**
+     * The whole reason a report carries a revision at all.
+     *
+     * Both devices hold the report, so the union that used to decide this would move nothing and
+     * the correction would live on one phone for ever.
+     */
+    @Test
+    fun `a report both sides hold travels from whichever has the newer correction`() {
+        val mineIsNewer = syncActions(
+            local = mapOf("a" to 3L),
+            remote = mapOf("a" to 1L),
+            deleted = emptySet(),
+        )
+        assertEquals(setOf("a"), mineIsNewer.upload)
+        assertEquals(emptySet<String>(), mineIsNewer.download)
+
+        val theirsIsNewer = syncActions(
+            local = mapOf("a" to 1L),
+            remote = mapOf("a" to 3L),
+            deleted = emptySet(),
+        )
+        assertEquals(emptySet<String>(), theirsIsNewer.upload)
+        assertEquals(setOf("a"), theirsIsNewer.download)
+    }
+
+    /** The ordinary case, and it has to stay free: nothing has been corrected on either side. */
+    @Test
+    fun `equal revisions move nothing`() {
+        val actions = syncActions(
+            local = mapOf("a" to 2L),
+            remote = mapOf("a" to 2L),
+            deleted = emptySet(),
+        )
+
+        assertEquals(emptySet<String>(), actions.upload)
+        assertEquals(emptySet<String>(), actions.download)
+    }
+
+    @Test
+    fun `a corrected report names its revision in the file name`() {
+        val corrected = run.copy(editRevision = 4)
+
+        assertEquals("${run.requestId}-r4.json", corrected.fileName)
+        assertEquals(run.requestId, SyncedRun.requestIdOf(corrected.fileName))
+        assertEquals(4L, SyncedRun.revisionOf(corrected.fileName))
+        assertEquals(corrected, SyncedRun.fromDocument(corrected.toDocument()))
+    }
+
+    /**
+     * Every report already in a channel was uploaded under the plain name and must stay readable.
+     *
+     * A request id is a UUID and carries plain hyphens, so the suffix has to be recognised by more
+     * than a hyphen or every id would lose its last segment.
+     */
+    @Test
+    fun `an uncorrected report keeps the name it has always had`() {
+        assertEquals("${run.requestId}.json", run.fileName)
+        assertEquals(0L, SyncedRun.revisionOf(run.fileName))
+        assertEquals(run.requestId, SyncedRun.requestIdOf(run.fileName))
+        assertEquals(0L, SyncedRun.fromDocument(run.toDocument())?.editRevision)
     }
 
     @Test
@@ -82,20 +157,41 @@ class ReportSyncTest {
      */
     @Test
     fun `a deleted report is neither downloaded nor uploaded by anyone`() {
-        val stillHasIt = syncActions(local = setOf("a"), remote = emptySet(), deleted = setOf("a"))
+        val stillHasIt = syncActions(
+            local = mapOf("a" to 0L),
+            remote = emptyMap(),
+            deleted = setOf("a"),
+        )
         assertEquals(emptySet<String>(), stillHasIt.upload)
         assertEquals(setOf("a"), stillHasIt.forget)
 
-        val neverHadIt = syncActions(local = emptySet(), remote = setOf("a"), deleted = setOf("a"))
+        val neverHadIt = syncActions(
+            local = emptyMap(),
+            remote = mapOf("a" to 0L),
+            deleted = setOf("a"),
+        )
         assertEquals(emptySet<String>(), neverHadIt.download)
         assertEquals(emptySet<String>(), neverHadIt.forget)
+    }
+
+    /** A delete outranks a correction, or the newer revision would drag a buried report back. */
+    @Test
+    fun `a delete beats a correction`() {
+        val actions = syncActions(
+            local = mapOf("gone" to 5L),
+            remote = mapOf("gone" to 1L),
+            deleted = setOf("gone"),
+        )
+
+        assertEquals(emptySet<String>(), actions.upload)
+        assertEquals(setOf("gone"), actions.forget)
     }
 
     @Test
     fun `everything not deleted still moves normally`() {
         val actions = syncActions(
-            local = setOf("a", "gone"),
-            remote = setOf("b", "gone"),
+            local = mapOf("a" to 0L, "gone" to 0L),
+            remote = mapOf("b" to 0L, "gone" to 0L),
             deleted = setOf("gone"),
         )
 

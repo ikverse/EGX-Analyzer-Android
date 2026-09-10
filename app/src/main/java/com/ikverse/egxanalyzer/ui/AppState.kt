@@ -33,6 +33,7 @@ import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.PromptSnapshot
+import com.ikverse.egxanalyzer.model.RecommendationEdit
 import com.ikverse.egxanalyzer.model.Sale
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.SourceTrace
@@ -548,6 +549,30 @@ interface AppState {
 
     fun selectResult(result: SavedAnalysis)
 
+    /**
+     * Corrects one extracted occurrence, and follows the correction through the app.
+     *
+     * @param correctTrade also move the trade recorded on this call, where there is one. Asked for
+     * rather than assumed: it is the only part of this that touches money, and a reader who bought
+     * the stock the model named holds that stock whatever the card actually said.
+     */
+    fun editRecommendation(
+        saved: SavedAnalysis,
+        edit: RecommendationEdit,
+        correctTrade: Boolean,
+    )
+
+    /** Puts a report back to exactly what the model read. */
+    fun clearRecommendationEdits(saved: SavedAnalysis)
+
+    /**
+     * Every listing the EGX catalog holds, for the ticker picker to search.
+     *
+     * Behind the interface because the catalog lives in `data` and nothing in `ui` may reach it -
+     * and as [CatalogStock] rather than the catalog's own row, for the same reason.
+     */
+    fun stockCatalog(): List<CatalogStock>
+
     fun deleteResult(result: SavedAnalysis)
 
     fun deleteAllResults()
@@ -633,4 +658,18 @@ data class PriceRefreshOutcome(
      * error would put a red line on a schedule that behaved perfectly.
      */
     val busy: Boolean = false,
+)
+
+
+/**
+ * One listing as the ticker picker needs it: a code and whatever it is called.
+ *
+ * A screen's own shape rather than the catalog's, because `ui` imports nothing from `data`. The
+ * names are what a search is actually run against - a reader hunting for a stock has whichever of
+ * the two they happened to read - so both travel with the code.
+ */
+data class CatalogStock(
+    val ticker: String,
+    val nameEnglish: String?,
+    val nameArabic: String?,
 )

@@ -28,7 +28,6 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -199,7 +198,7 @@ internal fun SettingsScreen(appState: AppState) {
                     TextButton(onClick = { providerMenuOpen = true }) {
                         Text("Provider: ${appState.cloudConfiguration.provider.displayName}")
                     }
-                    DropdownMenu(
+                    AppMenu(
                         expanded = providerMenuOpen,
                         onDismissRequest = { providerMenuOpen = false },
                     ) {
@@ -227,7 +226,7 @@ internal fun SettingsScreen(appState: AppState) {
                         SettingsButton(onClick = { endpointMenuOpen = true }) {
                             Text("Choose endpoint region")
                         }
-                        DropdownMenu(
+                        AppMenu(
                             expanded = endpointMenuOpen,
                             onDismissRequest = { endpointMenuOpen = false },
                         ) {
@@ -330,7 +329,7 @@ internal fun SettingsScreen(appState: AppState) {
                     SettingsButton(onClick = { languageMenuOpen = true }) {
                         Text("Output language: ${appState.appPreferences.analysisLanguage.displayName}")
                     }
-                    DropdownMenu(
+                    AppMenu(
                         expanded = languageMenuOpen,
                         onDismissRequest = { languageMenuOpen = false },
                     ) {
@@ -494,7 +493,7 @@ internal fun SettingsScreen(appState: AppState) {
             if (appState.availableModels.isNotEmpty()) {
                 Box {
                     SettingsButton(onClick = { askModelMenuOpen = true }) { Text("Choose model") }
-                    DropdownMenu(
+                    AppMenu(
                         expanded = askModelMenuOpen,
                         onDismissRequest = { askModelMenuOpen = false },
                     ) {
@@ -885,7 +884,7 @@ internal fun SettingsScreen(appState: AppState) {
                     SettingsButton(onClick = { themeMenuOpen = true }) {
                         Text("Theme: ${appState.appPreferences.themeMode.displayName}")
                     }
-                    DropdownMenu(
+                    AppMenu(
                         expanded = themeMenuOpen,
                         onDismissRequest = { themeMenuOpen = false },
                     ) {

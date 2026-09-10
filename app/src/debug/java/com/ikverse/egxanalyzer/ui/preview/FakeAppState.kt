@@ -443,6 +443,21 @@ class FakeAppState(
 
     override fun selectResult(result: SavedAnalysis) = Unit
 
+    override fun editRecommendation(
+        saved: SavedAnalysis,
+        edit: RecommendationEdit,
+        correctTrade: Boolean,
+    ) = Unit
+
+    override fun clearRecommendationEdits(saved: SavedAnalysis) = Unit
+
+    /** Three real listings, so the picker draws with something to search rather than empty. */
+    override fun stockCatalog(): List<CatalogStock> = listOf(
+        CatalogStock("ORAS", "Orascom Construction PLC", "اوراسكوم كونستراكشون بي ال سي"),
+        CatalogStock("ORHD", "Orascom Development Egypt S.A.E.", "أوراسكوم للتنمية مصر"),
+        CatalogStock("ORWE", "Oriental Weavers", "النساجون الشرقيون"),
+    )
+
     override fun deleteResult(result: SavedAnalysis) = Unit
 
     override fun deleteAllResults() = Unit

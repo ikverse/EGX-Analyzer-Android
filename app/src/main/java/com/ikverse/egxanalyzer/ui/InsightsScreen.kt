@@ -239,10 +239,23 @@ internal fun InsightsScreen(appState: AppState) {
         }
 
         if (report.tracked == 0) {
+            // The stock is named when it is what emptied the page, as it is on Results and the
+            // Portfolio: "nothing matches these filters" beside a box naming a company reads as
+            // though the app had not noticed which one was picked. See TickerPicker.name.
+            val searching = stock.isNotBlank()
             EmptyState(
                 icon = Icons.Outlined.Insights,
-                title = "Nothing matches these filters",
-                detail = "Clear a filter to see the rest of your calls.",
+                title = if (searching) {
+                    "No calls on ${TickerPicker.name(stock)}"
+                } else {
+                    "Nothing matches these filters"
+                },
+                detail = if (searching) {
+                    "No source has called that stock in the record. Clear the stock filter to see " +
+                        "the rest of your calls."
+                } else {
+                    "Clear a filter to see the rest of your calls."
+                },
             )
             return@Screen
         }

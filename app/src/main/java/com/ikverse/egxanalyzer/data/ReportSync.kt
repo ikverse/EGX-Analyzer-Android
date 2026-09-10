@@ -51,9 +51,25 @@ data class SyncedRun(
     val model: String,
     val completedAt: String,
     val payload: String,
+    /**
+     * How many times the report has been corrected, which is the only thing about it that moves.
+     *
+     * A run's extraction never changes; what the reader has since corrected in it does. This is
+     * what the sync compares, and it is in the file name as well as in the document so that
+     * deciding which copy is newer costs no downloads.
+     */
+    val editRevision: Long = 0,
 ) {
-    /** `<requestId>.json` - readable in a Telegram chat, and enough to tell copies apart. */
-    val fileName: String get() = "$requestId.json"
+    /**
+     * `<requestId>.json`, or `<requestId>-r<n>.json` once the report has been corrected.
+     *
+     * An uncorrected report keeps the name it has always had, so nothing already in a channel has
+     * to be moved or re-uploaded, and a device running an older build goes on recognising it.
+     * Revisions accumulate as separate files, exactly as a rule's and a trade's do; which one wins
+     * is the merge's decision rather than the order Telegram happens to return them in.
+     */
+    val fileName: String
+        get() = if (editRevision <= 0) "$requestId.json" else "$requestId-r$editRevision.json"
 
     fun toDocument(): String = JSONObject()
         .put("requestId", requestId)
@@ -61,6 +77,7 @@ data class SyncedRun(
         .put("model", model)
         .put("completedAt", completedAt)
         .put("payload", payload)
+        .put("editRevision", editRevision)
         .toString()
 
     companion object {
@@ -73,20 +90,46 @@ data class SyncedRun(
                 model = json.getString("model"),
                 completedAt = json.getString("completedAt"),
                 payload = json.getString("payload"),
+                editRevision = json.optLong("editRevision", 0),
             ).takeIf { it.requestId.isNotBlank() && it.payload.isNotBlank() }
         }.getOrNull()
 
-        /** The id a file name carries, or null when the name is not one this app wrote. */
-        fun requestIdOf(fileName: String): String? =
-            fileName.removeSuffix(".json").takeIf { it != fileName && it.isNotBlank() }
+        /**
+         * The id a file name carries, or null when the name is not one this app wrote.
+         *
+         * The revision suffix is stripped here rather than treated as part of the id, so a
+         * corrected report and its earlier copies are recognised as the same report - which is what
+         * lets the newest of them be picked instead of all of them being downloaded as strangers.
+         */
+        fun requestIdOf(fileName: String): String? = fileName
+            .removeSuffix(".json")
+            .takeIf { it != fileName && it.isNotBlank() }
+            ?.substringBeforeLast(REVISION_MARK)
+            ?.takeIf(String::isNotBlank)
+
+        /** The revision a file name carries. Zero for a report nobody has corrected. */
+        fun revisionOf(fileName: String): Long {
+            val stem = fileName.removeSuffix(".json").takeIf { it != fileName } ?: return 0
+            if (REVISION_MARK !in stem) return 0
+            return stem.substringAfterLast(REVISION_MARK).toLongOrNull() ?: 0
+        }
+
+        /**
+         * What separates an id from its revision in a file name.
+         *
+         * A request id is a UUID, which carries plain hyphens but never `-r` followed by digits, so
+         * the two cannot be confused. Split from the **last** mark for the same reason.
+         */
+        private const val REVISION_MARK = "-r"
     }
 }
 
 /**
- * What a sync should do once tombstones are taken into account.
+ * What a sync should do once tombstones and corrections are taken into account.
  *
  * A deleted report is neither uploaded nor downloaded by anyone, whichever side still happens to
- * hold a copy, and any device still holding one removes it. That is the whole of the rule.
+ * hold a copy, and any device still holding one removes it. That is the whole of the rule for a
+ * delete, and it outranks everything below it.
  */
 data class SyncActions(
     val upload: Set<String>,
@@ -94,20 +137,29 @@ data class SyncActions(
     val forget: Set<String>,
 )
 
-fun syncActions(local: Set<String>, remote: Set<String>, deleted: Set<String>): SyncActions =
-    SyncActions(
-        upload = local - remote - deleted,
-        download = remote - local - deleted,
-        forget = local intersect deleted,
-    )
-
 /**
- * Which runs each side is missing.
+ * Which reports each side owes the other.
  *
- * A saved run never changes once written, so syncing is a union rather than a merge: whatever
- * either side has, both should have. There is no conflict to resolve, no clock to trust, and no
- * way for two devices to disagree about the same run - which is what makes this safe to do
- * automatically.
+ * A run's extraction never changes, so this was a union with nothing to resolve. What the reader
+ * has **corrected** in a run does change, so it is no longer only about which side holds a copy: a
+ * report both sides hold at different revisions travels from whichever holds the newer one. Equal
+ * revisions move nothing, which is the ordinary case and has to stay free.
+ *
+ * Newest revision wins outright rather than being merged field by field. An edit is a deliberate
+ * act on one occurrence of one report, and the reader who made the later one was looking at the
+ * earlier one's result; merging two of them would produce a report neither device ever showed
+ * anybody.
  */
-fun syncPlan(local: Set<String>, remote: Set<String>): Pair<Set<String>, Set<String>> =
-    (local - remote) to (remote - local)
+fun syncActions(
+    local: Map<String, Long>,
+    remote: Map<String, Long>,
+    deleted: Set<String>,
+): SyncActions = SyncActions(
+    upload = local.keys
+        .filter { it !in deleted && local.getValue(it) > (remote[it] ?: -1) }
+        .toSet(),
+    download = remote.keys
+        .filter { it !in deleted && remote.getValue(it) > (local[it] ?: -1) }
+        .toSet(),
+    forget = local.keys intersect deleted,
+)

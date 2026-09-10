@@ -203,12 +203,42 @@ class BackupRestoreTest {
     @Test
     fun `only the reports this device is missing are taken`() {
         val taken = runsToRestore(
-            held = setOf("a"),
+            held = mapOf("a" to 0L),
             buried = emptySet(),
             backup = listOf(run("a"), run("b")),
         )
 
         assertEquals(listOf("b"), taken.map { it.requestId })
+    }
+
+    /**
+     * A correction is as missing as a whole report.
+     *
+     * Both devices hold the report, so "whatever this device is missing" measured by id alone would
+     * leave the correction in the backup for ever - which is exactly the case someone opens a
+     * backup to fix.
+     */
+    @Test
+    fun `a backup carrying a newer correction of a held report is taken`() {
+        val taken = runsToRestore(
+            held = mapOf("a" to 1L),
+            buried = emptySet(),
+            backup = listOf(run("a").copy(editRevision = 3)),
+        )
+
+        assertEquals(listOf("a"), taken.map { it.requestId })
+    }
+
+    /** A restore only ever adds, so it must never roll a correction back to an older one. */
+    @Test
+    fun `an older correction in a backup is left alone`() {
+        val taken = runsToRestore(
+            held = mapOf("a" to 4L),
+            buried = emptySet(),
+            backup = listOf(run("a").copy(editRevision = 2)),
+        )
+
+        assertEquals(emptyList<String>(), taken.map { it.requestId })
     }
 
     /**
@@ -220,7 +250,7 @@ class BackupRestoreTest {
     @Test
     fun `a report deleted here but not yet published does not come back`() {
         val taken = runsToRestore(
-            held = emptySet(),
+            held = emptyMap(),
             buried = setOf("b"),
             backup = listOf(run("a"), run("b")),
         )

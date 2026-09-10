@@ -195,6 +195,7 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
                 // content: a short record must not stretch the sheet to the full screen with the
                 // action bar stranded at the bottom of it.
                 .weight(1f, fill = false)
+                .sheetDragSlop()
                 .scrollableColumn()
                 .padding(horizontal = Space.l)
                 .padding(top = Space.s, bottom = Space.m),

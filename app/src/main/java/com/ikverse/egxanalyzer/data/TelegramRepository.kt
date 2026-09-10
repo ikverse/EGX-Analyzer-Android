@@ -452,23 +452,39 @@ class TelegramRepository(
      * Read across every duplicate: a report is worth having whichever channel it landed in, and a
      * device that once uploaded to a channel of its own should not lose those reports now.
      */
-    suspend fun listSyncedReports(): Map<String, Int> {
+    suspend fun listSyncedReports(): Map<String, RemoteReport> {
         val target = syncChatId()
         val chats = (findSyncChats() + target).distinct()
         return chats.fold(linkedMapOf()) { all, chat ->
-            reportsIn(chat).forEach { (id, fileId) -> all.putIfAbsent(id, fileId) }
+            reportsIn(chat).forEach { (id, report) ->
+                // Newest correction wins across the duplicates too, not merely inside one of them:
+                // a report edited on a phone that publishes to a channel of its own is still the
+                // newer copy of that report.
+                val held = all[id]
+                if (held == null || report.editRevision > held.editRevision) all[id] = report
+            }
             all
         }
     }
 
-    private suspend fun reportsIn(chatId: Long): Map<String, Int> =
-        contentsOf(chatId).reports.mapValues { (_, entry) -> entry.fileId }
+    private suspend fun reportsIn(chatId: Long): Map<String, RemoteReport> =
+        contentsOf(chatId).reports.mapValues { (_, files) ->
+            val newest = files.maxBy { it.editRevision }
+            RemoteReport(newest.file.fileId, newest.editRevision)
+        }
+
+    /** Which copy of a report the channel holds, and how to fetch it. */
+    data class RemoteReport(val fileId: Int, val editRevision: Long)
 
     /** One file in the channel: enough to download it, and enough to delete it. */
     private data class ChannelFile(val fileId: Int, val messageId: Long)
 
+    /** One uploaded copy of a report, with the correction count its name carries. */
+    private data class ReportFile(val file: ChannelFile, val editRevision: Long)
+
     private data class ChannelContents(
-        val reports: Map<String, ChannelFile>,
+        /** Every uploaded copy of every report, because a corrected one has several. */
+        val reports: Map<String, List<ReportFile>>,
         val tombstones: Map<String, ChannelFile>,
         /** Every revision of every rule, newest first, because the merge needs them all. */
         val ruleRevisions: List<ChannelFile>,
@@ -488,7 +504,7 @@ class TelegramRepository(
     )
 
     private suspend fun contentsOf(chatId: Long): ChannelContents {
-        val reports = linkedMapOf<String, ChannelFile>()
+        val reports = linkedMapOf<String, MutableList<ReportFile>>()
         val tombstones = linkedMapOf<String, ChannelFile>()
         val ruleRevisions = mutableListOf<ChannelFile>()
         val positionRevisions = mutableListOf<ChannelFile>()
@@ -534,7 +550,13 @@ class TelegramRepository(
                     promptVersions.putIfAbsent(it, file)
                     return@forEach
                 }
-                SyncedRun.requestIdOf(name)?.let { reports.putIfAbsent(it, file) }
+                // Every revision is kept, as a rule's and a trade's are: which copy of a
+                // corrected report wins is decided by the revision in its name, not by the order
+                // Telegram returned the messages in.
+                SyncedRun.requestIdOf(name)?.let {
+                    reports.getOrPut(it, ::mutableListOf) +=
+                        ReportFile(file, SyncedRun.revisionOf(name))
+                }
             }
             fromMessageId = messages.last().id
         }
@@ -569,9 +591,14 @@ class TelegramRepository(
         val chats = (findSyncChats() + syncChatId()).distinct()
         chats.forEach { chat ->
             val contents = contentsOf(chat)
-            contents.reports[requestId]?.let { file ->
+            // Every copy of it, not only the newest: a corrected report is several messages, and
+            // leaving the earlier ones behind would let another device download one and bring the
+            // report back under the tombstone's nose.
+            contents.reports[requestId].orEmpty().forEach { held ->
                 runCatching {
-                    client.deleteMessages(chat, longArrayOf(file.messageId), true).requireValue<Any?>()
+                    client
+                        .deleteMessages(chat, longArrayOf(held.file.messageId), true)
+                        .requireValue<Any?>()
                 }
             }
         }

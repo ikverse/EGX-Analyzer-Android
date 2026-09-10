@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -44,11 +45,16 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 
 /**
  * The page's own name, at the top of the page, shrinking as the page is read.
@@ -77,7 +83,10 @@ import androidx.compose.ui.unit.sp
  *   read here it is this row and nothing else.
  * @param search the page's own stock filter, or null on a page with no list to narrow - see
  *   `PageState.stockFilter`. Null draws no search icon at all, because an icon opening a box that
- *   narrows nothing is a control the page cannot honour.
+ *   narrows nothing is a control the page cannot honour. It holds a **picked ticker** rather than
+ *   whatever was typed: see [SearchField] and [TickerPicker].
+ * @param stocksOnPage the tickers this page actually holds, which the picker offers first. Called
+ *   once when the list opens rather than per keystroke - see `pageStocks` for what it walks.
  * @param current whether this page is the one the reader is actually on. See [SearchField], where
  *   it is what keeps a keyboard from opening on a page nobody has arrived at.
  * @param filters the page's own "is the filter sheet open" flag, or null on a page with no filters
@@ -95,19 +104,47 @@ internal fun PageHeader(
     current: Boolean,
     filters: MutableState<Boolean>?,
     filtered: Boolean,
+    /** The tickers this page holds, for the picker's **On this page** group. See `pageStocks`. */
+    stocksOnPage: () -> Set<String>,
     modifier: Modifier = Modifier,
 ) {
     var opened by remember { mutableStateOf(false) }
-    val typed = search?.value.orEmpty()
+    // What is being typed into the box, which since the picker arrived is **not** what the page is
+    // filtered by: typing narrows the list of listings on offer, and only a pick reaches the page.
+    // Header-local, so a fold loses a half-typed query and keeps the pick - which is the right way
+    // round, since the pick is the thing the reader can see the page answering.
+    var typed by remember { mutableStateOf("") }
+    val picked = search?.value.orEmpty()
     // Open because it was pressed, or because it is still narrowing the page. The second half is
     // what makes the box the indicator as well as the control: a page filtered to one stock with no
     // box on screen saying so is a page that looks as though it has lost its other rows.
-    val searching = search != null && (opened || typed.isNotBlank())
+    val searching = search != null && (opened || picked.isNotBlank())
 
     fun close() {
         opened = false
+        typed = ""
         search?.value = ""
     }
+    // Pressing past the list is "never mind", not "stop filtering": whatever was already picked
+    // stays and the box goes back to showing it. Only the X and back clear the page.
+    fun dismiss() {
+        if (picked.isNotBlank()) {
+            opened = false
+            typed = ""
+        } else {
+            close()
+        }
+    }
+
+    fun pick(ticker: String) {
+        search?.value = ticker
+        typed = ""
+        opened = false
+    }
+    // The same entrance every ticker in the app opens the stock sheet through. Read here rather
+    // than inside the list, because the list has to be put away before the sheet is raised: one
+    // left standing over a modal sheet is a scrim across the thing it was asked to open.
+    val openStock = LocalOpenStock.current
     // Closing the box is not navigation and never reaches `AppState.goBack`: back closes what is
     // open on the screen, which is what the press means while a keyboard is up. Enabled only while
     // the box is open **and this is the page the reader is on** - the pager keeps the neighbouring
@@ -154,13 +191,33 @@ internal fun PageHeader(
             // Both halves fill the row, so this only ever reports "has the fade finished".
             val settledIn = transition.currentState == transition.targetState
             if (open && search != null) {
-                SearchField(
-                    typed = search.value,
-                    onTyped = { search.value = it },
-                    onClose = ::close,
-                    focusable = current && settledIn,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                // Two states inside one open box, swapped without a fade: the field while a stock
+                // is being chosen, and the stock itself once one has been. They are the same
+                // control at two moments, so a cross-fade between them would announce a change of
+                // control where the reader has just made a choice.
+                if (opened) {
+                    SearchField(
+                        typed = typed,
+                        onTyped = { typed = it },
+                        onClose = ::close,
+                        onPick = ::pick,
+                        onDismiss = ::dismiss,
+                        onOpenStock = { ticker ->
+                            dismiss()
+                            openStock(ticker)
+                        },
+                        stocksOnPage = stocksOnPage,
+                        focusable = current && settledIn,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    PickedStock(
+                        ticker = picked,
+                        onReopen = { opened = true },
+                        onClear = ::close,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             } else {
                 TitleRow(
                     destination = destination,
@@ -290,13 +347,15 @@ private fun HeaderAction(
 }
 
 /**
- * The box the search icon opens, across the bar the title was in.
+ * The box the search icon opens, across the bar the title was in, with the catalog under it.
  *
- * **It is the page's own stock filter, moved.** Results, Insights and the Portfolio each drew one
- * on their filter shelf; this is the same state - `PageState.resultsStock` and its two siblings -
- * with the same matcher under it, drawn once, at the top, reachable from anywhere down a long page
- * instead of only from the shelf. Nothing about what it narrows changed: it is a filter over what
- * is already on the page, not a lookup, and it opens no stock sheet.
+ * **It is the page's own stock filter, and what it narrows by is now a listing rather than a
+ * phrase.** Results, Insights and the Portfolio each drew a box on their filter shelf; this is the
+ * same state - `PageState.resultsStock` and its two siblings - drawn once, at the top, reachable
+ * from anywhere down a long page. What changed on 2026-09-11 is what reaches that state: typing
+ * narrows [TickerPickerList] and a pick writes a ticker. Nothing here is a lookup in the sense the
+ * first version of this header was - the page is still filtered rather than replaced by a sheet -
+ * and the sheet is a trailing target on a row, not what a press does.
  *
  * Not a `TextField`, for [StockFilterField]'s reason, which this deliberately resembles: Material's
  * own is built for a form and brings a label, a container and 56dp of height with it, where this is
@@ -316,10 +375,22 @@ private fun SearchField(
     typed: String,
     onTyped: (String) -> Unit,
     onClose: () -> Unit,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onOpenStock: (String) -> Unit,
+    stocksOnPage: () -> Set<String>,
     focusable: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val focus = remember { FocusRequester() }
+    // Where the list hangs from, in pixels, measured off this row's own top edge - the popup is
+    // positioned against the box's bounds and knows nothing about how tall the box is drawn.
+    val anchorOffset = with(LocalDensity.current) { (SearchFieldHeight + Space.s).roundToPx() }
+    // And how much window is left under that point, which the list is drawn exactly as tall as.
+    // A popup taller than the space it hangs in is shifted **up** by the window manager to fit,
+    // which would put the list back over the header it belongs to. See `TickerPickerList`.
+    val windowHeight = LocalWindowInfo.current.containerSize.height
+    var spaceBelow by remember { mutableIntStateOf(0) }
     // The box was opened by somebody who wants to type in it - but only once the pages have stopped
     // moving and this is the one in front of them. `LocalTabsSettled` is the shell's own answer to
     // "has the reader arrived", written by the pager and true beside a rail.
@@ -327,48 +398,128 @@ private fun SearchField(
     LaunchedEffect(focusable, settled.value) {
         if (focusable && settled.value) focus.requestFocus()
     }
+    // The list is anchored to this box rather than to the row, so it stands under the field
+    // wherever the field is laid out.
+    Box(
+        modifier.onGloballyPositioned { placed ->
+            spaceBelow = windowHeight - (placed.positionInWindow().y.roundToInt() + anchorOffset)
+        },
+    ) {
+        Surface(
+            Modifier.fillMaxWidth().height(SearchFieldHeight),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Row(
+                Modifier.padding(start = Space.m, end = Space.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(IconSize.Inline),
+                )
+                Box(Modifier.weight(1f).padding(horizontal = Space.s)) {
+                    if (typed.isEmpty()) {
+                        Text(
+                            // What it asks for, not what it does: the reader is choosing a listing
+                            // here, and the page being narrowed is the consequence of the choice.
+                            "Search stocks",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    BasicTextField(
+                        value = typed,
+                        onValueChange = onTyped,
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                    )
+                }
+                Box(
+                    Modifier.size(SearchTarget).clip(CircleShape).clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Outlined.Close,
+                        // It clears as well as closes, which is what keeps the box the one visible
+                        // sign that the page underneath is narrowed.
+                        contentDescription = "Clear stock filter",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(IconSize.Inline),
+                    )
+                }
+            }
+        }
+        TickerPickerList(
+            typed = typed,
+            stocksOnPage = stocksOnPage,
+            onPick = onPick,
+            onDismiss = onDismiss,
+            onOpenStock = onOpenStock,
+            anchorOffset = anchorOffset,
+            spaceBelow = spaceBelow,
+        )
+    }
+}
+
+/**
+ * The listing the page is narrowed to, in the bar the box was in.
+ *
+ * The box closes onto this rather than back to the title, for the reason the box used to stay open
+ * while it held text: a page showing one stock's rows with nothing at the top saying which stock is
+ * a page that looks as though it has lost the rest. It says more than the typed query ever could -
+ * the mark, the code and the company's own name - because the pick is a listing rather than a
+ * phrase somebody remembered.
+ *
+ * Pressing it reopens the picker; the X clears the page, which is the same X the field carries and
+ * means the same thing.
+ */
+@Composable
+private fun PickedStock(
+    ticker: String,
+    onReopen: () -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Surface(
         modifier.height(SearchFieldHeight),
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Row(
-            Modifier.padding(start = Space.m, end = Space.xs),
+            Modifier
+                .clickable(onClick = onReopen)
+                .padding(start = Space.s, end = Space.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                Icons.Outlined.Search,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(IconSize.Inline),
+            StockLogo(ticker, LogoSize.Row)
+            Text(
+                ticker,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                modifier = Modifier.padding(start = Space.s),
             )
-            Box(Modifier.weight(1f).padding(horizontal = Space.s)) {
-                if (typed.isEmpty()) {
-                    Text(
-                        "Filter by stock",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                BasicTextField(
-                    value = typed,
-                    onValueChange = onTyped,
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                        color = MaterialTheme.colorScheme.onSurface,
-                    ),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
-                )
-            }
+            Text(
+                TickerPicker.name(ticker),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(start = Space.s),
+            )
             Box(
-                Modifier.size(SearchTarget).clip(CircleShape).clickable(onClick = onClose),
+                Modifier.size(SearchTarget).clip(CircleShape).clickable(onClick = onClear),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     Icons.Outlined.Close,
-                    // It clears as well as closes, which is what keeps the box the one visible sign
-                    // that the page underneath is narrowed.
                     contentDescription = "Clear stock filter",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(IconSize.Inline),

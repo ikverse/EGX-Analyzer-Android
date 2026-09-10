@@ -15,15 +15,11 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.HourglassEmpty
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -120,13 +116,11 @@ internal fun PositionCard(
                 }
                 PositionStatusChip(view)
                 Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = "More actions")
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Edit trade") },
-                            leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
+                    MoreButton(onClick = { menuOpen = true })
+                    AppMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        AppMenuItem(
+                            "Edit trade",
+                            Icons.Outlined.Edit,
                             onClick = { menuOpen = false; editing = true },
                         )
                         // Undoing Keep Open lives here rather than beside Sold. The pill already
@@ -135,18 +129,19 @@ internal fun PositionCard(
                         // has to stay reachable somewhere, though: without it a mistaken press
                         // could only be undone by deleting the trade and recording it again.
                         if (view.keptOpen) {
-                            DropdownMenuItem(
-                                text = { Text("Follow the deadline again") },
-                                leadingIcon = {
-                                    Icon(Icons.Outlined.HourglassEmpty, contentDescription = null)
-                                },
+                            AppMenuItem(
+                                "Follow the deadline again",
+                                Icons.Outlined.HourglassEmpty,
                                 onClick = { menuOpen = false; onKeepOpen(false, null) },
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text("Remove") },
-                            leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
+                        // The one press on this card that cannot be undone, and until now the one
+                        // press drawn in exactly the ink of Edit above it.
+                        AppMenuItem(
+                            "Remove",
+                            Icons.Outlined.Delete,
                             onClick = { menuOpen = false; confirmRemove = true },
+                            destructive = true,
                         )
                     }
                 }

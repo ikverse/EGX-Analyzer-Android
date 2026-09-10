@@ -169,6 +169,16 @@ data class RecommendationDataPoint(
     val resistance: Double?,
     val riskPct: Double?,
     val notesArabic: String?,
+    /**
+     * Where this occurrence sits in its stock's parsed list, which is what an edit is anchored to.
+     *
+     * Assigned by the parse after every occurrence that is going to be dropped has been dropped, so
+     * it is stable for as long as the response and the parse are - and the response never changes.
+     * Deliberately not the index the screen draws it at: the report filters occurrences by timing
+     * and by channel before laying them out, so a card's position in a filtered list is a fact
+     * about the filter rather than about the call. -1 on anything not built by the parse.
+     */
+    val parseIndex: Int = -1,
 ) {
     val isWatching: Boolean get() = effectiveDateBasis == "watching"
 
@@ -185,6 +195,14 @@ data class ConsolidatedRecommendation(
     val rank: Int,
     val notesSummary: String?,
     val dataPoints: List<RecommendationDataPoint> = emptyList(),
+    /**
+     * The code the model read, before any correction, which is what an edit is filed under.
+     *
+     * Not the corrected code: that is the thing being changed, so filing an edit under it would
+     * mean the edit could never be found again to be undone. Defaults to [stockCode], which is what
+     * it is on every stock nobody has touched.
+     */
+    val originalStockCode: String = stockCode,
 )
 
 data class ExcludedSource(
@@ -302,6 +320,23 @@ data class AnalysisResult(
      * "delete the report and run it again" the way to force a card to be read afresh.
      */
     val sourceReads: Map<String, String> = emptyMap(),
+    /**
+     * Corrections the reader made to what the model read, laid over [consolidated] on every read.
+     *
+     * Kept raw as well as applied, because the card has to be able to say what was changed and to
+     * put it back. See `RecommendationEdit`, which explains why this is an overlay rather than a
+     * rewrite of [rawResponse].
+     */
+    val edits: List<RecommendationEdit> = emptyList(),
+    /**
+     * How many times this report has been corrected, which is what makes it syncable.
+     *
+     * Reports travel as a union on the understanding that a saved run never changes, and an edited
+     * one does. This is the revision the sync compares: it rises with every edit, it is carried in
+     * the file name, and the highest one in the channel is the copy every device ends up holding.
+     * Zero on a report nobody has edited, which is every report saved before this existed.
+     */
+    val editRevision: Long = 0,
 )
 
 data class SavedAnalysis(

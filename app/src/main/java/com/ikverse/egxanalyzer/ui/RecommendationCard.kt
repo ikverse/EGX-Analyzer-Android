@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -35,11 +33,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -64,6 +60,8 @@ internal fun RecommendationCards(
     imagePathFor: (Int?) -> String?,
     /** Records what the user did about a call. Absent, the cards are read-only. */
     trades: TradeBook? = null,
+    /** Corrects what the model read off the card. Absent, the figures cannot be changed. */
+    editor: CallEditor? = null,
     modifier: Modifier = Modifier,
 ) {
     val points = stock.dataPoints
@@ -74,7 +72,15 @@ internal fun RecommendationCards(
             border = cardOutline,
         ) {
             Column(Modifier.padding(Space.l)) {
-                StockHeader(stock, point = null, channel = null, page = 0, pageCount = 0, session = null)
+                StockHeader(
+                    stock,
+                    point = null,
+                    channel = null,
+                    page = 0,
+                    pageCount = 0,
+                    session = null,
+                    editor = null,
+                )
             }
         }
         return
@@ -97,6 +103,7 @@ internal fun RecommendationCards(
                 channel = channelFor(point.sourceMessageId),
                 imagePath = imagePathFor(point.sourceImageRef),
                 trades = trades,
+                editor = editor,
                 page = page,
                 pageCount = points.size,
             )
@@ -117,12 +124,14 @@ private fun RecommendationCard(
     channel: String?,
     imagePath: String?,
     trades: TradeBook?,
+    editor: CallEditor?,
     page: Int,
     pageCount: Int,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember(point) { mutableStateOf(false) }
     var viewingImage by remember(point) { mutableStateOf(false) }
+    var editing by remember(point) { mutableStateOf(false) }
     val held = trades?.heldFor(stock, point)
 
     Card(
@@ -139,7 +148,10 @@ private fun RecommendationCard(
         Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             // The session the call was made for, from the same source the Bought button
             // reads it from, so the copied text and the trade agree about which day.
-            StockHeader(stock, point, channel, page, pageCount, trades?.dateOf(point))
+            StockHeader(
+                stock, point, channel, page, pageCount, trades?.dateOf(point), editor,
+                onEdit = { editing = true },
+            )
 
             // No ladder here, deliberately. This card is a row of the report that would not fit as
             // a row: what it owes the reader is the call's figures, and a drawing of the same five
@@ -211,6 +223,9 @@ private fun RecommendationCard(
     if (viewingImage) {
         SourceImageViewer(imagePath, point.sourceImageRef, onDismiss = { viewingImage = false })
     }
+    if (editing && editor != null) {
+        EditCallSheet(stock, point, editor, onDismiss = { editing = false })
+    }
 }
 
 @Composable
@@ -222,6 +237,8 @@ private fun StockHeader(
     pageCount: Int,
     /** The session this occurrence was made for, which the copied text names. */
     session: java.time.LocalDate?,
+    editor: CallEditor?,
+    onEdit: () -> Unit = {},
 ) {
     // Top-aligned so the right-hand column starts level with the ticker rather than floating
     // against the middle of however many name lines this stock happens to have.
@@ -287,14 +304,24 @@ private fun StockHeader(
                     }
                     Spacer(Modifier.height(Space.xs))
                 }
+                // Beside the timing chip rather than in place of it: what dated a call and whether
+                // anybody has corrected it are two different facts about the same card.
+                if (editor?.editFor(stock, point) != null) {
+                    EditedChip(onEdit)
+                    Spacer(Modifier.height(Space.xs))
+                }
                 TimingChip(point)
             }
+            // The pills and the button were flush against one another, which read as one control
+            // wearing a label rather than as a note standing beside a menu. Space.xs and not
+            // Space.s, because the button now carries 10dp of its own air on that side.
+            Spacer(Modifier.width(Space.xs))
             // The ⋮ the position card has carried since it was built, arriving on the other card
             // that holds a call. One item, because there is one thing to do with a call that the
             // card cannot already do: get its numbers out of the app intact. A report exports as a
             // spreadsheet, which is the right shape for a record and the wrong one for the four
             // figures somebody is about to retype into an order ticket.
-            CopyCallMenu(stock, point, channel, session)
+            CallMenu(stock, point, channel, session, editor, onEdit)
         }
     }
 }
@@ -309,26 +336,22 @@ private fun StockHeader(
  * cannot be turned off.
  */
 @Composable
-private fun CopyCallMenu(
+private fun CallMenu(
     stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     channel: String?,
     session: java.time.LocalDate?,
+    editor: CallEditor?,
+    onEdit: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     Box {
-        IconButton(onClick = { open = true }, modifier = Modifier.size(IconSize.Action)) {
-            Icon(
-                Icons.Outlined.MoreVert,
-                contentDescription = "More actions",
-                modifier = Modifier.size(IconSize.Inline),
-            )
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text("Copy call") },
-                leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
+        MoreButton(onClick = { open = true })
+        AppMenu(expanded = open, onDismissRequest = { open = false }) {
+            AppMenuItem(
+                "Copy call",
+                Icons.Outlined.ContentCopy,
                 onClick = {
                     open = false
                     clipboard.setText(
@@ -336,6 +359,30 @@ private fun CopyCallMenu(
                     )
                 },
             )
+            // The second thing worth doing to a call the card cannot already do: correcting what
+            // the model read off the screenshot. It lives here rather than only in the occurrence
+            // sheet because the sheet opens from the table, and the table is not drawn at all below
+            // 600dp - which is every phone in portrait, and so most of the time this is used.
+            if (editor != null) {
+                AppMenuItem(
+                    "Edit call",
+                    Icons.Outlined.Edit,
+                    onClick = {
+                        open = false
+                        onEdit()
+                    },
+                )
+                if (editor.hasEdits) {
+                    AppMenuItem(
+                        "Undo all edits",
+                        Icons.Outlined.Undo,
+                        onClick = {
+                            open = false
+                            editor.undoAll()
+                        },
+                    )
+                }
+            }
         }
     }
 }
@@ -351,15 +398,26 @@ private fun TimingChip(point: RecommendationDataPoint) {
     // Falls back to the signal only when the model recorded no basis at all, so the chip is
     // never blank.
     val label = timing(point) ?: point.recommendationType?.uppercase() ?: "-"
-    AssistChip(
-        onClick = {},
-        enabled = false,
-        label = { Text(label, fontWeight = FontWeight.Bold) },
-        colors = AssistChipDefaults.assistChipColors(
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-            disabledLabelColor = MaterialTheme.colorScheme.onSurface,
-        ),
-    )
+    // [OutlinePill], which is what every other card in this app annotates itself with. As an
+    // AssistChip this stood 32dp tall in 14sp of filled surfaceVariant beside a 24dp button, so the
+    // note about where a date came from was the largest object in the corner of the card and the
+    // heaviest thing on a header whose figures are the point. A ring at 20dp says the same word.
+    //
+    // T+1 takes the app's own voice, because it is the one label here that changes what the reader
+    // has to do - a trade taken on one is over the next session - and because Portfolio already
+    // draws exactly this pill in exactly this hue for exactly that fact. The rest are notes on
+    // where the date came from, and take the neutral ring every other note in the app wears.
+    val tone = if (point.isTPlusOne) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.outline
+    }
+    val ink = if (point.isTPlusOne) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    OutlinePill(label, outline = tone, textColor = ink)
 }
 
 /**

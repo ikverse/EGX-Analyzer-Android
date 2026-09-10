@@ -77,6 +77,7 @@ internal fun ChannelScoreSheet(channel: ChannelScore, onDismiss: () -> Unit) {
         Column(
             Modifier
                 .fillMaxWidth()
+                .sheetDragSlop()
                 .scrollableColumn()
                 .padding(horizontal = Space.l)
                 .padding(bottom = Space.xl),
