@@ -2770,7 +2770,14 @@ parameter being threaded anywhere. Added 2026-09-08.
   every phone holding trades actually is, and version 27 has one in `FeedHealthStoreTest` for
   `feed_checks` and `feed_faults`, written against the version-26 table for that same reason, and
   version 28 has one in `LocalDataStoreMigrationTest` for `source_reads` on `analyses`, written
-  against the version-27 table because that is where every phone holding reports actually is
+  against the version-27 table because that is where every phone holding reports actually is.
+  **That one arrived red and is the trap in its sharpest form**: `analyses` predates every other
+  table here, so it lived in `onCreate` alone — which held until a column was added to it by
+  `ALTER`, because a hand-built old database does not hold that table at all and answers the ALTER
+  with "no such table". One new column turned **twenty-one** migration tests red across six files,
+  none of them about reports. `createAnalyses()` is now in both hooks like everything else, which
+  is the same rule one line up, read the other way round: it is not only a new table that belongs
+  in `onUpgrade` but any table an `ALTER` is about to name
   — added by `ALTER`, one guard per column, so the risk
   is not that the upgrade fails but that it takes the answers already on the phone with it. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it

@@ -77,17 +77,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
                 name_ar TEXT
             )""",
         )
-        db.execSQL(
-            """CREATE TABLE analyses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                request_id TEXT NOT NULL UNIQUE,
-                provider TEXT NOT NULL,
-                model TEXT NOT NULL,
-                completed_at TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                source_reads TEXT
-            )""",
-        )
+        db.createAnalyses()
         db.createDailyPrices()
         db.createPriceEvents()
         db.createIntradayBars()
@@ -138,8 +128,34 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         db.createSessionDigestAnnounced()
         db.createFeedChecks()
         db.createFeedFaults()
+        db.createAnalyses()
         db.addSourceReadsColumn()
         db.dropNonTradingSessions()
+    }
+
+    /**
+     * The reports table, asserted on an upgrade as well as on a fresh install.
+     *
+     * It predates every other table in this file and so lived only in [onCreate], which was true
+     * enough while nothing ever altered it. The moment a column arrived by `ALTER` that stopped
+     * being enough: a database that does not hold the table at all answers with "no such table",
+     * and every migration test builds exactly such a database by hand - so one new column turned
+     * twenty-one of them red at once. On a phone the table is always there and this is a no-op;
+     * what it buys is that the `ALTER` below always has something to alter. The rule the rest of
+     * the file already follows, restated: a table belongs in **both** hooks.
+     */
+    private fun SQLiteDatabase.createAnalyses() {
+        execSQL(
+            """CREATE TABLE IF NOT EXISTS analyses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT NOT NULL UNIQUE,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                source_reads TEXT
+            )""",
+        )
     }
 
     /**
