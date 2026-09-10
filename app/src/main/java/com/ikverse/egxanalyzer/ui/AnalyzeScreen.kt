@@ -110,10 +110,12 @@ internal fun AnalyzeScreen(appState: AppState) {
     }
     // Computed here rather than inside the content, because the floating action needs it too.
     val blocker = analyzeBlocker(appState)
-    // What pressing the button will actually cost, worked out by the same function that will do the
-    // splitting - so the figure on the button and the number of requests the run makes cannot
-    // disagree. This is the only screen that spends the owner's money, and the count used to sit as
-    // grey text inside a card two thirds of the way up the page.
+    // What pressing the button will cost at most, worked out by the same function that will do the
+    // splitting, so the figure on the button and the run's own splitting cannot disagree about how
+    // the sources divide. At most rather than exactly: the wording filter drops sources at the run,
+    // and a message an earlier run has already read is not sent at all - both of which can only
+    // ever make it fewer. This is the only screen that spends the owner's money, and the count used
+    // to sit as grey text inside a card two thirds of the way up the page.
     val requests = remember(appState.inputs) {
         appState.inputs.takeIf(List<AnalysisInput>::isNotEmpty)
             ?.let { AnalysisChunking.chunk(it).size }

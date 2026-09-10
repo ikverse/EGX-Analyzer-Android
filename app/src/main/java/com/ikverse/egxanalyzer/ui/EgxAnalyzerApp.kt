@@ -9,12 +9,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.expandVertically
@@ -96,17 +90,10 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
@@ -114,7 +101,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ikverse.egxanalyzer.R
 import com.ikverse.egxanalyzer.ui.theme.LocalDarkTheme
 import com.ikverse.egxanalyzer.ui.theme.PageTheme
 import com.ikverse.egxanalyzer.ui.theme.accentFor
@@ -228,9 +214,12 @@ fun EgxAnalyzerApp(appState: AppState) {
                 navigationSuiteType = NavigationSuiteType.NavigationRail,
             ) {
                 // The suite scaffold used to paint this; the layout does not. Without it the
-                // window background shows through behind the system bars as a pale band. It is the
-                // chrome colour, because this is what shows behind the rail and behind the gesture
-                // strip; the page drawn on top of it paints its own.
+                // window background shows through behind the system bars as a pale band - the theme
+                // parents `Theme.Material.Light`, so that band is very nearly white. It is the
+                // page's own ground rather than the chrome colour: this shows behind the gesture
+                // strip, where `surfaceContainer` drew a full-width strip about 20dp tall along the
+                // foot of every page - the same band the top edge was cleared of when the app-name
+                // band went, lying along the other end of the window.
                 Surface(
                     // The layout does not do this for us the way the full NavigationSuiteScaffold
                     // does, and without it the page keeps clear of the gesture strip that the rail
@@ -239,7 +228,7 @@ fun EgxAnalyzerApp(appState: AppState) {
                     Modifier.fillMaxSize().consumeWindowInsets(
                         NavigationRailDefaults.windowInsets.only(WindowInsetsSides.Start),
                     ),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    color = MaterialTheme.colorScheme.background,
                 ) {
                     AppContent(appState, rail = true)
                 }
@@ -252,7 +241,7 @@ fun EgxAnalyzerApp(appState: AppState) {
             Box(Modifier.fillMaxSize()) {
                 Surface(
                     Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    color = MaterialTheme.colorScheme.background,
                 ) {
                     AppContent(appState, rail = false)
                 }
@@ -309,108 +298,12 @@ private val BarLabelSize = 11.sp
  *
  * A rail item is an icon stacked over a label, so left at the top its icon lands beside the blank
  * space above the page title rather than beside the title itself. This drops the column until the
- * first icon meets the heading next to it: past the header band, the page's own top padding, and
- * half a heading. The gap it leaves is beside the band, in the same colour, so the rail reads as the
- * band turning the corner rather than as a rail that starts late.
+ * first icon meets the heading next to it: past the status bar, the page's own top padding, and
+ * half a heading. What the gap is measured against is [PageHeader] - the page's own name and glyph,
+ * which is what sits beside it - and it is deliberately left empty. The app's mark stood in it
+ * until 2026-09-09; see [AppRail] for why nothing does now.
  */
 private val RailTopInset = 62.dp
-
-/**
- * How big the mark stands in the rail's top gap.
- *
- * It has no name beside it to be sized to any more - it is the only thing holding that corner,
- * against a column of 28dp glyphs, and at a glyph's size it reads as a sixth destination that has
- * lost its label. A size up separates it from the grid without making it artwork again.
- */
-private val AppMarkRailSize = 36.dp
-
-/**
- * The app's own mark, with the aurora moving through it.
- *
- * Drawn once, in the rail's top gap, and only on the layout that has a rail. It used to be drawn
- * in the header as well and animated between the two; see the rail shell for why that is gone.
- *
- * **The gradient is painted through the glyph rather than into the asset.** `ic_egx_notification` is
- * a one-colour vector and stays one; the layer below it is drawn, then a rectangle of the brush is
- * laid over it with `SrcIn`, which keeps the brush inside whatever the vector covers. The offscreen
- * compositing strategy is not optional - without a layer for the blend to be confined to, that
- * rectangle lands over the header instead of inside the mark.
- *
- * **`phase` is read inside the draw lambda, and that is what makes a permanent animation
- * affordable.** This is chrome that never leaves the screen, so the sweep runs for as long as the
- * app is in front - and a state read in the composition phase would recompose the header, and
- * everything the header's own recomposition reaches, on every frame of it. Read here the invalidation
- * is confined to the draw phase: a frame costs one 24dp glyph redrawn and no recomposition at all.
- * `arrivalFlash` in `CommonUi` makes the same argument from the other end, by composing itself only
- * while it is wanted.
- *
- * The tint underneath is the flat `primary` this mark used to be. Nothing normally sees it, since
- * `SrcIn` replaces it wholesale; it is what the mark falls back to rather than a blank space if the
- * blend is ever refused.
- *
- * @param hues the current page's aurora, passed in rather than read from a local: this is drawn in
- *   the header and over the rail, both of which sit outside any page's theme, so a mark that read
- *   the local would wear Analyze's cyan on all five pages. Given the destination's own, the app's
- *   name is the first thing on the screen to say where you are.
- */
-@Composable
-private fun AppMark(
-    hues: List<Color>,
-    modifier: Modifier = Modifier,
-    markSize: Dp = AppMarkRailSize,
-) {
-    val sweep = rememberInfiniteTransition(label = "mark aurora")
-    val phase by sweep.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            // Eased rather than linear, because it reverses: a linear ramp changes direction at the
-            // turn hard enough to be the one frame of this that catches the eye.
-            tween(MarkSweepMilliseconds, easing = FastOutSlowInEasing),
-            RepeatMode.Reverse,
-        ),
-        label = "sweep",
-    )
-    Icon(
-        painterResource(R.drawable.ic_egx_notification),
-        // The name is right beside it, and a reader announcing both says it twice.
-        contentDescription = null,
-        tint = MaterialTheme.colorScheme.primary,
-        modifier = modifier
-            .size(markSize)
-            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-            .drawWithContent {
-                drawContent()
-                // A ramp several times the glyph, slid diagonally across it, so what a reader sees
-                // is colour travelling *through* the mark. A ramp the size of the mark would change
-                // the whole glyph's hue at once, which reads as a light being switched rather than
-                // as one moving.
-                val span = size.maxDimension * MarkSweepSpan
-                val at = -span + (size.maxDimension + span) * phase
-                drawRect(
-                    Brush.linearGradient(
-                        colors = hues,
-                        start = Offset(at, at),
-                        end = Offset(at + span, at + span),
-                    ),
-                    blendMode = BlendMode.SrcIn,
-                )
-            },
-    )
-}
-
-/**
- * Twelve seconds each way, and deliberately that slow.
- *
- * This is on chrome that is always on screen, so the test it has to pass is that a reader never
- * catches it moving - they look up and the mark is a different colour from the one they remember.
- * Anything brisk enough to be seen as an animation would be the app's own name flashing beside a
- * page of figures, which is the last place in this app that should.
- */
-private const val MarkSweepMilliseconds = 12_000
-
-/** How many marks wide the ramp is. Enough that no more than one of its three hues is ever inside. */
-private const val MarkSweepSpan = 3f
 
 /** Between the header above the line and the first card under it. */
 private val StatusLineGap = 6.dp
@@ -558,30 +451,41 @@ private val RailItemGap = 16.dp
 
 @Composable
 private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
-    // Material leaves a rail the page's own colour; this one is the chrome, so it reads as a band
-    // down the side of the page rather than as a rail that has vanished into it.
+    // **The page's own ground, not the chrome colour.** It was `surfaceContainer` so that it read
+    // as the app-name band turning the corner down the side of the page - and that band was removed
+    // on 2026-09-09, which left the rail a slab in the one colour every `SectionCard` is also drawn
+    // in: a full-height card parked beside a page of cards, twice as light as the page between
+    // them, with no divider and nothing to say which of the two was chrome. The top edge was
+    // already argued out when the band went - a `surfaceContainer` strip over a `background` page
+    // is a seam, and nothing up there justified one - and this is the same seam stood on its end.
+    // On `background` the rail is the page's own ground with the destinations standing on it, and
+    // what separates the page is its cards' own inset rather than a change of colour.
     NavigationRail(
         modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = MaterialTheme.colorScheme.background,
     ) {
-        // The app's mark, in the gap `RailTopInset` was already holding open above the destinations.
-        // This is the only place in the app it is drawn now - see the rail shell.
+        // **The gap `RailTopInset` holds open, and nothing in it.** The app's mark stood here from
+        // 2026-09-09, when it left the header that was removed the same day, until it was taken out
+        // again: `ic_egx_notification` is three ascending bars and a rising arrow, and the three
+        // destinations under it are `AutoGraph`, `Assessment` and `Insights` - so the mark was a
+        // fourth chart glyph at the head of a column of chart glyphs, unlabelled among labelled
+        // ones and wearing the current page's own aurora, which is the hue of the one item beside
+        // it drawn at full strength. Sizing it away from them was tried first and 36dp against 28
+        // did not separate anything. What the mark was there to say, [PageHeader] now says on both
+        // layouts, in the page's name and its own glyph; the launcher icon and the notification
+        // glyph are where that artwork still earns its keep.
         //
-        // **Nothing in here may fill the rail's width**, and this Box did until 3.6.2 - it is what
-        // broke the unfolded layout the day the mark moved in. Material sizes a `NavigationRail`
-        // with `widthIn(min = ContainerWidth)`, a floor rather than a width, so a child that fills
-        // it stretches the rail to whatever it was measured against - and `NavigationSuiteScaffold-
-        // Layout` measures the navigation suite against the whole window, then gives the page
-        // `width - railWidth`. The rail became the screen and the page was measured at zero: five
-        // destinations centred on an empty display, with no page beside them at all. It cannot be
-        // seen on a phone, where there is no rail; only the Fold opened shows it. The column here
-        // already centres its children, so the mark needs no width of its own.
-        Box(
-            Modifier.height(RailTopInset),
-            contentAlignment = Alignment.Center,
-        ) {
-            AppMark(accentFor(appState.destination.accent, LocalDarkTheme.current).markAurora)
-        }
+        // The gap stays, because it is what drops the first icon level with the heading beside it.
+        //
+        // **Nothing put in here may fill the rail's width**, and a `Box` that did broke the
+        // unfolded layout in 3.6.1 - worth keeping written down, because this gap is where the next
+        // thing would go. Material sizes a `NavigationRail` with `widthIn(min = ContainerWidth)`, a
+        // floor rather than a width, so a child that fills it stretches the rail to whatever it was
+        // measured against - and `NavigationSuiteScaffoldLayout` measures the navigation suite
+        // against the whole window, then gives the page `width - railWidth`. The rail became the
+        // screen and the page was measured at zero: five destinations centred on an empty display,
+        // with no page beside them at all. A phone cannot show it, since there is no rail there.
+        Spacer(Modifier.height(RailTopInset))
         AppDestination.entries.forEachIndexed { index, destination ->
             if (index > 0) Spacer(Modifier.height(RailItemGap))
             val selected = appState.destination == destination
@@ -793,7 +697,10 @@ private fun AppContent(appState: AppState, rail: Boolean) {
         // is a status bar's worth of empty band above every page, and it also puts the page's own
         // background back below the status bar, which is the band this change existed to remove.
         contentWindowInsets = WindowInsets(0.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        // The page's ground, not the chrome colour. The `Surface` below is padded out of the
+        // horizontal and bottom safe-drawing insets, so what this paints is the strip behind the
+        // gesture bar - and in `surfaceContainer` that was a band across the foot of every page.
+        containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
         // No chrome above the page any more - no name band, no progress hairline, no status
         // line. The first two are gone; the third moved on to the page, under its own title. See

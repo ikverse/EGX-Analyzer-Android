@@ -308,7 +308,9 @@ class TelegramRepository(
             }
             is MessagePhoto -> {
                 if (AnalysisContentType.IMAGES in contentTypes) {
-                    val photo = content.photo.sizes.maxByOrNull { it.width * it.height }?.photo
+                    val sizes = content.photo.sizes
+                    val photo = preferredPhotoSize(sizes.map { maxOf(it.width, it.height) })
+                        ?.let { sizes[it].photo }
                     if (photo != null) {
                         val local = download(photo.id)
                         // The same picture posted twice - reposted, or forwarded back into the
@@ -1201,6 +1203,33 @@ class TelegramRepository(
 
 /** How much of a message is kept as its label in the source list. */
 internal const val PREVIEW_LENGTH = 160
+
+/**
+ * How wide a card has to be before its numbers can be read off it.
+ *
+ * Telegram offers the same photo at several sizes and the largest used to be taken, which for a
+ * channel card is usually 2560 on the long edge where 1280 sits beside it. A vision model is billed
+ * by pixel area, so that choice was paying four times over for a card that reads the same either
+ * way - on every image, in every run. 1280 is Telegram's own `y` size and what most channels post
+ * at to begin with, so on a great many cards this changes nothing at all.
+ *
+ * A floor rather than a target: nothing is ever resized here, and where no size reaches it the
+ * largest is still taken, because a card that arrives small arrives small.
+ */
+internal const val LEGIBLE_LONG_EDGE = 1280
+
+/**
+ * Which of a photo's sizes to fetch, given each one's long edge.
+ *
+ * The smallest at or above [floor], or the largest where none reaches it. Returns the index rather
+ * than the size so it can be stated over numbers and tested without TDLib.
+ */
+internal fun preferredPhotoSize(longEdges: List<Int>, floor: Int = LEGIBLE_LONG_EDGE): Int? {
+    if (longEdges.isEmpty()) return null
+    val legible = longEdges.withIndex().filter { it.value >= floor }
+    return (legible.minByOrNull(IndexedValue<Int>::value) ?: longEdges.withIndex().maxBy { it.value })
+        .index
+}
 
 /**
  * Which picture files a run has already collected.

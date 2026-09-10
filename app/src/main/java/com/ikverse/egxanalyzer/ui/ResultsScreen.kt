@@ -1380,9 +1380,15 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis, traceRoot: File) {
             )
         }
         if (diagnostics.requestCount > 0) {
+            // Named only where there were any: it is what says why a run's requests and images are
+            // fewer than the sources it covered, and on an ordinary run there is nothing to explain.
+            val reused = diagnostics.reusedSources
+                .takeIf { it > 0 }
+                ?.let { " · $it read before" }
+                .orEmpty()
             Text(
                 "${diagnostics.requestCount} model requests · ${diagnostics.imagesSent} images sent · " +
-                    "${diagnostics.unaccountedImages.size} unaccounted",
+                    "${diagnostics.unaccountedImages.size} unaccounted$reused",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

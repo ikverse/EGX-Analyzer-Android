@@ -96,6 +96,18 @@ data class AnalysisRequest(
      * in flight, and so the version it used is a fact about the request.
      */
     val prompt: ComposedPrompt? = null,
+    /**
+     * What an earlier run already read out of these same messages, keyed by source id.
+     *
+     * The window a run covers starts at yesterday's opening hour, so a second schedule re-sends
+     * every message the first one already paid to read. A source named here is not sent at all: its
+     * rows are adopted as they were, and only what nobody has read yet reaches the model.
+     *
+     * Each value is one source's stored reading, as JSON text - held as a string because the model
+     * layer parses nothing and only the repository that wrote it reads it back. Keyed by source id,
+     * which carries the chat and the Telegram message id, so it names one post and nothing else.
+     */
+    val priorReads: Map<String, String> = emptyMap(),
 )
 
 data class SourceTrace(
@@ -207,6 +219,13 @@ data class AnalysisDiagnostics(
     val requestCount: Int = 0,
     val imagesSent: Int = 0,
     /**
+     * Sources answered out of an earlier run's reading rather than sent again.
+     *
+     * The figure that says why a run's request and image counts are lower than its source count:
+     * they were read once, by a run that has already been paid for.
+     */
+    val reusedSources: Int = 0,
+    /**
      * What the run cost in tokens, summed over every request it made.
      *
      * Reported by the provider rather than counted here: the count that matters is the one being
@@ -273,6 +292,16 @@ data class AnalysisResult(
     val modelExclusions: List<ModelExclusion> = emptyList(),
     val rawResponse: String = "",
     val completedAt: Instant = Instant.now(),
+    /**
+     * What this run read out of each source, kept so the next run need not pay to read it again.
+     *
+     * Device-local and deliberately outside [toJson]: it is a cache of one reading, not a record of
+     * what anybody recommended, and shipping it through the sync channel would put a copy of every
+     * run's working into every phone's payload. It is stored beside the run rather than in a table
+     * of its own so that deleting a report takes its readings with it - which is what makes
+     * "delete the report and run it again" the way to force a card to be read afresh.
+     */
+    val sourceReads: Map<String, String> = emptyMap(),
 )
 
 data class SavedAnalysis(

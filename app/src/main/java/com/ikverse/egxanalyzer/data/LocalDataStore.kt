@@ -77,16 +77,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
                 name_ar TEXT
             )""",
         )
-        db.execSQL(
-            """CREATE TABLE analyses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                request_id TEXT NOT NULL UNIQUE,
-                provider TEXT NOT NULL,
-                model TEXT NOT NULL,
-                completed_at TEXT NOT NULL,
-                payload TEXT NOT NULL
-            )""",
-        )
+        db.createAnalyses()
         db.createDailyPrices()
         db.createPriceEvents()
         db.createIntradayBars()
@@ -137,7 +128,49 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         db.createSessionDigestAnnounced()
         db.createFeedChecks()
         db.createFeedFaults()
+        db.createAnalyses()
+        db.addSourceReadsColumn()
         db.dropNonTradingSessions()
+    }
+
+    /**
+     * The reports table, asserted on an upgrade as well as on a fresh install.
+     *
+     * It predates every other table in this file and so lived only in [onCreate], which was true
+     * enough while nothing ever altered it. The moment a column arrived by `ALTER` that stopped
+     * being enough: a database that does not hold the table at all answers with "no such table",
+     * and every migration test builds exactly such a database by hand - so one new column turned
+     * twenty-one of them red at once. On a phone the table is always there and this is a no-op;
+     * what it buys is that the `ALTER` below always has something to alter. The rule the rest of
+     * the file already follows, restated: a table belongs in **both** hooks.
+     */
+    private fun SQLiteDatabase.createAnalyses() {
+        execSQL(
+            """CREATE TABLE IF NOT EXISTS analyses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT NOT NULL UNIQUE,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                source_reads TEXT
+            )""",
+        )
+    }
+
+    /**
+     * Brings an analyses table written before a run remembered what it read up to date.
+     *
+     * Null on every report already on the phone, which is exactly right: nothing was written down
+     * about how those sources were read, so the next run over them reads them again. Added by
+     * `ALTER` with a guard, so no upgrade rewrites the reports already stored.
+     */
+    private fun SQLiteDatabase.addSourceReadsColumn() {
+        val hasColumn = rawQuery("PRAGMA table_info(analyses)", null).use { cursor ->
+            generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }
+                .any { it == "source_reads" }
+        }
+        if (!hasColumn) execSQL("ALTER TABLE analyses ADD COLUMN source_reads TEXT")
     }
 
     /**
@@ -1148,7 +1181,24 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         writableDatabase.delete("channels", null, null)
     }
 
-    fun saveResult(result: AnalysisResult, provider: CloudProvider, model: String): Long =
+    /**
+     * Saves a run, and beside it what that run read out of each source.
+     *
+     * [readingKey] says what the reading was made under - the prompt version and the language it
+     * was asked in - so a later run can tell whether it is looking at a reading of its own question
+     * or of a different one. Null stores no reading at all, which is what a caller that cannot say
+     * should get: an unkeyed reading is one nothing can safely be laid over.
+     *
+     * The readings are not in [AnalysisResult.toJson], so they never travel with the report. They
+     * are a cache of one device's working, and they die with the row - which is what makes deleting
+     * a report and running it again the way to have its cards read afresh.
+     */
+    fun saveResult(
+        result: AnalysisResult,
+        provider: CloudProvider,
+        model: String,
+        readingKey: String? = null,
+    ): Long =
         writableDatabase.insertWithOnConflict(
             "analyses",
             null,
@@ -1158,9 +1208,51 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
                 put("model", model)
                 put("completed_at", result.completedAt.toString())
                 put("payload", result.toJson().toString())
+                if (readingKey != null && result.sourceReads.isNotEmpty()) {
+                    put(
+                        "source_reads",
+                        JSONObject()
+                            .put("key", readingKey)
+                            .put("sources", JSONObject(result.sourceReads))
+                            .toString(),
+                    )
+                }
             },
             SQLiteDatabase.CONFLICT_REPLACE,
         )
+
+    /**
+     * What earlier runs already read out of the messages they covered, keyed by source id.
+     *
+     * Only readings made under the same model and the same [readingKey], because a reading is an
+     * answer to a particular question: a different prompt version or a different notes language is
+     * a different question, and laying one over the other would file the old answer under the new
+     * one's name. Only runs completed since [since], because a window reaches back a day or two and
+     * everything older is a source no run is going to name again.
+     *
+     * Oldest first, so a message read twice is remembered as the newer run read it.
+     */
+    fun sourceReads(model: String, readingKey: String, since: Instant): Map<String, String> =
+        readableDatabase.query(
+            "analyses",
+            arrayOf("source_reads"),
+            "model = ? AND completed_at >= ? AND source_reads IS NOT NULL",
+            arrayOf(model, since.toString()),
+            null,
+            null,
+            "completed_at ASC",
+        ).use { cursor ->
+            buildMap {
+                while (cursor.moveToNext()) {
+                    val stored = runCatching { JSONObject(cursor.getString(0)) }.getOrNull() ?: continue
+                    if (stored.optString("key") != readingKey) continue
+                    val sources = stored.optJSONObject("sources") ?: continue
+                    sources.keys().forEach { sourceId ->
+                        sources.optString(sourceId).takeIf(String::isNotBlank)?.let { put(sourceId, it) }
+                    }
+                }
+            }
+        }
 
     /**
      * Reports deleted here but not yet buried in the sync channel.
@@ -1741,6 +1833,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
             })
             put("requestCount", diagnostics.requestCount)
             put("imagesSent", diagnostics.imagesSent)
+            put("reusedSources", diagnostics.reusedSources)
             put("promptTokens", diagnostics.promptTokens)
             put("completionTokens", diagnostics.completionTokens)
             put("totalTokens", diagnostics.totalTokens)
@@ -1834,6 +1927,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
                 }.orEmpty(),
                 requestCount = value.optInt("requestCount"),
                 imagesSent = value.optInt("imagesSent"),
+                reusedSources = value.optInt("reusedSources"),
                 promptTokens = value.optLong("promptTokens"),
                 completionTokens = value.optLong("completionTokens"),
                 totalTokens = value.optLong("totalTokens"),
@@ -2796,7 +2890,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 27
+        const val DATABASE_VERSION = 28
     }
 }
 
