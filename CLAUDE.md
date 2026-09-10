@@ -113,6 +113,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/AnalysisPolicy.kt` + `model/RuleSet.kt` + `model/BuiltInRules.kt` — the local wording filter.
 - `data/PromptComposer.kt` — generates the prompt sent to the model.
 - `data/ReportSync.kt` + `data/RuleSync.kt` + `data/PositionSync.kt` — what travels between devices.
+- `ui/RecommendationTable.kt` + `ui/RecommendationCard.kt` — a report's calls, as a table above
+  600dp of container and as cards below it. See **A report's calls on screen** below.
 - `data/XlsxWriter.kt` + `ui/ReportExport.kt` — a report as a spreadsheet, saved to Downloads or
   sent onward from the ⋮ menu on its card. See below.
 - `data/Backup.kt` + `data/BackupRestore.kt` + `ui/BackupSection.kt` — the whole record as one file,
@@ -1481,6 +1483,70 @@ levels the channel printed are worth. The answer comes back in Arabic and is kep
 - A stored row whose verdict this build cannot read is **dropped rather than defaulted**: a card
   colouring an answer it could not read would be inventing one.
 
+## A report's calls on screen
+
+A table above `TableMinWidth` (600dp of container) and `RecommendationCards` below it. The cards
+were always right; the table was rebuilt on 2026-09-09 because it did not fit any screen the app
+runs on, and fitted the bigger ones worst.
+
+- **The width a row came to was a function of nothing but how many columns had been added.** Sixteen
+  fixed `Dp` widths behind a horizontal scroll: 889dp of them at the Fold's **614dp** of container,
+  1277dp at the tablet's **682dp**, because crossing `ContextMinWidth` (620dp) *appended* 388dp of
+  context columns to buy 68dp of viewport. So the tablet showed 49% of a row where the smaller Fold
+  showed 64% — **the bigger screen truncating harder than the small one**, which is the mistake the
+  `TodayCard` tile grid already records against itself, made a second time in a second place. The
+  container is 614 / 682 / 715dp on the Fold, the tablet and the emulator: the rail's 80dp, the
+  page's `Space.l` either side and the report card's `Space.m` either side are already spent before
+  the table is measured, which is why it measures itself with `BoxWithConstraints` rather than
+  asking the window.
+- **Three things got the row under the width it has.** A target and its return are **one cell**,
+  price over percent — they are read together and were 162dp of two fixed columns apiece, so three
+  weighted cells stand where six columns and 486dp of them did. **Timing rides the source** as a chip under the channel's name,
+  which is what killed the 96dp column whose two words wrapped and took the row's height with them.
+  And **the source image left the table**: a press opens `OccurrenceSheet`, which already draws the
+  screenshot at a size worth looking at, so the 72dp thumbnail was a column spent restating that a
+  press was available.
+- **Only `SourceWidth` and `ChevronWidth` are fixed now; every figure column is weighted.** That is
+  the whole of the fix and it is a property rather than a number: a wider window widens the columns
+  instead of adding more of them, so no width can ever again show less of a row than a narrower one.
+- **`RiskColumnMinWidth` (656dp) adds a column, and it is deliberately not the old mistake.** Risk to
+  reward is on **every row at every width** — the entry cell's second line below it, its own column
+  with a proportion bar above it — so nothing appears or disappears as a window changes size. Extra
+  width buys the same row more room to say what it was already saying, and never a figure the
+  narrower screen was denied. The Fold's 614dp lands under the threshold and the tablet's 682dp over
+  it, which is the intended split. It is also the figure the table never carried at all: it is on
+  the recommendation card and in the occurrence sheet, and it is the context a target cannot be read
+  without — 90% at 0.3 to 1 is a losing source.
+- **Context is a toggle, not a breakpoint**, and it draws **one muted line under the row** rather
+  than four columns. Support, resistance and the two dates are true of a call and are not what
+  anyone judges it by — the old column list said so itself, directly above them — so appearing
+  because the screen got wider was the one arrangement that could not be right: the reader who wants
+  them could not ask, and the reader who does not got them at the cost of the figures that decide
+  something. A line rather than columns, so asking for them can never put the table back into a
+  sideways scroll. Session-only and per report, like the toolbar's own filters, and drawn only
+  beside the table — the cards carry every figure already.
+- **A stock is a rounded block, not a band.** `surfaceContainerHigh` inside the report card's
+  `surfaceContainer`, the one-step-up rule the Portfolio's session cards follow. It was a full-bleed
+  `surfaceContainerHighest` strip under a **2dp** rule, the heaviest divider in the app.
+- **One grid device, not three.** The vertical rule after the first column and the `HorizontalDivider`
+  under every row are gone, and the stripe is raised from `surfaceContainerLowest` at 0.4 — nearly
+  invisible on dark, which is exactly why the other two were needed — to `surfaceContainer` at 0.55.
+- **The Watch list chip takes the page's own hue.** It was `tertiaryContainer`, which is the family
+  `PriceRole.target` is drawn from, so a status chip was wearing the colour that means *a target
+  price* on every other surface in the app. An accent is chrome and a signal is a figure; this is
+  the first. **The timing chip is neutral for every timing** for the same reason and it is worth
+  saying out loud, because a hue per timing is the obvious next idea: market blue is the one that
+  suggests itself, and it means *a price the market reached*.
+- **The row height is a minimum, not a fixed height.** Every cell is held to one line per figure, so
+  at any one font scale the rows are the same height and a column reads down — while a large scale
+  grows them all rather than clipping any. The old table wrapped in two columns at anything above
+  the default scale, and a wrapped row stood half again as tall as the one above it, which is most
+  of what the owner was looking at when they said it was hard to read.
+- **The toolbar is still pinned and the pinning is all that survives of the scroll machinery.** It
+  translates by how far the table's top has passed the viewport's, clamped inside the table's own
+  height, so it never hangs over the next card. It carries the report card's own fill because that
+  is what it slides across.
+
 ## Exporting a report to Excel
 
 A report card's ⋮ menu writes the results table as an `.xlsx`, two ways: **Save to Downloads** puts
@@ -1512,8 +1578,8 @@ through the filter dropdowns on row 1.
   prints one, so most rows are derived, and a grey for those against a green for the rest left one
   column in two hues with the grey ones reading as context. `returnFrom` and the alpha are both
   shared with the table rather than copied, so the two can never disagree about one row.
-- Every column is written, including the context and notes the table drops below 620dp and 900dp: a
-  sheet has no width to run out of. The **source image column is not exported** — a picture in a
+- Every column is written, including the notes and the context the table keeps a press or a toggle
+  away: a sheet has no width to run out of, which is the one thing the screen does. The **source image column is not exported** — a picture in a
   cell means media parts, a drawing and anchor geometry, for something a spreadsheet is not read for.
 - **Saving goes through `MediaStore.Downloads`, not a path.** From API 29 that needs no storage
   permission and no picker, and the file is registered as it lands, so the Files app and every
@@ -2960,6 +3026,17 @@ parameter being threaded anywhere. Added 2026-09-08.
   card; Your record and Overdue are built from the whole portfolio on purpose, so a date picked here
   cannot hide a trade that is late. The shelf said that by sitting inside the card it filtered. A
   sheet reached from the page header would be claiming the page, so the title says it instead.
+- **A breakpoint that *adds* content spends the width on itself.** `RecommendationTable` grew columns
+  at 620dp and 900dp and `TodayCard`'s tiles capped their grid at four columns, and both produced the
+  same result: the wider device showed **less** of what the reader came for — 49% of a table row on
+  the tablet against 64% on the smaller Fold. The check that catches it is not "does the breakpoint
+  fire at the right width" but **what fraction of the content is visible at each real container
+  width**, computed for the Fold's 614dp, the tablet's 682 and the emulator's 715 — and remember all
+  three are the *container*, after the rail's 80dp, the page's `Space.l` either side and the card's
+  own inset. Both are fixed the same way, and it is worth stating as the rule: extra width goes into
+  the elements already on screen, and anything a wider window adds must already be present in some
+  form at every narrower one. See **A report's calls on screen** and the tile table under **What
+  happened this session**.
 - **`AdaptivePanes` is the only "side by side, or stacked when it will not fit" rule in the app**, and
   a second one would be a second threshold, a second fallback and a second gap to keep in step. A
   pair of equals is that helper with `mainWeight = 1f`, not a layout of its own — which is how
