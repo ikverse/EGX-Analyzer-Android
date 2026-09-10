@@ -89,6 +89,9 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   the only place Ask AI's spending appears at all.
 - `model/AnalysisChunking.kt` — 8 images per request. Beyond ~32 the model loses track of which
   image it is citing, which produced exclusions naming the wrong card.
+- `model/ExtractionPlan.kt` — which images a run sends and under which of its own numbers, stated
+  apart from the chunking because a source read by an earlier run keeps its number and is not sent.
+  See **What a run sends, and what it does not send twice** below.
 - `data/ConsolidatedParser.kt` — the model's JSON into `ConsolidatedRecommendation`.
 - `model/Scoring.kt` — how a call is judged. See below.
 - `data/IntradayRepository.kt` — five-minute bars for the sessions daily figures cannot order,
@@ -234,6 +237,13 @@ the prompt is repeated, and how many cards are sent at all.
   language, since a new prompt reads the same card by different rules and a different language
   answers in different words. Change any of them and nothing is reused, which is right rather than
   wasteful: it is a different question.
+- **The numbering is a separate question from the chunking, and `ExtractionPlan` is where it is
+  answered.** `IMAGE_REF n` resolves to entry `n - 1` of `imagePaths`, which is every image the run
+  carries — so references are assigned over all of them while the chunks are built over only the
+  ones being sent. Folding the two together would renumber every card after a skipped one and hand
+  it somebody else's picture, in a report that reads perfectly well. Pure, beside
+  `AnalysisChunking`, and `ExtractionPlanTest` is most of what stands behind this feature: the test
+  that matters is that a reused source keeps its number and the card after it is still image 3.
 - **Refs are stored per source, never per run.** `IMAGE_REF` is a position in one request, so the
   same card can be image 3 one morning and image 11 the next. A stored reading numbers each row
   against its own source's images — a fact about the message — and `SourceReadings.lay` puts it back

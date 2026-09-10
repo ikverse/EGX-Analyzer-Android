@@ -2,7 +2,6 @@ package com.ikverse.egxanalyzer.data
 
 import android.content.ContentResolver
 import android.util.Base64
-import com.ikverse.egxanalyzer.model.AnalysisChunking
 import com.ikverse.egxanalyzer.model.AnalysisRequest
 import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.RuleKind
@@ -34,6 +33,7 @@ import java.time.LocalDate
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
 import com.ikverse.egxanalyzer.model.CloudProvider
+import com.ikverse.egxanalyzer.model.ExtractionPlan
 
 interface AnalysisRepository {
     suspend fun analyze(request: AnalysisRequest): AnalysisResult
@@ -253,40 +253,21 @@ class CloudAnalysisRepository(
         trace: RequestTrace?,
     ): Harvest {
         val harvest = Harvest()
-        // The run's numbering is assigned over every image it carries, not over the ones it sends:
+        // The numbering is assigned over every image the run carries, not over the ones it sends:
         // IMAGE_REF n has to resolve to entry n - 1 of `imagePaths`, and a source answered out of an
         // earlier run's reading still occupies its own place there.
-        val refByInput = mutableMapOf<Int, Int>()
-        var globalRef = 0
-        request.inputs.forEachIndexed { index, input ->
-            if (input is AnalysisInput.Image) {
-                globalRef += 1
-                refByInput[index] = globalRef
-            }
-        }
-        val refsBySource = LinkedHashMap<String, MutableList<Int>>()
-        request.inputs.forEachIndexed { index, input ->
-            refByInput[index]?.let { refsBySource.getOrPut(input.sourceId) { mutableListOf() } += it }
-        }
-        val sourceByRef = refsBySource.entries
-            .flatMap { (sourceId, refs) -> refs.map { it to sourceId } }
-            .toMap()
-        val reused = harvest.reuse(request, refsBySource)
-        val kept = request.inputs.withIndex().filterNot { it.value.sourceId in reused }
-        var chunkNumber = 0
-        // Planned over what is actually being sent, so a run whose every source has been read
-        // before sends nothing at all rather than a chunk of nothing.
-        val plan = AnalysisChunking.plan(
-            sourceIds = kept.map { it.value.sourceId },
-            images = kept.map { it.value is AnalysisInput.Image },
+        val plan = ExtractionPlan.of(
+            sourceIds = request.inputs.map(AnalysisInput::sourceId),
+            images = request.inputs.map { it is AnalysisInput.Image },
         )
-        for (range in plan) {
+        val reused = harvest.reuse(request, plan.referencesBySource)
+        var chunkNumber = 0
+        for (sending in plan.chunks(reused)) {
             chunkNumber += 1
             coroutineContext.ensureActive()
-            val entries = kept.slice(range)
-            val chunk = entries.map(IndexedValue<AnalysisInput>::value)
+            val chunk = sending.positions.map(request.inputs::get)
             // The run's reference for each image this chunk holds, in the order it sends them.
-            val globalRefs = entries.mapNotNull { refByInput[it.index] }
+            val globalRefs = sending.references
             harvest.imagesSent += globalRefs.size
             // A chunk that never answers used to throw out of this loop and take the run with
             // it - including every chunk already answered and already paid for. It is retried once,
@@ -313,7 +294,7 @@ class CloudAnalysisRepository(
                 // Its images are named as unaccounted, the same as any the model never mentioned,
                 // so a report built without them says so rather than looking complete.
                 globalRefs.forEach { reference ->
-                    val imageTrace = request.traceOf(sourceByRef[reference])
+                    val imageTrace = request.traceOf(plan.sourceOf[reference])
                     harvest.unaccounted += UnaccountedImage(
                         reference = reference,
                         sourceId = imageTrace?.sourceId,
@@ -329,11 +310,11 @@ class CloudAnalysisRepository(
                 // where most of a retry's money went. A message is still never split, so a card's
                 // caption returns with it.
                 harvest.retried = true
-                val unread = missing.mapNotNullTo(mutableSetOf(), sourceByRef::get)
-                val again = entries.filter { it.value.sourceId in unread }
-                val againRefs = again.mapNotNull { refByInput[it.index] }
+                val unread = missing.mapNotNullTo(mutableSetOf()) { plan.sourceOf[it] }
+                val again = sending.positions.filter { request.inputs[it].sourceId in unread }
+                val againRefs = again.mapNotNull(plan.referenceOf::get)
                 val second = readChunk(
-                    request, again.map(IndexedValue<AnalysisInput>::value), againRefs, harvest,
+                    request, again.map(request.inputs::get), againRefs, harvest,
                     config, appPreferences, credential,
                     "A previous request left ${againRefs.size} of these images out of both " +
                         "`extracted` and `excluded`. Read them again, accounting for every " +
@@ -356,7 +337,7 @@ class CloudAnalysisRepository(
             harvest.adopt(answer)
             val unaccounted = globalRefs.filterNot(answer.cited::contains)
             unaccounted.forEach { reference ->
-                val imageTrace = request.traceOf(sourceByRef[reference])
+                val imageTrace = request.traceOf(plan.sourceOf[reference])
                 harvest.unaccounted += UnaccountedImage(
                     reference = reference,
                     sourceId = imageTrace?.sourceId,
@@ -365,7 +346,9 @@ class CloudAnalysisRepository(
             }
             // Only a chunk that accounted for every image it was given is worth keeping: an answer
             // that lost track of one card says nothing dependable about the others beside it.
-            if (unaccounted.isEmpty()) harvest.remember(request, chunk, refsBySource, answer)
+            if (unaccounted.isEmpty()) {
+                harvest.remember(request, chunk, plan.referencesBySource, answer)
+            }
         }
         if (harvest.unaccounted.isNotEmpty()) {
             harvest.warnings += "${harvest.unaccounted.size} image(s) were neither recommended nor excluded."
