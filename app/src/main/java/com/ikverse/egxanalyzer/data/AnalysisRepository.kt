@@ -2,7 +2,6 @@ package com.ikverse.egxanalyzer.data
 
 import android.content.ContentResolver
 import android.util.Base64
-import com.ikverse.egxanalyzer.model.AnalysisChunking
 import com.ikverse.egxanalyzer.model.AnalysisRequest
 import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.RuleKind
@@ -34,6 +33,7 @@ import java.time.LocalDate
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
 import com.ikverse.egxanalyzer.model.CloudProvider
+import com.ikverse.egxanalyzer.model.ExtractionPlan
 
 interface AnalysisRepository {
     suspend fun analyze(request: AnalysisRequest): AnalysisResult
@@ -165,6 +165,7 @@ class CloudAnalysisRepository(
                     }
                     return@withContext parsed.copy(
                         recommendations = named,
+                        sourceReads = harvest.reads,
                         diagnostics = AnalysisDiagnostics(
                             sourceWindowStart = request.sourceWindowStart,
                             sourceWindowEnd = request.sourceWindowEnd,
@@ -176,6 +177,7 @@ class CloudAnalysisRepository(
                             durationMilliseconds = (System.nanoTime() - startedAt) / 1_000_000,
                             requestCount = harvest.requestCount + attempt + 1,
                             imagesSent = harvest.imagesSent,
+                            reusedSources = harvest.reusedSources,
                             promptTokens = harvest.usage.promptTokens,
                             completionTokens = harvest.usage.completionTokens,
                             totalTokens = harvest.usage.totalTokens,
@@ -192,7 +194,7 @@ class CloudAnalysisRepository(
                     "Correct the previous JSON response. Validation found: " +
                         warnings.joinToString(" ") +
                         " Cite only supplied source IDs and keep the exact target date. " +
-                        "Previous response: ${parsed.rawResponse.take(12_000)}"
+                        "Previous response: ${parsed.rawResponse.take(CORRECTION_ECHO_CHARS)}"
             }
             error("Analysis retry loop ended unexpectedly.")
         } finally {
@@ -217,6 +219,18 @@ class CloudAnalysisRepository(
         var imagesSent = 0
         var retried = false
 
+        /** What each source was read to say, keyed by source id, for the next run over it. */
+        val reads = mutableMapOf<String, String>()
+
+        /** Sources answered out of an earlier run's reading rather than sent again. */
+        var reusedSources = 0
+
+        fun destinationFor(key: String): JSONArray = when (key) {
+            "extracted" -> extracted
+            "excluded" -> excluded
+            else -> inquiries
+        }
+
         /** What the run has spent so far, as the provider reported it request by request. */
         var usage = TokenUsage.NONE
 
@@ -239,18 +253,26 @@ class CloudAnalysisRepository(
         trace: RequestTrace?,
     ): Harvest {
         val harvest = Harvest()
-        var globalRef = 0
+        // The numbering is assigned over every image the run carries, not over the ones it sends:
+        // IMAGE_REF n has to resolve to entry n - 1 of `imagePaths`, and a source answered out of an
+        // earlier run's reading still occupies its own place there.
+        val plan = ExtractionPlan.of(
+            sourceIds = request.inputs.map(AnalysisInput::sourceId),
+            images = request.inputs.map { it is AnalysisInput.Image },
+        )
+        val reused = harvest.reuse(request, plan.referencesBySource)
         var chunkNumber = 0
-        for (chunk in AnalysisChunking.chunk(request.inputs)) {
+        for (sending in plan.chunks(reused)) {
             chunkNumber += 1
             coroutineContext.ensureActive()
+            val chunk = sending.positions.map(request.inputs::get)
             // The run's reference for each image this chunk holds, in the order it sends them.
-            val globalRefs = chunk.filterIsInstance<AnalysisInput.Image>().map { globalRef += 1; globalRef }
+            val globalRefs = sending.references
             harvest.imagesSent += globalRefs.size
             // A chunk that never answers used to throw out of this loop and take the run with
             // it - including every chunk already answered and already paid for. It is retried once,
             // and if it still will not answer the run keeps what the others returned.
-            var answer = try {
+            val answer = try {
                 readChunk(
                     request, chunk, globalRefs, harvest, config, appPreferences, credential, null,
                     trace, "chunk-$chunkNumber",
@@ -271,39 +293,61 @@ class CloudAnalysisRepository(
             } ?: run {
                 // Its images are named as unaccounted, the same as any the model never mentioned,
                 // so a report built without them says so rather than looking complete.
-                (1..globalRefs.size).forEach { local ->
-                    val imageTrace = request.traceForImage(chunk, local)
+                globalRefs.forEach { reference ->
+                    val imageTrace = request.traceOf(plan.sourceOf[reference])
                     harvest.unaccounted += UnaccountedImage(
-                        reference = globalRefs[local - 1],
+                        reference = reference,
                         sourceId = imageTrace?.sourceId,
                         caption = imageTrace?.preview,
                     )
                 }
                 continue
             }
-            val missing = (1..globalRefs.size).filterNot(answer.cited::contains)
+            val missing = globalRefs.filterNot(answer.cited::contains)
             if (missing.isNotEmpty()) {
-                // Retry this chunk alone rather than the run: eight images, not thirty-two. The
-                // second answer replaces the first rather than joining it, or a chunk that merely
-                // forgot one image would contribute every other row twice.
+                // Only the messages holding those images go back, rather than all eight: the other
+                // cards in the chunk were read and are already paid for, and re-reading them was
+                // where most of a retry's money went. A message is still never split, so a card's
+                // caption returns with it.
                 harvest.retried = true
+                val unread = missing.mapNotNullTo(mutableSetOf()) { plan.sourceOf[it] }
+                val again = sending.positions.filter { request.inputs[it].sourceId in unread }
+                val againRefs = again.mapNotNull(plan.referenceOf::get)
                 val second = readChunk(
-                    request, chunk, globalRefs, harvest, config, appPreferences, credential,
-                    "Your previous response left IMAGE_REF ${missing.joinToString(", ")} out of both " +
-                        "`extracted` and `excluded`. Return the full response again, accounting for " +
-                        "every IMAGE_REF supplied.",
+                    request, again.map(request.inputs::get), againRefs, harvest,
+                    config, appPreferences, credential,
+                    "A previous request left ${againRefs.size} of these images out of both " +
+                        "`extracted` and `excluded`. Read them again, accounting for every " +
+                        "IMAGE_REF supplied here.",
                     trace, "chunk-$chunkNumber-retry",
                 )
-                if (second.cited.size > answer.cited.size) answer = second
+                // The second reading replaces the first for those messages alone rather than
+                // joining it, or a chunk that merely forgot one image would contribute every other
+                // card twice. And only where it did better by them: an answer that came back
+                // worse must not take with it the cards the first one did read.
+                val before = againRefs.count(answer.cited::contains)
+                if (againRefs.count(second.cited::contains) > before) {
+                    answer.replace(
+                        unread.mapTo(mutableSetOf()) { request.telegramIdFor(it) },
+                        againRefs,
+                        second,
+                    )
+                }
             }
             harvest.adopt(answer)
-            (1..globalRefs.size).filterNot(answer.cited::contains).forEach { local ->
-                val trace = request.traceForImage(chunk, local)
+            val unaccounted = globalRefs.filterNot(answer.cited::contains)
+            unaccounted.forEach { reference ->
+                val imageTrace = request.traceOf(plan.sourceOf[reference])
                 harvest.unaccounted += UnaccountedImage(
-                    reference = globalRefs[local - 1],
-                    sourceId = trace?.sourceId,
-                    caption = trace?.preview,
+                    reference = reference,
+                    sourceId = imageTrace?.sourceId,
+                    caption = imageTrace?.preview,
                 )
+            }
+            // Only a chunk that accounted for every image it was given is worth keeping: an answer
+            // that lost track of one card says nothing dependable about the others beside it.
+            if (unaccounted.isEmpty()) {
+                harvest.remember(request, chunk, plan.referencesBySource, answer)
             }
         }
         if (harvest.unaccounted.isNotEmpty()) {
@@ -312,12 +356,104 @@ class CloudAnalysisRepository(
         return harvest
     }
 
+    /**
+     * Adopts what an earlier run already read, and says which sources therefore need not be sent.
+     *
+     * The reading itself is translated by [SourceReadings], which refuses anything that does not
+     * line up exactly with this run's images. A refusal simply leaves the source in the list to be
+     * sent, which costs a request and can never cost a misread card.
+     */
+    private fun Harvest.reuse(
+        request: AnalysisRequest,
+        refsBySource: Map<String, List<Int>>,
+    ): Set<String> {
+        if (request.priorReads.isEmpty()) return emptySet()
+        val present = request.inputs.mapTo(mutableSetOf(), AnalysisInput::sourceId)
+        val taken = mutableSetOf<String>()
+        for ((sourceId, stored) in request.priorReads) {
+            if (sourceId !in present) continue
+            val laid = SourceReadings.lay(stored, refsBySource[sourceId].orEmpty()) ?: continue
+            laid.forEach { (key, rows) ->
+                val destination = destinationFor(key)
+                rows.forEachObject { destination.put(it) }
+            }
+            taken += sourceId
+            reusedSources += 1
+            // Carried into this run's own record as well, so a reading survives as long as any run
+            // that covered the message does. Without it a third run in one day would re-read the
+            // cards the second one reused rather than sent.
+            reads[sourceId] = stored
+        }
+        return taken
+    }
+
+    /**
+     * Writes down what this chunk read of each of its sources, for the next run over these messages.
+     *
+     * Nothing is remembered from an answer that names a message the request never carried: the
+     * model has lost track of which card it is reading, and the sources beside it in that answer
+     * cannot be trusted to have been read as carefully as they look.
+     */
+    private fun Harvest.remember(
+        request: AnalysisRequest,
+        chunk: List<AnalysisInput>,
+        refsBySource: Map<String, List<Int>>,
+        answer: ChunkAnswer,
+    ) {
+        val rows = SourceReadings.KEYS.associateWith(answer::destinationFor)
+        val sourceIds = chunk.mapTo(LinkedHashSet(), AnalysisInput::sourceId)
+        val telegramIds = sourceIds.mapTo(mutableSetOf()) { request.telegramIdFor(it) }
+        if (SourceReadings.namesOthers(rows, telegramIds)) return
+        for (sourceId in sourceIds) {
+            SourceReadings
+                .of(rows, request.telegramIdFor(sourceId), refsBySource[sourceId].orEmpty())
+                ?.let { reads[sourceId] = it }
+        }
+    }
+
     /** One chunk's answer, held apart from the run until it is known to be the one to keep. */
     private class ChunkAnswer {
-        val extracted = JSONArray()
-        val excluded = JSONArray()
-        val inquiries = JSONArray()
+        var extracted = JSONArray()
+            private set
+        var excluded = JSONArray()
+            private set
+        var inquiries = JSONArray()
+            private set
+
+        /** The run's own references, so two differently shaped requests can be compared at all. */
         val cited = mutableSetOf<Int>()
+
+        fun destinationFor(key: String): JSONArray = when (key) {
+            "extracted" -> extracted
+            "excluded" -> excluded
+            else -> inquiries
+        }
+
+        /**
+         * Takes [second]'s reading of [telegramIds] in place of this one's.
+         *
+         * Per message rather than per answer: everything else in the chunk was read the first time
+         * and is already paid for, and a row kept from both readings is a card counted twice.
+         */
+        fun replace(telegramIds: Set<String>, references: List<Int>, second: ChunkAnswer) {
+            extracted = merge(extracted, second.extracted, telegramIds)
+            excluded = merge(excluded, second.excluded, telegramIds)
+            inquiries = merge(inquiries, second.inquiries, telegramIds)
+            cited -= references.toSet()
+            cited += second.cited
+        }
+
+        private fun merge(first: JSONArray, second: JSONArray, replaced: Set<String>): JSONArray {
+            val kept = JSONArray()
+            for (index in 0 until first.length()) {
+                val row = first.optJSONObject(index) ?: continue
+                if (row.optString("source_message_id") !in replaced) kept.put(row)
+            }
+            for (index in 0 until second.length()) {
+                second.optJSONObject(index)?.let(kept::put)
+            }
+            return kept
+        }
     }
 
     private fun Harvest.adopt(answer: ChunkAnswer) {
@@ -348,7 +484,7 @@ class CloudAnalysisRepository(
         trace: RequestTrace?,
         label: String,
     ): ChunkAnswer {
-        val body = request.extractionBody(chunk, config.model, appPreferences, correctionInstructions)
+        val body = request.extractionBody(chunk, config, appPreferences, correctionInstructions)
         val completion = executeCompletion(request.requestId, body, config, appPreferences, credential)
         trace?.record(label, body, completion.body)
         harvest.requestCount += 1
@@ -382,7 +518,7 @@ class CloudAnalysisRepository(
             when {
                 local == null || local == 0 -> Unit
                 local in 1..globalRefs.size -> {
-                    cited += local
+                    cited += globalRefs[local - 1]
                     row.put("source_image_ref", globalRefs[local - 1])
                 }
                 else -> {
@@ -440,11 +576,9 @@ class CloudAnalysisRepository(
     private fun stripCodeFence(value: String): String = value.trim()
         .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
 
-    /** The trace behind the chunk's nth image, for naming an image the model never mentioned. */
-    private fun AnalysisRequest.traceForImage(chunk: List<AnalysisInput>, local: Int): SourceTrace? {
-        val sourceId = chunk.filterIsInstance<AnalysisInput.Image>().getOrNull(local - 1)?.sourceId
-        return sourceTraces.firstOrNull { it.sourceId == sourceId }
-    }
+    /** The trace behind one source, for naming an image the model never mentioned. */
+    private fun AnalysisRequest.traceOf(sourceId: String?): SourceTrace? =
+        sourceId?.let { id -> sourceTraces.firstOrNull { it.sourceId == id } }
 
     /**
      * Sends one body and hands back the answer with what it cost.
@@ -658,13 +792,36 @@ class CloudAnalysisRepository(
         }
     }
 
+    /**
+     * The system message, marked for caching where the provider reads such a mark.
+     *
+     * Every chunk of a run sends the same prompt - some seventeen kilobytes of it - one request
+     * after another, so the repeats are exactly what a prefix cache is for. It changes what the
+     * repeats are billed at and not what they count: the tokens still arrive in the usage block and
+     * are still added up on the card, which is why this is worth saying out loud rather than
+     * reading as a saving that failed to show.
+     *
+     * OpenRouter alone, in OpenRouter's own dialect. Qwen caches a repeated prefix without being
+     * asked, and an unknown key is rejected outright by some OpenAI-compatible gateways - which
+     * would fail the request rather than only the caching.
+     */
+    private fun cacheable(text: String, provider: CloudProvider): Any = when (provider) {
+        CloudProvider.OPENROUTER -> JSONArray().put(
+            JSONObject()
+                .put("type", "text")
+                .put("text", text)
+                .put("cache_control", JSONObject().put("type", "ephemeral")),
+        )
+        else -> text
+    }
+
     private suspend fun AnalysisRequest.extractionBody(
         chunk: List<AnalysisInput>,
-        modelName: String,
+        config: CloudConfiguration,
         preferences: AppPreferences,
         correctionInstructions: String? = null,
     ) = JSONObject().apply {
-        put("model", modelName)
+        put("model", config.model)
         // Reading a price off a card has one right answer, printed in the source, so sampling could
         // only ever move away from it - it is what produced English company names that changed
         // between runs of the same card. Fixed rather than offered as a setting: no value above 0
@@ -676,7 +833,7 @@ class CloudAnalysisRepository(
                 // The generated prompt when there is one, the shipped one otherwise. There is no
                 // longer a box that replaces the whole file: that froze whoever used it out of
                 // every prompt improvement an update would have brought.
-                put("content", prompt?.text ?: promptStore.consolidatedPrompt())
+                put("content", cacheable(prompt?.text ?: promptStore.consolidatedPrompt(), config.provider))
             })
             put(JSONObject().apply {
                 put("role", "user")
@@ -685,7 +842,11 @@ class CloudAnalysisRepository(
                         JSONObject().put("type", "text").put(
                             "text",
                             "${requestPrompt(chunk)} ${preferences.analysisLanguage.promptInstruction} " +
-                                customizationPrompt(rules) +
+                                // The generated prompt has already placed these phrases at the
+                                // sections that decide the things they are about. Restating them
+                                // flat, at the end, is the same instruction in two vocabularies -
+                                // which costs a request and is how the two come to disagree.
+                                (if (prompt == null) customizationPrompt(rules) else "") +
                                 correctionInstructions.orEmpty(),
                         ),
                     )
@@ -919,6 +1080,16 @@ class CloudAnalysisRepository(
 
     private companion object {
         const val CONNECT_TIMEOUT_MS = 30_000
+
+        /**
+         * How much of the answer being corrected is quoted back to the model.
+         *
+         * The request already carries every extracted occurrence, so this is context for the
+         * correction rather than the material for it: what it has to show is the shape of what came
+         * back and the rows the validation complained about. It echoed twelve thousand characters,
+         * which on a busy session is a second copy of the whole document at the model's own prices.
+         */
+        const val CORRECTION_ECHO_CHARS = 4_000
 
         /**
          * How much room the opinion request leaves the model.

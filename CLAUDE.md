@@ -76,6 +76,9 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 ## Where things live
 
 - `data/AnalysisRepository.kt` — builds the cloud request, chunks sources, harvests the answer.
+- `data/SourceReadings.kt` — what one run read out of one message, in a shape the next run can use,
+  so a second schedule in a day does not pay to read the same cards again. See **What a run sends,
+  and what it does not send twice** below.
 - `model/ModelSuitability.kt` + `model/CloudModelInfo.kt` — which models the picker offers. A run
   sends screenshots, so image input is the bar: OpenRouter states its modalities and is believed,
   and the providers that answer with bare ids have their names read. An unrecognised name is
@@ -86,6 +89,9 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   the only place Ask AI's spending appears at all.
 - `model/AnalysisChunking.kt` — 8 images per request. Beyond ~32 the model loses track of which
   image it is citing, which produced exclusions naming the wrong card.
+- `model/ExtractionPlan.kt` — which images a run sends and under which of its own numbers, stated
+  apart from the chunking because a source read by an earlier run keeps its number and is not sent.
+  See **What a run sends, and what it does not send twice** below.
 - `data/ConsolidatedParser.kt` — the model's JSON into `ConsolidatedRecommendation`.
 - `model/Scoring.kt` — how a call is judged. See below.
 - `data/IntradayRepository.kt` — five-minute bars for the sessions daily figures cannot order,
@@ -205,6 +211,78 @@ Two rules keep it that way:
 
 `src/next` predates this and still takes an `Activity` and reaches into `data` directly. It builds,
 and converting it is the obvious next step if that redesign is ever picked up again.
+
+## What a run sends, and what it does not send twice
+
+Everything here is about what leaves the phone, and none of it changes a rule about what a call
+means. Three things decide what a run costs: how many pixels each card is sent at, how many times
+the prompt is repeated, and how many cards are sent at all.
+
+- **A card is fetched at the smallest size that is still legible, not the largest.** Telegram offers
+  the same photo at several sizes and `appendMessage` took `maxByOrNull { width * height }`, which
+  for a channel card is usually 2560 on the long edge where 1280 sits beside it. A vision model is
+  billed by **pixel area**, so that one call was paying about four times over for a card that reads
+  the same either way, on every image in every run. `preferredPhotoSize` takes the smallest size at
+  or above `LEGIBLE_LONG_EDGE` (1280, Telegram's own `y` and what most channels post at to begin
+  with), and the largest where none reaches it — nothing is ever resized here, and a card that
+  arrives small arrives small. It also cuts the download, and it changes nothing else: the file-path
+  dedupe, the IMAGE_REF numbering and the traces are all untouched.
+- **A message a run has already read is not sent again.** `resolveAnalysisWindow` starts at
+  yesterday's opening hour, so a midday schedule covers every message the morning one covered, and
+  re-reading a card the model has already read is the one cost in the path nobody chose. Each run
+  writes down what it read of each source, in `analyses.source_reads`; the next run adopts those
+  rows and sends only what nobody has read yet. `AnalysisDiagnostics.reusedSources` is the figure on
+  the report card that says why its requests and images are fewer than its sources.
+- **The reading is keyed by the question it answers** — the prompt version, the model and the notes
+  language, since a new prompt reads the same card by different rules and a different language
+  answers in different words. Change any of them and nothing is reused, which is right rather than
+  wasteful: it is a different question.
+- **The numbering is a separate question from the chunking, and `ExtractionPlan` is where it is
+  answered.** `IMAGE_REF n` resolves to entry `n - 1` of `imagePaths`, which is every image the run
+  carries — so references are assigned over all of them while the chunks are built over only the
+  ones being sent. Folding the two together would renumber every card after a skipped one and hand
+  it somebody else's picture, in a report that reads perfectly well. Pure, beside
+  `AnalysisChunking`, and `ExtractionPlanTest` is most of what stands behind this feature: the test
+  that matters is that a reused source keeps its number and the card after it is still image 3.
+- **Refs are stored per source, never per run.** `IMAGE_REF` is a position in one request, so the
+  same card can be image 3 one morning and image 11 the next. A stored reading numbers each row
+  against its own source's images — a fact about the message — and `SourceReadings.lay` puts it back
+  onto whatever numbering the new run gives it. Anything that does not line up exactly is refused
+  and simply sent again: a refusal costs a request, and getting it wrong would file one channel's
+  levels under another channel's card in a report that looks entirely ordinary. That asymmetry is
+  why most of `SourceReadingsTest` is about the readings that must be **refused**.
+- **A reading is written only from a chunk that accounted for every image it was given**, and never
+  from one whose answer cites a `TELEGRAM_ID` the request did not carry. An answer that lost track
+  of one card says nothing dependable about the cards beside it.
+- **It is stored on the analyses row, not in a table of its own**, so deleting a report takes its
+  readings with it — which is what makes *delete the report and run it again* the way to have a
+  misread card read afresh. Device-local and never synced, like `price_events`: it is a cache of one
+  device's working rather than a record of what anybody recommended, and it is deliberately outside
+  `AnalysisResult.toJson`, so it never travels through the sync channel or into a backup payload.
+  A run also carries forward the readings it reused, so a reading survives as long as any run that
+  covered the message does.
+- **A retry sends only the messages it has to.** A chunk that leaves an IMAGE_REF out of both
+  `extracted` and `excluded` used to be sent again whole — eight images to re-read one — and now
+  only the messages holding the missing images go back. A message is still never split, so a card's
+  caption returns with it. The second reading **replaces the first for those messages alone**, which
+  is what stops a chunk that merely forgot one image contributing every other card twice, and it is
+  taken only where it accounted for more of them than the first did: an answer that came back worse
+  must not take with it the cards the first one did read.
+- **The correction echo is 4,000 characters, not 12,000.** A consolidation correction already
+  carries every extracted occurrence; the echo is context for the correction rather than the
+  material for it, and on a busy session twelve thousand characters was a second copy of the whole
+  document at the model's own prices.
+- **The system prompt is marked for caching, on OpenRouter and only on OpenRouter.** Every chunk
+  sends the same seventeen kilobytes one request after another, which is exactly what a prefix cache
+  is for. It changes what the repeats are **billed** at and not what they **count** — the tokens
+  still arrive in the usage block and are still added up on the card — so it is worth saying out
+  loud rather than being read as a saving that failed to show. Qwen caches a repeated prefix without
+  being asked, and an unknown key is rejected outright by some OpenAI-compatible gateways, which
+  would fail the request rather than only the caching.
+- **The flat "prioritize these phrases" line is gone from a generated prompt.** `PromptComposer` has
+  already placed those phrases at the sections that decide the things they are about, and restating
+  them at the end was the same instruction in two vocabularies — which is how the two come to
+  disagree. It still goes out on the fallback path, where the shipped prompt has no slots filled in.
 
 ## Scoring, and why each rule is there
 
@@ -2696,7 +2774,7 @@ parameter being threaded anywhere. Added 2026-09-08.
   sweeping up "the app's databases" would pull in a file sized in hundreds of megabytes. See
   **Keeping the sessions the feed forgets**.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 27. **Bumping the constant is half of it**: `session_events` was added to
+  `onUpgrade`. Currently 28. **Bumping the constant is half of it**: `session_events` was added to
   both hooks and left at 20, so a fresh install had the table and every upgrade silently did not —
   which fails at the first write and nowhere earlier. `SessionEventStoreTest` caught it. Adding it to only one of the two is the mistake that gets made:
   `CallAlertStoreTest` caught exactly that on version 19 before it shipped.
@@ -2720,7 +2798,16 @@ parameter being threaded anywhere. Added 2026-09-08.
   shape this trap is usually walked into, and version 26 has one beside *that* for the four
   split-exit columns on `positions`, written against the version-25 table because that is where
   every phone holding trades actually is, and version 27 has one in `FeedHealthStoreTest` for
-  `feed_checks` and `feed_faults`, written against the version-26 table for that same reason
+  `feed_checks` and `feed_faults`, written against the version-26 table for that same reason, and
+  version 28 has one in `LocalDataStoreMigrationTest` for `source_reads` on `analyses`, written
+  against the version-27 table because that is where every phone holding reports actually is.
+  **That one arrived red and is the trap in its sharpest form**: `analyses` predates every other
+  table here, so it lived in `onCreate` alone — which held until a column was added to it by
+  `ALTER`, because a hand-built old database does not hold that table at all and answers the ALTER
+  with "no such table". One new column turned **twenty-one** migration tests red across six files,
+  none of them about reports. `createAnalyses()` is now in both hooks like everything else, which
+  is the same rule one line up, read the other way round: it is not only a new table that belongs
+  in `onUpgrade` but any table an `ALTER` is about to name
   — added by `ALTER`, one guard per column, so the risk
   is not that the upgrade fails but that it takes the answers already on the phone with it. Note
   Robolectric coexists with the explicit `org.json` test dependency, which was the risk when it

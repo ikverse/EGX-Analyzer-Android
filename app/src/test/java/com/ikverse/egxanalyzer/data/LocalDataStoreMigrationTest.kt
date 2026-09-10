@@ -4,9 +4,11 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.ApproachAlerts
 import com.ikverse.egxanalyzer.model.ApproachLevel
 import com.ikverse.egxanalyzer.model.ApproachState
+import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.IntradayBar
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,6 +39,9 @@ import java.time.LocalDate
 class LocalDataStoreMigrationTest {
     private val context: Context get() = RuntimeEnvironment.getApplication()
     private val called = LocalDate.of(2026, 7, 20)
+
+    /** One source's reading, in the shape [SourceReadings] stores it. */
+    private val reading = """{"images":1,"extracted":[],"excluded":[],"inquiries":[]}"""
 
     @Test
     fun `a trade recorded before the update survives it`() {
@@ -791,6 +796,89 @@ class LocalDataStoreMigrationTest {
      * exists - an "old" schema assembled out of today's migration code moves whenever that code
      * does, and would pass through the very change that breaks a real upgrade.
      */
+    @Test
+    fun `a phone on schema 27 gains the readings column and keeps the reports under it`() {
+        // 27 is where every phone holding reports actually is, so this is the upgrade that runs on
+        // a real device rather than the oldest one that still can.
+        Version27(context).writableDatabase.use { old ->
+            old.insert("analyses", null, version27Analysis())
+        }
+
+        val store = LocalDataStore(context)
+
+        assertEquals(setOf("req-1"), store.savedRequestIds())
+        // Nothing was ever written down about how that report's sources were read, so a run over
+        // the same messages reads them again - which is right, and is what a null column means.
+        assertTrue(store.sourceReads("qwen-vl-max", "prompt-1|BILINGUAL", Instant.EPOCH).isEmpty())
+    }
+
+    @Test
+    fun `the upgraded table keeps what a run read, under the question it was read for`() {
+        Version27(context).writableDatabase.use { old ->
+            old.insert("analyses", null, version27Analysis())
+        }
+        val store = LocalDataStore(context)
+
+        store.saveResult(
+            AnalysisResult(
+                requestId = "req-2",
+                recommendations = emptyList(),
+                inquiryReplyCount = 0,
+                completedAt = Instant.parse("2026-09-09T08:00:00Z"),
+                sourceReads = mapOf("tg:-100:5" to reading),
+            ),
+            CloudProvider.QWEN,
+            "qwen-vl-max",
+            "prompt-1|BILINGUAL",
+        )
+
+        val reopened = LocalDataStore(context)
+        assertEquals(
+            mapOf("tg:-100:5" to reading),
+            reopened.sourceReads("qwen-vl-max", "prompt-1|BILINGUAL", Instant.parse("2026-09-08T22:00:00Z")),
+        )
+        // A different prompt version, a different notes language and a different model are three
+        // different questions. Yesterday's answer is not an answer to any of them.
+        assertTrue(reopened.sourceReads("qwen-vl-max", "prompt-2|BILINGUAL", Instant.EPOCH).isEmpty())
+        assertTrue(reopened.sourceReads("qwen-vl-max", "prompt-1|ARABIC", Instant.EPOCH).isEmpty())
+        assertTrue(reopened.sourceReads("some-other-model", "prompt-1|BILINGUAL", Instant.EPOCH).isEmpty())
+        // And a run that finished before the window a later run covers says nothing about it.
+        assertTrue(
+            reopened.sourceReads(
+                "qwen-vl-max",
+                "prompt-1|BILINGUAL",
+                Instant.parse("2026-09-10T00:00:00Z"),
+            ).isEmpty(),
+        )
+    }
+
+    private fun version27Analysis() = ContentValues().apply {
+        put("request_id", "req-1")
+        put("provider", "QWEN")
+        put("model", "qwen-vl-max")
+        put("completed_at", "2026-09-08T08:00:00Z")
+        put("payload", "{}")
+    }
+
+    private class Version27(context: Context) :
+        SQLiteOpenHelper(context, LocalDataStore.DATABASE_NAME, null, 27) {
+
+        override fun onCreate(db: SQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS analyses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT NOT NULL UNIQUE,
+                    provider TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    completed_at TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                )""",
+            )
+        }
+
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    }
+
     private class Version25(context: Context) :
         SQLiteOpenHelper(context, LocalDataStore.DATABASE_NAME, null, 25) {
 

@@ -4093,6 +4093,15 @@ class LiveAppState(
         }
         val window = resolveAnalysisWindow(plan.mode, plan.targetDate)
         if (onScreen) recommendationTargetDate = window.targetDate
+        // What an earlier run over this window already read. A run's window starts at yesterday's
+        // opening hour, so a second schedule in a day covers everything the first one covered - and
+        // paying twice to read the same cards is the one cost in this path nobody chose. Narrowed
+        // to readings made under this prompt version, this model and this notes language, because
+        // any of those changing makes it a different question with a different right answer.
+        val readingKey = analysisReadingKey()
+        val priorReads = runCatching {
+            localDataStore.sourceReads(cloudConfiguration.model, readingKey, window.start)
+        }.getOrDefault(emptyMap())
         val request = AnalysisRequest(
             channelIds = plan.channelIds,
             selectedChannels = plan.channels,
@@ -4107,6 +4116,7 @@ class LiveAppState(
             excludedSources = filtered.excluded,
             rules = rules,
             prompt = activePrompt,
+            priorReads = priorReads,
             sourceTraces = selectedInputs.map { input ->
                 sources.traces[input.sourceId] ?: run {
                 val channel = plan.channels.firstOrNull { it.id == sources.channelOf[input.sourceId] }
@@ -4139,7 +4149,9 @@ class LiveAppState(
             val result = analysisRepository.analyze(request)
             // The run has just spent; the tally on disk has moved and the screen's copy has not.
             refreshModelUsage()
-            localDataStore.saveResult(result, cloudConfiguration.provider, cloudConfiguration.model)
+            localDataStore.saveResult(
+                result, cloudConfiguration.provider, cloudConfiguration.model, readingKey,
+            )
             savedResults = localDataStore.results()
             unreadableResults = localDataStore.unreadableResults
             // The newest report leads only for the reader who asked for it. A scheduled run must
@@ -4187,6 +4199,16 @@ class LiveAppState(
             analysisStartedAt = null
         }
     }
+
+    /**
+     * What a stored reading was made under, so a later run can tell it apart from its own question.
+     *
+     * The prompt version and the notes language, beside the model the row is already keyed by. A
+     * new prompt version reads the same card by different rules and a different language answers in
+     * different words, and either one makes yesterday's reading an answer to something else.
+     */
+    private fun analysisReadingKey(): String =
+        "${activePrompt?.id ?: "shipped"}|${appPreferences.analysisLanguage.name}"
 
     /**
      * A run that never started, said once.
