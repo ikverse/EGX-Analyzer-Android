@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -148,9 +149,11 @@ internal fun RecommendationTable(
  * distinction from the breakpoint this replaced: extra width buys the same row more room to say
  * what it was already saying, and never a figure the narrower screen was denied.
  *
- * 656dp is where [SourceWidth] + [ChevronWidth] plus five weighted cells of 100dp clears the
- * tablet's 682dp with room to grow. The Fold's 614dp lands under it, which is the intended split:
- * four columns there, five on the tablet and the emulator.
+ * 656dp is where [SourceWidth] + [ChevronWidth] plus five weighted cells clears the tablet's 682dp
+ * with room to grow: the 500dp left over divides into 89dp per share, so entry takes 143dp at
+ * [EntryWeight] and the four single-share columns take 89dp each - more than a six-character price
+ * needs at either of the row's two type sizes. The Fold's 614dp lands under it, which is the
+ * intended split: four columns there, five on the tablet and the emulator.
  */
 private val RiskColumnMinWidth = 656.dp
 
@@ -159,6 +162,17 @@ private val SourceWidth = 132.dp
 
 /** Just enough for the chevron that says the row opens. */
 private val ChevronWidth = 24.dp
+
+/**
+ * What the entry column gets for every 1 the other figure columns get.
+ *
+ * Entry is the only cell on the row that holds two prices and the dash between them - fifteen
+ * characters where a target holds six - and it was given the same weight as the columns holding
+ * half its content, so it was the one column that truncated while four beside it sat half empty.
+ * 1.6 puts the longest real range inside the cell at the row's own type size at every width the
+ * table is drawn at, which is what stops [AutoSizeText] from ever having to shrink it in practice.
+ */
+private const val EntryWeight = 1.6f
 
 /**
  * A minimum rather than a fixed height, so a large font scale grows the row instead of clipping it.
@@ -279,7 +293,7 @@ private fun ColumnHeader(wide: Boolean) {
         verticalAlignment = Alignment.Bottom,
     ) {
         HeaderLabel("Source", Modifier.width(SourceWidth), TextAlign.Start)
-        HeaderLabel("Entry", Modifier.weight(1f), TextAlign.End)
+        HeaderLabel("Entry", Modifier.weight(EntryWeight), TextAlign.End)
         HeaderLabel("Target 1", Modifier.weight(1f), TextAlign.End)
         HeaderLabel("Target 2", Modifier.weight(1f), TextAlign.End)
         HeaderLabel("Stop", Modifier.weight(1f), TextAlign.End)
@@ -289,16 +303,21 @@ private fun ColumnHeader(wide: Boolean) {
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
+/**
+ * A column's name, which shrinks with the same rule its figures do.
+ *
+ * `Risk / reward` is the one header longer than the column it names is guaranteed to be, and a
+ * header reading `Risk / rew…` is a column whose meaning has to be guessed at from the figures
+ * under it.
+ */
 @Composable
 private fun HeaderLabel(label: String, modifier: Modifier, align: TextAlign) {
-    Text(
+    AutoSizeText(
         label,
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = align,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = modifier.padding(horizontal = Space.xs),
+        modifier = modifier.fillMaxWidth().padding(horizontal = Space.xs),
     )
 }
 
@@ -332,7 +351,7 @@ private fun CallRow(
         ) {
             SourceCell(channel, timing(point), Modifier.width(SourceWidth))
             StackedCell(
-                Modifier.weight(1f),
+                Modifier.weight(EntryWeight),
                 value = entry(point),
                 tone = PriceRole.entry,
                 // Below the risk column's width this is where risk to reward lives, so the figure
@@ -370,11 +389,13 @@ private fun SourceCell(channel: String?, timing: String?, modifier: Modifier) {
     // 3dp its edge closed on the channel name instead of standing under it. The row does not grow
     // - the name, this gap and the pill come to 45dp inside a 56dp row.
     Column(modifier.padding(horizontal = Space.xs), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        Text(
+        // The one place in the table where the floor can actually be reached: channel names run
+        // long and this column is fixed, so a name that will not fit at 9sp still ends in a dot.
+        AutoSizeText(
             channel ?: Dash,
             style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            color = LocalContentColor.current,
+            modifier = Modifier.fillMaxWidth(),
         )
         timing?.let {
             // Neutral, and deliberately not a hue per timing. Every colour this app has spare means
@@ -404,22 +425,20 @@ private fun StackedCell(
     subTone: Color,
 ) {
     Column(modifier.padding(horizontal = Space.xs), horizontalAlignment = Alignment.End) {
-        Text(
+        AutoSizeText(
             value,
             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
             color = tone,
             textAlign = TextAlign.End,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
         )
         sub?.let {
-            Text(
+            AutoSizeText(
                 it,
                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
                 color = subTone,
                 textAlign = TextAlign.End,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }
@@ -493,12 +512,12 @@ private fun RiskRewardCell(modifier: Modifier, point: RecommendationDataPoint) {
         horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        Text(
+        AutoSizeText(
             ratio?.let { "1 : ${"%.1f".format(it)}" } ?: Dash,
             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
             color = if (ratio == null) PriceRole.muted else PriceRole.entry,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.End,
+            modifier = Modifier.fillMaxWidth(),
         )
         // A length rather than a number to divide in the head, which is the one thing a wide screen
         // can give a table that a narrow one cannot. Only where the ratio is real: an empty track

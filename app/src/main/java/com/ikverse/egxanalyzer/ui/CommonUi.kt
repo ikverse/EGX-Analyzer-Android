@@ -32,6 +32,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -94,8 +96,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.takeOrElse
 import com.ikverse.egxanalyzer.R
 import com.ikverse.egxanalyzer.model.isEgx33
 import com.ikverse.egxanalyzer.ui.theme.pageAccent
@@ -1421,6 +1425,66 @@ internal fun Figure(
         }
     }
 }
+
+/**
+ * One line of text that shrinks to fit rather than ending in an ellipsis.
+ *
+ * For the cells of a fixed-column table, where the alternative is worse than small type. A price
+ * read as `123.4…` is not a smaller price, it is a different one, and the column it sits in is the
+ * one thing the reader is there to compare - so where a cell cannot hold its figure at the row's
+ * size, the figure keeps its digits and gives up a point of type instead. Widths come first: every
+ * column that uses this is sized to hold its longest real value outright, and the shrink is what
+ * catches the value nobody sized for and the large system font scales.
+ *
+ * It starts at the size the caller asked for and steps down only as far as it has to, so a table
+ * whose values all fit is drawn at exactly the size it was before this existed.
+ *
+ * [TextOverflow.Ellipsis] is still set, and is now a floor rather than a first resort: it can only
+ * appear on text that does not fit at [minFontSize], which prices never reach and a long channel
+ * name can. Three dots read better there than a glyph cut in half.
+ */
+@Composable
+internal fun AutoSizeText(
+    text: String,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+    textAlign: TextAlign = TextAlign.Start,
+    minFontSize: TextUnit = MinAutoFontSize,
+) {
+    BasicText(
+        text,
+        modifier = modifier,
+        style = style.merge(color = color, textAlign = textAlign),
+        maxLines = 1,
+        // No wrapping at any size. With a break allowed, an entry range would split at the space
+        // around its dash and the shrink would chase a second line instead of the width.
+        softWrap = false,
+        overflow = TextOverflow.Ellipsis,
+        autoSize = TextAutoSize.StepBased(
+            minFontSize = minFontSize,
+            // The caller's own size is the ceiling: this may only make text smaller, never larger
+            // than the style it shares with everything around it.
+            maxFontSize = style.fontSize.takeOrElse { DefaultAutoFontSize },
+            // Half a point. A whole one overshoots on a cell that is a hair too narrow and drops a
+            // row of figures a visible step below the row above it for a pixel of overflow.
+            stepSize = 0.5.sp,
+        ),
+    )
+}
+
+/**
+ * How small [AutoSizeText] may go before it gives up and truncates.
+ *
+ * Set where a price stops being readable at arm's length rather than where it stops being drawn.
+ * A cell that needs less than this is too narrow to be a column, and that is a width bug to fix
+ * where the width is declared.
+ */
+internal val MinAutoFontSize = 9.sp
+
+/** Only for a style with no size of its own, which none of the app's typography has. */
+private val DefaultAutoFontSize = 14.sp
+
 
 /**
  * Every dropdown in the app, and the only place a menu's surface is described.
