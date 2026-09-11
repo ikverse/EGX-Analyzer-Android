@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -35,7 +36,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -81,10 +81,11 @@ import kotlin.math.roundToInt
  *   [Screen], which is where the scroll it is read from lives. **A lambda rather than a value**:
  *   read at the call site it would be the whole page recomposing on every frame of a collapse, and
  *   read here it is this row and nothing else.
- * @param search the page's own stock filter, or null on a page with no list to narrow - see
- *   `PageState.stockFilter`. Null draws no search icon at all, because an icon opening a box that
- *   narrows nothing is a control the page cannot honour. It holds a **picked ticker** rather than
- *   whatever was typed: see [SearchField] and [TickerPicker].
+ * @param search the page's own stock box, or null on a page with no list to narrow - see
+ *   `PageState.stockBox`. Null draws no search icon at all, because an icon opening a box that
+ *   narrows nothing is a control the page cannot honour. It filters by a **picked ticker** rather
+ *   than by whatever was typed: see [SearchField] and [TickerPicker]. **Every part of it lives on
+ *   the page rather than in a `remember` here** - see [StockBox] for what that cost.
  * @param stocksOnPage the tickers this page actually holds, which the picker offers first. Called
  *   once when the list opens rather than per keystroke - see `pageStocks` for what it walks.
  * @param current whether this page is the one the reader is actually on. See [SearchField], where
@@ -100,7 +101,7 @@ import kotlin.math.roundToInt
 internal fun PageHeader(
     destination: AppDestination,
     collapse: () -> Float,
-    search: MutableState<String>?,
+    search: StockBox?,
     current: Boolean,
     filters: MutableState<Boolean>?,
     filtered: Boolean,
@@ -108,38 +109,60 @@ internal fun PageHeader(
     stocksOnPage: () -> Set<String>,
     modifier: Modifier = Modifier,
 ) {
-    var opened by remember { mutableStateOf(false) }
-    // What is being typed into the box, which since the picker arrived is **not** what the page is
-    // filtered by: typing narrows the list of listings on offer, and only a pick reaches the page.
-    // Header-local, so a fold loses a half-typed query and keeps the pick - which is the right way
-    // round, since the pick is the thing the reader can see the page answering.
-    var typed by remember { mutableStateOf("") }
-    val picked = search?.value.orEmpty()
+    // **Read from the page, and not one of them remembered here.** `opened` and `typed` were held
+    // in this composition until 2026-09-11, which is what made the box disappear on the first letter
+    // pressed into it: a rebuilt header came back with both at their defaults, so the reader was
+    // looking at the page's title again with nothing typed. See [StockBox], and `PageState` for the
+    // older half of the same lesson.
+    val picked = search?.picked?.value.orEmpty()
+    val opened = search?.opened?.value == true
+    val typed = search?.typed?.value.orEmpty()
+    // Whether the catalog is dropped under the field, which is deliberately not the same question
+    // as whether the box is open - see [StockBox.listing].
+    val listing = search?.listing?.value == true
     // Open because it was pressed, or because it is still narrowing the page. The second half is
     // what makes the box the indicator as well as the control: a page filtered to one stock with no
     // box on screen saying so is a page that looks as though it has lost its other rows.
     val searching = search != null && (opened || picked.isNotBlank())
 
-    fun close() {
-        opened = false
-        typed = ""
-        search?.value = ""
+    fun open() {
+        search?.opened?.value = true
+        search?.listing?.value = true
     }
-    // Pressing past the list is "never mind", not "stop filtering": whatever was already picked
-    // stays and the box goes back to showing it. Only the X and back clear the page.
+    // Only the X, back and Clear filters mean this: the box goes, and the page opens back up.
+    fun close() {
+        search?.clear()
+    }
+    // What is typed narrows the listings on offer and never the page, and it brings the list back
+    // with it: typing is the one thing a reader can do to a field whose list they have dismissed.
+    fun type(text: String) {
+        search?.typed?.value = text
+        search?.listing?.value = true
+    }
+    /**
+     * Pressing past the list: "never mind the **list**", which is not "throw away what I was doing".
+     *
+     * A pick already made collapses the box onto it, as it always has. A half-typed query keeps the
+     * field and loses only the list - a press that lands here while somebody is typing must not be
+     * able to undo their typing, which is the failure this whole change exists to make impossible.
+     * An untouched empty box goes away, because that is plainly what pressing past it means.
+     */
     fun dismiss() {
-        if (picked.isNotBlank()) {
-            opened = false
-            typed = ""
-        } else {
-            close()
+        search?.listing?.value = false
+        when {
+            picked.isNotBlank() -> {
+                search?.opened?.value = false
+                search?.typed?.value = ""
+            }
+            typed.isBlank() -> close()
         }
     }
 
     fun pick(ticker: String) {
-        search?.value = ticker
-        typed = ""
-        opened = false
+        search?.picked?.value = ticker
+        search?.typed?.value = ""
+        search?.listing?.value = false
+        search?.opened?.value = false
     }
     // The same entrance every ticker in the app opens the stock sheet through. Read here rather
     // than inside the list, because the list has to be put away before the sheet is raised: one
@@ -198,7 +221,8 @@ internal fun PageHeader(
                 if (opened) {
                     SearchField(
                         typed = typed,
-                        onTyped = { typed = it },
+                        listing = listing,
+                        onTyped = ::type,
                         onClose = ::close,
                         onPick = ::pick,
                         onDismiss = ::dismiss,
@@ -213,7 +237,7 @@ internal fun PageHeader(
                 } else {
                     PickedStock(
                         ticker = picked,
-                        onReopen = { opened = true },
+                        onReopen = ::open,
                         onClear = ::close,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -222,7 +246,7 @@ internal fun PageHeader(
                 TitleRow(
                     destination = destination,
                     collapse = fraction,
-                    onSearch = if (search == null) null else ({ opened = true }),
+                    onSearch = if (search == null) null else ::open,
                     onFilters = if (filters == null) null else ({ filters.value = true }),
                     filtered = filtered,
                 )
@@ -373,6 +397,8 @@ private fun HeaderAction(
 @Composable
 private fun SearchField(
     typed: String,
+    /** Whether the catalog is dropped under the field right now. See [StockBox.listing]. */
+    listing: Boolean,
     onTyped: (String) -> Unit,
     onClose: () -> Unit,
     onPick: (String) -> Unit,
@@ -383,14 +409,26 @@ private fun SearchField(
     modifier: Modifier = Modifier,
 ) {
     val focus = remember { FocusRequester() }
+    val density = LocalDensity.current
     // Where the list hangs from, in pixels, measured off this row's own top edge - the popup is
     // positioned against the box's bounds and knows nothing about how tall the box is drawn.
-    val anchorOffset = with(LocalDensity.current) { (SearchFieldHeight + Space.s).roundToPx() }
+    val anchorOffset = with(density) { (SearchFieldHeight + Space.s).roundToPx() }
     // And how much window is left under that point, which the list is drawn exactly as tall as.
     // A popup taller than the space it hangs in is shifted **up** by the window manager to fit,
     // which would put the list back over the header it belongs to. See `TickerPickerList`.
+    //
+    // **The keyboard comes off it.** The window's own height is all of it, keys included, and the
+    // keyboard is the whole reason this box is open - measured against the bare window the list ran
+    // to within a row of the keys on a tall phone and clean under them on a short one. Read here
+    // rather than through an inset padding inside the popup, because a popup is its own window and
+    // is handed none of this one's insets.
     val windowHeight = LocalWindowInfo.current.containerSize.height
-    var spaceBelow by remember { mutableIntStateOf(0) }
+    val keyboard = WindowInsets.ime.getBottom(density)
+    // -1 until the row has been laid out once. Nothing is drawn on a guess: measured as 0 the list
+    // would be laid out a window too tall for one frame, and a popup that does not fit is shifted
+    // **up** by the window manager - back over the header it hangs from.
+    var anchorTop by remember { mutableIntStateOf(-1) }
+    val spaceBelow = if (anchorTop < 0) 0 else windowHeight - keyboard - (anchorTop + anchorOffset)
     // The box was opened by somebody who wants to type in it - but only once the pages have stopped
     // moving and this is the one in front of them. `LocalTabsSettled` is the shell's own answer to
     // "has the reader arrived", written by the pager and true beside a rail.
@@ -402,7 +440,7 @@ private fun SearchField(
     // wherever the field is laid out.
     Box(
         modifier.onGloballyPositioned { placed ->
-            spaceBelow = windowHeight - (placed.positionInWindow().y.roundToInt() + anchorOffset)
+            anchorTop = placed.positionInWindow().y.roundToInt()
         },
     ) {
         Surface(
@@ -456,6 +494,7 @@ private fun SearchField(
                 }
             }
         }
+        if (!listing) return@Box
         TickerPickerList(
             typed = typed,
             stocksOnPage = stocksOnPage,

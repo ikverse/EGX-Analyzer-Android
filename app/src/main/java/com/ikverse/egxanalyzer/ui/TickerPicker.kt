@@ -158,16 +158,24 @@ internal fun TickerPickerList(
     onOpenStock: (String) -> Unit,
     /** How far under the field's top edge the list hangs, in pixels. */
     anchorOffset: Int,
-    /** How much window is left under that point, in pixels. Nothing is drawn without any. */
+    /** How much window is left under that point **above the keyboard**, in pixels. */
     spaceBelow: Int,
 ) {
     if (spaceBelow <= 0) return
     // Read once per opening rather than per keystroke: it is a pass over every saved run, every
     // scored call or every position, and none of those change while somebody is typing.
     val onPage = remember { stocksOnPage() }
+    // **The rest of the exchange is held back until something is typed.** Two hundred-odd listings
+    // dropped over the page the moment the icon is pressed is a menu to be scrolled rather than
+    // read, and the half worth reading - what this page actually holds - was the first few rows of
+    // it. An empty box offers those and says where the others are; the exchange's own listing is a
+    // search, and a search wants a query.
+    val browsing = typed.isBlank()
     val suggestions = remember(typed, onPage) { TickerPicker.suggest(typed, onPage) }
     val held = remember(suggestions) { suggestions.filter(TickerPicker.Suggestion::onPage) }
-    val rest = remember(suggestions) { suggestions.filterNot(TickerPicker.Suggestion::onPage) }
+    val rest = remember(suggestions, browsing) {
+        if (browsing) emptyList() else suggestions.filterNot(TickerPicker.Suggestion::onPage)
+    }
     val position = remember(anchorOffset) {
         object : PopupPositionProvider {
             override fun calculatePosition(
@@ -207,9 +215,11 @@ internal fun TickerPickerList(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shadowElevation = PickerElevation,
             ) {
-                if (suggestions.isEmpty()) {
+                if (held.isEmpty() && rest.isEmpty()) {
                     Text(
-                        "No listing answers to that",
+                        // A page with nothing on it is not the same answer as a query nothing
+                        // answers to, and on an empty box the reader has not asked anything yet.
+                        if (browsing) "Type to search the exchange" else "No listing answers to that",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(Space.l),
@@ -229,10 +239,27 @@ internal fun TickerPickerList(
                             SuggestionRow(suggestion, onPick, onOpenStock)
                         }
                     }
+                    // Where the other listings went, said at the foot of the short list rather than
+                    // left to be guessed - a picker that offers six stocks with no word about the
+                    // exchange's other two hundred reads as a picker that has never heard of them.
+                    if (browsing) {
+                        item { PickerNote("Type to search all ${EgxCatalog.size()} listings") }
+                    }
                 }
             }
         }
     }
+}
+
+/** Where the rest of the exchange is, under a list that is only showing this page's own stocks. */
+@Composable
+private fun PickerNote(label: String) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = Space.l, vertical = Space.s),
+    )
 }
 
 @Composable
@@ -319,9 +346,10 @@ private fun SuggestionRow(
  *
  * Short enough that the page it is narrowing is still visible underneath on a cover screen - the
  * reader is choosing what to do to that page, and a list that filled the window would read as
- * having left it.
+ * having left it. It is now a ceiling rather than the usual height: what the list is actually drawn
+ * as tall as is the window above the keyboard, measured in [SearchField].
  */
-private val PickerMaxHeight = 340.dp
+private val PickerMaxHeight = 300.dp
 
 /** It floats over the page rather than sitting on it, so it carries a shadow the cards do not. */
 private val PickerElevation: Dp = 6.dp

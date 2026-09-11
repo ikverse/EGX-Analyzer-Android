@@ -36,6 +36,51 @@ import java.time.LocalDate
  * writing a plain local name - `var openRun by appState.pages.openResultId` - which is Compose's own
  * `getValue`/`setValue` and not reflection.
  */
+/**
+ * The header's stock box on one page: what it narrows the page to, and what the reader is doing to
+ * it right now.
+ *
+ * **All four fields live out here rather than in the header's own `remember`, and that is the whole
+ * of the fix of 2026-09-11.** `opened` and `typed` were held in the composition. Anything that
+ * rebuilt the header took them with it, so the box vanished back to the page's title between the
+ * reader pressing a key and the letter landing - "I can't write anything in the box, the box
+ * disappears". The picker survived the same treatment for the day before that only by accident: the
+ * text was then kept in [picked], which has always lived out here, so a rebuilt header came back
+ * open with the text still in it and nobody could see the fault. See [PageState] itself for why
+ * nothing about a page may be held by the composition.
+ */
+class StockBox {
+
+    /**
+     * The ticker this page is narrowed to, or blank for the whole page.
+     *
+     * Written only by a **pick** from the catalog, never by what was typed - see `TickerPicker`.
+     */
+    val picked: MutableState<String> = mutableStateOf("")
+
+    /** Whether the field is showing, as against the page's title or the pick it closed onto. */
+    val opened: MutableState<Boolean> = mutableStateOf(false)
+
+    /** What is in the field. It narrows the listings on offer and never the page. */
+    val typed: MutableState<String> = mutableStateOf("")
+
+    /**
+     * Whether the catalog is dropped under the field.
+     *
+     * Separate from [opened] on purpose: a press past the list has to be able to put the **list**
+     * away without taking the box with it, or a stray one throws away a half-typed query.
+     */
+    val listing: MutableState<Boolean> = mutableStateOf(false)
+
+    /** Back to the page's title, filtering nothing. The X, back and Clear filters all mean this. */
+    fun clear() {
+        picked.value = ""
+        opened.value = false
+        typed.value = ""
+        listing.value = false
+    }
+}
+
 class PageState {
 
     // ── Shared by Portfolio and Insights ─────────────────────────────────────────────────────
@@ -79,7 +124,11 @@ class PageState {
 
     val resultsChannels: MutableState<Set<String>> = mutableStateOf(emptySet())
     val resultsDate: MutableState<String?> = mutableStateOf(null)
-    val resultsStock: MutableState<String> = mutableStateOf("")
+    /** The header's stock box for this page: the pick, and what the reader is doing to it. */
+    val resultsStockBox: StockBox = StockBox()
+
+    /** What Results is narrowed to. The box that writes it is [resultsStockBox]. */
+    val resultsStock: MutableState<String> get() = resultsStockBox.picked
     val resultsOrder: MutableState<RunOrder> = mutableStateOf(RunOrder.RUN_NEWEST)
     val resultsFiltersOpen: MutableState<Boolean> = mutableStateOf(false)
 
@@ -90,7 +139,11 @@ class PageState {
 
     val insightsChannels: MutableState<Set<String>> = mutableStateOf(emptySet())
     val insightsOutcomes: MutableState<Set<String>> = mutableStateOf(emptySet())
-    val insightsStock: MutableState<String> = mutableStateOf("")
+    /** The header's stock box for this page: the pick, and what the reader is doing to it. */
+    val insightsStockBox: StockBox = StockBox()
+
+    /** What Insights is narrowed to. The box that writes it is [insightsStockBox]. */
+    val insightsStock: MutableState<String> get() = insightsStockBox.picked
     val insightsFiltersOpen: MutableState<Boolean> = mutableStateOf(false)
 
     // ── Portfolio ────────────────────────────────────────────────────────────────────────────
@@ -99,13 +152,17 @@ class PageState {
     val openPortfolioGroups: MutableState<Set<LocalDate>> = mutableStateOf(emptySet())
 
     val portfolioDate: MutableState<String?> = mutableStateOf(null)
-    val portfolioStock: MutableState<String> = mutableStateOf("")
+    /** The header's stock box for this page: the pick, and what the reader is doing to it. */
+    val portfolioStockBox: StockBox = StockBox()
+
+    /** What the Portfolio is narrowed to. The box that writes it is [portfolioStockBox]. */
+    val portfolioStock: MutableState<String> get() = portfolioStockBox.picked
     val portfolioFiltersOpen: MutableState<Boolean> = mutableStateOf(false)
 
     // ── What is narrowing a tab ──────────────────────────────────────────────────────────────
 
     /**
-     * The stock box this page filters by, or null for a page that has no such list.
+     * The header's stock box for this page, or null for a page that has no list to narrow.
      *
      * Read by [Screen], which draws that box in the page header rather than on the filter shelf -
      * one control per page, in one place, wherever the page keeps its state. Analyze and Settings
@@ -113,19 +170,20 @@ class PageState {
      * would be a control the page cannot honour.
      *
      * The same shape [filtersActive] has and for the same reason - the question is asked from
-     * outside the screen that owns the answer, so the answer lives here.
+     * outside the screen that owns the answer, so the answer lives here. What the box itself keeps,
+     * and why every part of it is out here rather than in the header, is [StockBox].
      */
-    fun stockFilter(destination: AppDestination): MutableState<String>? = when (destination) {
-        AppDestination.RESULTS -> resultsStock
-        AppDestination.INSIGHTS -> insightsStock
-        AppDestination.PORTFOLIO -> portfolioStock
+    fun stockBox(destination: AppDestination): StockBox? = when (destination) {
+        AppDestination.RESULTS -> resultsStockBox
+        AppDestination.INSIGHTS -> insightsStockBox
+        AppDestination.PORTFOLIO -> portfolioStockBox
         AppDestination.ANALYZE, AppDestination.SETTINGS -> null
     }
 
     /**
      * Whether [destination]'s filter sheet is open, or null for a page that has no filters.
      *
-     * The same shape [stockFilter] has, and it is read from the same place: the header draws the
+     * The same shape [stockBox] has, and it is read from the same place: the header draws the
      * icon that opens the sheet, and the screen underneath draws what is inside it. Neither can
      * hold the flag - the header does not know what a page filters by, and the screen is composed
      * below the icon that opens it - so it lives out here with the rest of the page's own state.
@@ -191,16 +249,16 @@ class PageState {
             AppDestination.RESULTS -> {
                 resultsChannels.value = emptySet()
                 resultsDate.value = null
-                resultsStock.value = ""
+                resultsStockBox.clear()
             }
             AppDestination.INSIGHTS -> {
                 insightsChannels.value = emptySet()
                 insightsOutcomes.value = emptySet()
-                insightsStock.value = ""
+                insightsStockBox.clear()
             }
             AppDestination.PORTFOLIO -> {
                 portfolioDate.value = null
-                portfolioStock.value = ""
+                portfolioStockBox.clear()
             }
             AppDestination.ANALYZE, AppDestination.SETTINGS -> Unit
         }

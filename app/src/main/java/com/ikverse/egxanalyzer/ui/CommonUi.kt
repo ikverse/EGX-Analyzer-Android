@@ -280,9 +280,9 @@ internal fun Screen(
                 // A lambda, not a value. Read here it would be this function recomposing on every
                 // frame of a collapse, and this function composes the whole page.
                 collapse = { (taken.floatValue / travel).coerceIn(0f, 1f) },
-                // The page's own stock filter, or null where the page has no list to narrow. See
-                // PageState.stockFilter.
-                search = appState.pages.stockFilter(destination),
+                // The page's own stock box, or null where the page has no list to narrow. See
+                // PageState.stockBox - and StockBox for why every part of it is held out there.
+                search = appState.pages.stockBox(destination),
                 current = appState.destination == destination,
                 // The flag the filter icon sets; the page below draws the sheet it opens. Null
                 // where the page has no filters at all. See PageState.filtersOpen.

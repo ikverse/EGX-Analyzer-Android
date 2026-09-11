@@ -2669,18 +2669,34 @@ along with the rounded well the page used to sit in.
   card that takes every press aimed past it. Drawn as a sibling of the header it would be painted
   under the page; drawn inside it, clipped to a 56dp bar. `focusable = false` is what keeps the
   keyboard up, and it is why back is still answered by `PageHeader`'s own `BackHandler`.
+- **It is drawn as tall as the window *above the keyboard*, not as tall as the window.** A popup is
+  its own window and is handed none of this one's insets, so `SearchField` takes
+  `WindowInsets.ime` off the measurement itself. Measured against the bare window the list ran to
+  within a row of the keys on a tall phone and clean under them on a short one. `PickerMaxHeight`
+  is a ceiling over that rather than the usual height.
+- **The rest of the exchange is held back until something is typed.** An empty box offers **On this
+  page** and a line saying where the other listings are; typing brings **All other stocks** with it.
+  Two hundred-odd rows dropped over the page the moment the icon is pressed is a menu to be scrolled
+  rather than read, and the half worth reading was the first few rows of it.
 - **The box closes onto the pick rather than back to the title.** `PickedStock` draws the mark, the
   code and the company in the bar, and pressing it reopens the picker. The X and back clear the
-  page; a press past the list is "never mind" and keeps what was already picked.
+  page. A press past the list means "never mind the **list**": a pick already made keeps the box and
+  collapses it onto that pick, a half-typed query keeps the field and loses only the list, and only
+  an untouched empty box goes away. `StockBox.listing` is what lets those be three answers rather
+  than one — a press landing there while somebody is typing must not be able to undo their typing.
 - **The three shelves lost their box**, which left each of them a Filters chip alone — a loose
   one-control row above every list, floating on a shadow, to open a panel. That is what took the
   shelf itself away a day later; see **A page's filters live in a sheet** under Gotchas. The in-report toolbar on
   Results keeps its own box, because that one is a different control inside a report card,
   narrowing that report's own table.
-- **`PageState.stockFilter(destination)` is what decides whether a page has one**, the same shape
+- **`PageState.stockBox(destination)` is what decides whether a page has one**, the same shape
   `filtersActive` has and for the same reason: the question is asked from outside the screen that
   owns the answer. Analyze and Settings answer null and get **no search icon at all** — an icon
   opening a box that narrows nothing is a control the page cannot honour.
+- **Every part of the box lives on `PageState`, and none of it in the header's own `remember`.**
+  `StockBox` holds the pick, whether the box is open, what is typed into it and whether the list is
+  down. See **The box that disappeared on the first letter** below for what the header holding two
+  of those cost.
 - **The box is the indicator as well as the control.** It stays open while a stock is picked and
   the close button clears as well as closes, so a page narrowed to one stock always has the box on
   screen saying so — and it now says it in the company's own name rather than in what was typed. Without that a filtered page with no visible box is a page that looks as
@@ -2690,6 +2706,25 @@ along with the rounded well the page used to sit in.
 - **The `folded` flag on those three shelves still leaves the stock box out**, for its original
   reason restated: the box shows its own text while it is narrowing anything, so a chip lit by it
   would report something the reader is already looking at.
+
+### The box that disappeared on the first letter
+
+Reported on 2026-09-11, the day after the picker shipped: *"I can't write anything in the box, the
+box disappears."* Pressing the search icon opened the box and the list; the first key press put the
+page's title back, with nothing typed.
+
+- **`opened` and `typed` were `remember`ed inside `PageHeader`.** The box existed only for as long
+  as that composition did, so anything that rebuilt the header between the key press and the letter
+  landing took the box with it and left the defaults — closed, empty.
+- **The picker's first day hid it rather than caused it.** Before the picker, the box's text *was*
+  the page's filter and lived on `PageState`; a rebuilt header came straight back open with the text
+  still in it, so the same teardown was invisible. Moving the text into the composition is what made
+  it visible, which is the same lesson `PageState`'s own doc block opens with, arrived at from the
+  other direction.
+- **The fix is `StockBox`, not a guard.** All four fields live on the page, so there is no longer a
+  state of "the box is open" that a rebuild can lose. The second path to the same symptom — a press
+  past the list calling `close()` when nothing was picked — is gone with it: `listing` is now its
+  own flag, so that press puts the list away and leaves a half-typed query alone.
 
 ### The bug that opening it shipped with
 
@@ -3319,7 +3354,7 @@ parameter being threaded anywhere. Added 2026-09-08.
 - **The trigger is in the header and the content is on the page, and neither could hold the other.**
   The header does not know what a page filters by — channels come off `savedResults`, dates off the
   trades — and the screen is composed below the icon that opens it. So the flag lives on
-  `PageState.filtersOpen(destination)`, which is exactly the shape `stockFilter(destination)` has
+  `PageState.filtersOpen(destination)`, which is exactly the shape `stockBox(destination)` has
   and for the same reason. It is also why it survives a fold, where a `remember` inside the sheet
   would not: see the head of `PageState`.
 - **A sheet, not a panel hanging off the header.** A sheet already means one thing here — the longer
