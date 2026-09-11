@@ -96,6 +96,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
@@ -207,12 +208,13 @@ fun EgxAnalyzerApp(appState: AppState) {
         LocalOpenStock provides remember(appState) { appState::openStock },
     ) {
         if (rail) {
-            // **The mark lives in the rail, and only in the rail.** It used to be drawn in the
-            // header beside the app's name and travel across into the rail's top gap as that header
+            // **The mark is not drawn in the chrome at all.** It used to be drawn in the header
+            // beside the app's name and travel across into the rail's top gap as that header
             // collapsed - a whole mechanism of anchors, window coordinates and two animations,
-            // existing so one glyph could be in two places. With the name band gone there is only
-            // one place left for it, `RailTopInset` is already holding that place open, and the
-            // travel had nothing to travel from. It is drawn inside `AppRail` now.
+            // existing so one glyph could be in two places. The name band went on 2026-09-09 and
+            // the travel had nothing to travel from; the mark stood in the rail's top gap for a
+            // while after that, and that gap itself is gone now the destinations are centred on
+            // the window - see [AppRail].
             //
             // On the phone there is no rail, so the mark is not drawn at all: the page's own name
             // and icon are what the top of the window says. The launcher icon and the notification
@@ -300,18 +302,6 @@ private val BarIconSize = 26.dp
  * size. Shrinking the label rather than dropping it keeps all five named.
  */
 private val BarLabelSize = 11.sp
-
-/**
- * How far the rail's items sit below the top of the window.
- *
- * A rail item is an icon stacked over a label, so left at the top its icon lands beside the blank
- * space above the page title rather than beside the title itself. This drops the column until the
- * first icon meets the heading next to it: past the status bar, the page's own top padding, and
- * half a heading. What the gap is measured against is [PageHeader] - the page's own name and glyph,
- * which is what sits beside it - and it is deliberately left empty. The app's mark stood in it
- * until 2026-09-09; see [AppRail] for why nothing does now.
- */
-private val RailTopInset = 62.dp
 
 /** Between the header above the line and the first card under it. */
 private val StatusLineGap = 6.dp
@@ -485,6 +475,10 @@ private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
     // destination into the next, and a wash that snapped to the new colour on the press would arrive
     // a whole transition before the page under it did.
     val wash = LocalPageWash.current
+    // How tall the Settings item turned out to be, held so the column above it can hold back the
+    // same amount and leave the group centred on the window. See the spacers in the rail below.
+    var settingsHeight by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
     val hue = animateColorAsState(
         accentFor(appState.destination.accent, LocalDarkTheme.current).wash,
         label = "railWash",
@@ -513,53 +507,102 @@ private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
         // anything in the rail that did not name its own colour taking whatever was in scope.
         contentColor = MaterialTheme.colorScheme.onBackground,
     ) {
-        // **The gap `RailTopInset` holds open, and nothing in it.** The app's mark stood here from
-        // 2026-09-09, when it left the header that was removed the same day, until it was taken out
-        // again: `ic_egx_notification` is three ascending bars and a rising arrow, and the three
-        // destinations under it are `AutoGraph`, `Assessment` and `Insights` - so the mark was a
-        // fourth chart glyph at the head of a column of chart glyphs, unlabelled among labelled
-        // ones and wearing the current page's own aurora, which is the hue of the one item beside
-        // it drawn at full strength. Sizing it away from them was tried first and 36dp against 28
-        // did not separate anything. What the mark was there to say, [PageHeader] now says on both
-        // layouts, in the page's name and its own glyph; the launcher icon and the notification
-        // glyph are where that artwork still earns its keep.
+        // **What the destinations are centred on is the window, not the space above Settings.**
+        // Two weighted spacers alone would centre the four in what is left after Settings has taken
+        // its height off the bottom, which lands the group half an item - about 29dp - above the
+        // middle of a window whose middle is the one line the eye checks a centred column against.
+        // Holding that much of the top back, on top of the equal weights, is what makes the group's
+        // own midpoint and the rail's the same line: with a top hold of `settings + gap` and a
+        // bottom of `gap`, the space above the group comes out exactly one Settings taller than the
+        // space below it, which is the offset Settings itself introduced.
         //
-        // The gap stays, because it is what drops the first icon level with the heading beside it.
+        // The height is measured rather than named because a `NavigationRailItem` has no fixed one:
+        // it is an indicator over a label, so it moves with the icon size, the label's text size
+        // and the font scale the reader chose. The first frame of a cold start is laid out against
+        // zero and settles on the next - a rail that is on screen for a fold's worth of animation
+        // anyway.
         //
-        // **Nothing put in here may fill the rail's width**, and a `Box` that did broke the
-        // unfolded layout in 3.6.1 - worth keeping written down, because this gap is where the next
-        // thing would go. Material sizes a `NavigationRail` with `widthIn(min = ContainerWidth)`, a
-        // floor rather than a width, so a child that fills it stretches the rail to whatever it was
-        // measured against - and `NavigationSuiteScaffoldLayout` measures the navigation suite
-        // against the whole window, then gives the page `width - railWidth`. The rail became the
-        // screen and the page was measured at zero: five destinations centred on an empty display,
-        // with no page beside them at all. A phone cannot show it, since there is no rail there.
-        Spacer(Modifier.height(RailTopInset))
-        AppDestination.entries.forEachIndexed { index, destination ->
-            if (index > 0) Spacer(Modifier.height(RailItemGap))
-            val selected = appState.destination == destination
-            // The pill's colours, on the rail's own item. See PillItem for why every destination
-            // wears its own hue here rather than only the selected one.
-            val accent = accentFor(destination.accent, LocalDarkTheme.current)
-            NavigationRailItem(
-                selected = selected,
-                // Pressing the destination you are already on means "back to the top" - the same
-                // press every bottom bar on this platform answers that way. See AppState.scrollToTop.
-                onClick = {
-                    if (selected) appState.scrollToTop(destination) else appState.navigate(destination)
-                },
-                icon = { NavigationIcon(destination, selected) },
-                label = { Text(destination.label) },
-                colors = NavigationRailItemDefaults.colors(
-                    selectedIconColor = accent.ink,
-                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                    indicatorColor = accent.soft,
-                    unselectedIconColor = accent.ink.copy(alpha = RestingIconAlpha),
-                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
-            )
-        }
+        // **Nothing put in this rail may fill its width**, and a `Box` that did broke the unfolded
+        // layout in 3.6.1 - worth keeping written down, because the spacers below are where the
+        // next thing would go. Material sizes a `NavigationRail` with `widthIn(min =
+        // ContainerWidth)`, a floor rather than a width, so a child that fills it stretches the
+        // rail to whatever it was measured against - and `NavigationSuiteScaffoldLayout` measures
+        // the navigation suite against the whole window, then gives the page `width - railWidth`.
+        // The rail became the screen and the page was measured at zero: five destinations centred
+        // on an empty display, with no page beside them at all. A phone cannot show it, since there
+        // is no rail there. A `Spacer` carrying only a height or a weight has no width to give, so
+        // the ones below are safe.
+        //
+        // The app's mark stood at the top of this column from 2026-09-09, when it left the header
+        // that was removed the same day, until it was taken out again: `ic_egx_notification` is
+        // three ascending bars and a rising arrow, and the three destinations under it are
+        // `AutoGraph`, `Assessment` and `Insights` - so the mark was a fourth chart glyph at the
+        // head of a column of chart glyphs, unlabelled among labelled ones and wearing the current
+        // page's own aurora. What it was there to say, [PageHeader] now says on both layouts, in
+        // the page's name and its own glyph; the launcher icon and the notification glyph are where
+        // that artwork still earns its keep.
+        Spacer(Modifier.height(settingsHeight + RailItemGap))
+        Spacer(Modifier.weight(1f))
+        // **Settings is the one destination that is not part of the group.** It is where you go to
+        // set the app up rather than to read it, which is the same reason it sits last in
+        // [AppDestination] and last in the phone's pill - and on a rail there is somewhere for that
+        // to be said out loud: the reading at the middle of the window, the configuration at the
+        // far end of it.
+        AppDestination.entries.filter { it != AppDestination.SETTINGS }
+            .forEachIndexed { index, destination ->
+                if (index > 0) Spacer(Modifier.height(RailItemGap))
+                RailItem(appState, destination)
+            }
+        Spacer(Modifier.weight(1f))
+        // A floor under the weighted gap: on a window short enough for the weights to collapse to
+        // nothing, this is what keeps Settings off the bottom of the group.
+        Spacer(Modifier.height(RailItemGap))
+        RailItem(
+            appState,
+            AppDestination.SETTINGS,
+            // Read back for the hold at the top of the column. `onSizeChanged` rather than a
+            // `Layout`: the value is wanted once, and only to the nearest pixel.
+            Modifier.onSizeChanged { size ->
+                settingsHeight = with(density) { size.height.toDp() }
+            },
+        )
     }
+}
+
+/**
+ * One destination on the rail.
+ *
+ * Written out once because the rail composes it in two places - the centred group and Settings at
+ * the foot - and a destination has to look and behave the same in both.
+ */
+@Composable
+private fun RailItem(
+    appState: AppState,
+    destination: AppDestination,
+    modifier: Modifier = Modifier,
+) {
+    val selected = appState.destination == destination
+    // The pill's colours, on the rail's own item. See PillItem for why every destination
+    // wears its own hue here rather than only the selected one.
+    val accent = accentFor(destination.accent, LocalDarkTheme.current)
+    NavigationRailItem(
+        selected = selected,
+        // Pressing the destination you are already on means "back to the top" - the same
+        // press every bottom bar on this platform answers that way. See AppState.scrollToTop.
+        onClick = {
+            if (selected) appState.scrollToTop(destination) else appState.navigate(destination)
+        },
+        icon = { NavigationIcon(destination, selected) },
+        label = { Text(destination.label) },
+        modifier = modifier,
+        colors = NavigationRailItemDefaults.colors(
+            selectedIconColor = accent.ink,
+            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+            indicatorColor = accent.soft,
+            unselectedIconColor = accent.ink.copy(alpha = RestingIconAlpha),
+            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    )
 }
 
 /**

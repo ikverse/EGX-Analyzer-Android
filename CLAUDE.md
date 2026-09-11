@@ -124,6 +124,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/ReportSync.kt` + `data/RuleSync.kt` + `data/PositionSync.kt` — what travels between devices.
 - `ui/RecommendationTable.kt` + `ui/RecommendationCard.kt` — a report's calls, as a table above
   600dp of container and as cards below it. See **A report's calls on screen** below.
+- `ui/OccurrenceSheet.kt` — one call in full, opened by pressing a table row. See **The sheet a row
+  opens** below.
 - `data/XlsxWriter.kt` + `ui/ReportExport.kt` — a report as a spreadsheet, saved to Downloads or
   sent onward from the ⋮ menu on its card. See below.
 - `data/Backup.kt` + `data/BackupRestore.kt` + `ui/BackupSection.kt` — the whole record as one file,
@@ -1633,6 +1635,50 @@ runs on, and fitted the bigger ones worst.
   height, so it never hangs over the next card. It carries the report card's own fill because that
   is what it slides across.
 
+### The sheet a row opens
+
+`OccurrenceSheet` is the longer version of a table row, and until 2026-09-11 it was the last
+surface in the app still built as one column of dividers - the shape `StockSheet` left behind. It
+is a **header, a scroller and an action bar** now, on that sheet's own terms.
+
+- **It had no scroller at all**, alone among the seven sheets here, and that is a bug rather than a
+  look: a call carrying all six levels, a long Arabic note, or an ordinary one at a large font
+  scale ran off the bottom of the screen with no way to reach it. `sheetDragSlop().scrollableColumn()`
+  is the pair every other sheet carries, and it also answers the pull-at-the-top problem in the
+  same breath.
+- **The identity band is fixed and the record scrolls under it** - logo, ticker, EGX 33 mark, both
+  names on one line, and the `⋮`. The ticker opens `StockSheet` through `LocalOpenStock`, which is
+  the rule every other full-width card naming a stock follows.
+- **The channel is drawn at all for the first time.** It has been a parameter of this function
+  since it was written and reached the screen nowhere, so two occurrences of one stock in one
+  report - which differ by nothing else - were told apart by nothing.
+- **`Edit` moved into the `⋮`.** A violet text button in the top-right corner was the loudest thing
+  on a sheet whose subject is a set of figures. It is `CallMenu`, the recommendation card's own
+  menu, which also brings **Copy call** to a surface that had no way of getting a call's numbers
+  out of the app. The `Edited` pill still opens the editor directly, and it sits beside the timing
+  pill on the header's own row - the shape both call cards were given the same day.
+- **The figures are `LevelGrid` and no longer a `FlowRow`.** Six tiles flowed at whatever width
+  their numbers happened to print, which is why Resistance sat alone on a line under the other
+  five. This reverses `LevelGrid`'s own note that the sheet prints left to right in its own order:
+  that order is right for a table and an export, which are read down a column, and a sheet is the
+  one surface where a single call is the whole subject.
+- **`entryText` and the implied return are shared rather than copied.** The sheet kept its own
+  `entryText` and read `returnTp1Pct` straight, so a target the channel had not put a percentage
+  against showed a bare price here and a computed one on the card - two readings of one call,
+  differing on nothing but whether the source happened to print the figure.
+- **The peak is a figure and not only the ladder's arrow.** `peakSince` has been passed to this
+  sheet since it was written and drawn only as a mark on a scale; the header names it, measured
+  against the entry midpoint, which is the basis the scorer measures every return from.
+- **The source is a section and not a footer.** The screenshot is the evidence every figure above
+  it rests on and was drawn at 88dp under a run-on line whose loudest content was a nineteen-digit
+  Telegram message id. It is 104dp beside what the model quoted, the card's printed date and the
+  target date are two labelled facts rather than one joined line, and the ids drop to a monospace
+  last line - they are for checking the app against a report, not for reading a call.
+- **`SheetSection` and `SheetSectionLabel` moved to `CommonUi.kt`**, from `StockSheet.kt` where
+  they were private. Two sheets draw that card now, and a card shape spelled twice is two that
+  agree until one is adjusted. `EditCallSheet` keeps its own two-argument `SheetSection`, which is
+  a different signature and deliberately untouched.
+
 ## Correcting a misread call
 
 The model reads tickers and levels off channel screenshots and gets one wrong from time to time — a
@@ -2590,8 +2636,9 @@ Two things the app could always have done and never did: go back, and put one st
   sheet is allowed to move. It re-arms whenever the content actually scrolls, so a long record read
   back to its top arrives with the whole 64dp in hand. **On the scroller and not on the sheet**, and
   not by raising the thresholds, because both of those also govern the drag handle - a handle that
-  has to be dragged half a screen is a handle that looks stuck. All six sheets with a scroller carry
-  it: the stock sheet, the filter sheet, Info, Channel score, Stock opinion and Edit call.
+  has to be dragged half a screen is a handle that looks stuck. All seven sheets with a scroller carry
+  it: the stock sheet, the occurrence sheet, the filter sheet, Info, Channel score, Stock opinion
+  and Edit call.
 
 ## The page header
 

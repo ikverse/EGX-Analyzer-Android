@@ -439,7 +439,7 @@ private fun StockSheetPrice(
     var touched by remember(visible) { mutableStateOf<DailySession?>(null) }
     SheetSection {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            SectionLabel("Where it stands")
+            SheetSectionLabel("Where it stands")
             // What the visible line adds up to, which is the one thing its shape cannot say: the
             // same climb is three percent or forty depending on a scale the chart deliberately
             // does not print.
@@ -593,7 +593,7 @@ private fun StockSheetRecord(score: StockScore) {
     val tally: CallTally = score.tally
     val thin = tally.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
     SheetSection {
-        SectionLabel("When this stock is recommended")
+        SheetSectionLabel("When this stock is recommended")
         // Nested, not disjoint, and read exactly as the channel cards' headline is read: reached
         // target 1 on the first figure, ran the whole way on the second.
         Text(
@@ -659,7 +659,7 @@ private fun StockSheetRecord(score: StockScore) {
 @Composable
 private fun StockSheetTrades(trades: List<PositionView>, onOpen: (String) -> Unit) {
     SheetSection {
-        SectionLabel("Your trades")
+        SheetSectionLabel("Your trades")
         trades.forEach { view ->
             Row(
                 Modifier
@@ -719,7 +719,7 @@ private fun StockSheetCalls(calls: List<ScoredCall>, onOpen: (String) -> Unit) {
     var all by remember(calls) { mutableStateOf(false) }
     val shown = if (all) calls else calls.take(CallsShown)
     SheetSection {
-        SectionLabel("Every call on it")
+        SheetSectionLabel("Every call on it")
         shown.forEach { call ->
             Row(
                 Modifier
@@ -915,40 +915,6 @@ private fun StockSheetActions(call: ScoredCall, latest: LatestPrice?, appState: 
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-}
-
-/**
- * One band of the scroll, on the cards' own surface.
- *
- * The sections were divided by rules and read as one long column that happened to have lines in it.
- * A card each is what the rest of the app uses to say "this is one thing", and it is what lets the
- * heading of a section sit inside the thing it heads rather than floating above the gap.
- */
-@Composable
-private fun SheetSection(content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-        border = cardOutline,
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Column(
-            Modifier.padding(Space.m),
-            verticalArrangement = Arrangement.spacedBy(Space.xs),
-            content = content,
-        )
-    }
-}
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 }
 
 /** What a stock did between its last two stored sessions, and which one it moved from. */

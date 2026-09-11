@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -1589,3 +1590,74 @@ private val MoreButtonSize = 40.dp
 
 /** Enough to read as floating over a card without the card showing through it. */
 private val MenuShadow = 8.dp
+
+/**
+ * One band of a sheet's scroll, on the cards' own surface.
+ *
+ * The stock sheet's sections were divided by rules and read as one long column that happened to
+ * have lines in it; a card each is what the rest of the app uses to say "this is one thing", and it
+ * is what lets the heading of a section sit inside the thing it heads rather than floating above
+ * the gap. It lives here rather than beside either sheet because two sheets now draw it - the stock
+ * sheet and the occurrence sheet - and a card shape spelled twice is two that agree until one is
+ * adjusted.
+ *
+ * Not [SectionCard], which is a page's card: that one carries an icon tile, an accent edge and a
+ * title in the page's own hue, and a sheet is raised over a page rather than on one - see
+ * **A hue per page**.
+ */
+@Composable
+internal fun SheetSection(content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        border = cardOutline,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(
+            Modifier.padding(Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.xs),
+            content = content,
+        )
+    }
+}
+
+/** What a [SheetSection] is called, in the key style every label over a figure already uses. */
+@Composable
+internal fun SheetSectionLabel(text: String) {
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * What a call risks against what it seeks, drawn as a length rather than a number to divide.
+ *
+ * Built for the table's own risk column and now drawn on the occurrence sheet as well, which is the
+ * one surface where a single call is the whole subject: 1 : 3.0 is arithmetic, and two segments are
+ * a proportion the eye reads without doing any.
+ *
+ * Clamped off both ends so a lopsided call still draws two segments: at 1 : 20 the risk side rounds
+ * to nothing, and a bar that is entirely one colour says "no risk" rather than "little". Only ever
+ * drawn where the ratio is real - an empty track under a dash would be a proportion made out of
+ * levels the source never printed.
+ */
+@Composable
+internal fun RiskRewardBar(ratio: Double, modifier: Modifier = Modifier) {
+    val riskShare = (1.0 / (1.0 + ratio)).coerceIn(0.08, 0.92).toFloat()
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(RiskBarHeight)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)),
+    ) {
+        Box(Modifier.weight(riskShare).fillMaxHeight().background(PriceRole.stop))
+        Box(Modifier.weight(1f - riskShare).fillMaxHeight().background(PriceRole.target))
+    }
+}
+
+private val RiskBarHeight = 4.dp

@@ -351,7 +351,7 @@ private fun StockHeader(
  * cannot be turned off.
  */
 @Composable
-private fun CallMenu(
+internal fun CallMenu(
     stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     channel: String?,
@@ -409,7 +409,7 @@ private fun CallMenu(
  * session a call is for is the thing that actually differs between two rows of the same stock.
  */
 @Composable
-private fun TimingChip(point: RecommendationDataPoint) {
+internal fun TimingChip(point: RecommendationDataPoint) {
     // Falls back to the signal only when the model recorded no basis at all, so the chip is
     // never blank.
     val label = timing(point) ?: point.recommendationType?.uppercase() ?: "-"
@@ -440,9 +440,12 @@ private fun TimingChip(point: RecommendationDataPoint) {
  * rather than one shape repeated. Fixed slots mean a card can be read down as well as across, and
  * the market levels always land last. Each row pairs the levels that are read against one another
  * - the entry with the stop it risks, then the two targets it is aiming at - which is how the
- * portfolio card already sets a held position out. The table, the occurrence sheet and the export
- * still print left to right in their own order; a card is looked at one at a time, and this is the
- * pairing that reads there.
+ * portfolio card already sets a held position out. The table and the export still print left to
+ * right in their own order, because both are read down a column; **the occurrence sheet draws this
+ * grid**, and did not until 2026-09-11 - it flowed six figures at whatever width they happened to
+ * print, which left Resistance stranded on a line of its own. A sheet is the one surface where a
+ * single call is the whole subject, so if this pairing reads on a card being scanned it reads
+ * there.
  *
  * Every slot is drawn whether or not the source filled it: a card whose rows move depending on what
  * the channel happened to publish is the thing this layout exists to stop, and a dash says "no
@@ -453,15 +456,15 @@ private fun TimingChip(point: RecommendationDataPoint) {
  * reason that stop is where it is, and that only reads when the two are a glance apart.
  */
 @Composable
-private fun LevelGrid(point: RecommendationDataPoint) {
+internal fun LevelGrid(point: RecommendationDataPoint) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         LevelPair(
             { Level("Entry", entryText(point), PriceRole.entry, it) },
-            { Level("Stop loss", figure(point.stopLoss, point.riskPct), PriceRole.stop, it) },
+            { Level("Stop loss", levelText(point.stopLoss, point.riskPct), PriceRole.stop, it) },
         )
         LevelPair(
-            { Level("Target 1", figure(point.target1, returnPct(point, point.target1, point.returnTp1Pct)), PriceRole.target, it) },
-            { Level("Target 2", figure(point.target2, returnPct(point, point.target2, point.returnTp2Pct)), PriceRole.target, it) },
+            { Level("Target 1", levelText(point.target1, targetReturn(point, point.target1, point.returnTp1Pct)), PriceRole.target, it) },
+            { Level("Target 2", levelText(point.target2, targetReturn(point, point.target2, point.returnTp2Pct)), PriceRole.target, it) },
         )
         // Plain, with no percentage beside them. The other four are distances from the entry, which
         // is what a percentage measures here; a support is simply a price the stock has held at.
@@ -559,7 +562,13 @@ private fun OccurrenceDetail(
     }
 }
 
-private fun entryText(point: RecommendationDataPoint): String {
+/**
+ * The buy band as one string, or the single price where the source printed one.
+ *
+ * Internal because the occurrence sheet kept its own copy of this until 2026-09-11, and two
+ * functions printing one call's entry are two that agree until somebody changes the dash.
+ */
+internal fun entryText(point: RecommendationDataPoint): String {
     val low = point.buyPriceLow
     val high = point.buyPriceHigh
     return when {
@@ -569,15 +578,21 @@ private fun entryText(point: RecommendationDataPoint): String {
 }
 
 /** A price with its percentage, or the dash where the source gave no such level at all. */
-private fun figure(value: Double?, percent: Double?): String =
+internal fun levelText(value: Double?, percent: Double?): String =
     if (value == null || percent == null) {
         formatPrice(value)
     } else {
         "${formatPrice(value)}  (${formatPercent(percent)})"
     }
 
-/** What a source printed against a target, or what the entry implies where it printed nothing. */
-private fun returnPct(point: RecommendationDataPoint, target: Double?, stated: Double?): Double? =
+/**
+ * What a source printed against a target, or what the entry implies where it printed nothing.
+ *
+ * The occurrence sheet read `returnTp1Pct` and `returnTp2Pct` straight until 2026-09-11, so the
+ * card showed a percentage beside a target and the sheet showed the bare price - two readings of
+ * one call, differing only on whether the channel had happened to print the figure.
+ */
+internal fun targetReturn(point: RecommendationDataPoint, target: Double?, stated: Double?): Double? =
     stated ?: impliedReturn(point, target)
 
 /** Entry midpoint to target, so a card shows the upside even when the source never printed it. */

@@ -12,13 +12,11 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material3.HorizontalDivider
@@ -34,7 +32,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -67,8 +64,8 @@ import com.ikverse.egxanalyzer.model.RecommendationDataPoint
  *
  * What is left of a fixed width is [SourceWidth] and [ChevronWidth]; every figure column is
  * weighted, so a wider window widens the columns rather than adding more of them. See
- * [RiskColumnMinWidth] for the one thing extra width does add, and why that is not the old mistake
- * in a new place.
+ * [LevelColumnsMinWidth] for the one thing extra width does add, and why that is not the old
+ * mistake in a new place.
  */
 @Composable
 internal fun RecommendationTable(
@@ -114,7 +111,7 @@ internal fun RecommendationTable(
                 pin = (viewportTop - top).coerceIn(0f, max(0f, height - pinnedHeight))
             },
     ) {
-        val wide = maxWidth >= RiskColumnMinWidth
+        val wide = maxWidth >= LevelColumnsMinWidth
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             toolbar?.let {
                 // Opaque and full width, because it slides across the blocks rather than pushing
@@ -142,20 +139,34 @@ internal fun RecommendationTable(
 }
 
 /**
- * Where risk to reward stops being a caption and becomes a column.
+ * Where the two levels stop being a footnote and become columns.
  *
- * The figure is on every row at every width - it is the entry cell's second line below this, its
- * own column above it - so nothing appears or disappears as a window changes size. That is the
- * distinction from the breakpoint this replaced: extra width buys the same row more room to say
- * what it was already saying, and never a figure the narrower screen was denied.
+ * Nothing the narrower screen had is taken away to pay for them: risk to reward is the entry cell's
+ * second line at every width now, and support and resistance stay on [ContextLine] under any row
+ * too narrow to column them. A window that shrinks moves figures rather than dropping them, which
+ * is the distinction from the breakpoint this table was built to replace - extra width buys the
+ * same row more room, never a figure the smaller screen was denied.
  *
- * 656dp is where [SourceWidth] + [ChevronWidth] plus five weighted cells clears the tablet's 682dp
- * with room to grow: the 500dp left over divides into 89dp per share, so entry takes 143dp at
- * [EntryWeight] and the four single-share columns take 89dp each - more than a six-character price
- * needs at either of the row's two type sizes. The Fold's 614dp lands under it, which is the
- * intended split: four columns there, five on the tablet and the emulator.
+ * **The line is phone against large screen, and nothing finer.** At 656dp it fell between the
+ * unfolded Fold's 614dp of container and the tablet's 682dp, so the same report drew six figure
+ * columns on one big screen and four on the other - a split no reader asked for and none could
+ * predict, since the two screens are a hinge apart and show the same app. The app has one idea of
+ * a large window, `WIDE_LAYOUT_DP`, and both clear it; this is the container-side reading of the
+ * same idea, so whatever the tablet draws the Fold's inner screen draws too.
+ *
+ * 600dp of container is about 736dp of window once the rail and three insets are out, so the Fold's
+ * 750dp clears it and nothing phone-sized comes near. The row spends [Space].m either side,
+ * [SourceWidth] and [ChevronWidth], and divides what is left over 6.6 shares at [EntryWeight]: the
+ * Fold's 614dp gives 66dp a share, so entry takes 105dp and each single-figure column 66dp - 58dp
+ * of text inside [Space].xs on either side, where the longest price the row draws is six characters
+ * of 14sp mono at roughly 50dp. The tablet's 682dp gives 76dp a share. Below this it is `Resistance`
+ * that goes first, the one header longer than its column's figures are.
+ *
+ * It reads as the same number as the page's own `TableMinWidth` and is not: that one is measured on
+ * the page, outside the report card's insets, so by the time it reaches here the width has already
+ * lost them. A window that only just earns a table is still drawn with four figure columns.
  */
-private val RiskColumnMinWidth = 656.dp
+private val LevelColumnsMinWidth = 600.dp
 
 /** The channel and its timing chip. The one column that holds words rather than figures. */
 private val SourceWidth = 132.dp
@@ -297,7 +308,10 @@ private fun ColumnHeader(wide: Boolean) {
         HeaderLabel("Target 1", Modifier.weight(1f), TextAlign.End)
         HeaderLabel("Target 2", Modifier.weight(1f), TextAlign.End)
         HeaderLabel("Stop", Modifier.weight(1f), TextAlign.End)
-        if (wide) HeaderLabel("Risk / reward", Modifier.weight(1f), TextAlign.End)
+        if (wide) {
+            HeaderLabel("Support", Modifier.weight(1f), TextAlign.End)
+            HeaderLabel("Resistance", Modifier.weight(1f), TextAlign.End)
+        }
         Spacer(Modifier.width(ChevronWidth))
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -306,9 +320,8 @@ private fun ColumnHeader(wide: Boolean) {
 /**
  * A column's name, which shrinks with the same rule its figures do.
  *
- * `Risk / reward` is the one header longer than the column it names is guaranteed to be, and a
- * header reading `Risk / rew…` is a column whose meaning has to be guessed at from the figures
- * under it.
+ * `Resistance` is the one header longer than the column it names is guaranteed to be, and a header
+ * reading `Resistan…` is a column whose meaning has to be guessed at from the figures under it.
  */
 @Composable
 private fun HeaderLabel(label: String, modifier: Modifier, align: TextAlign) {
@@ -354,16 +367,20 @@ private fun CallRow(
                 Modifier.weight(EntryWeight),
                 value = entry(point),
                 tone = PriceRole.entry,
-                // Below the risk column's width this is where risk to reward lives, so the figure
-                // is on the row at every size. It reads as a caption to the entry rather than as a
-                // figure of its own, which is what it is: a ratio measured from the price paid.
-                sub = if (wide) null else riskReward(point),
+                // Where risk to reward lives at every width now, rather than only below the
+                // breakpoint it used to have a column above. It reads as a caption to the entry
+                // rather than a figure of its own, which is what it is: a ratio measured from the
+                // price paid.
+                sub = riskReward(point),
                 subTone = PriceRole.muted,
             )
             TargetCell(Modifier.weight(1f), point, point.target1, point.returnTp1Pct)
             TargetCell(Modifier.weight(1f), point, point.target2, point.returnTp2Pct)
             StopCell(Modifier.weight(1f), point)
-            if (wide) RiskRewardCell(Modifier.weight(1f), point)
+            if (wide) {
+                LevelCell(Modifier.weight(1f), point.support)
+                LevelCell(Modifier.weight(1f), point.resistance)
+            }
             Icon(
                 Icons.AutoMirrored.Outlined.KeyboardArrowRight,
                 contentDescription = null,
@@ -371,7 +388,7 @@ private fun CallRow(
                 modifier = Modifier.width(ChevronWidth).height(IconSize.Inline),
             )
         }
-        if (showContext) ContextLine(point)
+        if (showContext) ContextLine(point, levelsInColumns = wide)
     }
 }
 
@@ -497,66 +514,44 @@ private fun StopCell(modifier: Modifier, point: RecommendationDataPoint) {
 }
 
 /**
- * What the call risks against what it seeks, and the shape of it.
+ * A level the chart says the price has trouble getting through.
  *
- * The figure the table never carried. It is on the recommendation card and in the occurrence sheet
- * and it is the context a target cannot be read without - 90% at 0.3 to 1 is a losing source - so
- * the extra width a big screen has goes here rather than into Support and Resistance, which the old
- * column list itself described as not what you look at to judge a call.
+ * The two figures the extra width goes to, in place of the risk to reward column and its bar.
+ * Neither is the call's to make - a channel does not decide where a stock has been turned back, it
+ * reads it off - so both are drawn in [PriceRole.market], the hue that already means a price the
+ * market set rather than one the source chose. Entry, target and stop keep their three hues for the
+ * levels that are decisions, which is the distinction the rest of the row is built on.
+ *
+ * One line and no second figure under it, so a support cannot be taken for a price with its
+ * percentage beneath. The column head is the only label either of them needs.
  */
 @Composable
-private fun RiskRewardCell(modifier: Modifier, point: RecommendationDataPoint) {
-    val ratio = point.riskRewardRatio()
-    Column(
-        modifier.padding(horizontal = Space.xs),
-        horizontalAlignment = Alignment.End,
-        verticalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        AutoSizeText(
-            ratio?.let { "1 : ${"%.1f".format(it)}" } ?: Dash,
-            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
-            color = if (ratio == null) PriceRole.muted else PriceRole.entry,
-            textAlign = TextAlign.End,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        // A length rather than a number to divide in the head, which is the one thing a wide screen
-        // can give a table that a narrow one cannot. Only where the ratio is real: an empty track
-        // under a dash would draw a proportion out of levels the source never printed.
-        ratio?.let { RiskRewardBar(it) }
-    }
+private fun LevelCell(modifier: Modifier, level: Double?) {
+    AutoSizeText(
+        formatPrice(level),
+        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
+        color = if (level == null) PriceRole.muted else PriceRole.market,
+        textAlign = TextAlign.End,
+        modifier = modifier.fillMaxWidth().padding(horizontal = Space.xs),
+    )
 }
-
-@Composable
-private fun RiskRewardBar(ratio: Double) {
-    // Clamped off both ends so a lopsided call still draws two segments: at 1 : 20 the risk side
-    // rounds to nothing, and a bar that is entirely one colour says "no risk" rather than "little".
-    val riskShare = (1.0 / (1.0 + ratio)).coerceIn(0.08, 0.92).toFloat()
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(BarHeight)
-            .clip(RoundedCornerShape(percent = 50))
-            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)),
-    ) {
-        Box(Modifier.weight(riskShare).fillMaxHeight().background(PriceRole.stop))
-        Box(Modifier.weight(1f - riskShare).fillMaxHeight().background(PriceRole.target))
-    }
-}
-
-private val BarHeight = 4.dp
 
 /**
- * Support, resistance and the two dates, on one muted line under the row that owns them.
+ * The two dates, and the two levels on any row too narrow to column them.
  *
  * A line rather than four columns, so the toggle can never put the table back into the sideways
  * scroll this rebuild exists to end. Absent labels are dropped rather than drawn as dashes: this is
  * an aside, and an aside made mostly of em dashes is noise under every row in the report.
+ *
+ * Support and resistance leave the line as soon as [LevelCell] draws them, which is the only thing
+ * width decides here. A figure printed twice on one row teaches the reader that the two are
+ * different figures and sends them looking for the difference.
  */
 @Composable
-private fun ContextLine(point: RecommendationDataPoint) {
+private fun ContextLine(point: RecommendationDataPoint, levelsInColumns: Boolean) {
     val parts = listOfNotNull(
-        point.support?.let { "Support ${formatPrice(it)}" },
-        point.resistance?.let { "Resistance ${formatPrice(it)}" },
+        point.support?.takeIf { !levelsInColumns }?.let { "Support ${formatPrice(it)}" },
+        point.resistance?.takeIf { !levelsInColumns }?.let { "Resistance ${formatPrice(it)}" },
         point.date?.let { "Target date $it" },
         point.visibleSourceDate?.takeIf(String::isNotBlank)?.let { "Source date $it" },
     )
