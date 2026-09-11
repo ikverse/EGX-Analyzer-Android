@@ -93,6 +93,9 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   apart from the chunking because a source read by an earlier run keeps its number and is not sent.
   See **What a run sends, and what it does not send twice** below.
 - `data/ConsolidatedParser.kt` — the model's JSON into `ConsolidatedRecommendation`.
+- `model/RecommendationEdit.kt` + `ui/EditCallSheet.kt` — correcting what the model misread off a
+  screenshot, as an overlay on the report rather than a rewrite of its answer. See **Correcting a
+  misread call** below.
 - `model/Scoring.kt` — how a call is judged. See below.
 - `data/IntradayRepository.kt` — five-minute bars for the sessions daily figures cannot order,
   hourly bars for the stocks no daily feed carries at all, and the kept archive below. See below.
@@ -1554,7 +1557,9 @@ levels the channel printed are worth. The answer comes back in Arabic and is kep
   levels, so an opinion on one is not an opinion on the other — where a holding is one holding
   however many sources called it.
 - **Deleting the report deletes its opinions**, on all three paths and on a report another device
-  buried. `ScoredCall.requestId` exists for this and only this. `deleteResult(id)` has to read the
+  buried. **Correcting a call's ticker or its session deletes that call's opinion too**, for a
+  sharper reason than orphaning: the answer is about the other company. See **Correcting a misread
+  call**. `ScoredCall.requestId` exists for this and only this. `deleteResult(id)` has to read the
   request id back *before* the row goes — the opinions are keyed on the request id, and doing it the
   other way round is a cascade that deletes nothing while looking correct, which
   `StockOpinionStoreTest` covers on both paths.
@@ -1627,6 +1632,118 @@ runs on, and fitted the bigger ones worst.
   translates by how far the table's top has passed the viewport's, clamped inside the table's own
   height, so it never hangs over the next card. It carries the report card's own fill because that
   is what it slides across.
+
+## Correcting a misread call
+
+The model reads tickers and levels off channel screenshots and gets one wrong from time to time — a
+transposed code, a decimal in the wrong place, a stop picked up from the card above. The only remedy
+used to be deleting the report and paying to run it again, which throws away every other call in it
+to fix one. `Edit call`, in the ⋮ the recommendation card already carries, is that remedy.
+
+- **It is an overlay and deliberately not a rewrite**, and that follows from a fact easy to miss: a
+  report's stocks are **not stored**. They are re-parsed from the model's `rawResponse` every time
+  the report is read, so an edit written into the parsed object vanishes on the next read, and an
+  edit written into `rawResponse` destroys the one record of what the model actually said.
+  `RecommendationEdits.apply` runs straight after `ConsolidatedParser.parse` in
+  `LocalDataStore.toAnalysisResult`, which buys three things at once: every screen picks the
+  correction up with **no change of its own** — the cards, the table, the spreadsheet export, every
+  rate on Insights, the alerts and which tickers the price feed is asked about all derive from that
+  one list — the model's answer survives, so undoing is always available, and deleting the report
+  takes its corrections with it, because they live in its payload.
+- **In the payload, not a table of its own**, so there is no schema bump and no migration — and the
+  payload is edited **in place as JSON** rather than decoded and written out again, so every key a
+  later version added survives the write. Only two of them move: the list of corrections, and
+  `editRevision`.
+- **Anchored on the parse, not on the screen.** `originalStockCode` is the code the model read — not
+  the corrected one, which is the thing being changed, and filing under it would mean a correction
+  could never be found again to be undone — and `pointIndex` is the occurrence's position in that
+  stock's *parsed* list. The screen filters occurrences by timing and by channel before drawing
+  them, so the index a card sits at is a fact about the filter; `RecommendationDataPoint.parseIndex`
+  carries the right one onto the card, assigned after every drop the parse makes.
+- **A fingerprint decides whether it still fits.** A newer prompt can return a different reading of
+  the same response, and the slot an edit was filed against may now hold another occurrence
+  entirely. `editFingerprint` is checked before the overlay is applied, and a mismatch **drops the
+  edit** rather than applying it blind — the call reads as the model left it, which is visible and
+  recoverable, where a silently rewritten one is neither. It is checked a second time in
+  `CallEditor.editFor`, so the `Edited` chip can never mark a card that is showing the model's own
+  figures.
+- **Emptying a field and saying nothing about it are different acts.** `EditField` in `cleared` is
+  the first; a null is the second. The model inventing a target that is not on the card is as common
+  as it misreading one, so without the distinction the reader could only ever change a figure and
+  never delete one. Clearing both halves of the entry band takes `buy_price` with it, or a single
+  price the model returned survives through `buyPriceLow ?: buyPrice` and the deletion looks as if
+  it failed.
+- **Names are re-derived, never carried.** The parse names a stock through `EgxCatalog.namesFor`, so
+  a correction that moved the code and kept the names would print the right ticker over the wrong
+  company — a card that agrees with itself and is wrong, which is worse than either mistake alone.
+  `model` may not reach `data`, so the catalog is passed in as a lambda.
+- **The percentages are recomputed** through `returnFrom`, the same basis the scorer measures a
+  return from. The model returns them and both the card and the spreadsheet print what is stored, so
+  a corrected target beside an uncorrected percentage would be two numbers on one card that
+  contradict each other.
+
+### What a correction has to be followed through by hand
+
+Everything derived from the extraction comes right on the next recompute. `editRecommendation` in
+`LiveAppState` exists for the four things that are **copies taken at some earlier moment**.
+
+- **The AI opinion is deleted rather than re-filed.** `opinionId` is ticker, session and channel, so
+  a corrected ticker orphans it — but re-keying it would be worse than losing it. The answer is
+  about the wrong company: it read that company's news, rated that company's levels and forecast
+  that company's next three months. It is wrong, not misfiled.
+- **A trade is re-keyed, and only when the reader asks.** `positionId` is derived from the ticker and
+  the session, so a corrected ticker cannot leave the trade where it is: the new row is written and
+  the old one **buried**, the way every removal already travels, and `position_status_seen` and
+  `position_approach_seen` are dropped because both are keyed on the id that just moved. Behind an
+  explicit checkbox because it is the only part of this that touches money, and the reader may have
+  bought the stock the model named rather than the one on the card. It also brings the trade's
+  **copied levels** up to date — a trade snapshots them so that re-running an analysis cannot move a
+  trade already taken, and a correction is the one case that rule was not written for.
+- **The stored reading is dropped**, and this is the root rather than a symptom. A run writes down
+  what it read of each message so the next one need not pay to read it again, and that reading still
+  carries the wrong ticker; left alone, tomorrow's run adopts the same misread **for free** and puts
+  it back into a fresh report with nothing on screen to say why. Only the message the occurrence was
+  read out of, and every source carrying that message — a caption and the photos under it are one
+  card, and forgetting one of them would have the next run adopt the mistake from the source beside
+  it.
+- **Prices are refreshed**, so the corrected ticker has a history to be scored on. Free: the same
+  public feed the Fetch prices button reads. Silent, because the reader asked for a correction
+  rather than for a fetch.
+
+**Frozen verdicts need nothing, and pruning them would be wrong.** `settledKey` is a fingerprint of
+the ticker, the levels and the window, so a corrected call asks under a key that has never been
+written and is scored from scratch; the row left behind names a call nothing will ask about again.
+Clearing by ticker — the only cheap way to find it — would take the verdicts of every *other* call
+on that stock with it.
+
+**One consequence is named and not prevented.** `PerformanceCalculator.callsByChannel` keeps one
+call per stock per channel and drops the rest, so correcting a code to one already in the report
+from the same chat quietly costs a call on Insights. Both readings may genuinely be right and
+merging them would invent a call neither channel made — so `CallEditor.clashFor` says so in the
+sheet instead, above the Save button, with every other consequence.
+
+### Where it is reached from
+
+- **The ⋮ on the recommendation card**, under `Copy call`, plus `Undo all edits` once the report
+  carries any. Not the occurrence sheet alone: that sheet opens from the **table**, and the table is
+  not drawn at all below 600dp of container — which is every phone in portrait, and so most of the
+  time this is used. The sheet has its own entrance to the same `CallEditor`.
+- **The consequences are stated before the press, not after it.** Deleting an opinion and re-keying
+  a trade are not things to discover afterwards, so the block above the buttons names them and the
+  trade is named by the price and the day it was bought on.
+- **The ticker is a picker over `EgxCatalog.entries()`**, searched through `StockSearch` across the
+  code and both names, filling both names when a row is chosen. Free text is still accepted — a
+  listing this build's catalog has never heard of is a real thing and refusing it would make a new
+  listing uncorrectable — but it says so, because an unknown code is also what a typo looks like and
+  it will not price. `AppState.stockCatalog` is how it reaches `ui`, which imports nothing from
+  `data`.
+- **Every changed field shows what the model read underneath it**, in the muted grey a derived figure
+  already wears, with a press that puts that one field back. That is also the "what changed" view;
+  there is no second panel for it.
+- **The session a whole report is for is not editable.** The occurrence's own `date` is, and usually
+  decides nothing — a call is dated by the session the run was aimed at and this is only read where
+  that is absent. Moving the report's own target date would move every call in it at once, which is
+  a different and much larger act.
 
 ## Exporting a report to Excel
 
@@ -1733,6 +1850,11 @@ app's storage was holding a file nothing on earth could do anything with.
   preserved, and letting last week's moment remove a trade recorded yesterday would make this
   dangerous to press. Somebody opens a backup because something is missing, and the one outcome they
   must never get is more missing. Deletes go on travelling through the channel.
+- **A correction in a backup counts as something this device is missing.** `runsToRestore` compares
+  `editRevision` rather than only the id, so a backup carrying a newer correction of a report this
+  device already holds is taken — both sides holding the report by id alone would have left it in
+  the file for ever, which is exactly the case someone opens a backup to fix. A revision at or below
+  the one held is never taken, so this cannot roll a correction back and the rule above is intact.
 - **A report this device buried but has not yet published is not restored either.** That delete is a
   decision already taken and still in flight, and restoring over it would leave a tombstone about to
   be published for a report sitting on disk again.
@@ -1851,7 +1973,24 @@ are rows now — shipped, visible, switchable, not deletable — and users add t
 
 Everything travels through a private Telegram channel titled `EGX Analyzer sync`.
 
-- Reports are append-only: a saved run never changes, so syncing them is a union.
+- **A run's extraction is append-only; what the reader has corrected in it is not.** Syncing used
+  to be a plain union on exactly that reasoning — a saved run never changes, so the only question
+  was who was missing it. Correcting a misread call made a stored run mutable for the first time,
+  so reports now carry an `editRevision` and the newest one wins: a report both sides hold at
+  different revisions travels from whichever holds the newer one, and equal revisions still move
+  nothing, which keeps the ordinary case free. A **delete outranks a correction**, or a higher
+  revision would drag a buried report back.
+- **The revision is in the file name, so deciding costs no downloads.** `<requestId>.json` for a
+  report nobody has corrected — the name every report already in a channel was uploaded under, so
+  nothing had to be moved — and `<requestId>-r<n>.json` once it has been. `SyncedRun.requestIdOf`
+  strips the suffix, so every revision of one report is recognised as that report rather than as
+  several strangers. A request id is a UUID and carries plain hyphens, which is why the suffix is
+  `-r<digits>` from the **last** mark rather than anything a hyphen alone could match.
+- **`adoptResult` overwrites only on a strictly higher revision**, and only the payload:
+  `source_reads` is this device's own cache of what it read out of each message, keyed by the
+  prompt rather than by the report, and is nobody else's to replace. Burying a report deletes
+  **every** revision of it in the channel — leaving an earlier copy behind would let another device
+  download it and bring the report back under the tombstone's nose.
 - **Publishing is automatic.** A finished run and every change to a position upload themselves in
   the background through `AppState.publish`, so another device only ever has to pull. Failures are
   swallowed on purpose: the record is already on disk and the next sync's diff carries it, and an
@@ -3085,6 +3224,43 @@ parameter being threaded anywhere. Added 2026-09-08.
   floating edge in the app, gradient or not — the bar sits directly under the action on a compact
   screen, and an edge thicker on one of them would read as the two not matching rather than as one
   of them being the control. The colour is what separates them.
+- **Every pill in the app is one shape and one of two heights**, `PillShape` and `LabelPillHeight`
+  / `PillHeight` in `DesignSystem.kt`. Before 2026-09-11 they were all `CircleShape` at whatever
+  height their own padding produced, which is what the owner reported as pills "too rounded" and
+  "different sizes in one card": a capsule is a shape nothing else on a screen of 14dp cards makes,
+  and a height derived from padding moves with the text, the font scale and whoever wrote that
+  particular chip. Six families had grown - the ring on a card, the button on a card, the EGX 33
+  badge, the stock sheet's filled flags and two chips spelled inline in the table - across four
+  corners and five heights. They are one now: **6dp**; **20dp** for anything only read, with the text
+  centred in a fixed box rather than propping it open; **32dp** for anything pressed, where the extra
+  12dp is the fingertip. **The 6 is not a free number and 8 was tried first.** `CircleShape` takes
+  half the *shorter* side, so the capsule on a 20dp pill was already only a 10dp corner - 8dp moved
+  every label pill by two, shipped, and looked identical on the device, while making the EGX 33 badge
+  *rounder* than the 4dp it had. 6dp is the largest corner that visibly cuts a 20dp pill. `OutlinePill` is the ring and
+  `FilledPill` is the block of colour, and both draw one `PillLabel`, so a pill's padding and type
+  cannot be restated anywhere. **What stays round is round by nature** and not by drift: avatars,
+  logos, the empty state's glyph, the navigation indicator, the header's search field, `DayChip`
+  (a seven-across day toggle) and `RiskRewardBar` (a bar, not a pill).
+- **A card says its pills in one place.** The position card drew the status chip in the header and
+  the rest of them a block lower down, and the call card stacked Edited over Timing in the top-right
+  corner - against a name block three or four lines tall, so the one annotation every call card
+  carries floated at the very top aligned with nothing: not the ticker's line, not the menu beside
+  it, not a figure underneath. Both cards are now the same shape - identity on the left of the
+  header, the menu on its right, every pill on one row beneath it, starting at the card's own inset
+  so it lines up with the ticker above and `ENTRY` below. The status chip leads the position card's
+  row (which is unconditional now, since a status is always there to say). No fact was added or
+  removed by either move. The call card's own regroup was missed on the first pass and reported on
+  2026-09-11 as pills "at the very top of the card, not aligned, placed randomly".
+- **The EGX 33 badge is deliberately outside `PillShape`**, and was folded in once and had to come
+  back out the same day. It is a 4dp square because round its outline sits concentric with the star
+  inside it and the pair reads as a settings cog; the shared 6dp made it rounder than the 4dp it had
+  and it read as a gear on the device within the hour. The pill rule is about labels, and this
+  carries no wording.
+- **T+1 is neutral, like every other note pill.** It was `primary` in all three places that draw it -
+  the call card, the position card, Insights - on the reasoning that it is neither a verdict nor a
+  warning and so may take the app's own voice. True, and not a reason to be the one differently
+  coloured ring in a row of them; the wording already says the call named its own deadline. Asked
+  for on 2026-09-11. It is still tappable in the two places it explains itself.
 - **A button on a card is one of two things, and its colour says which.** `ActionPill` in
   `CommonUi.kt` is anything that changes the record — Bought, Sold, Keep open — as a `PillHeight`
   ring in the app's own `primary` at half strength. `DisclosureButton` is anything that only opens
@@ -3240,6 +3416,30 @@ parameter being threaded anywhere. Added 2026-09-08.
   card it was written for was never a general primitive, and a public helper nobody calls is read as
   the house answer by whoever needs the next one. Deleting it also takes a `SubcomposeLayout` back
   out of a pane `alignHeights` has to measure — see the crash above, whose rule stands without it.
+- **A `remember` keyed on `saved.id` goes stale now that a report's contents can change.** A
+  report's id never changes, and until corrections existed nothing else about a report ever changed
+  either, so keying the parsed stocks on the id alone was correct for as long as it was written.
+  The first correction made a stored run mutable and the report went on drawing the stocks as the
+  model first read them — while **Insights showed the fix**, because it rebuilds from the record on
+  every recompute, and leaving the screen fixed it, because that disposed the memo. Anything in
+  `ResultDetail` derived from a report's *contents* is keyed on `saved.result.editRevision` as well
+  as its id: the stocks, the channel names, and the timing and channel option lists. The revision
+  rather than `saved` itself, so it is an integer comparison per recomposition rather than a deep
+  compare of every call in the run. **View state stays keyed on the id alone** — the search box, the
+  context toggle, the open filter panel — because those are about the reader rather than about the
+  report.
+- **A filter stores what is hidden, not what is shown**, for the same reason. Seeded once from the
+  report, a set of shown names cannot contain a value that did not exist when it was seeded — so
+  re-dating a card as Watching created a timing the filter had never heard of and the card the
+  reader had just corrected **vanished** instead of updating. Storing the exclusions gives both
+  halves: filters set on purpose survive a correction, and anything a correction creates is shown
+  because nobody ever chose to hide it. `narrowed` is still measured against what the report
+  actually offers, so an exclusion naming a timing the report no longer has lights nothing.
+- **A sheet holds an anchor, not the objects it was opened with.** `ResultDetail`'s occurrence sheet
+  captured the stock and the point it was opened with, so a correction made *from inside it* left it
+  drawing the figures that had just been replaced. It holds `(originalStockCode, parseIndex)` and
+  re-resolves on every recomposition — against the whole report rather than the filtered list, so a
+  filter can never close a sheet the reader has open.
 - **The two shells are two call sites, so no page may hold its own state.** `EgxAnalyzerApp` branches
   on `rail` around one `AppContent` for the rail and another for the pill, and again around
   `AnimatedContent` versus `DestinationPager`. Folding the phone flips `rail`, Compose disposes one

@@ -240,52 +240,55 @@ private fun StockHeader(
     editor: CallEditor?,
     onEdit: () -> Unit = {},
 ) {
-    // Top-aligned so the right-hand column starts level with the ticker rather than floating
-    // against the middle of however many name lines this stock happens to have.
-    Row(verticalAlignment = Alignment.Top) {
-        Column(Modifier.weight(1f)) {
-            // The logo rides the ticker's own line rather than sitting beside the whole column.
-            // Beside the column it left a hole under itself the height of the names below the
-            // ticker, and it pushed those names in past the ladder and the levels, which start at
-            // the card's edge - one card, two left edges. Here the names stay flush with them.
-            // The logo and the ticker press together as one target rather than the text alone:
-            // a 12sp glyph beside a headline is two touch targets where the reader sees one thing.
-            // See LocalOpenStock.
-            val openStock = LocalOpenStock.current
-            Row(
-                Modifier.clickable { openStock(stock.stockCode) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
-                Text(
-                    stock.stockCode,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
+    // A column, because the header is two things now: the identity row, and the card's own pills
+    // on a line under it. Space.s between them is what the card's own Column already puts between
+    // every other pair of blocks on it.
+    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        // Top-aligned so the menu and the dots start level with the ticker rather than floating
+        // against the middle of however many name lines this stock happens to have.
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f)) {
+                // The logo rides the ticker's own line rather than sitting beside the whole column.
+                // Beside the column it left a hole under itself the height of the names below the
+                // ticker, and it pushed those names in past the ladder and the levels, which start at
+                // the card's edge - one card, two left edges. Here the names stay flush with them.
+                // The logo and the ticker press together as one target rather than the text alone:
+                // a 12sp glyph beside a headline is two touch targets where the reader sees one thing.
+                // See LocalOpenStock.
+                val openStock = LocalOpenStock.current
+                Row(
+                    Modifier.clickable { openStock(stock.stockCode) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
+                    Text(
+                        stock.stockCode,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
+                }
+                // The Arabic name is the one printed in the source, so it is the reliable identity.
+                stock.stockNameArabic?.let {
+                    Text(it, style = MaterialTheme.typography.bodyMedium)
+                }
+                stock.stockNameEnglish?.takeIf { it != stock.stockCode }?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // Two cards for one stock can be identical apart from who said it.
+                channel?.takeIf(String::isNotBlank)?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
-            // The Arabic name is the one printed in the source, so it is the reliable identity.
-            stock.stockNameArabic?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium)
-            }
-            stock.stockNameEnglish?.takeIf { it != stock.stockCode }?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            // Two cards for one stock can be identical apart from who said it.
-            channel?.takeIf(String::isNotBlank)?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-        }
-        if (point != null) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (point != null) {
                 // Only where there is something to page through. One occurrence needs no map.
                 if (pageCount > 1) {
                     // Held in a box the height of the ticker's own line and centred in it, so the
@@ -297,31 +300,43 @@ private fun StockHeader(
                         Modifier.height(tickerLine),
                         contentAlignment = Alignment.Center,
                     ) {
-                        // Under the timing chip rather than below the card: the header already stands
-                        // two lines tall to keep names level, so this costs no height, and the chip is
-                        // exactly what differs between one occurrence and the next.
                         PageDots(page, pageCount)
                     }
-                    Spacer(Modifier.height(Space.xs))
+                    // The dots and the menu were flush against one another, which read as one control
+                    // wearing a label rather than as a hint standing beside a menu.
+                    Spacer(Modifier.width(Space.xs))
                 }
-                // Beside the timing chip rather than in place of it: what dated a call and whether
-                // anybody has corrected it are two different facts about the same card.
-                if (editor?.editFor(stock, point) != null) {
-                    EditedChip(onEdit)
-                    Spacer(Modifier.height(Space.xs))
-                }
+                // The ⋮ the position card has carried since it was built, arriving on the other card
+                // that holds a call. One item, because there is one thing to do with a call that the
+                // card cannot already do: get its numbers out of the app intact. A report exports as a
+                // spreadsheet, which is the right shape for a record and the wrong one for the four
+                // figures somebody is about to retype into an order ticket.
+                CallMenu(stock, point, channel, session, editor, onEdit)
+            }
+            }
+
+        // Every pill on this card, on one line under the header and starting at the card's own
+        // inset - level with the ticker above it and with ENTRY below it.
+        //
+        // They were stacked in the top-right corner, against a name block three or four lines tall,
+        // so the one annotation this card always carries floated at the very top of it aligned with
+        // nothing: not the ticker's line, not the menu beside it, not a single figure underneath.
+        // Reported 2026-09-11 as pills "at the very top of the card, not aligned, placed randomly".
+        // This is the shape the position card was given the same day - identity on the left of the
+        // header, the menu on its right, and every ring on one row beneath.
+        //
+        // Edited beside Timing rather than over it: what dated a call and whether anybody has
+        // corrected it are two different facts about the same card, and stacked the pill that is on
+        // every card sat under the one that is on almost none - so the card's own annotation moved
+        // a line whenever somebody corrected it.
+        if (point != null) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
+                if (editor?.editFor(stock, point) != null) EditedChip(onEdit)
                 TimingChip(point)
             }
-            // The pills and the button were flush against one another, which read as one control
-            // wearing a label rather than as a note standing beside a menu. Space.xs and not
-            // Space.s, because the button now carries 10dp of its own air on that side.
-            Spacer(Modifier.width(Space.xs))
-            // The ⋮ the position card has carried since it was built, arriving on the other card
-            // that holds a call. One item, because there is one thing to do with a call that the
-            // card cannot already do: get its numbers out of the app intact. A report exports as a
-            // spreadsheet, which is the right shape for a record and the wrong one for the four
-            // figures somebody is about to retype into an order ticket.
-            CallMenu(stock, point, channel, session, editor, onEdit)
         }
     }
 }
@@ -403,21 +418,16 @@ private fun TimingChip(point: RecommendationDataPoint) {
     // note about where a date came from was the largest object in the corner of the card and the
     // heaviest thing on a header whose figures are the point. A ring at 20dp says the same word.
     //
-    // T+1 takes the app's own voice, because it is the one label here that changes what the reader
-    // has to do - a trade taken on one is over the next session - and because Portfolio already
-    // draws exactly this pill in exactly this hue for exactly that fact. The rest are notes on
-    // where the date came from, and take the neutral ring every other note in the app wears.
-    val tone = if (point.isTPlusOne) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outline
-    }
-    val ink = if (point.isTPlusOne) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    OutlinePill(label, outline = tone, textColor = ink)
+    // Neutral, like every other note pill on this card. It was `primary` - the app's own voice,
+    // on the reasoning that a T+1 changes what the reader has to do - and that made one pill in
+    // the app a different colour from its neighbours for a reason none of them showed. The
+    // wording is what says this call names its own deadline; the hue was saying it twice, in a
+    // language the card spends on prices everywhere else. Asked for on 2026-09-11.
+    OutlinePill(
+        label,
+        outline = MaterialTheme.colorScheme.outline,
+        textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /**

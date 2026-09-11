@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Timeline
@@ -25,7 +24,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -396,14 +394,7 @@ private fun StockSheetChips(
 
 @Composable
 private fun StockChip(label: String, container: Color, content: Color) {
-    Surface(color = container, shape = RoundedCornerShape(ChipCorner)) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = content,
-            modifier = Modifier.padding(horizontal = Space.s, vertical = Space.xs),
-        )
-    }
+    FilledPill(label, container, content)
 }
 
 /**
@@ -1042,4 +1033,3 @@ private fun List<DailySession>.rangeMove(): Double? {
 /** Enough recent calls to see who has been saying what, before the list is asked to open. */
 private const val CallsShown = 5
 
-private val ChipCorner = 8.dp

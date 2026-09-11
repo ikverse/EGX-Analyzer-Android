@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.ScrollState
@@ -157,6 +158,56 @@ object Space {
  * is the kind of almost-aligned this scale exists to stop.
  */
 val PillHeight: Dp = 32.dp
+
+/**
+ * How tall a pill that is only read stands.
+ *
+ * A label pill used to be as tall as its padding happened to make it, which is why a card carrying
+ * three of them carried three heights: the ring around "T+1" closed tighter than the ring around
+ * "Price scale changed" the moment either one's text metrics moved, and at a larger font scale they
+ * separated further. Fixed here, the text is centred inside a known box instead of pushing it open,
+ * so every label on a card is one object repeated.
+ *
+ * 20dp, which is where those pills already sat - the ring hugs its word, and nothing on a card grew
+ * to make this agree. [Egx33Badge] came down to it instead.
+ *
+ * Not [PillHeight]: that is the height of something you press, and the extra 12dp is the fingertip,
+ * not the label. The two are deliberately the only two.
+ */
+val LabelPillHeight: Dp = 20.dp
+
+/**
+ * The corner every pill in the app is cut at.
+ *
+ * They were all `CircleShape` - a capsule, whatever the pill's height - and that is what read as
+ * "too round" inside cards drawn at 14dp: the fully rounded end of a ring is a shape the rest of
+ * the screen never makes.
+ *
+ * **It is 6dp and not 8, and the arithmetic is why.** `CircleShape` takes half the *shorter* side,
+ * so on a [LabelPillHeight] pill the capsule it replaced was already only a 10dp corner - 8dp moved
+ * it by two, which is nothing anybody can see, and the first pass at this shipped that and looked
+ * identical on the phone. At 6dp the pill is visibly cut; below that it stops reading as a pill at
+ * all. The 32dp buttons had further to come - 16dp to 6 - so one number serves both.
+ *
+ * The cost of leaving the theme's `small` behind is that this is now a radius of its own rather
+ * than a step on the shape scale. That is the trade: 8dp was on the scale and did nothing.
+ *
+ * Kept as a [Dp] beside the shape because one caller paints its own background rather than clipping
+ * to a shape, and a corner given twice in two units is a corner that drifts.
+ */
+val PillCorner: Dp = 6.dp
+
+/** [PillCorner] as a shape, which is what every pill but the painted one asks for. */
+val PillShape: Shape = RoundedCornerShape(PillCorner)
+
+/**
+ * The air between a pill's text and its own edge.
+ *
+ * Six, and not [Space.s]: a ring is drawn around one or two words and reads as a label only while
+ * it is close to them. At 8dp the box stood visibly off its text, which is the same fault as the
+ * height being loose - the pill looked like a container for something rather than a mark on it.
+ */
+val PillPaddingH: Dp = 6.dp
 
 /**
  * Three icon sizes, and no others.

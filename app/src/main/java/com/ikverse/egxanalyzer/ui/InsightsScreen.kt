@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Assessment
@@ -1610,16 +1609,25 @@ private fun CallContext(call: ScoredCall) {
  * them expired.
  *
  * Tappable and outlined like the outcome chip it sits under, for the reason [OutcomeLabel] gives:
- * a chip that is only sometimes tappable teaches nobody that it can be tapped. Drawn in `primary`,
- * the app's own voice, because it is neither a verdict nor a warning - the two things every other
- * hue on this card already means.
+ * a chip that is only sometimes tappable teaches nobody that it can be tapped. Neutral since
+ * 2026-09-11: it was `primary` on the reasoning that it is neither a verdict nor a warning, which
+ * is true and is not a reason to be the one differently coloured ring in a row of them.
  */
 @Composable
 private fun TimingLabel(call: ScoredCall) {
     if (!call.isTPlusOne) return
     var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
-    val tone = MaterialTheme.colorScheme.primary
-    OutlinePill("T+1", outline = tone, textColor = tone, onClick = { showing = true })
+    // Neutral, like every other note pill on this card. It was `primary` - the app's own voice,
+    // on the reasoning that a T+1 changes what the reader has to do - and that made one pill in
+    // the app a different colour from its neighbours for a reason none of them showed. The
+    // wording is what says this call names its own deadline; the hue was saying it twice, in a
+    // language the card spends on prices everywhere else. Asked for on 2026-09-11.
+    OutlinePill(
+        "T+1",
+        outline = MaterialTheme.colorScheme.outline,
+        textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        onClick = { showing = true },
+    )
     if (showing) {
         AlertDialog(
             onDismissRequest = { showing = false },
@@ -1720,8 +1728,8 @@ private fun PriceFeedButton(expanded: Boolean, onClick: () -> Unit) {
             // The card's own hairline, not a heavier one. Beside a filled pill that spends money
             // this is the quiet half of the row, and it should read as an outline of a control
             // rather than a second call to press something.
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-            .clip(CircleShape)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, PillShape)
+            .clip(PillShape)
             .clickable(onClick = onClick)
             .semantics {
                 onClick(label = if (expanded) "Hide the price feed" else "Show the price feed", action = null)

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.Icon
@@ -115,7 +114,11 @@ private fun FilledPill(
         // composition they would recompose every card sixty times a second; read in the draw
         // lambda the frame costs a repaint and nothing else.
         painted = Modifier.drawBehind {
-            val corner = size.height / 2f
+            // [PillCorner] in pixels rather than half the height: this is the one pill that paints
+            // its own ground instead of clipping to [PillShape], so the corner has to be said twice
+            // and the two have to agree. A capsule here against an 8dp ring everywhere else is the
+            // most conspicuous place that could disagree - it is the brightest object on the card.
+            val corner = PillCorner.toPx()
             drawAiHalo(ai.aiGlow, corner, motion.breath(working))
             drawRoundRect(motion.fill(size.width, working), cornerRadius = CornerRadius(corner))
         },
@@ -133,7 +136,7 @@ private fun OutlinedPill(label: String, onClick: () -> Unit, modifier: Modifier,
         enabled = enabled,
         textColor = ai.aiText,
         spark = ai.aiSparkOnCard,
-        painted = Modifier.border(OutlineWidth, Brush.horizontalGradient(accent.aiLine), CircleShape),
+        painted = Modifier.border(OutlineWidth, Brush.horizontalGradient(accent.aiLine), PillShape),
         inset = AiPadding - 1.dp,
         modifier = modifier,
     )
@@ -159,7 +162,7 @@ private fun Pill(
             .then(painted)
             // After the paint, so the ripple is bounded by the pill while the halo drawn above is
             // free to fall outside it.
-            .clip(CircleShape)
+            .clip(PillShape)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = inset),
         verticalAlignment = Alignment.CenterVertically,

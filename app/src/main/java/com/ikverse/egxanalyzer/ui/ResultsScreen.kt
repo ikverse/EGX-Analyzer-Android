@@ -252,10 +252,14 @@ internal fun ResultsScreen(appState: AppState) {
                         trades = remember(appState, saved.id) {
                             TradeBook(appState, saved.result.recommendationTargetDate)
                         },
-                        // Keyed on the report itself rather than only its id: an edit rewrites the
-                        // stored run, so a holder remembered across that would go on offering the
-                        // reader the values they have just corrected.
-                        editor = remember(appState, saved) { CallEditor(appState, saved) },
+                        // Keyed on which reading of the report this is, not on its id alone: an
+                        // edit rewrites the stored run, and a holder remembered across that would
+                        // go on offering the reader the values they have just corrected. The
+                        // revision rather than the report itself, so this is an integer comparison
+                        // per recomposition rather than a deep compare of every call in the run.
+                        editor = remember(appState, saved.id, saved.result.editRevision) {
+                            CallEditor(appState, saved)
+                        },
                         expanded = expanded,
                         onExpandedChange = { open ->
                             openRun = if (open) saved.id else null
@@ -853,7 +857,10 @@ private fun SavedAnalysisCard(
                     // an older run keeps the chats the newer one never read, which is how the
                     // scoring treats it too.
                     if (newerRunExists) {
-                        Box(Modifier.padding(top = Space.xs)) { StatusPill("Newer run exists") }
+                        // Space.s, the same air the table's timing pill stands on. A 20dp ring
+                        // set 4dp under a line of small print reads as hanging off it rather
+                        // than as a mark beside it, and the two are one object.
+                        Box(Modifier.padding(top = Space.s)) { StatusPill("Newer run exists") }
                     }
                 }
                 // Which reading of the session this card is, kept up here beside the menu rather
@@ -1113,21 +1120,44 @@ private fun ResultDetail(
     stockFilter: String,
     onHide: () -> Unit,
 ) {
-    var detail by remember { mutableStateOf<Pair<ConsolidatedRecommendation, RecommendationDataPoint>?>(null) }
+    // The occurrence the sheet is showing, held as **where it is** rather than as what it held when
+    // it was opened. A correction made from inside the sheet rewrites the report underneath it, and
+    // a captured pair would go on drawing the figures the reader has just replaced.
+    var detail by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var showTrace by remember { mutableStateOf(false) }
+    // Everything derived from the report's own contents is keyed on **which reading of it this
+    // is**, not on its id. A report's id never changes and its contents now do: correcting a call
+    // rewrites the stored run in place, and a memo keyed on the id alone went on handing back the
+    // stocks as the model first read them. That is why an edit used to reach Insights - which
+    // rebuilds from the record - and not the report it was made on, until the screen was left and
+    // come back to. `editRevision` rises on every correction and on every corrected copy adopted
+    // from another device, which is exactly the set of events that move these.
+    val reading = saved.result.editRevision
+
     // The model cites sources by Telegram id; the channel name lives on the stored trace.
-    val channelNames = remember(saved.id) {
+    val channelNames = remember(saved.id, reading) {
         saved.result.sources
             .filter { it.messageId != null }
             .associate { it.messageId.toString() to it.channelName }
     }
 
+    val timings = remember(saved.id, reading) { saved.result.timings() }
+    val channels = remember(saved.id, reading, channelNames) {
+        saved.result.channelLabels(channelNames)
+    }
     // Session-only, and per report: a row hidden here is one someone chose not to read now, not a
     // preference about every report they open later.
-    val timings = remember(saved.id) { saved.result.timings() }
-    val channels = remember(saved.id, channelNames) { saved.result.channelLabels(channelNames) }
-    var shownTimings by remember(saved.id) { mutableStateOf(timings.toSet()) }
-    var shownChannels by remember(saved.id) { mutableStateOf(channels.toSet()) }
+    //
+    // **What is hidden, rather than what is shown**, and keyed on the report rather than on this
+    // reading of it. Two things had to be true at once: a correction must not throw away filters
+    // the reader set on purpose, and a timing a correction has just *created* - re-dating a card as
+    // Watching makes one - must not arrive already hidden, which is what a stored set of shown
+    // names would do to it. Storing the exclusions gives both: the reader's choices survive the
+    // edit, and anything new is shown because nobody ever chose to hide it.
+    var hiddenTimings by remember(saved.id) { mutableStateOf(emptySet<String>()) }
+    var hiddenChannels by remember(saved.id) { mutableStateOf(emptySet<String>()) }
+    val shownTimings = timings.toSet() - hiddenTimings
+    val shownChannels = channels.toSet() - hiddenChannels
     // Seeded from the screen's search, and re-seeded when it changes, so a report opened under one
     // opens narrowed to it. Held rather than applied behind the toolbar: the box then shows the
     // query that is hiding rows, which is what makes it clearable here.
@@ -1137,7 +1167,7 @@ private fun ResultDetail(
     // filters above it: asking to see them is about the report being read now, not a preference.
     var showContext by remember(saved.id) { mutableStateOf(false) }
 
-    val stocks = remember(saved.id, shownTimings, shownChannels, search, channelNames) {
+    val stocks = remember(saved.id, reading, shownTimings, shownChannels, search, channelNames) {
         // Timing and channel narrow the rows; the search narrows the stocks, because a name belongs
         // to the stock rather than to any one occurrence of it.
         val wanted = StockSearch.query(search)
@@ -1153,12 +1183,15 @@ private fun ResultDetail(
             .filter { it.dataPoints.isNotEmpty() && it.matches(wanted) }
     }
 
+    // Measured against what the report actually offers, not against the exclusion sets: a timing a
+    // correction has removed from the report entirely is still named in `hiddenTimings` and is
+    // hiding nothing, so counting it would light the chip over a report nothing is narrowing.
     val narrowed = shownTimings.size < timings.size ||
         shownChannels.size < channels.size ||
         search.isNotBlank()
     val clearFilters = {
-        shownTimings = timings.toSet()
-        shownChannels = channels.toSet()
+        hiddenTimings = emptySet()
+        hiddenChannels = emptySet()
         search = ""
     }
 
@@ -1173,18 +1206,20 @@ private fun ResultDetail(
             options = timings,
             shown = shownTimings,
             onToggle = { name ->
-                shownTimings = if (name in shownTimings) shownTimings - name else shownTimings + name
+                hiddenTimings =
+                    if (name in hiddenTimings) hiddenTimings - name else hiddenTimings + name
             },
-            onSelectAll = { shownTimings = timings.toSet() },
+            onSelectAll = { hiddenTimings = emptySet() },
         )
         CheckedSetFilter(
             label = "channels",
             options = channels,
             shown = shownChannels,
             onToggle = { name ->
-                shownChannels = if (name in shownChannels) shownChannels - name else shownChannels + name
+                hiddenChannels =
+                    if (name in hiddenChannels) hiddenChannels - name else hiddenChannels + name
             },
-            onSelectAll = { shownChannels = channels.toSet() },
+            onSelectAll = { hiddenChannels = emptySet() },
         )
     }
 
@@ -1276,7 +1311,9 @@ private fun ResultDetail(
                     RecommendationTable(
                         stocks = stocks,
                         channelFor = { messageId -> channelNames[messageId] },
-                        onSelectPoint = { stock, point -> detail = stock to point },
+                        onSelectPoint = { stock, point ->
+                            detail = stock.originalStockCode to point.parseIndex
+                        },
                         showContext = showContext,
                         toolbar = { Toolbar(compact = false) },
                     )
@@ -1310,17 +1347,28 @@ private fun ResultDetail(
     }
 
 
-    detail?.let { (stock, point) ->
-        OccurrenceSheet(
-            stock = stock,
-            point = point,
-            imagePath = saved.result.imagePathFor(point.sourceImageRef),
-            peak = peakFor(stock.stockCode, point.date),
-            channel = channelNames[point.sourceMessageId],
-            trades = trades,
-            editor = editor,
-            onDismiss = { detail = null },
-        )
+    detail?.let { (code, slot) ->
+        // Resolved against the whole report rather than the filtered list, so a filter cannot close
+        // a sheet the reader has open - and re-resolved on every recomposition, which is what makes
+        // a correction visible in the sheet it was made from.
+        val stock = saved.result.consolidated.firstOrNull { it.originalStockCode == code }
+        val point = stock?.dataPoints?.firstOrNull { it.parseIndex == slot }
+        if (stock == null || point == null) {
+            // The occurrence has gone - the only way that happens is a correction being undone
+            // while its sheet is open. Closing is the honest answer; there is nothing left to draw.
+            LaunchedEffect(code, slot) { detail = null }
+        } else {
+            OccurrenceSheet(
+                stock = stock,
+                point = point,
+                imagePath = saved.result.imagePathFor(point.sourceImageRef),
+                peak = peakFor(stock.stockCode, point.date),
+                channel = channelNames[point.sourceMessageId],
+                trades = trades,
+                editor = editor,
+                onDismiss = { detail = null },
+            )
+        }
     }
 }
 

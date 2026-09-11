@@ -114,7 +114,6 @@ internal fun PositionCard(
                             )
                         }
                 }
-                PositionStatusChip(view)
                 Box {
                     MoreButton(onClick = { menuOpen = true })
                     AppMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -180,39 +179,43 @@ internal fun PositionCard(
                 }
             }
 
-            // Its own row rather than the header, which is held to a fixed height so cards beside
-            // each other start level. Drawn only when there is something to say, so an ordinary
-            // position is exactly as tall as it was.
+            // Every pill on this card, in one row. The status used to sit up in the header while
+            // these sat down here, so a card carrying three facts about one trade said one of them
+            // in a different place and at a different height from the other two - which is what
+            // read as pills scattered over the card rather than as a line of them.
+            //
+            // The row is unconditional now, because the status is always there to say. It is no
+            // longer drawn only when something has gone wrong with the trade, and that costs the
+            // ordinary position the one line the header gives back.
             //
             // Every chip inside is named in the condition. Price scale was not, and a split under a
             // trade that was neither overdue nor kept open had its chip written and never drawn.
-            if (view.overdue || view.keptOpen || view.priceScaleChanged ||
-                position.isTPlusOne
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
             ) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(Space.s),
-                    verticalArrangement = Arrangement.spacedBy(Space.xs),
-                ) {
-                    // First in the row: it is the one chip here that was true the day the trade was
-                    // taken, and it is what the deadline further down the card is measured by.
-                    if (position.isTPlusOne) TPlusOneChip(position)
-                    if (view.overdue) OverdueChip(view.overdueDays)
-                    // One chip, not two saying the same thing: a trade can only be overdue by being
-                    // kept open now, so Overdue already carries the state and adds how late it is.
-                    // The instruction the chip also held is not lost - the Sell button below is on
-                    // the card for as long as no sale has been recorded.
-                    if (view.keptOpen && !view.overdue) KeptOpenChip()
-                    if (view.priceScaleChanged) PriceScaleChip()
-                }
-                position.keepOpenNote?.takeIf(String::isNotBlank)?.let { why ->
-                    Text(
-                        why,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                // Where the trade stands leads, because it is the one fact here that is true of
+                // every trade and the one the rest of the row qualifies.
+                PositionStatusChip(view)
+                // Then the fact that was true the day the trade was taken, which is what the
+                // deadline further down the card is measured by.
+                if (position.isTPlusOne) TPlusOneChip(position)
+                if (view.overdue) OverdueChip(view.overdueDays)
+                // One chip, not two saying the same thing: a trade can only be overdue by being
+                // kept open now, so Overdue already carries the state and adds how late it is.
+                // The instruction the chip also held is not lost - the Sell button below is on
+                // the card for as long as no sale has been recorded.
+                if (view.keptOpen && !view.overdue) KeptOpenChip()
+                if (view.priceScaleChanged) PriceScaleChip()
+            }
+            position.keepOpenNote?.takeIf(String::isNotBlank)?.let { why ->
+                Text(
+                    why,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
 
             PriceLadder(
@@ -509,16 +512,25 @@ private fun PositionView.extremeCaption(price: Double?, on: LocalDate?): String?
  * one that was the point of the call. Insights has said this on the call for as long as the pill has
  * existed; the Portfolio, where the trade actually is, said nothing.
  *
- * Tappable and drawn in `primary` for the reasons the pill in Insights gives: the app's own voice
- * rather than a verdict or a warning, and a pill that is only sometimes pressable teaches nobody
- * that it can be pressed. The sentence behind it is about this trade rather than about the call,
- * which is the one thing the two screens are entitled to word differently.
+ * Tappable for the reason the pill in Insights gives - a pill that is only sometimes pressable
+ * teaches nobody that it can be pressed - and neutral since 2026-09-11, where it was `primary`.
+ * The sentence behind it is about this trade rather than about the call, which is the one thing
+ * the two screens are entitled to word differently.
  */
 @Composable
 private fun TPlusOneChip(position: Position) {
     var showing by remember(position.id) { mutableStateOf(false) }
-    val tone = MaterialTheme.colorScheme.primary
-    OutlinePill("T+1", outline = tone, textColor = tone, onClick = { showing = true })
+    // Neutral, like every other note pill on this card. It was `primary` - the app's own voice,
+    // on the reasoning that a T+1 changes what the reader has to do - and that made one pill in
+    // the app a different colour from its neighbours for a reason none of them showed. The
+    // wording is what says this call names its own deadline; the hue was saying it twice, in a
+    // language the card spends on prices everywhere else. Asked for on 2026-09-11.
+    OutlinePill(
+        "T+1",
+        outline = MaterialTheme.colorScheme.outline,
+        textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        onClick = { showing = true },
+    )
     if (showing) {
         val who = position.channel?.takeIf(String::isNotBlank) ?: "The channel"
         val call = "$who printed this as a T+1 call: buy on the session it was made for, and be " +

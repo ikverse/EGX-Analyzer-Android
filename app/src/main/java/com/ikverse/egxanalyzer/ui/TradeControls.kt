@@ -673,8 +673,11 @@ internal fun PositionStatusChip(view: PositionView) {
 internal fun heldBorder(view: PositionView?): BorderStroke? =
     view?.let { BorderStroke(HeldOutline, it.status.tone()) }
 
-/** Thick enough to read as deliberate at a glance, thin enough not to shout over the card. */
-private val HeldOutline = 2.dp
+/**
+ * Half a step above the plain card hairline: heavy enough that the coloured edge reads as
+ * deliberate, light enough that a page of held cards does not look boxed in.
+ */
+private val HeldOutline = 1.5.dp
 
 /**
  * Status colour, borrowed from the roles prices already use.

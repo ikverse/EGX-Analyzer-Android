@@ -216,6 +216,23 @@ internal fun Screen(
             mark = offset
         }
     }
+    // The rail beside the page wears this page's wash and has no way to work out how much of it is
+    // left. Written from the same two numbers [PageWash] is drawn from, in a flow rather than in
+    // composition, for the reason `taken` is never read here: a page that read a scroll position in
+    // its own composition would recompose whole on every frame of one.
+    //
+    // **Only the page actually on screen writes.** Beside a rail two of them are composed at once
+    // while the destinations cross-fade, and the one being left would otherwise report its own
+    // scroll as the arriving page's.
+    val railWash = LocalPageWash.current
+    val washHeight = with(LocalDensity.current) { PageWashHeight.toPx() }
+    val onScreen = appState.destination == destination
+    LaunchedEffect(railWash, washHeight, onScreen) {
+        if (!onScreen) return@LaunchedEffect
+        snapshotFlow { (1f - (scroll.value + taken.floatValue) / washHeight).coerceIn(0f, 1f) }
+            .collect { railWash.floatValue = it }
+    }
+
     // Pressing the destination already showing means "take me back to the top". Animated rather
     // than jumped, so it reads as the page travelling rather than as the content being replaced -
     // and the watcher above brings the navigation back on its own as the offset passes the slop.
@@ -363,6 +380,21 @@ internal val LocalViewportTop = compositionLocalOf { 0f }
  * screen, so a page being scrolled has no other way to tell it to get out of the way.
  */
 internal val LocalNavBarVisible = staticCompositionLocalOf { mutableStateOf(true) }
+
+/**
+ * How much of the page's accent wash is still standing: 1f at the top of a page, 0f once it has been
+ * scrolled away.
+ *
+ * Owned by the shell and written by the page, the same way round as [LocalNavBarVisible] and for the
+ * same reason - the rail is drawn outside every screen. It wears this page's wash across its own
+ * width so the band runs unbroken along the top of the window rather than stopping dead at the
+ * rail's edge, and a band that stayed put while the page's faded would be a column of colour beside
+ * a plain page. Only the page being scrolled knows the answer.
+ *
+ * One float for the whole app: only the page on screen writes it, only the rail reads it, and on a
+ * phone nothing reads it at all. Read in a draw lambda rather than in composition - see `AppRail`.
+ */
+internal val LocalPageWash = staticCompositionLocalOf { mutableFloatStateOf(1f) }
 
 /**
  * Whether the pager holding the five tabs has come to rest.
@@ -620,8 +652,11 @@ private fun PageWash(scroll: ScrollState, taken: () -> Float) {
  * runs up behind the status bar now - see `AppContent`. The extra 40dp over the old 120 is roughly
  * the bar it has to cover before it starts on the page, so the tint fades over the same stretch of
  * reading as it did rather than appearing to burn off faster.
+ *
+ * Published because the rail measures its own wash from it - one number, or the two halves of the
+ * band across the top of a wide window would fade out at different rates. See `AppRail`.
  */
-private val PageWashHeight = 160.dp
+internal val PageWashHeight = 160.dp
 
 /** A hairline of the card's own hue. Wider and it is a stripe the content has to sit clear of. */
 private val AccentEdgeWidth = 3.dp
@@ -960,11 +995,13 @@ internal fun ActionPill(
         modifier
             .minimumInteractiveComponentSize()
             .height(PillHeight)
-            .border(ActionRing, ink.copy(alpha = ActionRingAlpha), CircleShape)
+            .border(ActionRing, ink.copy(alpha = ActionRingAlpha), PillShape)
             // After the edge, so the ripple is bounded by the pill rather than by the row.
-            .clip(CircleShape)
+            .clip(PillShape)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = Space.m),
+            // A step under [Space.m]. The ring is tighter on its label than a capsule was, and the
+            // side padding is what a pill's own edge is read against.
+            .padding(horizontal = Space.s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.s),
     ) {
@@ -1039,9 +1076,9 @@ internal fun SettingsButton(
         ProvideTextStyle(MaterialTheme.typography.labelMedium) { row.content() }
     }
     if (filled) {
-        Button(onClick, sized, enabled, contentPadding = padding, content = label)
+        Button(onClick, sized, enabled, shape = PillShape, contentPadding = padding, content = label)
     } else {
-        OutlinedButton(onClick, sized, enabled, contentPadding = padding, content = label)
+        OutlinedButton(onClick, sized, enabled, shape = PillShape, contentPadding = padding, content = label)
     }
 }
 
@@ -1064,7 +1101,7 @@ internal fun DisclosureButton(
         modifier
             .minimumInteractiveComponentSize()
             .height(PillHeight)
-            .clip(CircleShape)
+            .clip(PillShape)
             .clickable(onClick = onClick)
             .padding(horizontal = Space.s),
         verticalAlignment = Alignment.CenterVertically,
@@ -1105,7 +1142,8 @@ internal fun StatusPill(text: String, tone: StatusTone = StatusTone.NEUTRAL) {
 }
 
 /**
- * Every pill in the app, and the only place the shape is described.
+ * Every label pill in the app. The shape and the height are [PillShape] and [LabelPillHeight],
+ * beside the spacing scale, because the buttons and the badge are cut to them too.
  *
  * A ring rather than a block of colour. A card can carry three of these at once - what the position
  * did, how late it is, why it is still open - and three filled pills stacked beside the name were
@@ -1123,24 +1161,13 @@ internal fun OutlinePill(
     textColor: Color,
     onClick: (() -> Unit)? = null,
 ) {
-    val label: @Composable () -> Unit = {
-        Text(
-            text,
-            // A step under `labelMedium`, set as a copy of it rather than as `labelSmall`: that
-            // style is tracked out for uppercase keys over figures, and a pill is a sentence.
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontSize = PillText,
-                lineHeight = PillLine,
-            ),
-            modifier = Modifier.padding(horizontal = PillPaddingH, vertical = PillPaddingV),
-        )
-    }
+    val label: @Composable () -> Unit = { PillLabel(text) }
     val ring = BorderStroke(PillOutline, outline)
     if (onClick == null) {
         Surface(
             color = Color.Transparent,
             contentColor = textColor,
-            shape = CircleShape,
+            shape = PillShape,
             border = ring,
             content = label,
         )
@@ -1149,29 +1176,58 @@ internal fun OutlinePill(
             onClick = onClick,
             color = Color.Transparent,
             contentColor = textColor,
-            shape = CircleShape,
+            shape = PillShape,
             border = ring,
             content = label,
         )
     }
 }
 
-// 20dp of pill: an 11sp line with 3dp of air over and under it, inside a hairline.
+/**
+ * The same pill with the colour inside the edge rather than on it.
+ *
+ * Two surfaces draw a pill as a block of colour - the stock sheet's flags, and the table's own
+ * marks - and both were spelling their own corner, their own padding and their own text size. They
+ * are not [OutlinePill] with a fill parameter, because a fill and a ring say different things here:
+ * a ring annotates the call it sits on and a fill flags a standing fact about the stock. What they
+ * must not differ in is their shape, and that is what this shares.
+ */
+@Composable
+internal fun FilledPill(text: String, container: Color, content: Color) {
+    Surface(color = container, contentColor = content, shape = PillShape) {
+        PillLabel(text)
+    }
+}
+
+/** One label, one height, one padding - the whole of what the two pills have in common. */
+@Composable
+private fun PillLabel(text: String) {
+    Box(
+        Modifier.height(LabelPillHeight).padding(horizontal = PillPaddingH),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            // A step under `labelMedium`, set as a copy of it rather than as `labelSmall`: that
+            // style is tracked out for uppercase keys over figures, and a pill is a sentence.
+            text,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = PillText,
+                lineHeight = PillLine,
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+// An 11sp line, centred in [LabelPillHeight] rather than propping the box open from inside. The
+// height is the pill's and no longer the text's: two pills whose words set at different heights
+// used to close to different sizes, and that is what a card of them read as.
 private val PillText = 11.sp
 private val PillLine = 14.sp
-private val PillPaddingH = 6.dp
-private val PillPaddingV = 3.dp
 
 /** A hairline. A card's own held outline is twice it, so a pill never competes with the edge. */
 private val PillOutline = 1.dp
-
-/**
- * The gap in a stack of pills, which is tighter than [Space.xs].
- *
- * Rings need less air between them than blocks of colour did: at 4dp the stack read as three
- * separate marks rather than one column saying three things about the same trade.
- */
-internal val PillStackGap: Dp = 3.dp
 
 /**
  * The mark a stock carries when the exchange counts it in the EGX 33 Shariah index.
@@ -1186,10 +1242,16 @@ internal val PillStackGap: Dp = 3.dp
  * "EGX33" out beside a ticker on all of them adds a third thing to a line that already holds a
  * logo and a name. The reader learns one mark once; a screen reader still hears the whole phrase.
  *
- * Square rather than the round ring the other pills use, and that is not a free choice. Round, its
- * outline sat concentric with the eight-pointed star inside it, and two rings around a small dark
- * shape is the shape of a settings cog - which is what it read as. The corner is the theme's own
- * `extraSmall`, so no new radius enters the shape scale.
+ * Square rather than the ring the pills wear, and that is not a free choice. Round, its outline sat
+ * concentric with the eight-pointed star inside it, and two rings around a small dark shape is the
+ * shape of a settings cog - which is what it read as.
+ *
+ * **It is deliberately outside [PillShape], and it was folded in once and had to come back out.**
+ * The pill pass of 2026-09-11 gave it the shared 6dp on the reasoning that one corner everywhere is
+ * one object everywhere, which took it from 4dp to 6 - rounder, on the one mark in the app whose
+ * whole history is that it must not be round. It read as a gear on the device inside the hour. The
+ * rule the pills follow is about labels; this carries no wording, and a glyph in a ring is a
+ * different object from a word in one however the two are cut.
  */
 @Composable
 internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
@@ -1212,17 +1274,21 @@ internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * 24dp, which is [LogoSize.Row].
+ * [LabelPillHeight], which is every other pill on the card.
  *
  * One size on all three screens rather than one per ticker style. It shares a line with a 27dp
- * headline on Results and a titleSmall on Insights, and sized to each it was two different marks;
- * sized to the row logo it is the same object wherever the reader meets it, and never the tallest
- * thing on its line.
+ * headline on Results and a titleSmall on Insights, and sized to each it was two different marks.
+ *
+ * It was 24dp, which is [LogoSize.Row], on the reasoning that the logo at the head of the line is
+ * what a mark at the end of it should match. That was the wrong thing to match: the logo is the
+ * stock's own picture and this is a label about it, so the badge stood 4dp over every ring on the
+ * card while agreeing with the one thing on the line nobody reads it against. Matching the pills
+ * was the other way to make it one object, and it is the way that does not ask them to grow.
  */
-private val Egx33BadgeSize: Dp = 24.dp
+private val Egx33BadgeSize: Dp = LabelPillHeight
 
-/** 14dp of glyph, which leaves 5dp of air on every side of it inside the hairline. */
-private val Egx33GlyphSize: Dp = 14.dp
+/** 12dp of glyph, which leaves 4dp of air on every side of it inside the hairline. */
+private val Egx33GlyphSize: Dp = 12.dp
 
 
 /** Placeholder for a screen with nothing to show yet, so empty states explain themselves. */

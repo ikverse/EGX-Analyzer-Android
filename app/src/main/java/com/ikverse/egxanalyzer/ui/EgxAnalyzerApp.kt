@@ -10,6 +10,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -74,6 +75,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
@@ -90,6 +92,8 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
@@ -159,6 +163,9 @@ fun EgxAnalyzerApp(appState: AppState) {
     // Held here for the same reason, and read by exactly one thing - see LocalTabsSettled. The pager
     // below writes it; beside a rail nothing does, and nothing there needs to.
     val tabsSettled = remember { mutableStateOf(true) }
+    // Held here for the same reason again: the rail is drawn beside every page and wears the wash of
+    // whichever one is on screen, so the page has to be able to hand it out. See LocalPageWash.
+    val pageWash = remember { mutableFloatStateOf(1f) }
     // Above the shells and not inside either of them: back means the same thing whichever one is
     // drawn, and a handler in each would be one rule written twice. Enabled only when there is
     // something to undo, so a reader with nothing outstanding gets the system's own behaviour -
@@ -193,6 +200,7 @@ fun EgxAnalyzerApp(appState: AppState) {
         LocalWindowWidth provides windowWidth,
         LocalNavBarVisible provides navBarVisible,
         LocalTabsSettled provides tabsSettled,
+        LocalPageWash provides pageWash,
         // Remembered on the state rather than rebuilt each frame: a new lambda every recomposition
         // is a new value for a static local, which invalidates every reader of it - and the readers
         // here are every ticker on every card on the page.
@@ -460,9 +468,50 @@ private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
     // is a seam, and nothing up there justified one - and this is the same seam stood on its end.
     // On `background` the rail is the page's own ground with the destinations standing on it, and
     // what separates the page is its cards' own inset rather than a change of colour.
+    //
+    // **And on that ground, the page's own wash.** The accent band at the top of a page used to stop
+    // at the rail's edge, which on a wide window is a band ending a rail's width short of the
+    // corner - the one place the eye reads as the top of the *window* rather than the top of the
+    // page. Drawn here as well it is one band across the whole width, and the destinations stand in
+    // the colour their page opens in.
+    //
+    // It fades with the page rather than staying put: the strength comes from the page itself
+    // through [LocalPageWash] and the height from the same [PageWashHeight] the page measures, so
+    // the two halves go together. Both are read inside the draw lambda, which costs this rail one
+    // rectangle repainted per scrolled frame and no recomposition - the discipline `PageWash` is
+    // written to on the other side of the seam.
+    //
+    // The hue is animated because the page it belongs to cross-fades: `AppContent` fades one
+    // destination into the next, and a wash that snapped to the new colour on the press would arrive
+    // a whole transition before the page under it did.
+    val wash = LocalPageWash.current
+    val hue = animateColorAsState(
+        accentFor(appState.destination.accent, LocalDarkTheme.current).wash,
+        label = "railWash",
+    )
+    val washHeight = with(LocalDensity.current) { PageWashHeight.toPx() }
     NavigationRail(
-        modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.background,
+        // The ground is painted here rather than by the rail, because the wash has to go on top of
+        // it and under the destinations. A `containerColor` is drawn by the rail's own surface,
+        // which is below everything a modifier draws.
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.background)
+            .drawBehind {
+                val left = wash.floatValue
+                if (left <= 0f) return@drawBehind
+                val tint = hue.value
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(tint.copy(alpha = tint.alpha * left), Color.Transparent),
+                        endY = washHeight,
+                    ),
+                    size = size.copy(height = washHeight),
+                )
+            },
+        containerColor = Color.Transparent,
+        // Spelled out because `contentColorFor(Transparent)` is `Unspecified`, which would leave
+        // anything in the rail that did not name its own colour taking whatever was in scope.
+        contentColor = MaterialTheme.colorScheme.onBackground,
     ) {
         // **The gap `RailTopInset` holds open, and nothing in it.** The app's mark stood here from
         // 2026-09-09, when it left the header that was removed the same day, until it was taken out

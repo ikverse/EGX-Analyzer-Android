@@ -259,17 +259,14 @@ private fun StockHeading(stock: ConsolidatedRecommendation) {
             // `PriceRole.target` is drawn from, so a status chip was wearing the colour that means
             // "a target price" on every other surface in the app. An accent is chrome and a signal
             // is a figure; this is the first.
-            Text(
+            //
+            // [OutlinePill], which is the one pill in the app: this drew its own ring at its own
+            // corner and its own padding, so the table's marks and the cards' marks were two
+            // families of one thing seen a scroll apart.
+            OutlinePill(
                 "Watch list",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .border(
-                        width = 1.dp,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.42f),
-                        shape = RoundedCornerShape(percent = 50),
-                    )
-                    .padding(horizontal = Space.s, vertical = 2.dp),
+                outline = MaterialTheme.colorScheme.primary.copy(alpha = 0.42f),
+                textColor = MaterialTheme.colorScheme.primary,
             )
         }
     }
@@ -368,7 +365,11 @@ private fun CallRow(
  */
 @Composable
 private fun SourceCell(channel: String?, timing: String?, modifier: Modifier) {
-    Column(modifier.padding(horizontal = Space.xs), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+    // Space.s, and no longer the 3dp that was never on the spacing scale. That gap was set when
+    // the timing was a line of small print carrying 1dp of padding; it is a 20dp pill now, and at
+    // 3dp its edge closed on the channel name instead of standing under it. The row does not grow
+    // - the name, this gap and the pill come to 45dp inside a 56dp row.
+    Column(modifier.padding(horizontal = Space.xs), verticalArrangement = Arrangement.spacedBy(Space.s)) {
         Text(
             channel ?: Dash,
             style = MaterialTheme.typography.bodySmall,
@@ -379,18 +380,10 @@ private fun SourceCell(channel: String?, timing: String?, modifier: Modifier) {
             // Neutral, and deliberately not a hue per timing. Every colour this app has spare means
             // something about a price - market blue most of all - and a T+1 chip borrowing one
             // would be spending a signal on chrome to save the reader reading two characters.
-            Text(
+            FilledPill(
                 it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .background(
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f),
-                        RoundedCornerShape(percent = 50),
-                    )
-                    .padding(horizontal = 6.dp, vertical = 1.dp),
+                container = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f),
+                content = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
