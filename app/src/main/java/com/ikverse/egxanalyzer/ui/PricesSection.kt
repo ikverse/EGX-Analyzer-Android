@@ -3,6 +3,7 @@ package com.ikverse.egxanalyzer.ui
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -16,7 +17,11 @@ import com.ikverse.egxanalyzer.model.PriceSeriesSummary
 import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.SeriesHarvest
 import kotlinx.coroutines.launch
+import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
+import java.time.format.TextStyle
+import java.util.Locale
 
 /**
  * Where prices come from and when: the market-hours refresh, what it is doing, and Fetch now.
@@ -316,6 +321,81 @@ private fun seriesSpan(summary: PriceSeriesSummary): String {
  * wonders why the prices have not moved.
  */
 internal data class MarketRefreshStatus(val text: String, val warning: Boolean)
+
+/**
+ * The two system permissions, said the same way whichever it is.
+ *
+ * The granted line is drawn too, not only the missing one: a page that goes quiet once something
+ * is right leaves the reader unable to tell a granted permission from an app that forgot to check.
+ */
+@Composable
+internal fun SystemPermissions(appState: AppState) {
+    SystemPermissionRow(
+        // Read on every recomposition rather than remembered: the answer changes on a system page,
+        // and this screen is still underneath when the user comes back from it.
+        granted = appState.exactAlarmsAllowed(),
+        grantedText = "Exact alarms are allowed, so refreshes and the close sweep keep to the " +
+            "minute.",
+        missing = "Exact alarms are off. Refreshes can arrive up to an hour late.",
+        action = "Allow exact alarms",
+    ) {
+        appState.openExactAlarmSettings()
+    }
+    SystemPermissionRow(
+        granted = appState.batteryOptimizationExempt(),
+        grantedText = "Battery optimization is off for this app, so it will not be put to sleep.",
+        missing = "Battery optimization can put this app to sleep, and a sleeping app keeps no " +
+            "time at all. Samsung does this after a few days of not opening it.",
+        action = "Open battery settings",
+    ) {
+        appState.openBatteryOptimizationSettings()
+    }
+}
+
+@Composable
+private fun SystemPermissionRow(
+    granted: Boolean,
+    grantedText: String,
+    missing: String,
+    action: String,
+    onAct: () -> Unit,
+) {
+    Text(
+        if (granted) grantedText else missing,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (granted) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            MaterialTheme.colorScheme.error
+        },
+    )
+    if (!granted) TextButton(onClick = onAct) { Text(action) }
+}
+
+/**
+ * A moment as a reader would say it: today, tomorrow, a weekday, or a date.
+ *
+ * Relative near the present and absolute past it, because "Sunday" is unambiguous three days out
+ * and useless three weeks out - by then the reader needs the date, which is the point at which the
+ * weekday stops being the shorter way of saying it.
+ */
+internal fun whenLabel(at: Instant, now: Instant, zone: ZoneId = ScheduleClock.ZONE): String {
+    val moment = at.atZone(zone)
+    val today = now.atZone(zone).toLocalDate()
+    val clock = ScheduleClock.clock(moment.toLocalTime())
+    val days = Duration.between(today.atStartOfDay(zone), moment.toLocalDate().atStartOfDay(zone))
+        .toDays()
+    return when {
+        days == 0L -> "today $clock"
+        days == 1L -> "tomorrow $clock"
+        days == -1L -> "yesterday $clock"
+        days in 2..6 -> "${moment.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH)} $clock"
+        days in -6..-2 ->
+            "last ${moment.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH)} $clock"
+
+        else -> "${moment.toLocalDate()} $clock"
+    }
+}
 
 internal fun marketRefreshLine(
     enabled: Boolean,

@@ -4,10 +4,8 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import com.ikverse.egxanalyzer.model.AnalysisSchedule
 import com.ikverse.egxanalyzer.model.CloseSweep
 import com.ikverse.egxanalyzer.model.MarketRefresh
-import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.SeriesHarvest
 import java.time.Instant
 
@@ -15,10 +13,8 @@ import java.time.Instant
  * Books the one alarm that wakes the app for whatever is next.
  *
  * One alarm for everything this phone does on its own - keeping prices fresh through a session, one
- * sweep at the close, and up to four analyses - rather than one each: only the nearest fire matters,
- * and the run that answers it books the one after. A pending intent per schedule would be four
- * pieces of state to keep in step for no gain, and four ways for one of them to be left booked
- * after its schedule was deleted.
+ * sweep at the close, and the intraday archive - rather than one each: only the nearest fire
+ * matters, and the run that answers it books the one after.
  *
  * WorkManager is not the timekeeper here, deliberately. Its delays are a floor and not a promise -
  * in Doze a fifteen-minute period becomes whenever the system next feels like it - so 11:15 would
@@ -35,22 +31,20 @@ class JobScheduler(private val context: Context) {
      *
      * From Android 14 this is off until the user grants it, and the app asks rather than declaring
      * USE_EXACT_ALARM, which is meant for alarm clocks and calendars. Without it the fallback is
-     * inexact and can drift by the better part of an hour, which is survivable for the analysis
-     * because it carries a grace window, and is most of what a fifteen-minute refresh has to
-     * offer - which is why the screen says so rather than leaving the user to wonder.
+     * inexact and can drift by the better part of an hour, which for a fifteen-minute refresh means
+     * most fires quietly not happening - which is why the screen says so rather than leaving the
+     * user to wonder.
      */
     fun canScheduleExact(): Boolean = alarms.canScheduleExactAlarms()
 
     /**
      * Points the alarm at the earliest fire anything here has left, or takes it down.
      *
-     * Called after anything that could move that moment: any switch flipped, a schedule's time or
-     * days changed, one added or deleted, a run served, a reboot, the exact-alarm permission
-     * changing, and every launch. Booking is cheap and idempotent, so the safe thing on all of
-     * those is to book again.
+     * Called after anything that could move that moment: any switch flipped, a reboot, the
+     * exact-alarm permission changing, and every launch. Booking is cheap and idempotent, so the
+     * safe thing on all of those is to book again.
      */
     fun rebook(
-        schedules: List<AnalysisSchedule>,
         marketRefresh: Boolean,
         /**
          * Whether anyone here wants to be told what the session did to their trades.
@@ -74,7 +68,6 @@ class JobScheduler(private val context: Context) {
         val pending = fireIntent()
         val now = Instant.now()
         val at = listOfNotNull(
-            ScheduleClock.nextFireOf(schedules, now),
             if (marketRefresh) MarketRefresh.nextFire(now) else null,
             if (closeSweep) CloseSweep.nextFire(now) else null,
             if (priceSeries) SeriesHarvest.nextFire(now) else null,

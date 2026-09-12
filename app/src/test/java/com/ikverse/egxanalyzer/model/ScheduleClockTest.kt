@@ -1,9 +1,7 @@
 package com.ikverse.egxanalyzer.model
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.DayOfWeek
 import java.time.Instant
@@ -13,12 +11,11 @@ import java.time.LocalTime
 import java.time.ZoneId
 
 /**
- * When the scheduled analysis fires, and when it is owed one.
+ * When the market refresh, close sweep and series harvest fire.
  *
  * A rule about what happens at 07:00 next Sunday cannot be checked by waiting for next Sunday,
  * which is the whole reason this arithmetic lives away from Android. The cases below are the ones
- * that cost something: the weekend the exchange is shut for, a schedule switched on after its own
- * hour has gone by, and a slot that has already been served.
+ * that cost something: the weekend the exchange is shut for, and what session a fire is final for.
  *
  * 2026-08-20 is a Thursday - the last trading day of its week.
  */
@@ -124,75 +121,8 @@ class ScheduleClockTest {
     }
 
     @Test
-    fun `a schedule with no days has no next fire and owes nothing`() {
+    fun `a schedule with no days has no next fire`() {
         assertNull(ScheduleClock.nextFire(morning, emptySet(), at("2026-08-20", "06:00")))
-        assertNull(
-            ScheduleClock.unservedFire(
-                schedule(armedAt = at("2026-08-19", "12:00"), days = emptySet()),
-                at("2026-08-20", "07:20"),
-            ),
-        )
-    }
-
-    /**
-     * One alarm is booked for the whole list, so the only fire that matters is the earliest any of
-     * them will reach. A schedule that is switched off has none, which is what takes it out of the
-     * answer without taking the others with it.
-     */
-    @Test
-    fun `the list is next at the earliest fire any of it will reach`() {
-        val early = schedule(armedAt = at("2026-08-19", "12:00")).copy(id = 1, at = LocalTime.of(7, 0))
-        val late = schedule(armedAt = at("2026-08-19", "12:00"))
-            .copy(id = 2, at = LocalTime.of(12, 0))
-        val off = schedule(armedAt = at("2026-08-19", "12:00"), enabled = false)
-            .copy(id = 3, at = LocalTime.of(6, 0))
-        assertEquals(
-            at("2026-08-20", "07:00"),
-            ScheduleClock.nextFireOf(listOf(late, early, off), at("2026-08-20", "06:30")),
-        )
-        assertNull(ScheduleClock.nextFireOf(listOf(off), at("2026-08-20", "06:30")))
-        assertNull(ScheduleClock.nextFireOf(emptyList(), at("2026-08-20", "06:30")))
-    }
-
-    @Test
-    fun `an enabled schedule owes the fire that has gone unanswered`() {
-        val schedule = schedule(armedAt = at("2026-08-19", "12:00"))
-        assertEquals(
-            at("2026-08-20", "07:00"),
-            ScheduleClock.unservedFire(schedule, at("2026-08-20", "07:20")),
-        )
-    }
-
-    @Test
-    fun `a schedule that is off owes nothing`() {
-        val schedule = schedule(armedAt = at("2026-08-19", "12:00"), enabled = false)
-        assertNull(ScheduleClock.unservedFire(schedule, at("2026-08-20", "07:20")))
-    }
-
-    /**
-     * Switching a schedule on at 07:30 for 07:00 must not run it on the spot. The grace window is
-     * there to forgive a sleeping phone, not to turn saving a setting into starting a paid run.
-     */
-    @Test
-    fun `a fire from before the schedule was armed was never its to serve`() {
-        val schedule = schedule(armedAt = at("2026-08-20", "07:30"))
-        assertNull(ScheduleClock.unservedFire(schedule, at("2026-08-20", "07:40")))
-    }
-
-    @Test
-    fun `a fire already served is not owed twice`() {
-        val schedule = schedule(
-            armedAt = at("2026-08-19", "12:00"),
-            lastFiredAt = at("2026-08-20", "07:00"),
-        )
-        assertNull(ScheduleClock.unservedFire(schedule, at("2026-08-20", "09:00")))
-    }
-
-    @Test
-    fun `grace forgives a late phone and then stops`() {
-        val due = at("2026-08-20", "07:00")
-        assertTrue(ScheduleClock.withinGrace(due, at("2026-08-20", "08:59")))
-        assertFalse(ScheduleClock.withinGrace(due, at("2026-08-20", "09:01")))
     }
 
     /**
@@ -272,21 +202,6 @@ class ScheduleClockTest {
         assertEquals("07:00", ScheduleClock.clock(LocalTime.of(7, 0)))
         assertEquals("18:05", ScheduleClock.clock(LocalTime.of(18, 5)))
     }
-
-    private fun schedule(
-        armedAt: Instant,
-        enabled: Boolean = true,
-        lastFiredAt: Instant? = null,
-        days: Set<DayOfWeek> = everyDay,
-    ) = AnalysisSchedule(
-        enabled = enabled,
-        at = morning,
-        days = days,
-        channels = listOf(AnalysedChannel(1, "Signals")),
-        contentTypes = setOf(AnalysisContentType.entries.first()),
-        lastFiredAt = lastFiredAt,
-        armedAt = armedAt,
-    )
 
     private fun at(date: String, time: String): Instant =
         LocalDateTime.parse("${date}T$time").atZone(ScheduleClock.ZONE).toInstant()

@@ -14,9 +14,7 @@ import com.ikverse.egxanalyzer.model.AvailableUpdate
 import com.ikverse.egxanalyzer.model.UpdateState
 import com.ikverse.egxanalyzer.model.PriceHealthReport
 import com.ikverse.egxanalyzer.model.PriceSeriesSummary
-import com.ikverse.egxanalyzer.model.AnalysisAim
 import com.ikverse.egxanalyzer.model.AnalysisContentType
-import com.ikverse.egxanalyzer.model.AnalysisSchedule
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisMode
@@ -177,16 +175,12 @@ interface AppState : AppUpdates {
     val canGoBack: Boolean
     val scrollToTopRequest: Pair<AppDestination, Int>?
     val tradeWatchWanted: Boolean
-    val analysisSchedules: List<AnalysisSchedule>
-    /** Writable: the schedules sheet opens and closes itself. */
-    var openScheduleSettings: Boolean
     val marketRefreshEnabled: Boolean
     val marketRefreshNote: String?
     val marketRefreshNoteAt: Long
     val priceSeriesEnabled: Boolean
     val seriesHarvestNote: String?
     val seriesHarvestNoteAt: Long
-    val paidSchedulesEnabled: Boolean
     val backupFolder: String?
     val chatsRefreshing: Boolean
 
@@ -489,21 +483,9 @@ interface AppState : AppUpdates {
 
     fun updateFeedAlerts(enabled: Boolean)
 
-    fun updateScheduleAlerts(enabled: Boolean)
-
-    fun editSchedules()
-
     fun updateMarketRefreshEnabled(enabled: Boolean)
 
     fun updatePriceSeriesEnabled(enabled: Boolean)
-
-    fun updatePaidSchedulesEnabled(enabled: Boolean)
-
-    fun saveAnalysisSchedule(schedule: AnalysisSchedule)
-
-    fun addAnalysisSchedule()
-
-    fun deleteAnalysisSchedule(id: Long)
 
     suspend fun runDueScheduledJobs()
 
@@ -579,8 +561,6 @@ interface AppState : AppUpdates {
     fun removeInput(sourceId: String)
 
     suspend fun analyze()
-
-    fun scheduledAnalysisFromScreen(): AnalysisAim?
 
     suspend fun cancelAnalysis()
 

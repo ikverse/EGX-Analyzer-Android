@@ -1,95 +1,30 @@
 package com.ikverse.egxanalyzer.data
 
-import com.ikverse.egxanalyzer.model.AnalysedChannel
-import com.ikverse.egxanalyzer.model.AnalysisContentType
-import com.ikverse.egxanalyzer.model.AnalysisSchedule
-import org.json.JSONObject
-import java.time.Instant
-import java.time.LocalTime
-
 /**
- * What the rows of the retired job table mean under the two things that replaced it.
+ * What the rows of the retired job table mean under what replaced it.
  *
  * The table let a user build any number of jobs out of a kind of work and a choice of trigger.
- * What is left is a checkbox that keeps prices fresh while the market trades, and one analysis at
- * one time - so this reads what was there and answers with the nearest true thing, once, before
- * the table is dropped.
+ * What is left is a checkbox that keeps prices fresh while the market trades, so this reads what
+ * was there and answers with the nearest true thing, once, before the table is dropped.
  *
  * Carrying an intent across is not the same as making a new one. A phone that was asking for
  * prices through the session goes on asking; a phone that had switched that off does not have it
- * switched on for it. The one thing this deliberately will not do is invent a schedule nobody set.
+ * switched on for it. An old repeating analysis row is dropped along with the table rather than
+ * carried anywhere - the feature it belonged to is gone.
  *
- * Pure, so the decisions can be checked without a database: it is handed rows and returns what
- * should be written.
+ * Pure, so the decision can be checked without a database: it is handed rows and returns whether
+ * the price refresh should be turned on.
  */
 object ScheduleMigration {
 
-    /** What to write in place of the table. An empty [schedules] leaves that side untouched. */
-    data class Result(val marketRefresh: Boolean, val schedules: List<AnalysisSchedule>)
-
     /**
-     * Reads the old rows.
+     * Whether a price refresh was switched on among the old rows, whatever shape its trigger had.
      *
-     * A price refresh that was switched on becomes the checkbox, whatever shape its trigger had:
-     * every one of them - after the close, hourly, through the session - was a way of asking the
+     * Every trigger kind - after the close, hourly, through the session - was a way of asking the
      * same question, and the checkbox is now the answer to all of them.
-     *
-     * An analysis survives only where it repeated on a set of days, which is the only one of the
-     * three triggers the new schedule can still express. A one-shot is a button press with a delay
-     * on it and its moment has almost certainly passed; an analysis on an interval would have been
-     * paying for the same session several times over. Neither is worth reconstructing, and both
-     * are dropped with the schedule left switched off rather than guessed at.
-     *
-     * Up to [AnalysisSchedule.MAX] of them, oldest first, since the new shape can hold more than
-     * one. Which days each kept is not carried: the column that held them went with the table, and
-     * every trading day is the safe reading - it loses no run the owner had booked, where guessing
-     * narrower would.
      */
-    fun from(rows: List<LegacyScheduleRow>, armedAt: Instant = Instant.now()): Result {
-        val marketRefresh = rows.any { it.workKind == PRICE_REFRESH && it.enabled }
-        val analyses = rows.asSequence()
-            .filter { it.workKind == ANALYSIS && it.triggerKind == REPEAT }
-            .mapNotNull { it.toSchedule(armedAt) }
-            .take(AnalysisSchedule.MAX)
-            .toList()
-            // Numbered in the order the table held them, which is the order they were made.
-            .mapIndexed { index, schedule -> schedule.copy(id = index + 1L) }
-        return Result(marketRefresh, analyses)
-    }
-
-    /**
-     * One row as a schedule, or null where its settings cannot be read.
-     *
-     * An unreadable row is dropped rather than turned into an analysis of no chats, which would be
-     * a paid request for an empty answer booked by a migration nobody watched.
-     */
-    private fun LegacyScheduleRow.toSchedule(armedAt: Instant): AnalysisSchedule? = runCatching {
-        val json = JSONObject(workConfig)
-        val channelArray = json.getJSONArray("channels")
-        val channels = (0 until channelArray.length()).map {
-            val entry = channelArray.getJSONObject(it)
-            AnalysedChannel(entry.getLong("id"), entry.getString("name"))
-        }
-        val typeArray = json.getJSONArray("contentTypes")
-        val types = (0 until typeArray.length())
-            .mapNotNullTo(mutableSetOf()) { index ->
-                val name = typeArray.getString(index)
-                AnalysisContentType.entries.firstOrNull { it.name == name }
-            }
-        require(channels.isNotEmpty() && types.isNotEmpty())
-        AnalysisSchedule(
-            enabled = enabled,
-            at = LocalTime.parse(triggerAt),
-            channels = channels,
-            contentTypes = types,
-            // Armed now rather than carried, so a schedule whose hour has already gone by today
-            // does not owe a run the moment the app finishes migrating and pay for it through the
-            // grace window. Tomorrow is the first fire either way.
-            armedAt = armedAt,
-        )
-    }.getOrNull()
+    fun marketRefreshWasOn(rows: List<LegacyScheduleRow>): Boolean =
+        rows.any { it.workKind == PRICE_REFRESH && it.enabled }
 
     private const val PRICE_REFRESH = "PRICE_REFRESH"
-    private const val ANALYSIS = "ANALYSIS"
-    private const val REPEAT = "REPEAT"
 }

@@ -10,15 +10,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <!-- Wakes the phone at the minute a scheduled job asks for. Requested rather than the
-         auto-granted USE_EXACT_ALARM, which is meant for alarm clocks and calendars; without it
-         the app falls back to an inexact alarm that can drift by the better part of an hour,
-         which is what every job's grace window exists to absorb. -->
+    <!-- Wakes the phone at the minute the price refresh, close sweep or series harvest asks for.
+         Requested rather than the auto-granted USE_EXACT_ALARM, which is meant for alarm clocks
+         and calendars; without it the app falls back to an inexact alarm that can drift by the
+         better part of an hour. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <!-- A foreground service keeps the process from being reclaimed; it does not keep the phone
-         from sleeping. WorkManager held one of these for the ten minutes it allowed a run, so the
-         service that replaced it has to hold one too, or a run stalls with the screen off. -->
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- An alarm does not survive a reboot. Without this a phone that restarted overnight comes
          back with every schedule silently unbooked. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -57,21 +53,9 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- Where a paid scheduled run actually happens. Started by ScheduleReceiver inside the
-             seconds-long allowlist an exact alarm grants, because from Android 12 a background app
-             may not start one otherwise - which is what made the worker's attempt at going
-             foreground fail silently, leaving every scheduled analysis to be killed at the
-             ten-minute mark. Not exported: nothing outside this app has business starting it. -->
-        <service
-            android:name=".data.ScheduledRunService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-
-        <!-- WorkManager's own foreground service, given the type this app uses it for. A scheduled
-             analysis can outlast the ten minutes ordinary work gets, so the worker goes foreground
-             for the length of one - and from Android 14 a foreground service with no declared type
-             is refused outright, which would take the run down with it. WorkManager declares this
-             service without a type, so the type is merged in here. -->
+        <!-- WorkManager's own foreground service, given the type this app uses it for - from
+             Android 14 a foreground service with no declared type is refused outright. WorkManager
+             declares this service without a type, so the type is merged in here. -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"

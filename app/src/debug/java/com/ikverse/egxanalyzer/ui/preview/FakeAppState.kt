@@ -79,15 +79,12 @@ class FakeAppState(
     override val canGoBack: Boolean = false,
     override val scrollToTopRequest: Pair<AppDestination, Int>? = null,
     override val tradeWatchWanted: Boolean = false,
-    override val analysisSchedules: List<AnalysisSchedule> = emptyList(),
-    override var openScheduleSettings: Boolean = false,
     override val marketRefreshEnabled: Boolean = false,
     override val marketRefreshNote: String? = null,
     override val marketRefreshNoteAt: Long = 0L,
     override val priceSeriesEnabled: Boolean = false,
     override val seriesHarvestNote: String? = null,
     override val seriesHarvestNoteAt: Long = 0L,
-    override val paidSchedulesEnabled: Boolean = false,
     override val backupFolder: String? = null,
     override val chatsRefreshing: Boolean = false,
 ) : AppState {
@@ -353,21 +350,9 @@ class FakeAppState(
 
     override fun updateFeedAlerts(enabled: Boolean) = Unit
 
-    override fun updateScheduleAlerts(enabled: Boolean) = Unit
-
-    override fun editSchedules() = Unit
-
     override fun updateMarketRefreshEnabled(enabled: Boolean) = Unit
 
     override fun updatePriceSeriesEnabled(enabled: Boolean) = Unit
-
-    override fun updatePaidSchedulesEnabled(enabled: Boolean) = Unit
-
-    override fun saveAnalysisSchedule(schedule: AnalysisSchedule) = Unit
-
-    override fun addAnalysisSchedule() = Unit
-
-    override fun deleteAnalysisSchedule(id: Long) = Unit
 
     override suspend fun runDueScheduledJobs() = Unit
 
@@ -442,8 +427,6 @@ class FakeAppState(
     override fun removeInput(sourceId: String) = Unit
 
     override suspend fun analyze() = Unit
-
-    override fun scheduledAnalysisFromScreen(): AnalysisAim? = null
 
     override suspend fun cancelAnalysis() = Unit
 

@@ -1,10 +1,7 @@
 package com.ikverse.egxanalyzer.data
 
 import android.content.Context
-import com.ikverse.egxanalyzer.model.AnalysedChannel
 import com.ikverse.egxanalyzer.model.AnalysisContentType
-import com.ikverse.egxanalyzer.model.AnalysisSchedule
-import com.ikverse.egxanalyzer.model.JobOutcome
 import com.ikverse.egxanalyzer.model.MarketRefresh
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.ApproachAlerts
@@ -21,9 +18,6 @@ import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.Scoring
 import org.json.JSONArray
 import org.json.JSONObject
-import java.time.DayOfWeek
-import java.time.Instant
-import java.time.LocalTime
 
 class SettingsRepository(
     context: Context,
@@ -271,7 +265,6 @@ class SettingsRepository(
         ),
         sessionDigestEnabled = preferences.getBoolean(KEY_SESSION_DIGEST, false),
         feedAlertsEnabled = preferences.getBoolean(KEY_FEED_ALERTS, true),
-        scheduleAlertsEnabled = preferences.getBoolean(KEY_SCHEDULE_ALERTS, true),
         updateChecksEnabled = preferences.getBoolean(KEY_UPDATE_CHECKS, true),
         portfolioOrder = enumPreference(KEY_PORTFOLIO_ORDER, PortfolioOrder.URGENT),
         callOrder = enumPreference(KEY_CALL_ORDER, CallOrder.TICKER),
@@ -302,7 +295,6 @@ class SettingsRepository(
             .putInt(KEY_APPROACH_THRESHOLD, value.approachThresholdPercent)
             .putBoolean(KEY_SESSION_DIGEST, value.sessionDigestEnabled)
             .putBoolean(KEY_FEED_ALERTS, value.feedAlertsEnabled)
-            .putBoolean(KEY_SCHEDULE_ALERTS, value.scheduleAlertsEnabled)
             .putBoolean(KEY_UPDATE_CHECKS, value.updateChecksEnabled)
             // By name rather than by ordinal: reordering the options or dropping one would otherwise
             // silently reinterpret what every existing install had chosen.
@@ -506,108 +498,6 @@ class SettingsRepository(
     }
 
     /**
-     * The analyses this phone runs on its own, in the order they were made.
-     *
-     * Here rather than in the database, for the reason the switch above is: it is this device's
-     * own answer and it is never published. A stored value that will not parse comes back as no
-     * schedules at all rather than throwing - an unreadable list must not take the screen that
-     * draws it down with it, and the failure that leaves is the safe one, since a schedule the
-     * app cannot read is one it also cannot spend money on.
-     *
-     * A phone still holding the single schedule the previous build wrote reads it back as a list
-     * of one, keeping its time, its aim and its switch. Not rewritten here: reading is not the
-     * place to write, and the first save the user makes moves it across on its own.
-     */
-    fun analysisSchedules(): List<AnalysisSchedule> = runCatching {
-        val stored = preferences.getString(KEY_ANALYSIS_SCHEDULES, null)
-        if (stored != null) {
-            JSONArray(stored).objectList().mapIndexed { index, json ->
-                json.toAnalysisSchedule(fallbackId = index + 1L)
-            }
-        } else {
-            // The shape this app wrote before it could hold more than one. It kept every trading
-            // day, which is what an absent day list reads back as.
-            preferences.getString(KEY_ANALYSIS_SCHEDULE, null)
-                ?.let { listOf(JSONObject(it).toAnalysisSchedule(fallbackId = 1L)) }
-                .orEmpty()
-        }
-    }.getOrDefault(emptyList())
-
-    fun saveAnalysisSchedules(schedules: List<AnalysisSchedule>) {
-        val array = JSONArray()
-        schedules.take(AnalysisSchedule.MAX).forEach { array.put(it.toJson()) }
-        preferences.edit().putString(KEY_ANALYSIS_SCHEDULES, array.toString()).apply()
-    }
-
-    /**
-     * Writes one schedule back into the stored list, found by its id.
-     *
-     * Read, replace, write, rather than saving the whole list the caller happens to be holding:
-     * the caller here is a run in a process with no screen in it, and the list on disk may have
-     * been edited since that run started. Saving its copy would undo the edit. A schedule whose
-     * id is no longer there was deleted while it ran, and its outcome is dropped rather than
-     * bringing it back.
-     */
-    fun recordAnalysisSchedule(schedule: AnalysisSchedule) {
-        val stored = analysisSchedules()
-        if (stored.none { it.id == schedule.id }) return
-        saveAnalysisSchedules(stored.map { if (it.id == schedule.id) schedule else it })
-    }
-
-    private fun JSONObject.toAnalysisSchedule(fallbackId: Long) = AnalysisSchedule(
-        // A list written before ids existed gets its position, once, and keeps it from the next
-        // save onwards.
-        id = optLong("id", 0L).takeIf { it > 0L } ?: fallbackId,
-        enabled = optBoolean("enabled", false),
-        at = LocalTime.parse(getString("at")),
-        // Absent is the single schedule the previous build stored, which ran every trading day.
-        // An empty set that was actually chosen is written as an empty array and read back as one,
-        // so a schedule the user emptied stays empty and says so.
-        days = if (has("days")) {
-            optJSONArray("days").stringList().mapNotNullTo(mutableSetOf()) { name ->
-                DayOfWeek.entries.firstOrNull { it.name == name }
-            }
-        } else {
-            AnalysisSchedule.DEFAULT_DAYS
-        },
-        channels = optJSONArray("channels").objectList().map {
-            AnalysedChannel(it.getLong("id"), it.getString("name"))
-        },
-        contentTypes = optJSONArray("contentTypes").stringList()
-            .mapNotNullTo(mutableSetOf()) { name ->
-                AnalysisContentType.entries.firstOrNull { it.name == name }
-            },
-        lastFiredAt = optLong("lastFiredAt", 0L)
-            .takeIf { it > 0L }
-            ?.let(Instant::ofEpochMilli),
-        lastOutcome = JobOutcome.entries
-            .firstOrNull { it.name == optString("lastOutcome") }
-            ?: JobOutcome.NEVER,
-        lastMessage = optString("lastMessage").takeIf(String::isNotBlank),
-        armedAt = Instant.ofEpochMilli(optLong("armedAt", 0L)),
-    )
-
-    private fun AnalysisSchedule.toJson(): JSONObject = JSONObject()
-        .put("id", id)
-        .put("enabled", enabled)
-        .put("at", at.toString())
-        .put("days", JSONArray().apply { days.forEach { put(it.name) } })
-        .put(
-            "channels",
-            JSONArray().apply {
-                channels.forEach { put(JSONObject().put("id", it.id).put("name", it.name)) }
-            },
-        )
-        .put(
-            "contentTypes",
-            JSONArray().apply { contentTypes.forEach { put(it.name) } },
-        )
-        .put("lastFiredAt", lastFiredAt?.toEpochMilli() ?: 0L)
-        .put("lastOutcome", lastOutcome.name)
-        .put("lastMessage", lastMessage.orEmpty())
-        .put("armedAt", armedAt.toEpochMilli())
-
-    /**
      * Whether the one-time move off the old job table has happened.
      *
      * A flag rather than a look at the table, because the migration job is to leave that table
@@ -618,32 +508,6 @@ class SettingsRepository(
 
     fun markSchedulesMigrated() {
         preferences.edit().putBoolean(KEY_SCHEDULES_MIGRATED, true).apply()
-    }
-
-    private fun JSONArray?.objectList(): List<JSONObject> {
-        val array = this ?: return emptyList()
-        return (0 until array.length()).map(array::getJSONObject)
-    }
-
-    private fun JSONArray?.stringList(): List<String> {
-        val array = this ?: return emptyList()
-        return (0 until array.length()).map(array::getString)
-    }
-
-    /**
-     * Whether a schedule on this phone may start work that spends cloud credits.
-     *
-     * A second switch behind the schedule own one, and off until it is turned on. The free
-     * market-hours refresh proves the alarms, the reboots and whatever the phone battery
-     * manager does to a sleeping app; only once that is believable is it reasonable to let the
-     * same machinery send a paid request while nobody is watching. Arming the clock to spend
-     * money later is the same act as spending it, so it needs the owner own hand. Device-local
-     * for the same reason [marketRefreshEnabled] is.
-     */
-    fun paidSchedulesEnabled(): Boolean = preferences.getBoolean(KEY_PAID_SCHEDULES, false)
-
-    fun savePaidSchedulesEnabled(value: Boolean) {
-        preferences.edit().putBoolean(KEY_PAID_SCHEDULES, value).apply()
     }
 
     fun useDefaultPromptOnly(): Boolean = preferences.getBoolean(KEY_DEFAULT_PROMPT_ONLY, false)
@@ -849,14 +713,9 @@ class SettingsRepository(
         const val KEY_APPROACH_THRESHOLD = "approach_threshold_percent"
         const val KEY_SESSION_DIGEST = "session_digest_enabled"
         const val KEY_FEED_ALERTS = "feed_alerts_enabled"
-        const val KEY_SCHEDULE_ALERTS = "schedule_alerts_enabled"
         const val KEY_MARKET_REFRESH_NOTE = "market_refresh_note"
         const val KEY_MARKET_REFRESH_NOTE_AT = "market_refresh_note_at"
-        /** What the build that could hold only one schedule wrote. Read, never written. */
-        const val KEY_ANALYSIS_SCHEDULE = "analysis_schedule"
-        const val KEY_ANALYSIS_SCHEDULES = "analysis_schedules"
         const val KEY_SCHEDULES_MIGRATED = "schedules_migrated"
-        const val KEY_PAID_SCHEDULES = "paid_schedules_enabled"
         const val KEY_OPINION_SEARCH = "opinion_search_enabled"
         const val KEY_OPINION_NEWS_WINDOW = "opinion_news_window_days"
         const val KEY_OPINION_DEEP_SEARCH = "opinion_deep_search"

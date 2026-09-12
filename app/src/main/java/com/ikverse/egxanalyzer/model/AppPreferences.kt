@@ -131,18 +131,6 @@ data class AppPreferences(
      */
     val feedAlertsEnabled: Boolean = true,
     /**
-     * Whether the phone says a scheduled analysis was due and did not happen.
-     *
-     * Default **on**, for the reason above: it reports the app failing to keep a promise the reader
-     * made it make. The reported symptom of a broken schedule is silence - nothing fires and
-     * nothing says so - and the two system permissions that stop one working are named only on a
-     * screen somebody has to think to open.
-     *
-     * It never announces a *skip*, so it cannot become a daily line about paid runs being switched
-     * off, which is the standing state of that switch.
-     */
-    val scheduleAlertsEnabled: Boolean = true,
-    /**
      * Whether a launch quietly asks GitHub whether a newer build exists.
      *
      * On by default and silent unless there is something new: the app is sideloaded, so a release

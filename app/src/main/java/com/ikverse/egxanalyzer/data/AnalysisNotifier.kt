@@ -44,22 +44,6 @@ class AnalysisNotifier(private val context: Context) {
             "android.permission.POST_NOTIFICATIONS",
         ) == PackageManager.PERMISSION_GRANTED
 
-    /**
-     * A scheduled run that has woken the app and is getting ready.
-     *
-     * The same id as [running], so the two are one notification rather than two: this one is
-     * replaced the moment the run knows how many sources it is sending. It exists because the work
-     * before that point is not instant - a Telegram session has to come back and the chats have to
-     * be read - and a phone that lit up its screen for a job should say what the job is.
-     */
-    fun starting(): Notification = base()
-        .setContentTitle("Scheduled run")
-        .setContentText("Reading the chats…")
-        .setProgress(0, 0, true)
-        .setOngoing(true)
-        .setContentIntent(openApp(null))
-        .build()
-
     fun running(sources: Int, model: String): Notification = base()
         .setContentTitle("Analysis running")
         .setContentText("$sources ${if (sources == 1) "source" else "sources"} · $model")
@@ -67,15 +51,6 @@ class AnalysisNotifier(private val context: Context) {
         .setOngoing(true)
         .setContentIntent(openApp(null))
         .build()
-
-    /**
-     * Replaces [starting] with what the run turned out to be, without a service behind it.
-     *
-     * For a scheduled run, where [ScheduledRunService] is already the foreground service holding
-     * this notification id. Starting a second service to say the same thing would leave two owners
-     * of one notification, and the first to stop would cancel the other's.
-     */
-    fun nowRunning(sources: Int, model: String) = show(running(sources, model))
 
     fun finished(recommendations: Int, resultId: Long) {
         show(

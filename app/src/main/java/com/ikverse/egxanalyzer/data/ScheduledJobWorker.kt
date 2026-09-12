@@ -25,14 +25,6 @@ import kotlinx.coroutines.withContext
  *
  * The cost is honest: waking the process brings the catalog, a stale-price check and a sync
  * catch-up with it. None of them is paid and none of them reaches a cloud provider.
- *
- * **Not where a paid analysis belongs.** WorkManager stops ordinary work after about ten minutes
- * and an analysis routinely outlasts that, so a run started here is killed mid-request having
- * already paid for every chunk it sent. This used to try to escape the ceiling by going foreground,
- * which Android 12 refuses to a background app that is not running expedited work - and the refusal
- * was swallowed, so the run went ahead into a window that was always going to kill it. That path is
- * gone: [ScheduledRunService] takes those wakes now, and this stays the route for the cheap ones
- * and the fallback for a start the system would not allow.
  */
 class ScheduledJobWorker(
     context: Context,
@@ -43,12 +35,9 @@ class ScheduledJobWorker(
         val application = applicationContext as? EgxApplication
             ?: return@runCatching Result.success()
         // Said before the state is first touched, because that is when it is read and the state is
-        // built by whoever asks for it first. A price refresh brings up no Telegram session, no
-        // sync and no update check; an analysis needs all three, so a wake that owes one starts
-        // the app in full exactly as it always did.
-        if (!ScheduledRun.paidAnalysisOwed(applicationContext)) {
-            application.startedForSchedule = true
-        }
+        // built by whoever asks for it first. None of what this worker does - a price refresh, the
+        // close sweep, the series harvest - brings up a Telegram session, a sync or an update check.
+        application.startedForSchedule = true
         // AppState is Compose state driven from the main thread; the run itself suspends onto IO
         // inside the repositories, exactly as it does when a screen starts it.
         withContext(Dispatchers.Main) { application.appState.runDueScheduledJobs() }

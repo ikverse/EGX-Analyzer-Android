@@ -7,12 +7,12 @@ import java.time.LocalTime
 import java.time.ZoneId
 
 /**
- * When the analysis schedule fires, and whether one is owed a run right now.
+ * When the market refresh, close sweep and series harvest fire.
  *
  * Pure arithmetic over a zone and a clock, with no Android and no storage in it, because this is
  * the part of the feature that is impossible to check by hand: a rule about what happens at 07:00
  * next Sunday cannot be tested by waiting for next Sunday. Everything above it - the alarm, the
- * worker, the card - only asks this file the two questions below.
+ * worker, the card - only asks this file the questions below.
  *
  * Times are Cairo's, always. A schedule belongs to the exchange the app follows, not to wherever
  * the phone happens to be. The zone is a parameter only so the tests can drive it through a
@@ -25,11 +25,7 @@ object ScheduleClock {
     /**
      * The days the exchange is open.
      *
-     * What the price refresh's slots are built from, and what a schedule keeping exactly these
-     * days is called on screen. It is deliberately **not** a bound on what an analysis may be
-     * booked for: a run on a Friday reads what the chats posted over the weekend and files it
-     * against the Sunday session, which is a real question and not a wasted request. See
-     * [AnalysisSchedule.days].
+     * What the price refresh's slots are built from.
      */
     val tradingDays: Set<DayOfWeek> = setOf(
         DayOfWeek.SUNDAY,
@@ -120,53 +116,6 @@ object ScheduleClock {
             .map { it.atTime(at).atZone(zone).toInstant() }
             .firstOrNull { !it.isAfter(moment) }
     }
-
-    /**
-     * The earliest fire any of [schedules] has left, or null where none of them has one.
-     *
-     * The alarm books one moment for the whole list, so this is the question it asks. A schedule
-     * that is switched off has no next fire at all, which is what takes it out of the answer
-     * without taking down the ones beside it.
-     */
-    fun nextFireOf(
-        schedules: List<AnalysisSchedule>,
-        now: Instant,
-        zone: ZoneId = ZONE,
-    ): Instant? = schedules
-        .filter { it.enabled }
-        .mapNotNull { nextFire(it.at, it.days, now, zone) }
-        .minOrNull()
-
-    /**
-     * The fire this schedule owes a run for, or null where it owes none.
-     *
-     * Owed rather than due-right-now: this deliberately still answers with a fire whose grace has
-     * run out, so the caller can record that it was missed instead of leaving the schedule looking
-     * as though it had never been booked. Whether it may still be run is [withinGrace].
-     *
-     * Compared against the fire last served rather than against the wall clock, which is what
-     * stops one slot running twice on a phone whose clock jumped.
-     */
-    fun unservedFire(
-        schedule: AnalysisSchedule,
-        now: Instant,
-        zone: ZoneId = ZONE,
-    ): Instant? {
-        if (!schedule.enabled) return null
-        val due = previousFire(schedule.at, schedule.days, now, zone) ?: return null
-        // A fire from before this schedule was armed was never its to serve: switching it on at
-        // 07:30 for 07:00 must not run it on the spot through the grace window.
-        if (!due.isAfter(schedule.armedAt)) return null
-        if (schedule.lastFiredAt != null && !due.isAfter(schedule.lastFiredAt)) return null
-        return due
-    }
-
-    /** Whether a fire that came due at [due] may still be run at [now]. */
-    fun withinGrace(
-        due: Instant,
-        now: Instant,
-        graceMinutes: Int = AnalysisSchedule.GRACE_MINUTES,
-    ): Boolean = !now.isAfter(due.plusSeconds(graceMinutes * 60L))
 
     /** 24-hour, because 18:00 cannot be read as the morning and "6:00 PM" is three characters longer. */
     fun clock(time: LocalTime): String = "%02d:%02d".format(time.hour, time.minute)

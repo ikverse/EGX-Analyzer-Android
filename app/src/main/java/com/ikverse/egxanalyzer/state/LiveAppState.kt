@@ -47,8 +47,6 @@ import com.ikverse.egxanalyzer.data.BackupRecord
 import com.ikverse.egxanalyzer.data.EgxCatalog
 import com.ikverse.egxanalyzer.data.EndpointPolicy
 import com.ikverse.egxanalyzer.data.IntradayRepository
-import com.ikverse.egxanalyzer.data.JobRunner
-import com.ikverse.egxanalyzer.data.JobSkipped
 import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.ModelUsageStore
 import com.ikverse.egxanalyzer.data.OpinionParser
@@ -86,7 +84,6 @@ import com.ikverse.egxanalyzer.data.runsToRestore
 import com.ikverse.egxanalyzer.data.settingsWorthUploading
 import com.ikverse.egxanalyzer.data.syncActions
 import com.ikverse.egxanalyzer.model.AnalysedChannel
-import com.ikverse.egxanalyzer.model.AnalysisAim
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
@@ -94,7 +91,6 @@ import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.AnalysisPlan
 import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.AnalysisRequest
-import com.ikverse.egxanalyzer.model.AnalysisSchedule
 import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.ApproachAlerts
 import com.ikverse.egxanalyzer.model.ApproachChange
@@ -111,7 +107,6 @@ import com.ikverse.egxanalyzer.model.ComposedPrompt
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.DownloadedApk
 import com.ikverse.egxanalyzer.model.FULL_SPLIT_PCT
-import com.ikverse.egxanalyzer.model.JobOutcome
 import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.MarketRefresh
 import com.ikverse.egxanalyzer.model.ModelUsageRecord
@@ -176,10 +171,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * How long settings have to stop changing before they are published.
@@ -188,15 +181,6 @@ import kotlinx.coroutines.withTimeoutOrNull
  * a phone put down straight after a change still sends them.
  */
 private const val SETTINGS_PUBLISH_DELAY_MILLISECONDS = 3_000L
-
-/**
- * How long a scheduled run waits for Telegram to sign back in before giving up on that fire.
- *
- * Ninety seconds covers a cold start on a phone that has been asleep - opening the encrypted
- * database, reconnecting, restoring the session. Long enough that a slow morning does not lose the
- * run; short enough that a genuinely signed-out app says so rather than holding the wake-up open.
- */
-private const val TELEGRAM_READY_TIMEOUT_MILLISECONDS = 90_000L
 
 /**
  * How far back an opinion reads the price feed, in calendar days.
@@ -299,8 +283,6 @@ class LiveAppState(
      * by the card that draws one.
      */
     private val feedQuiet: (stocks: Int, callsHeld: Int) -> Unit = { _, _ -> },
-    /** Says a scheduled analysis was due and did not happen; supplied like the rest. */
-    private val scheduleMissed: (schedule: AnalysisSchedule) -> Unit = {},
     /**
      * How many trades are overdue, for the launcher shortcut that counts them.
      *
@@ -313,11 +295,10 @@ class LiveAppState(
      * Books or cancels this phone's schedule alarm; supplied by the app so this class stays testable.
      */
     private val schedulesChanged: (
-        schedules: List<AnalysisSchedule>,
         marketRefresh: Boolean,
         closeSweep: Boolean,
         priceSeries: Boolean,
-    ) -> Unit = { _, _, _, _ -> },
+    ) -> Unit = { _, _, _ -> },
     /**
      * Whether this process was started by the clock rather than by its owner.
      *
@@ -2494,12 +2475,6 @@ class LiveAppState(
         persistPreferences(appPreferences.copy(feedAlertsEnabled = enabled))
     }
 
-    /** Whether the phone says a scheduled analysis was due and did not happen. */
-    override fun updateScheduleAlerts(enabled: Boolean) {
-        if (enabled == appPreferences.scheduleAlertsEnabled) return
-        persistPreferences(appPreferences.copy(scheduleAlertsEnabled = enabled))
-    }
-
     /**
      * Whether anything here wants to be told what became of a trade.
      *
@@ -2532,31 +2507,6 @@ class LiveAppState(
     }
 
     /**
-     * The analyses this phone runs on its own, at most [AnalysisSchedule.MAX] of them.
-     *
-     * Held here so a screen can show them, and read back from storage after every change rather
-     * than edited in memory: the alarm that fires them can wake a process with no screen in it,
-     * and the schedules the runner works from have to be the ones the card is showing.
-     */
-    override var analysisSchedules by mutableStateOf(settingsRepository.analysisSchedules())
-        private set
-
-    /**
-     * Asks Settings to open its schedule section, set by the summary on Analyze.
-     *
-     * A one-shot request rather than a piece of state: the section that consumes it clears it, so
-     * coming back to Settings later finds it closed like every other group. Analyze reports on the
-     * schedules and Settings owns them, which is the whole reason this has to travel.
-     */
-    override var openScheduleSettings by mutableStateOf(false)
-
-    /** Sends the reader from the summary on Analyze to the controls in Settings. */
-    override fun editSchedules() {
-        openScheduleSettings = true
-        navigate(AppDestination.SETTINGS)
-    }
-
-    /**
      * Whether this phone keeps prices fresh while the market is trading.
      *
      * Off until it is switched on, unlike the daily catch-up beside it. That one runs on a launch
@@ -2578,17 +2528,6 @@ class LiveAppState(
         private set
 
     override var marketRefreshNoteAt by mutableStateOf(settingsRepository.marketRefreshNoteAt())
-        private set
-
-    /**
-     * Whether the clock here may start work that spends cloud credits.
-     *
-     * A second switch behind the schedule's own, off until it is turned on, and the only thing
-     * standing between the clock and the owner's money. Separate because the two decisions are
-     * separate: letting the phone keep a time says nothing about letting it spend money at that
-     * time.
-     */
-    override var paidSchedulesEnabled by mutableStateOf(settingsRepository.paidSchedulesEnabled())
         private set
 
     /**
@@ -2633,86 +2572,18 @@ class LiveAppState(
         rebookSchedules()
     }
 
-    override fun updatePaidSchedulesEnabled(enabled: Boolean) {
-        if (enabled == paidSchedulesEnabled) return
-        settingsRepository.savePaidSchedulesEnabled(enabled)
-        paidSchedulesEnabled = enabled
-        // Nothing to re-book: the alarm is booked for the schedule either way, and the runner is
-        // what refuses to spend. Booking on this switch would mean a schedule that vanished from
-        // the screen rather than one that says why it was passed over.
-    }
-
-    /**
-     * Saves one schedule, re-arming it where the fire it promises has moved.
-     *
-     * Re-armed on a changed time, on a changed set of days, and on being switched on, because each
-     * makes the last fire a promise under a rule that no longer applies: switching on at 07:30 for
-     * 07:00, or ticking a Wednesday at noon, must not owe a run on the spot and have the grace
-     * window pay for it. Ticking a day is a decision about the weeks ahead, never about this
-     * morning.
-     *
-     * Matched by id, and a schedule whose id is gone is not re-added: the only way that happens is
-     * a screen holding a row that has since been deleted.
-     */
-    override fun saveAnalysisSchedule(schedule: AnalysisSchedule) {
-        val before = analysisSchedules.firstOrNull { it.id == schedule.id } ?: return
-        val moved = schedule.at != before.at ||
-            schedule.days != before.days ||
-            (schedule.enabled && !before.enabled)
-        val saved = if (moved) schedule.copy(armedAt = Instant.now()) else schedule
-        settingsRepository.saveAnalysisSchedules(
-            analysisSchedules.map { if (it.id == saved.id) saved else it },
-        )
-        analysisSchedules = settingsRepository.analysisSchedules()
-        rebookSchedules()
-    }
-
-    /**
-     * Adds a schedule, switched off and aimed at whatever Analyze has ticked.
-     *
-     * Off, because a new row that started keeping time would be the app booking a paid run nobody
-     * asked for - the same reason nothing here ships switched on. Aimed at the screen's current
-     * selection because that is how a schedule is made: set a run up the way you always do, then
-     * put a time on it. An empty selection leaves it unaimed, and the card says so.
-     */
-    override fun addAnalysisSchedule() {
-        if (analysisSchedules.size >= AnalysisSchedule.MAX) return
-        val aim = scheduledAnalysisFromScreen()
-        settingsRepository.saveAnalysisSchedules(
-            analysisSchedules + AnalysisSchedule(
-                id = AnalysisSchedule.nextId(analysisSchedules),
-                channels = aim?.channels.orEmpty(),
-                contentTypes = aim?.contentTypes.orEmpty(),
-            ),
-        )
-        analysisSchedules = settingsRepository.analysisSchedules()
-        // Nothing to re-book: a schedule that is switched off has no next fire. Booked anyway,
-        // because the cost is one comparison and the alternative is a rule about which edits move
-        // the alarm.
-        rebookSchedules()
-    }
-
-    /** Removes a schedule. The alarm is re-booked because the one it was set for may have gone. */
-    override fun deleteAnalysisSchedule(id: Long) {
-        settingsRepository.saveAnalysisSchedules(analysisSchedules.filterNot { it.id == id })
-        analysisSchedules = settingsRepository.analysisSchedules()
-        rebookSchedules()
-    }
-
     /**
      * Moves what is on disk to what replaced it, once, on the first start of the build that did it.
      *
      * The rows this reads belonged to a job table that could hold any number of schedules of two
-     * kinds. What is left is a checkbox and one analysis, so what a phone was already asking for is
-     * carried across rather than lost - and then the table goes, because a table nothing reads is
-     * one the next reader of this file has to work out the status of.
+     * kinds. What is left is a checkbox, so what a phone was already asking for is carried across
+     * rather than lost - and then the table goes, because a table nothing reads is one the next
+     * reader of this file has to work out the status of.
      */
     private fun migrateSchedules() {
         if (settingsRepository.schedulesMigrated()) return
-        val carried = ScheduleMigration.from(localDataStore.legacyScheduleRows())
-        if (carried.marketRefresh) settingsRepository.saveMarketRefreshEnabled(true)
-        if (carried.schedules.isNotEmpty()) {
-            settingsRepository.saveAnalysisSchedules(carried.schedules)
+        if (ScheduleMigration.marketRefreshWasOn(localDataStore.legacyScheduleRows())) {
+            settingsRepository.saveMarketRefreshEnabled(true)
         }
         localDataStore.dropScheduledJobs()
         settingsRepository.markSchedulesMigrated()
@@ -2723,7 +2594,6 @@ class LiveAppState(
     /** Books the alarm for whatever is now nearest, after anything that could have moved it. */
     private fun rebookSchedules() =
         schedulesChanged(
-            analysisSchedules,
             marketRefreshEnabled,
             tradeWatchWanted,
             priceSeriesEnabled,
@@ -2741,20 +2611,6 @@ class LiveAppState(
         runDueMarketRefresh()
         runDueCloseSweep()
         runDueSeriesHarvest()
-        JobRunner(
-            schedules = settingsRepository::analysisSchedules,
-            record = settingsRepository::recordAnalysisSchedule,
-            paidWorkAllowed = settingsRepository::paidSchedulesEnabled,
-        ).runDue(::runScheduledAnalysis)
-            // Missed and failed only. A skip is the app deliberately doing nothing - most often
-            // because paid runs are switched off, which is the standing state of that switch - and
-            // a notification restating it every morning would be the app asking to be allowed to
-            // spend. These two are the app failing to keep a promise, which is the thing silence
-            // hides and this exists to break.
-            .filter { it.lastOutcome == JobOutcome.MISSED || it.lastOutcome == JobOutcome.FAILED }
-            .takeIf { appPreferences.scheduleAlertsEnabled }
-            ?.forEach(scheduleMissed)
-        analysisSchedules = settingsRepository.analysisSchedules()
         marketRefreshEnabled = settingsRepository.marketRefreshEnabled()
         priceSeriesEnabled = settingsRepository.priceSeriesEnabled()
         rebookSchedules()
@@ -2888,95 +2744,6 @@ class LiveAppState(
         val store = priceSeriesStore ?: error("This build keeps no price series")
         writePriceSeriesToDownloads(context, store)
     }
-
-    /**
-     * An analysis started by the clock rather than by a press.
-     *
-     * Everything before the run is a reason not to make it. This is the only thing in the app that
-     * spends the owner's money without being asked to at that moment, so each guard below is a
-     * separate way of being wrong that costs a real request, and every one of them ends in
-     * [JobSkipped] - written down, not charged, and tried again at the next fire.
-     */
-    private suspend fun runScheduledAnalysis(schedule: AnalysisSchedule, due: Instant): String {
-        if (analysisStatus == AnalysisStatus.RUNNING) {
-            throw JobSkipped("A run was already going when this one came due.")
-        }
-        if (!cloudConfiguration.hasCredential || cloudConfiguration.model.isBlank()) {
-            throw JobSkipped("No provider credential or model is saved.")
-        }
-        // The alarm wakes a process that may have been dead, and TDLib has to open its database and
-        // sign back in before a chat can be read. Without the wait the run would find no session,
-        // read nothing, and file itself as a schedule that does not work.
-        if (!awaitTelegramReady()) {
-            throw JobSkipped("Telegram was not ready in time to read the chats.")
-        }
-        val plan = schedule.plan()
-        val window = resolveAnalysisWindow(plan.mode, plan.targetDate)
-        // The session a run is for flips at 14:30 Cairo. A fire delayed across that line - by Doze,
-        // by a phone that was off, by the grace window doing its job - would quietly analyse the
-        // day after the one it was booked for, and the report would look perfectly ordinary. So the
-        // session this job was due for is compared with the one it would run for now, and a
-        // disagreement stops it: a schedule is a promise about a particular session.
-        val intended = egxTargetSession(due.atZone(ZoneId.of(EGX_ZONE)))
-        if (intended != window.targetDate) {
-            throw JobSkipped(
-                "Due for the $intended session, but by the time this ran the next one was " +
-                    "${window.targetDate}. Skipped rather than pay to analyse a different day.",
-            )
-        }
-        // Read first, decided after. A report of this session already exists on any day a second
-        // schedule fires, and the question is not whether it exists but whether the chats have
-        // said anything since - which is exactly what more than one schedule a day is for.
-        val already = duplicateOf(window.targetDate, plan.channelIds.toSet())
-        val batch = telegramRepository.collectSources(
-            channelIds = plan.channelIds,
-            start = window.start,
-            endExclusive = window.endExclusive,
-            contentTypes = plan.contentTypes,
-        )
-        if (batch.inputs.isEmpty()) {
-            throw JobSkipped("The chats posted nothing in the window for the $intended session.")
-        }
-        // Collecting is free - it reads Telegram's own store - so this is checked after the read
-        // and before the one expensive thing in the whole path. Paying to re-extract the same
-        // messages is the mistake the old interval trigger made, and the reason it was dropped.
-        already?.let { report ->
-            val fresh = SourceFreshness.newSources(report.result.sources, batch.traces)
-            if (fresh.isEmpty()) {
-                val at = ScheduleClock.clock(
-                    report.result.completedAt.atZone(ScheduleClock.ZONE).toLocalTime(),
-                )
-                throw JobSkipped(
-                    "Nothing new since the $at report of the $intended session.",
-                )
-            }
-        }
-        val sources = LoadedSources(
-            inputs = batch.inputs,
-            traces = batch.traces.associateBy(SourceTrace::sourceId),
-            channelOf = batch.traces.associate { it.sourceId to it.channelId },
-        )
-        return when (val outcome = executeRun(plan, sources, onScreen = false)) {
-            is RunOutcome.Saved -> outcome.summary
-            // Refused means nothing was sent and nothing was charged, which is a skip and not a
-            // failure however it reads on the Analyze screen.
-            is RunOutcome.Refused -> throw JobSkipped(outcome.reason)
-            is RunOutcome.Failed -> error(outcome.reason)
-            RunOutcome.Cancelled -> throw JobSkipped("The run was cancelled.")
-        }
-    }
-
-    /**
-     * Waits for a Telegram session to come back, for a run that woke the app rather than found it.
-     *
-     * Returns at once when one is already up, which is every run started from the screen and most
-     * of the ones started by a schedule on a phone that was in use.
-     */
-    private suspend fun awaitTelegramReady(): Boolean =
-        telegramAuthState.step == TelegramAuthStep.READY ||
-            withTimeoutOrNull(TELEGRAM_READY_TIMEOUT_MILLISECONDS) {
-                telegramRepository.authState.first { it.step == TelegramAuthStep.READY }
-            } != null
 
     /**
      * Remembers the order the Portfolio is being read in.
@@ -3899,19 +3666,6 @@ class LiveAppState(
             sources = LoadedSources(inputs, telegramTraces, sourceChannelIds),
             onScreen = true,
         )
-    }
-
-    /**
-     * The Analyze screen's current selection, as work a schedule can carry.
-     *
-     * This is how an analysis job is made: configure a run the way you always do, then put a time
-     * on it. Nobody should have to re-pick six chats inside a scheduling form, and a second place
-     * to choose them would be a second answer to what a run covers. Null when the screen has
-     * nothing selected, which is a schedule there is no point offering.
-     */
-    override fun scheduledAnalysisFromScreen(): AnalysisAim? {
-        val plan = screenPlan()
-        return if (plan.isEmpty) null else AnalysisAim(plan.channels, plan.contentTypes)
     }
 
     /** What the Analyze screen is currently set to run. */

@@ -21,8 +21,7 @@ import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.PromptStore
 import com.ikverse.egxanalyzer.data.OpinionPromptStore
 import com.ikverse.egxanalyzer.data.RequestTrace
-import com.ikverse.egxanalyzer.data.ScheduledRun
-import com.ikverse.egxanalyzer.data.ScheduledRunService
+import com.ikverse.egxanalyzer.data.ScheduledJobWorker
 import com.ikverse.egxanalyzer.data.SymbolMap
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.TelegramRepository
@@ -133,23 +132,10 @@ class EgxApplication : Application() {
             // The foreground service is what keeps the process alive; the notification is what
             // tells the user so.
             // Wrapped, because from Android 12 an app in the background may not start a foreground
-            // service at all. A scheduled run has already put its worker in the foreground before
-            // reaching here, which makes this start legal - but if that was itself refused, the run
-            // is still under way and paid for, and letting an exception about a notification throw
-            // it away would be the worst possible trade.
+            // service at all, and letting an exception about it throw the run away would be the
+            // worst possible trade.
             analysisRunning = { sources, model ->
-                runCatching {
-                    // While the scheduled service is holding the process there is already a
-                    // foreground service on this notification id, and a second one would mean the
-                    // first to stop takes the other's notification down with it. The run still has
-                    // to say what it is doing, so the notification is replaced rather than a
-                    // second service started.
-                    if (ScheduledRunService.holding) {
-                        notifier.nowRunning(sources, model)
-                    } else {
-                        AnalysisService.start(this, sources, model)
-                    }
-                }
+                runCatching { AnalysisService.start(this, sources, model) }
             },
             analysisFinished = { resultId, recommendations ->
                 AnalysisService.stop(this)
@@ -159,14 +145,10 @@ class EgxApplication : Application() {
                 AnalysisService.stop(this)
                 if (reason == null) notifier.cancelled() else notifier.failed(reason)
             },
-            schedulesChanged = { schedules, marketRefresh, closeSweep, priceSeriesOn ->
-                JobScheduler(this).rebook(
-                    schedules,
-                    marketRefresh,
-                    closeSweep,
-                    priceSeriesOn,
-                )
-            },            dailyCheckChanged = { wanted ->
+            schedulesChanged = { marketRefresh, closeSweep, priceSeriesOn ->
+                JobScheduler(this).rebook(marketRefresh, closeSweep, priceSeriesOn)
+            },
+            dailyCheckChanged = { wanted ->
                 if (wanted) OverdueWorker.schedule(this) else OverdueWorker.cancel(this)
             },
             // Wrapped for the reason the analysis announcements are: the trades have already been
@@ -192,9 +174,6 @@ class EgxApplication : Application() {
             },
             feedQuiet = { stocks, callsHeld ->
                 runCatching { AttentionNotifier(this).feedQuiet(stocks, callsHeld) }
-            },
-            scheduleMissed = { schedule ->
-                runCatching { AttentionNotifier(this).scheduleMissed(schedule) }
             },
             // Already swallows its own failures - a launcher that refuses a shortcut is not
             // something the reader asked about - so it needs no wrapper here.
@@ -222,21 +201,12 @@ class EgxApplication : Application() {
         // silently stopped keeping time. The sweep answers a fire that came due while the phone
         // was off, which is what the grace windows are for.
         JobScheduler(this).rebook(
-            state.analysisSchedules,
             state.marketRefreshEnabled,
             state.tradeWatchWanted,
             state.priceSeriesEnabled,
         )
-        if (state.analysisSchedules.any { it.enabled } ||
-            state.marketRefreshEnabled ||
-            state.tradeWatchWanted ||
-            state.priceSeriesEnabled
-        ) {
-            // Through the dispatcher rather than straight at the worker: a launch that finds an
-            // analysis owed - the app opened at 07:20 for a 07:00 schedule, inside its grace -
-            // must not run it under a ten-minute ceiling either. The app is on screen here, which
-            // is its own permission to start the service.
-            ScheduledRun.request(this)
+        if (state.marketRefreshEnabled || state.tradeWatchWanted || state.priceSeriesEnabled) {
+            ScheduledJobWorker.sweep(this)
         }
         state
     }

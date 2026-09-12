@@ -12,24 +12,18 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.ikverse.egxanalyzer.MainActivity
 import com.ikverse.egxanalyzer.R
-import com.ikverse.egxanalyzer.model.AnalysisSchedule
 
 /**
- * The two ways this app can stop working without anything looking wrong.
+ * The price feed going quiet without anything else looking wrong.
  *
- * Both were already detected and both reached the reader only on a screen they had to think to go
- * and open. A frozen price feed looks exactly like a calm market; a schedule the system dropped
- * looks exactly like a schedule with nothing to do. Silence is the failure mode of everything this
- * phone does unattended, and these are the two silences the app can hear and could not speak.
+ * It was already detected and reached the reader only on a screen they had to think to go and
+ * open. A frozen price feed looks exactly like a calm market, and silence is the failure mode of
+ * everything this phone does unattended.
  *
  * **Its own channel and not the overdue one**, although both belong to the same "you need to look
  * at this" register. That channel is named for trades past their deadline, and Android silences a
  * whole channel at a time - so folding a feed fault into it would mean a reader who muted one had
  * silently muted the other, which is the exact failure this file exists to prevent.
- *
- * **Nothing here offers to fix anything.** In particular a missed analysis carries no "run now":
- * that is a paid request, and a one-tap way to spend from the lock screen is the same act as
- * spending. Every one of these leads into the app, where the decision is made in full.
  */
 class AttentionNotifier(private val context: Context) {
 
@@ -43,8 +37,7 @@ class AttentionNotifier(private val context: Context) {
                     "Needs attention",
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply {
-                    description =
-                        "A price feed that has gone quiet, or a scheduled run that did not happen."
+                    description = "A price feed that has gone quiet."
                 },
             )
         }
@@ -90,53 +83,16 @@ class AttentionNotifier(private val context: Context) {
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setAutoCancel(true)
                 .setOnlyAlertOnce(true)
-                .setContentIntent(openApp(FEED_REQUEST, schedules = false))
+                .setContentIntent(openApp(FEED_REQUEST))
                 .build(),
         )
     }
 
-    /**
-     * Says a scheduled analysis was due and did not happen, and why.
-     *
-     * The reported symptom this exists for was **silence**: schedules that never fired, with no
-     * outcome line anywhere until the app was opened and the row read. The status line has always
-     * named a missing exact-alarm grant or a battery exemption ahead of anything else - to anybody
-     * who opened Settings.
-     *
-     * Deliberately not raised for a skip. "Scheduled runs are not allowed to spend cloud credits on
-     * this phone" is the *normal* state of the money switch, and a daily notification restating it
-     * would be the app nagging to be allowed to spend.
-     */
-    fun scheduleMissed(schedule: AnalysisSchedule) {
-        if (!permitted()) return
-        val detail = schedule.lastMessage.orEmpty().ifBlank { "It did not run." } +
-            " Settings shows what is stopping it, and the next fire is the retry."
-        manager.notify(
-            SCHEDULE_ID_BASE + schedule.id.hashCode().mod(ID_RANGE),
-            NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_egx_notification)
-                .setContentTitle("A scheduled analysis did not run")
-                .setContentText(detail)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setAutoCancel(true)
-                .setContentIntent(openApp(SCHEDULE_REQUEST + schedule.id.toInt(), schedules = true))
-                .build(),
-        )
-    }
-
-    /**
-     * Takes the reader to Settings, which is where both of these are explained and answered.
-     *
-     * [schedules] opens the schedules section with it, through the same entrance the Analyze card's
-     * own button uses - a notification that landed on Settings and left the reader to find the row
-     * would have wasted most of what it was for.
-     */
-    private fun openApp(requestCode: Int, schedules: Boolean): PendingIntent {
+    /** Takes the reader to Settings, which is where this is explained and answered. */
+    private fun openApp(requestCode: Int): PendingIntent {
         val intent = Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             .putExtra(EXTRA_SHOW_SETTINGS, true)
-            .putExtra(EXTRA_SHOW_SCHEDULES, schedules)
         return PendingIntent.getActivity(
             context,
             requestCode,
@@ -148,13 +104,9 @@ class AttentionNotifier(private val context: Context) {
     companion object {
         const val CHANNEL_ID = "attention"
         const val EXTRA_SHOW_SETTINGS = "com.ikverse.egxanalyzer.SHOW_SETTINGS"
-        const val EXTRA_SHOW_SCHEDULES = "com.ikverse.egxanalyzer.SHOW_SCHEDULES"
 
         /** Clear of 1001-1005, which the notifiers before this one hold. */
         private const val FEED_ID = 1006
-        private const val SCHEDULE_ID_BASE = 5000
-        private const val ID_RANGE = 1000
         private const val FEED_REQUEST = 6
-        private const val SCHEDULE_REQUEST = 50_000
     }
 }

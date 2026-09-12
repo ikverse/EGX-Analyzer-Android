@@ -139,7 +139,6 @@ internal fun SettingsScreen(appState: AppState) {
         appState.appPreferences.approachAlertsEnabled,
         appState.appPreferences.sessionDigestEnabled,
         appState.appPreferences.feedAlertsEnabled,
-        appState.appPreferences.scheduleAlertsEnabled,
     ).count { it }
 
     // One line per group as well as one for the card. A closed group saying nothing about how much
@@ -157,7 +156,6 @@ internal fun SettingsScreen(appState: AppState) {
     )
     val appNotificationsSummary = switchesOn(
         appState.appPreferences.feedAlertsEnabled,
-        appState.appPreferences.scheduleAlertsEnabled,
     )
 
     Screen(
@@ -608,8 +606,6 @@ internal fun SettingsScreen(appState: AppState) {
             }
         }
 
-        SchedulesSettingsSection(appState, FormWidth)
-
         ExpandableSection(
             "Telegram",
             icon = Icons.Outlined.Forum,
@@ -813,11 +809,10 @@ internal fun SettingsScreen(appState: AppState) {
                 summary = appNotificationsSummary,
                 about = infoNote(
                     "The app itself",
-                    "The two that report this app being unable to do its job, rather than " +
-                        "anything the market did.",
-                    "Both are on by default, and that is deliberate: the way each of these breaks " +
-                        "is silence, so an app that stopped working quietly would look exactly " +
-                        "like a quiet week.",
+                    "Reports this app being unable to do its job, rather than anything the market " +
+                        "did.",
+                    "On by default, and that is deliberate: the way this breaks is silence, so an " +
+                        "app that stopped working quietly would look exactly like a quiet week.",
                 ),
             ) {
                 SettingToggle(
@@ -836,22 +831,6 @@ internal fun SettingsScreen(appState: AppState) {
                             "until the feed comes back and goes quiet a second time. Prices under " +
                             "General says how many stocks are affected and how much of the record " +
                             "they are holding.",
-                    ),
-                )
-                SettingToggle(
-                    label = "Tell me when a scheduled run did not happen",
-                    checked = appState.appPreferences.scheduleAlertsEnabled,
-                    onCheckedChange = appState::updateScheduleAlerts,
-                    about = infoNote(
-                        "Tell me when a scheduled run did not happen",
-                        "A schedule that was due and was missed, or one that failed - with the reason " +
-                            "it gives. The way a schedule breaks on this platform is silence: nothing " +
-                            "fires and nothing says so, and the two permissions that stop one working " +
-                            "are named only on this screen.",
-                        "It never mentions a run that was deliberately skipped, so it cannot become a " +
-                            "daily reminder that paid runs are switched off.",
-                        "It offers no way to start a run: that would be a way to spend from the lock " +
-                            "screen, and starting one is always your own decision.",
                     ),
                 )
             }

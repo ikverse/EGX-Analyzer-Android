@@ -90,7 +90,6 @@ data class SettingsSnapshot(
             .put("approachThresholdPercent", preferences.approachThresholdPercent)
             .put("sessionDigestEnabled", preferences.sessionDigestEnabled)
             .put("feedAlertsEnabled", preferences.feedAlertsEnabled)
-            .put("scheduleAlertsEnabled", preferences.scheduleAlertsEnabled)
             .put("portfolioOrder", preferences.portfolioOrder.name)
             .put("callOrder", preferences.callOrder.name)
             .put("updateChecksEnabled", preferences.updateChecksEnabled)
@@ -197,10 +196,6 @@ data class SettingsSnapshot(
                         "feedAlertsEnabled",
                         defaults.feedAlertsEnabled,
                     ),
-                    scheduleAlertsEnabled = json.optBoolean(
-                        "scheduleAlertsEnabled",
-                        defaults.scheduleAlertsEnabled,
-                    ),
                     portfolioOrder = json.enumOr("portfolioOrder", defaults.portfolioOrder),
                     callOrder = json.enumOr("callOrder", defaults.callOrder),
                     updateChecksEnabled = json.optBoolean(
@@ -272,7 +267,7 @@ data class SettingsSnapshot(
             "correctionRetries", "catalogEnrichmentEnabled", "scoringWindowSessions",
             "overdueRemindersEnabled", "tradeAlertsEnabled", "callAlertsEnabled",
             "approachAlertsEnabled", "approachThresholdPercent", "sessionDigestEnabled",
-            "feedAlertsEnabled", "scheduleAlertsEnabled",
+            "feedAlertsEnabled",
             "portfolioOrder", "callOrder",
             "updateChecksEnabled",
             "useDefaultPromptOnly", "provider", "providers", "promptHistory",

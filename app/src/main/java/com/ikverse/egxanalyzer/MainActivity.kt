@@ -148,15 +148,9 @@ class MainActivity : ComponentActivity() {
             }
             AppShortcuts.ACTION_INSIGHTS -> appState.navigate(AppDestination.INSIGHTS)
         }
-        // A feed that has gone quiet, or a schedule that did not run. Both are answered in
-        // Settings; the schedule one opens the section too, through the same entrance the Analyze
-        // card's own button uses, so the row is on screen rather than somewhere on the page.
+        // A feed that has gone quiet, answered in Settings.
         if (intent?.getBooleanExtra(AttentionNotifier.EXTRA_SHOW_SETTINGS, false) == true) {
-            if (intent.getBooleanExtra(AttentionNotifier.EXTRA_SHOW_SCHEDULES, false)) {
-                appState.editSchedules()
-            } else {
-                appState.navigate(AppDestination.SETTINGS)
-            }
+            appState.navigate(AppDestination.SETTINGS)
         }
         intent?.getStringExtra(CallAlertNotifier.EXTRA_CALL_ID)
             ?.takeIf(String::isNotBlank)
