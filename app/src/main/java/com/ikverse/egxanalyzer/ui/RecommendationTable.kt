@@ -184,8 +184,14 @@ private const val EntryWeight = 1.6f
  * Every cell is held to one line per figure, so at any one scale the rows are the same height and
  * the column reads down. That is what the old table could not do: two of its columns wrapped at
  * anything above the default scale, and a wrapped row stood half again as tall as the one above it.
+ *
+ * 64dp and no longer 56dp, because the tallest cell is [SourceCell] and it is taller than 56dp: an
+ * Arabic channel name, the gap, the timing pill and the air the cell now asks for either side come
+ * to 61dp. At 56dp a row carrying a pill would have stood on its own content and a row whose call
+ * has no timing would have stopped at the minimum, so the table would have read down in two
+ * heights - the one failure this minimum exists to prevent.
  */
-private val RowHeight = 56.dp
+private val RowHeight = 64.dp
 
 @Composable
 private fun StockBlock(
@@ -437,9 +443,21 @@ private fun CallRow(
 private fun SourceCell(channel: String?, timing: String?, modifier: Modifier) {
     // Space.s, and no longer the 3dp that was never on the spacing scale. That gap was set when
     // the timing was a line of small print carrying 1dp of padding; it is a 20dp pill now, and at
-    // 3dp its edge closed on the channel name instead of standing under it. The row does not grow
-    // - the name, this gap and the pill come to 45dp inside a 56dp row.
-    Column(modifier.padding(horizontal = Space.xs), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+    // 3dp its edge closed on the channel name instead of standing under it.
+    //
+    // The vertical padding is what keeps the pill off the row's floor. This gap and the pill are
+    // 28dp between them, and the line above was budgeted at the 17dp a Latin `bodySmall` measures
+    // - 45dp of a 56dp row, with 5.5dp of air either side. The names here are Arabic, and Noto
+    // Naskh's ascent and descent make that same line measure about 25dp: the stack came to 53dp
+    // and the pill sat 1.5dp off the bottom edge of the row, which reads as touching it. Air
+    // asked for here rather than a line box trimmed to a number is the one form of this that
+    // holds whatever the script or the font does - a trim tight enough to buy back 8dp would be
+    // tighter than the ink of the hamza above `إ` and the tail of `ي`. The Latin case is unmoved
+    // at 53dp inside the 56dp minimum; an Arabic row grows to 61dp and says so.
+    Column(
+        modifier.padding(horizontal = Space.xs, vertical = Space.xs),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
         // The one place in the table where the floor can actually be reached: channel names run
         // long and this column is fixed, so a name that will not fit at 9sp still ends in a dot.
         AutoSizeText(

@@ -93,6 +93,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -949,8 +954,52 @@ private fun DestinationPager(appState: AppState) {
         // moves it somewhere there is no gesture for it to stutter.
         beyondViewportPageCount = 1,
     ) { page ->
-        DestinationScreen(destinations[page], appState)
+        Box(Modifier.fillMaxSize().sidewaysGesturesStayOnThePage()) {
+            DestinationScreen(destinations[page], appState)
+        }
     }
+}
+
+/**
+ * Keeps a sideways gesture that began on something inside the page from becoming a page turn.
+ *
+ * **This is the fix of 2026-09-12 - "results to insights I have to scroll a long distance and it
+ * jumps two pages to portfolio".** A page here is full of things that scroll sideways in their own
+ * right: the stack of readings behind a session (`SavedRunStack`), the tables a wide row is read in
+ * (`scrollableRow`), the outcome chips on Insights, the sparkline in a recommendation. Compose hands
+ * whatever a child scroller could not use **to its parent within the same gesture** - the leftover
+ * distance through `onPostScroll`, and the leftover velocity of the fling through `onPostFling` -
+ * and the pager's own `scrollable` takes both. So a swipe that started on one of those spent its
+ * first inches running that thing to its end, which is the long distance, and then poured the rest
+ * of the finger's travel into the pager. A drag is not clamped to one page, so the remainder plus
+ * the child's leftover fling carried the reader past the tab they were swiping towards and onto the
+ * one after it.
+ *
+ * **Only what comes up from inside the page is eaten, and only sideways.** A swipe over ordinary
+ * page content never passes through here at all - the pager's own gesture detector owns it, above
+ * this connection - so page swiping is untouched, and what stops is one gesture doing two jobs.
+ * Vertical is passed on whole, because three things upstream live on it: the header's collapse, the
+ * navigation bar getting out of the way, and pull to refresh.
+ *
+ * Every source is eaten rather than just `UserInput`. A child flung to its end goes on dispatching
+ * leftovers for the length of its own settling animation, and those are the same gesture arriving a
+ * few frames later.
+ */
+@Composable
+private fun Modifier.sidewaysGesturesStayOnThePage(): Modifier {
+    val connection = remember {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset = Offset(available.x, 0f)
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
+                Velocity(available.x, 0f)
+        }
+    }
+    return this.nestedScroll(connection)
 }
 
 @Composable
