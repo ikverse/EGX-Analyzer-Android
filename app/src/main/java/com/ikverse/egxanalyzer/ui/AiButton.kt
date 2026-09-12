@@ -396,8 +396,18 @@ private fun mix(from: Float, to: Float, t: Float): Float = from + (to - from) * 
  *   enough over it that where they overlap the fill still reads at the bar's strength rather than
  *   above it.
  */
-internal fun DrawScope.drawActionAurora(base: Color, lights: List<Color>, at: List<Offset>) {
-    drawRect(base)
+internal fun DrawScope.drawActionAurora(
+    base: Color,
+    lights: List<Color>,
+    at: List<Offset>,
+    /**
+     * How much of the ground to lay down, for a caller drawing over something it wants to see. The
+     * lights keep their own strength: they are what says the run is alive, and a frosted button
+     * that dimmed them as well would report a run more quietly than a solid one did.
+     */
+    alpha: Float = 1f,
+) {
+    drawRect(base, alpha = alpha)
     val radius = size.height * LightRadius
     lights.forEachIndexed { index, colour ->
         val centre = at[index]

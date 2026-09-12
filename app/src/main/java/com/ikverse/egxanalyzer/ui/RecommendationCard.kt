@@ -68,10 +68,13 @@ internal fun RecommendationCards(
     if (points.isEmpty()) {
         Card(
             modifier = modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-            border = cardOutline,
+            // The same glass the card with figures on it is drawn with: a stock with nothing to
+            // show is still one of these cards, and a slab among them reads as a fault.
+            colors = CardDefaults.cardColors(containerColor = Glass.fill),
+            border = Glass.outline,
+            elevation = CardDefaults.cardElevation(defaultElevation = Glass.lift),
         ) {
-            Column(Modifier.padding(Space.l)) {
+            Column(Modifier.glassSheen().padding(Space.l)) {
                 StockHeader(
                     stock,
                     point = null,
@@ -139,13 +142,20 @@ private fun RecommendationCard(
         // A step up in container rather than a shadow. These sit inside the report's own card, which
         // is why they were elevated; the step is what separates them now that nothing on the page
         // casts a shadow.
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        // Glass rather than a step up in container, on this card and the Portfolio position card,
+        // while the treatment is being judged. It sits inside the report's own card, so what shows
+        // through it is that card rather than the page. See Glass.
+        colors = CardDefaults.cardColors(containerColor = Glass.fill),
+        elevation = CardDefaults.cardElevation(defaultElevation = Glass.lift),
         // A stock the user is actually in is outlined in the colour of where it stands, so a page
         // of calls can be read for what is held before any card is opened. Everything else carries
         // the hairline every other card on the page is drawn with.
-        border = heldBorder(held) ?: cardOutline,
+        border = heldBorder(held) ?: Glass.outline,
     ) {
-        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        Column(
+            Modifier.glassSheen().padding(Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
             // The session the call was made for, from the same source the Bought button
             // reads it from, so the copied text and the trade agree about which day.
             StockHeader(

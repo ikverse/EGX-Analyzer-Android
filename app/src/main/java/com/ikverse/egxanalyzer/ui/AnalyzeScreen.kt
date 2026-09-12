@@ -151,15 +151,21 @@ internal fun AnalyzeScreen(appState: AppState) {
             // Read in the draw lambda rather than the composable body: read at composition the
             // drifts would recompose this screen sixty times a second, where here a frame costs a
             // repaint and nothing else.
-            val fill = Modifier.drawBehind {
+            // The page behind the button, blurred, under everything the button paints. This is the
+            // one place in the app where a frost is worth its frame: the page scrolls under this
+            // button the whole time it is on screen, so there is something behind it to soften.
+            // See frostedBackdrop - and ActionFrost for why the fills above it had to come down.
+            val frost = Modifier.frostedBackdrop()
+            val fill = frost.drawBehind {
                 if (running) {
                     drawActionAurora(
                         accent.actionAuroraBase,
                         accent.actionAurora,
                         motion.lights(size.width, size.height),
+                        alpha = ActionFrost,
                     )
                 } else {
-                    drawRect(teal)
+                    drawRect(teal, alpha = ActionFrost)
                 }
             }
             if (running) {
@@ -194,6 +200,7 @@ internal fun AnalyzeScreen(appState: AppState) {
                 // the action colour would be the loudest thing on the screen and do nothing when
                 // pressed, which is the one thing it must not be able to mean.
                 val ready = blocker == null
+                val blocked = MaterialTheme.colorScheme.surfaceContainerHigh
                 AnalyzeAction(
                     onClick = {
                         // Asked here rather than at first launch: a permission prompt before the
@@ -209,17 +216,20 @@ internal fun AnalyzeScreen(appState: AppState) {
                             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
                     },
-                    container = if (ready) {
-                        Color.Transparent
-                    } else {
-                        // A step down from surfaceContainerHighest, which read as nearly solid once
-                        // the button went see-through and left the blocked state looking the most
-                        // substantial of the three.
-                        MaterialTheme.colorScheme.surfaceContainerHigh
-                    },
+                    // Painted in every state now, blocked included: the frost is the button's
+                    // material, and a state that kept a flat tint would be the one state made of
+                    // something else. The colour is still the step down from surfaceContainerHighest
+                    // this state has worn since the button went see-through.
+                    container = Color.Transparent,
                     content = if (ready) accent.onAction else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = if (ready) haloed else actionModifier,
-                    painted = fill.takeIf { ready },
+                    painted = if (ready) {
+                        fill
+                    } else {
+                        frost.drawBehind {
+                            drawRect(blocked, alpha = ActionFrost)
+                        }
+                    },
                     stretch = !big,
                     // Only the state that can spend money wears the coloured edge, for the reason
                     // only it wears the fill: a blocked button with the action's own hairline round
@@ -827,6 +837,20 @@ private val BigActionIcon = 34.dp
 
 /** Room either side of the icon and its label, where the button used to bring Material's own. */
 private val ActionPadding = 20.dp
+
+/**
+ * How much of the button's own fill is laid over the frost.
+ *
+ * The fills were built to sit on a page they hid, at an alpha that already read as glass against a
+ * flat ground - and over a blurred page that same alpha simply covers the blur up. Multiplied
+ * rather than restated in the theme, so the hues stay the one list `PageAccent` publishes and this
+ * number means what it says: what the frost is worth against the colour.
+ *
+ * Low enough that the page moving underneath is visible, high enough that the label keeps its
+ * contrast over whatever happens to pass under it. Below about 0.6 a white heading scrolling past
+ * came through the button and fought the button's own words.
+ */
+private const val ActionFrost = 0.66f
 
 /**
  * The screen's action, wearing the same floating treatment as the navigation bar under it.

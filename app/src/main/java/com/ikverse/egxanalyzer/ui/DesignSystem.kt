@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
@@ -31,19 +32,29 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -57,6 +68,7 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import com.ikverse.egxanalyzer.ui.theme.LocalDarkTheme
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -125,6 +137,96 @@ internal fun FloatingSurface(
 
 /** Enough to lift the surface off the page without casting a shadow the tint then shows through. */
 private val FloatingElevation = 6.dp
+
+/**
+ * The page, held as something a floating surface can look through itself at.
+ *
+ * A card cannot be frosted in any way worth the frame it costs: the page behind one is a flat
+ * colour and no card overlaps anything, so blurring what is behind it produces the tint a tint
+ * already is. **A floating surface is the opposite case.** The page runs under the action and the
+ * navigation the whole time it is being read, so what is behind them is cards, figures and moving
+ * text - and softening that is the difference between a control the page passes under and a pane of
+ * glass it passes behind.
+ *
+ * The page draws itself into [layer] on its way to the screen (see [Modifier.recordBackdrop]) and
+ * anything floating over it can then draw that same recording, blurred, as its own ground. The two
+ * must be **different subtrees**: a surface inside the recorded page drawing the recording it is
+ * part of is a layer being read while it is written.
+ *
+ * @property origin where the recording's own top-left sits in the window, so a surface anywhere on
+ *   screen can work out which part of it is behind itself.
+ */
+internal class PageBackdrop(val layer: GraphicsLayer) {
+    var origin by mutableStateOf(Offset.Zero)
+}
+
+/**
+ * The backdrop a floating surface should frost against, or null where nothing is recording one.
+ *
+ * Null is the working default and not a failure: a sheet, a preview and a widget all draw floating
+ * surfaces with no page behind them, and [Modifier.frostedBackdrop] simply does nothing there
+ * rather than each of those having to know whether it is inside a [Screen].
+ */
+internal val LocalPageBackdrop = staticCompositionLocalOf<PageBackdrop?> { null }
+
+@Composable
+internal fun rememberPageBackdrop(): PageBackdrop {
+    val layer = rememberGraphicsLayer()
+    return remember(layer) { PageBackdrop(layer) }
+}
+
+/**
+ * Draws the page as usual and keeps a copy of it in [backdrop].
+ *
+ * The copy is what the blur is taken from, so it is re-recorded every frame the page draws - which
+ * is the cost of this treatment and the whole of it: one screen-sized layer, written once and read
+ * by however many floating surfaces are frosted. Anything that must be frosted has to sit outside
+ * the subtree this is applied to.
+ */
+internal fun Modifier.recordBackdrop(backdrop: PageBackdrop): Modifier = this
+    .onGloballyPositioned { backdrop.origin = it.positionInWindow() }
+    .drawWithContent {
+        backdrop.layer.record { this@drawWithContent.drawContent() }
+        drawLayer(backdrop.layer)
+    }
+
+/**
+ * The page behind this surface, blurred, as the surface's own ground.
+ *
+ * Drawn behind whatever else the surface paints, so a fill over it still reads as a fill - the frost
+ * replaces the flat page showing through, not the colour. The caller's fill has to be see-through
+ * enough to let it show, which is the one thing this modifier cannot do for it.
+ *
+ * A second layer is needed because the blur belongs to this surface and not to the page: a render
+ * effect set on the recording itself would blur the page on its way to the screen, which is the one
+ * thing nobody asked for. It samples only what is behind the surface's own bounds, so the edges are
+ * clamped rather than faded - a decal edge leaves a pale rim around a surface this small.
+ */
+@Composable
+internal fun Modifier.frostedBackdrop(radius: Dp = FrostRadius): Modifier {
+    val backdrop = LocalPageBackdrop.current ?: return this
+    val blurred = rememberGraphicsLayer()
+    val blur = with(LocalDensity.current) { radius.toPx() }
+    val position = remember { mutableStateOf(Offset.Zero) }
+    return this
+        .onGloballyPositioned { position.value = it.positionInWindow() }
+        .drawBehind {
+            // Where the recording's top-left falls in this surface's own coordinates, which is what
+            // the recording has to be shifted by for the part behind this surface to land under it.
+            val shift = backdrop.origin - position.value
+            blurred.renderEffect = BlurEffect(blur, blur, TileMode.Clamp)
+            blurred.record { translate(shift.x, shift.y) { drawLayer(backdrop.layer) } }
+            drawLayer(blurred)
+        }
+}
+
+/**
+ * How far the frost carries.
+ *
+ * Far enough that a headline passing under the action is light and movement rather than words -
+ * which is the same thing the 0.94 tint was for, said in the medium instead of by hiding the page.
+ */
+private val FrostRadius = 20.dp
 
 /**
  * One width for every floating edge, gradient or not.
@@ -238,6 +340,91 @@ val cardOutline: BorderStroke
         1.dp,
         androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant,
     )
+
+/**
+ * What a card is made of where it is drawn as glass rather than as a slab.
+ *
+ * Three parts that only mean anything together: a fill the page shows through, a sheen across the
+ * top corner, and an edge lit along its top. Any one of them alone reads as a card that failed to
+ * paint rather than as a card made of something - a see-through card with a flat grey edge is the
+ * worst of the three - so they are declared here together and applied in one line at each call site.
+ *
+ * **Not a blur, deliberately.** The page behind a card is one flat colour and cards do not overlap,
+ * so blurring what is behind one would cost a layer a frame to produce the tint this already is.
+ * What makes these read as glass is the page coming through them and the light along their top,
+ * neither of which needs a [android.graphics.RenderEffect].
+ *
+ * Held to the two cards it is being judged on - the Results occurrence card and the Portfolio
+ * position card - rather than applied to [SectionCard], which every page draws.
+ */
+internal object Glass {
+    /**
+     * See-through enough that the page changes the card, opaque enough to carry a figure.
+     *
+     * A shade heavier on the light theme: the same alpha over near-white leaves less contrast under
+     * the small grey type than it does over near-black, and the type is what the card is for.
+     */
+    val fill: Color
+        @Composable get() = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh
+            .copy(alpha = if (LocalDarkTheme.current) 0.70f else 0.76f)
+
+    /**
+     * Light along the top edge, falling away down the sides.
+     *
+     * Stands in for [cardOutline] **only where the card has nothing better to say with its edge**. A
+     * trade's status and an arrival flash both own this edge while they are there, and what a card
+     * means outranks how it is lit - so both call sites keep their own border where they have one
+     * and take this where they would have taken the hairline.
+     */
+    val outline: BorderStroke
+        @Composable get() = BorderStroke(
+            1.dp,
+            if (LocalDarkTheme.current) {
+                Brush.verticalGradient(
+                    listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.07f)),
+                )
+            } else {
+                // White at the top and the card hairline below it: on this theme the lit edge is
+                // the page's own light catching the top of the card, and the rest of the outline
+                // still has to be the line every other card is drawn with.
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White,
+                        androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant,
+                    ),
+                )
+            },
+        )
+
+    /**
+     * Just enough shadow to sit the glass off the page.
+     *
+     * The **one** place this treatment departs from the rule that nothing on these pages casts a
+     * shadow. A translucent card has less edge than a solid one by definition, and against a page
+     * it is showing through, the hairline alone left it looking printed on rather than laid over.
+     * Two cards carry it while the treatment is being judged; if it goes, it goes from here.
+     */
+    val lift: Dp = 2.dp
+}
+
+/**
+ * The sheen, on the card's own content root rather than on the card.
+ *
+ * It has to be painted over the fill and under the words. On the `Card`'s own modifier it would
+ * land behind a translucent fill, which is what dims a 7% white to nothing; drawn after the content
+ * it would sit on the type. The content root is the one place that is both, and being inside the
+ * card it is clipped by the card's shape for free.
+ *
+ * Diagonal by default - [Brush.linearGradient] runs corner to corner - so the light has a direction
+ * and the card is not simply paler at the top.
+ */
+@Composable
+internal fun Modifier.glassSheen(): Modifier = background(
+    Brush.linearGradient(
+        0f to Color.White.copy(alpha = if (LocalDarkTheme.current) 0.07f else 0.50f),
+        0.45f to Color.Transparent,
+    ),
+)
 
 /**
  * Colour carries meaning for a price, not decoration.

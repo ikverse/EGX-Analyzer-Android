@@ -272,8 +272,13 @@ internal fun Screen(
             content()
         }
     }
+    // The page keeps a copy of itself so the action floating over it can frost against what is
+    // actually behind it. Recorded around the wash and the page together and **not** around the
+    // floating action below, which has to stay outside the recording it reads. See PageBackdrop.
+    val backdrop = rememberPageBackdrop()
     CompositionLocalProvider(LocalViewportTop provides viewportTop) {
     Box(Modifier.fillMaxSize().nestedScroll(headerScroll)) {
+      Box(Modifier.fillMaxSize().recordBackdrop(backdrop)) {
         PageWash(scroll) { taken.floatValue }
         Column(Modifier.fillMaxSize()) {
             PageHeader(
@@ -335,7 +340,9 @@ internal fun Screen(
                 }
             }
         }
+      }
         floatingAction?.let {
+          CompositionLocalProvider(LocalPageBackdrop provides backdrop) {
             if (compact) {
                 // The action keeps the bar's side margins and its corner, and **never leaves**. It
                 // used to go with the bar on the same scroll, so the one control that starts a run
@@ -364,6 +371,7 @@ internal fun Screen(
                 // would be an 88dp slab the width of an unfolded Fold.
                 Box(Modifier.align(Alignment.BottomEnd).padding(Space.xl + Space.s)) { it() }
             }
+          }
         }
     }
     }

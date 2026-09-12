@@ -78,13 +78,17 @@ internal fun PositionCard(
     var editing by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
 
-    val colors = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-    )
+    // Glass rather than a slab, on this card and the Results occurrence card, while the treatment
+    // is being judged. Only the fill and the sheen: this card's edge always carries the trade's
+    // status, and what a card means outranks how it is lit. See Glass.
+    val colors = CardDefaults.cardColors(containerColor = Glass.fill)
     // The arrival flash takes the edge for as long as it runs, then the status outline has it back.
     val border = arrivalFlash(highlighted, onHighlightShown) ?: heldBorder(view)
     val body: @Composable ColumnScope.() -> Unit = {
-        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        Column(
+            Modifier.glassSheen().padding(Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
             // A fixed two lines for the name, so a company whose name wraps does not make its card
             // taller than the one beside it.
             Row(Modifier.heightIn(min = PositionHeaderHeight), verticalAlignment = Alignment.Top) {
@@ -408,6 +412,7 @@ internal fun PositionCard(
             colors = colors,
             border = border,
             shape = MaterialTheme.shapes.medium,
+            elevation = CardDefaults.cardElevation(defaultElevation = Glass.lift),
             content = body,
         )
     } else {
@@ -420,6 +425,7 @@ internal fun PositionCard(
             colors = colors,
             border = border,
             shape = MaterialTheme.shapes.medium,
+            elevation = CardDefaults.cardElevation(defaultElevation = Glass.lift),
             content = body,
         )
     }
