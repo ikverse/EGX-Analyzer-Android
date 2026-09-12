@@ -79,9 +79,11 @@ import com.ikverse.egxanalyzer.model.AnalysisDiagnostics
 import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
+import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SavedAnalysis
+import com.ikverse.egxanalyzer.model.Scoring
 import java.io.File
 import java.time.LocalDate
 import java.time.ZoneId
@@ -283,6 +285,12 @@ internal fun ResultsScreen(appState: AppState) {
                         onDelete = { appState.deleteResult(saved) },
                         report = { appState.reportFor(saved) },
                         peakFor = appState::peakSince,
+                        // Normalized, because the record keys prices on the bare ticker and a
+                        // report can name the same stock as COMI or COMI.CA - the grouping every
+                        // other reader of `latestPrices` already does.
+                        latestFor = { code ->
+                            appState.performance.latestPrices[Scoring.normalizeTicker(code)]
+                        },
                         traceRoot = appState.traceRoot(),
                         stockFilter = stockFilter,
                     )
@@ -765,6 +773,8 @@ private fun SavedAnalysisCard(
     report: () -> AnalysisReport,
     /** Highest a stock has traded since the call, for the ladder's arrow. */
     peakFor: (String, LocalDate?) -> Double? = { _, _ -> null },
+    /** Where a stock stands now, for the heading over its block of the table. */
+    latestFor: (String) -> LatestPrice? = { null },
     /** Where request traces are kept, so the diagnostics list can count this run's. */
     traceRoot: File,
     /** What the screen is searching for, which the report opens already narrowed to. */
@@ -1006,6 +1016,7 @@ private fun SavedAnalysisCard(
                 ResultDetail(
                     saved,
                     peakFor,
+                    latestFor,
                     traceRoot,
                     trades,
                     editor,
@@ -1113,6 +1124,7 @@ private fun relativeSession(target: LocalDate): String? {
 private fun ResultDetail(
     saved: SavedAnalysis,
     peakFor: (String, LocalDate?) -> Double?,
+    latestFor: (String) -> LatestPrice?,
     traceRoot: File,
     trades: TradeBook,
     editor: CallEditor,
@@ -1311,6 +1323,7 @@ private fun ResultDetail(
                     RecommendationTable(
                         stocks = stocks,
                         channelFor = { messageId -> channelNames[messageId] },
+                        latestFor = latestFor,
                         onSelectPoint = { stock, point ->
                             detail = stock.originalStockCode to point.parseIndex
                         },

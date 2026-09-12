@@ -8,7 +8,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -42,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import kotlin.math.max
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
+import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 
 /**
@@ -63,25 +63,51 @@ import com.ikverse.egxanalyzer.model.RecommendationDataPoint
  *   restating that a press was available.
  *
  * What is left of a fixed width is [SourceWidth] and [ChevronWidth]; every figure column is
- * weighted, so a wider window widens the columns rather than adding more of them. See
- * [LevelColumnsMinWidth] for the one thing extra width does add, and why that is not the old
- * mistake in a new place.
+ * weighted, so a wider window widens the columns rather than adding more of them. **Width adds
+ * nothing at all now**, which is the end of that argument rather than a new position in it: the
+ * table draws the same six figure columns at every size it is drawn at.
+ *
+ * There was a breakpoint here until the last of it was deleted, and the reason it went is worth
+ * keeping. It was measured on this composable's own container and compared against 600dp - the
+ * same figure as the page's own `TableMinWidth`, which gates whether this table is drawn instead of
+ * cards. Its doc argued the two were different numbers because one was measured outside the report
+ * card's insets. They are not: the gate and this table sit in the same `BoxWithConstraints`, with
+ * nothing but a `Column` between them, so both read one width. The flag was true wherever the table
+ * existed and false nowhere, and every branch on it was dead.
+ *
+ * So the one thing that decides whether a reader sees this table at all is `TableMinWidth`, on the
+ * page, and what they see once they do is fixed. The row spends [Space].m either side, [SourceWidth]
+ * and [ChevronWidth], and divides what is left over 6.6 shares at [EntryWeight]: at the narrowest
+ * container that earns a table, 600dp, that is 64dp a share - 56dp of text inside [Space].xs on
+ * either side, against a six-character price of roughly 50dp at 14sp mono. `Resistance` is the one
+ * label that does not fit at full size there and [AutoSizeText] steps it down; see [HeaderLabel].
  */
 @Composable
 internal fun RecommendationTable(
     stocks: List<ConsolidatedRecommendation>,
     channelFor: (String?) -> String?,
+    /**
+     * Where the stock is now, for the heading of its block.
+     *
+     * A lambda rather than a map, beside `peakFor` and for the same reason: the report this table
+     * draws and the price record are two stores, and handing the table the second one whole would
+     * make every block recompose when any stock's price moved.
+     */
+    latestFor: (String) -> LatestPrice?,
     onSelectPoint: (ConsolidatedRecommendation, RecommendationDataPoint) -> Unit,
     modifier: Modifier = Modifier,
     /**
-     * Support, resistance and the two dates, under each row.
+     * The two dates, under each row.
      *
      * A toggle rather than the width breakpoint it used to be. These are true of a call and are not
      * what anyone judges it by - the file said so itself, above the column list - so appearing
      * because the screen got wider was the one arrangement that could not be right: the reader who
      * wants them cannot ask, and the reader who does not gets them at the cost of the figures that
-     * decide something. A second line rather than four more columns, so asking for them never puts
-     * the table back into a sideways scroll.
+     * decide something. A second line rather than more columns, so asking for them never puts the
+     * table back into a sideways scroll.
+     *
+     * Support and resistance used to ride this line as well, on any row too narrow to column them.
+     * They are columns at every width now, so what is left here is what dated the call.
      */
     showContext: Boolean = false,
     /**
@@ -100,9 +126,7 @@ internal fun RecommendationTable(
     var pin by remember { mutableFloatStateOf(0f) }
     var pinnedHeight by remember { mutableFloatStateOf(0f) }
 
-    // Measured here rather than from the window: the table sits inside a report card inside a page
-    // inside the rail, and window width would promise room three insets have already spent.
-    BoxWithConstraints(
+    Box(
         modifier
             .fillMaxWidth()
             .onGloballyPositioned { coordinates ->
@@ -111,7 +135,6 @@ internal fun RecommendationTable(
                 pin = (viewportTop - top).coerceIn(0f, max(0f, height - pinnedHeight))
             },
     ) {
-        val wide = maxWidth >= LevelColumnsMinWidth
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             toolbar?.let {
                 // Opaque and full width, because it slides across the blocks rather than pushing
@@ -129,7 +152,7 @@ internal fun RecommendationTable(
                 StockBlock(
                     stock = stock,
                     channelFor = channelFor,
-                    wide = wide,
+                    latest = latestFor(stock.stockCode),
                     showContext = showContext,
                     onSelectPoint = onSelectPoint,
                 )
@@ -137,36 +160,6 @@ internal fun RecommendationTable(
         }
     }
 }
-
-/**
- * Where the two levels stop being a footnote and become columns.
- *
- * Nothing the narrower screen had is taken away to pay for them: risk to reward is the entry cell's
- * second line at every width now, and support and resistance stay on [ContextLine] under any row
- * too narrow to column them. A window that shrinks moves figures rather than dropping them, which
- * is the distinction from the breakpoint this table was built to replace - extra width buys the
- * same row more room, never a figure the smaller screen was denied.
- *
- * **The line is phone against large screen, and nothing finer.** At 656dp it fell between the
- * unfolded Fold's 614dp of container and the tablet's 682dp, so the same report drew six figure
- * columns on one big screen and four on the other - a split no reader asked for and none could
- * predict, since the two screens are a hinge apart and show the same app. The app has one idea of
- * a large window, `WIDE_LAYOUT_DP`, and both clear it; this is the container-side reading of the
- * same idea, so whatever the tablet draws the Fold's inner screen draws too.
- *
- * 600dp of container is about 736dp of window once the rail and three insets are out, so the Fold's
- * 750dp clears it and nothing phone-sized comes near. The row spends [Space].m either side,
- * [SourceWidth] and [ChevronWidth], and divides what is left over 6.6 shares at [EntryWeight]: the
- * Fold's 614dp gives 66dp a share, so entry takes 105dp and each single-figure column 66dp - 58dp
- * of text inside [Space].xs on either side, where the longest price the row draws is six characters
- * of 14sp mono at roughly 50dp. The tablet's 682dp gives 76dp a share. Below this it is `Resistance`
- * that goes first, the one header longer than its column's figures are.
- *
- * It reads as the same number as the page's own `TableMinWidth` and is not: that one is measured on
- * the page, outside the report card's insets, so by the time it reaches here the width has already
- * lost them. A window that only just earns a table is still drawn with four figure columns.
- */
-private val LevelColumnsMinWidth = 600.dp
 
 /** The channel and its timing chip. The one column that holds words rather than figures. */
 private val SourceWidth = 132.dp
@@ -198,7 +191,7 @@ private val RowHeight = 56.dp
 private fun StockBlock(
     stock: ConsolidatedRecommendation,
     channelFor: (String?) -> String?,
-    wide: Boolean,
+    latest: LatestPrice?,
     showContext: Boolean,
     onSelectPoint: (ConsolidatedRecommendation, RecommendationDataPoint) -> Unit,
 ) {
@@ -213,13 +206,12 @@ private fun StockBlock(
         border = cardOutline,
     ) {
         Column {
-            StockHeading(stock)
-            ColumnHeader(wide)
+            StockHeading(stock, latest)
+            ColumnHeader()
             stock.dataPoints.forEachIndexed { index, point ->
                 CallRow(
                     point = point,
                     channel = channelFor(point.sourceMessageId) ?: point.sourceMessageId,
-                    wide = wide,
                     showContext = showContext,
                     // The stripe does the separating on its own now. It shared the job with a rule
                     // under every row and a vertical rule beside the first column, and three grid
@@ -232,8 +224,29 @@ private fun StockBlock(
     }
 }
 
+/**
+ * Which stock the block below is about, and where that stock is now.
+ *
+ * **The price is the point of this row.** Identity took the leading edge and nothing held the
+ * trailing one, so a band that named one stock sat over a rule running the full width of the card -
+ * left-heavy over something symmetrical, which is what made it read as unfinished. What fills it is
+ * not decoration: the block underneath is made entirely of prices the sources chose, and the one
+ * price nobody chose - what the stock actually costs today - was the figure the table never
+ * carried. An entry of 2.25 - 2.23 against a last close of 2.31 says the entry is gone, and a
+ * target of 2.55 at +13.3% says how much of that is still there. Neither could be read off this
+ * table before.
+ *
+ * Drawn as [LatestPrice] is drawn in the stock sheet's own heading: the key over the figure, in
+ * [PriceRole.market], and the key itself saying the one thing that changes the figure's meaning -
+ * a session still trading is a price, not a close. No day move beside it, which that heading does
+ * carry: the move is measured off stored history through a suspend read per stock, and a table
+ * draws every stock in the report at once.
+ *
+ * Absent where the feed has nothing, with no dash and no placeholder. A column of figures earns a
+ * dash because the reader is scanning down it for one; a heading is read once.
+ */
 @Composable
-private fun StockHeading(stock: ConsolidatedRecommendation) {
+private fun StockHeading(stock: ConsolidatedRecommendation, latest: LatestPrice?) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.s),
         verticalAlignment = Alignment.CenterVertically,
@@ -254,8 +267,14 @@ private fun StockHeading(stock: ConsolidatedRecommendation) {
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
+            // Inside the press target with the logo and the code, as it is on the recommendation
+            // card: the badge is a fact about this stock, so it belongs to the thing that opens it.
+            // This heading was the one place in the app that drew a stock without it, which meant
+            // the same company was marked Shariah-compliant on its card and on its sheet and
+            // unmarked on the table between them.
+            Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
         }
-        Column(Modifier.weight(1f).padding(start = Space.s)) {
+        Column(Modifier.weight(1f).padding(start = Space.m)) {
             stock.stockNameArabic?.let {
                 Text(
                     it,
@@ -294,11 +313,31 @@ private fun StockHeading(stock: ConsolidatedRecommendation) {
                 textColor = MaterialTheme.colorScheme.primary,
             )
         }
+        // Last, so the price closes the row's trailing edge whether or not the pill is there. The
+        // pill moves and the price does not, which is the way round that keeps the one figure the
+        // eye is looking for in the same place on every block of the report.
+        if (latest != null) {
+            Column(
+                Modifier.padding(start = Space.m),
+                horizontalAlignment = Alignment.End,
+            ) {
+                Text(
+                    if (latest.provisional) "LATEST PRICE" else "LAST CLOSE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    formatPrice(latest.session.close),
+                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
+                    color = PriceRole.market,
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun ColumnHeader(wide: Boolean) {
+private fun ColumnHeader() {
     Row(
         Modifier.fillMaxWidth().padding(start = Space.m, end = Space.m, bottom = Space.xs),
         verticalAlignment = Alignment.Bottom,
@@ -308,10 +347,8 @@ private fun ColumnHeader(wide: Boolean) {
         HeaderLabel("Target 1", Modifier.weight(1f), TextAlign.End)
         HeaderLabel("Target 2", Modifier.weight(1f), TextAlign.End)
         HeaderLabel("Stop", Modifier.weight(1f), TextAlign.End)
-        if (wide) {
-            HeaderLabel("Support", Modifier.weight(1f), TextAlign.End)
-            HeaderLabel("Resistance", Modifier.weight(1f), TextAlign.End)
-        }
+        HeaderLabel("Support", Modifier.weight(1f), TextAlign.End)
+        HeaderLabel("Resistance", Modifier.weight(1f), TextAlign.End)
         Spacer(Modifier.width(ChevronWidth))
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -338,7 +375,6 @@ private fun HeaderLabel(label: String, modifier: Modifier, align: TextAlign) {
 private fun CallRow(
     point: RecommendationDataPoint,
     channel: String?,
-    wide: Boolean,
     showContext: Boolean,
     striped: Boolean,
     onClick: () -> Unit,
@@ -377,10 +413,8 @@ private fun CallRow(
             TargetCell(Modifier.weight(1f), point, point.target1, point.returnTp1Pct)
             TargetCell(Modifier.weight(1f), point, point.target2, point.returnTp2Pct)
             StopCell(Modifier.weight(1f), point)
-            if (wide) {
-                LevelCell(Modifier.weight(1f), point.support)
-                LevelCell(Modifier.weight(1f), point.resistance)
-            }
+            LevelCell(Modifier.weight(1f), point.support)
+            LevelCell(Modifier.weight(1f), point.resistance)
             Icon(
                 Icons.AutoMirrored.Outlined.KeyboardArrowRight,
                 contentDescription = null,
@@ -388,7 +422,7 @@ private fun CallRow(
                 modifier = Modifier.width(ChevronWidth).height(IconSize.Inline),
             )
         }
-        if (showContext) ContextLine(point, levelsInColumns = wide)
+        if (showContext) ContextLine(point)
     }
 }
 
@@ -537,21 +571,20 @@ private fun LevelCell(modifier: Modifier, level: Double?) {
 }
 
 /**
- * The two dates, and the two levels on any row too narrow to column them.
+ * The two dates, under the row they date.
  *
- * A line rather than four columns, so the toggle can never put the table back into the sideways
+ * A line rather than two columns, so the toggle can never put the table back into the sideways
  * scroll this rebuild exists to end. Absent labels are dropped rather than drawn as dashes: this is
  * an aside, and an aside made mostly of em dashes is noise under every row in the report.
  *
- * Support and resistance leave the line as soon as [LevelCell] draws them, which is the only thing
- * width decides here. A figure printed twice on one row teaches the reader that the two are
- * different figures and sends them looking for the difference.
+ * Support and resistance were here too, on any row too narrow to column them. Nothing is that
+ * narrow now - [LevelCell] draws both at every width the table is drawn at - and a figure printed
+ * twice on one row teaches the reader that the two are different figures and sends them looking for
+ * the difference.
  */
 @Composable
-private fun ContextLine(point: RecommendationDataPoint, levelsInColumns: Boolean) {
+private fun ContextLine(point: RecommendationDataPoint) {
     val parts = listOfNotNull(
-        point.support?.takeIf { !levelsInColumns }?.let { "Support ${formatPrice(it)}" },
-        point.resistance?.takeIf { !levelsInColumns }?.let { "Resistance ${formatPrice(it)}" },
         point.date?.let { "Target date $it" },
         point.visibleSourceDate?.takeIf(String::isNotBlank)?.let { "Source date $it" },
     )
