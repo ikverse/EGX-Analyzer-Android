@@ -38,6 +38,9 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.zIndex
 import kotlin.math.max
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
@@ -137,25 +140,45 @@ internal fun RecommendationTable(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
             toolbar?.let {
-                // Opaque and full width, because it slides across the blocks rather than pushing
-                // them. The report card's own fill, since that is what it slides over.
+                // **No fill, and the blocks are clipped out from under it instead.**
+                //
+                // It slides across the blocks rather than pushing them, so something has to stop a
+                // row reading through the controls that filter it, and painting the toolbar was the
+                // obvious answer for as long as the card under it was opaque. It is not: the card
+                // is see-through, so a fill here is the card's own colour laid over itself and
+                // comes out as a band across a card that has no band in it. Three colours were
+                // tried - the role, the role made solid, and the ground plus the role - and each
+                // was out by a different amount, because what the card actually composites to
+                // depends on the ground under it *and* the page's wash over that, neither of which
+                // a surface inside the card can know. Clipping needs to know none of it.
                 Box(
                     Modifier
                         .fillMaxWidth()
                         .graphicsLayer { translationY = pin }
                         .zIndex(1f)
-                        .onGloballyPositioned { pinnedHeight = it.size.height.toFloat() }
-                        .background(MaterialTheme.colorScheme.surfaceContainer),
+                        .onGloballyPositioned { pinnedHeight = it.size.height.toFloat() },
                 ) { it() }
             }
-            stocks.forEach { stock ->
-                StockBlock(
-                    stock = stock,
-                    channelFor = channelFor,
-                    latest = latestFor(stock.stockCode),
-                    showContext = showContext,
-                    onSelectPoint = onSelectPoint,
-                )
+            // Everything the pinned toolbar has travelled over is clipped away rather than
+            // covered. `pin` is how far the toolbar has been pushed back down into the blocks, and
+            // the gap the Column leaves between the two is already spent before any block starts -
+            // so what is hidden is exactly what is behind the toolbar and never a row below it.
+            val gap = with(LocalDensity.current) { Space.s.toPx() }
+            Column(
+                Modifier.drawWithContent {
+                    clipRect(top = (pin - gap).coerceAtLeast(0f)) { this@drawWithContent.drawContent() }
+                },
+                verticalArrangement = Arrangement.spacedBy(Space.s),
+            ) {
+                stocks.forEach { stock ->
+                    StockBlock(
+                        stock = stock,
+                        channelFor = channelFor,
+                        latest = latestFor(stock.stockCode),
+                        showContext = showContext,
+                        onSelectPoint = onSelectPoint,
+                    )
+                }
             }
         }
     }

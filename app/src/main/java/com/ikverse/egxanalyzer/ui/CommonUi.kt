@@ -562,14 +562,14 @@ internal fun SectionCard(
     Card(
         modifier = modifier.fillMaxWidth(),
         // The colour is see-through in the theme itself - see GlassSection - so what this adds is
-        // only what a **first-level** card gets: the light along its top edge, the sheen under it,
-        // and the lift that sits it off the page. A card inside this one takes none of the three.
-        // Repeated at every level they read as glitter rather than as depth, and the app nests
-        // three deep.
+        // only what a **first-level** card gets: the light along its top edge. **No shadow**: a
+        // shadow is drawn behind the card's whole shape, and behind a see-through card that is a
+        // dark panel tinting the card's own face rather than a lift under its edge - which is what
+        // was reading as a solid background on every card on every tab. It comes off every card
+        // that had it: the treatment is the material and the edge, not depth faked under glass.
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = MaterialTheme.shapes.large,
         border = Glass.outline,
-        elevation = CardDefaults.cardElevation(defaultElevation = Glass.lift),
     ) {
         // Drawn behind the content rather than as a `Row` beside it: the edge runs the whole height
         // of the card, which is not known until everything inside it has been laid out, and a column
@@ -584,7 +584,7 @@ internal fun SectionCard(
         // amounts. Both were one padding on this Column until the nesting above made the two
         // different questions.
         Column(
-            Modifier.glassSheen().padding(vertical = Space.l),
+            Modifier.padding(vertical = Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             if (title != null) {
@@ -785,14 +785,13 @@ internal fun ExpandableSection(
             containerColor = containerColor ?: MaterialTheme.colorScheme.surfaceContainer,
         ),
         shape = MaterialTheme.shapes.large,
-        // A session card stands on the page exactly as a section card does, so it is lit and lifted
-        // exactly as one. See SectionCard.
+        // A session card stands on the page exactly as a section card does, so it is lit exactly
+        // as one - and casts no shadow, for the reason given there.
         border = Glass.outline,
-        elevation = CardDefaults.cardElevation(defaultElevation = Glass.lift),
     ) {
         Column(
-            // SectionCard's edge and sheen, drawn the same way and for the same reasons.
-            Modifier.glassSheen().drawBehind {
+            // SectionCard's edge, drawn the same way and for the same reason.
+            Modifier.drawBehind {
                 drawRect(hue, size = Size(AccentEdgeWidth.toPx(), size.height))
             },
         ) {

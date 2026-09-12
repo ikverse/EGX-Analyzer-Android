@@ -416,35 +416,8 @@ internal object Glass {
             },
         )
 
-    /**
-     * Just enough shadow to sit the glass off the page.
-     *
-     * The **one** place this treatment departs from the rule that nothing on these pages casts a
-     * shadow. A translucent card has less edge than a solid one by definition, and against a page
-     * it is showing through, the hairline alone left it looking printed on rather than laid over.
-     * Two cards carry it while the treatment is being judged; if it goes, it goes from here.
-     */
-    val lift: Dp = 2.dp
 }
 
-/**
- * The sheen, on the card's own content root rather than on the card.
- *
- * It has to be painted over the fill and under the words. On the `Card`'s own modifier it would
- * land behind a translucent fill, which is what dims a 7% white to nothing; drawn after the content
- * it would sit on the type. The content root is the one place that is both, and being inside the
- * card it is clipped by the card's shape for free.
- *
- * Diagonal by default - [Brush.linearGradient] runs corner to corner - so the light has a direction
- * and the card is not simply paler at the top.
- */
-@Composable
-internal fun Modifier.glassSheen(): Modifier = background(
-    Brush.linearGradient(
-        0f to Color.White.copy(alpha = if (LocalDarkTheme.current) 0.12f else 0.55f),
-        0.45f to Color.Transparent,
-    ),
-)
 
 /**
  * Colour carries meaning for a price, not decoration.

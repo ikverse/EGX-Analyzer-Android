@@ -816,10 +816,9 @@ private fun SavedAnalysisCard(
         ),
         border = arrivalFlash(highlighted, onHighlightShown) ?: Glass.outline,
         shape = MaterialTheme.shapes.large,
-        elevation = CardDefaults.cardElevation(defaultElevation = Glass.lift),
     ) {
         Column(
-            Modifier.glassSheen().padding(Space.m),
+            Modifier.padding(Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             // Top-aligned: the heading below runs to two lines and a menu centred against both sits
