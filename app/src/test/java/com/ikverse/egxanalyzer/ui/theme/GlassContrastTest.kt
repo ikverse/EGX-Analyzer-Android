@@ -68,7 +68,7 @@ class GlassContrastTest {
             // The scheme's own figures, read rather than repeated: a guard restating the numbers it
             // guards passes whatever those numbers become.
             section = Color(0xFF141C2C).copy(alpha = GlassSection),
-            card = Color(0xFF1C2638).copy(alpha = GlassCard),
+            card = Color(0xFF182030).copy(alpha = GlassCard),
             tile = Color(0xFF243046).copy(alpha = GlassTile),
             onSurfaceVariant = Color(0xFF9AA7BD),
             onSurface = Color(0xFFE8ECF4),
@@ -77,7 +77,7 @@ class GlassContrastTest {
             background = Color(0xFFF5F7FE),
             lift = LightGroundLift,
             section = Color(0xFFFFFFFF).copy(alpha = LightGlassSection),
-            card = Color(0xFFEDF1FC).copy(alpha = LightGlassCard),
+            card = Color(0xFFF4F6FE).copy(alpha = LightGlassCard),
             tile = Color(0xFFE4EAF8).copy(alpha = LightGlassTile),
             onSurfaceVariant = Color(0xFF55617A),
             onSurface = Color(0xFF121926),

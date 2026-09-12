@@ -56,14 +56,24 @@ import com.ikverse.egxanalyzer.model.ThemeMode
  * set of numbers written here failed the second - at a 0.09 ground the lit page came out *brighter*
  * than the section card standing on it, so a card crossing a light disappeared into it. These are
  * the most see-through values that pass.
+ *
+ * **The card level is the exception, and alpha is not what opened it.** Asked to make those
+ * surfaces read as more see-through, the obvious move - drop `GlassCard` and leave the colour -
+ * turned out to be worth two values out of 255: a transparent surface shows you what is behind it,
+ * and what is behind a card here is its section card, which is very nearly the same blue. The alpha
+ * came down *and* the colour came with it, toward the parent rather than away from the page, which
+ * is the only lever on this palette that a reader can actually see. The step it leaves - card over
+ * section, 0.0023 - is the narrowest in the app and deliberately so; it is still half again the
+ * floor `GlassContrastTest` holds, and that test is what says whether the next move of this kind
+ * is available.
  */
 internal const val GlassSection = 0.66f
-internal const val GlassCard = 0.76f
+internal const val GlassCard = 0.60f
 internal const val GlassTile = 0.86f
 
 /** A step more opaque each: the same alpha over near-white passes less contrast to the type on it. */
 internal const val LightGlassSection = 0.70f
-internal const val LightGlassCard = 0.80f
+internal const val LightGlassCard = 0.64f
 internal const val LightGlassTile = 0.90f
 
 private val DarkColors = darkColorScheme(
@@ -104,7 +114,7 @@ private val DarkColors = darkColorScheme(
     surfaceContainerLow = Color(0xFF101724),
     // See GlassSection for what the alphas are and why they run the way they do.
     surfaceContainer = Color(0xFF141C2C).copy(alpha = GlassSection),
-    surfaceContainerHigh = Color(0xFF1C2638).copy(alpha = GlassCard),
+    surfaceContainerHigh = Color(0xFF182030).copy(alpha = GlassCard),
     surfaceContainerHighest = Color(0xFF243046).copy(alpha = GlassTile),
     outline = Color(0xFF6B7684),
     outlineVariant = Color(0xFF2A364B),
@@ -136,7 +146,7 @@ private val LightColors = lightColorScheme(
     surfaceContainerLowest = Color.White,
     surfaceContainerLow = Color(0xFFF1F4FD),
     surfaceContainer = Color(0xFFFFFFFF).copy(alpha = LightGlassSection),
-    surfaceContainerHigh = Color(0xFFEDF1FC).copy(alpha = LightGlassCard),
+    surfaceContainerHigh = Color(0xFFF4F6FE).copy(alpha = LightGlassCard),
     surfaceContainerHighest = Color(0xFFE4EAF8).copy(alpha = LightGlassTile),
     outline = Color(0xFF71787E),
     outlineVariant = Color(0xFFD7DFF0),
