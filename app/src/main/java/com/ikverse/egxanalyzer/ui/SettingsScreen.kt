@@ -1082,17 +1082,55 @@ internal fun SettingsScreen(appState: AppState) {
  * Off the main thread - it copies a file that grows with the record - and nothing opens afterwards,
  * so the status message is the only sign it worked. It names what Downloads actually created, which
  * differs from what was asked for the second time it is saved on one day.
+ *
+ * **The crash line above it is what makes the button get pressed.** A crash log nobody knows about
+ * is a crash log nobody sends, and the reader of this app is not going to think to look: the app
+ * reappeared, so as far as they know it recovered. The line is the app saying it did not, and it
+ * only appears where there is something to say.
  */
 @Composable
 private fun DiagnosticsControl(appState: AppState) {
     val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }
+    // Read once into state rather than on every recomposition. It is a file read, it changes only
+    // when the process dies - which is the one moment nothing is composing - and holding it is what
+    // lets Forget take the line off screen without a reason to rebuild the whole page.
+    var crash by remember { mutableStateOf(appState.lastCrash() to appState.crashCount()) }
+    val (latest, count) = crash
+    if (latest != null) {
+        SettingRow(
+            about = infoNote(
+                "The app closed unexpectedly",
+                "The app hit an error it could not carry on from and was shut down by Android.",
+                "What it was doing is written down on this phone. Save diagnostics puts it in " +
+                    "Downloads as egx-crashes-….txt, beside the record, where it can be sent on.",
+                "Forget removes it. Nothing is sent anywhere on its own.",
+            ),
+        ) {
+            Text(
+                if (count > 1) "Closed unexpectedly $count times, last $latest"
+                else "Closed unexpectedly $latest",
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.error,
+            )
+            SettingsButton(
+                onClick = {
+                    appState.forgetCrashes()
+                    crash = null to 0
+                },
+            ) {
+                Text("Forget")
+            }
+        }
+    }
     // A row rather than a column, now that what sat under the button is behind the question mark
     // beside it: one line where there were four.
     SettingRow(
         about = infoNote(
             "Save diagnostics",
-            "Copies this device's saved record into Downloads.",
+            "Copies this device's saved record into Downloads, and the crash log with it where " +
+                "the app has closed unexpectedly.",
             "No provider key and no Telegram key travels in it - those are encrypted " +
                 "separately by Android Keystore and have never been part of it.",
         ),
@@ -1102,10 +1140,12 @@ private fun DiagnosticsControl(appState: AppState) {
             onClick = {
                 scope.launch {
                     saving = true
-                    runCatching { appState.saveDatabaseToDownloads() }
-                        .onSuccess {
-                            appState.statusMessage =
-                                StatusMessage("Saved to Downloads/$it", succeeded = true)
+                    runCatching { appState.saveDiagnosticsToDownloads() }
+                        .onSuccess { written ->
+                            appState.statusMessage = StatusMessage(
+                                "Saved to Downloads: " + written.joinToString(", "),
+                                succeeded = true,
+                            )
                         }
                         .onFailure {
                             appState.statusMessage = StatusMessage(

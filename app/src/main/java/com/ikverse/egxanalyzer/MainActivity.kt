@@ -41,7 +41,7 @@ class MainActivity : ComponentActivity() {
             // How overdue a trade is depends on the date, and nothing announces midnight. A phone
             // left on the Portfolio tab overnight would otherwise show yesterday's count until
             // something else happened to recompute. Outside the root on purpose: it is app
-            // behaviour rather than UI, so both versions of the UI get it without either owning it.
+            // behaviour rather than UI, and no screen should have to own it.
             val scope = rememberCoroutineScope()
             LifecycleResumeEffect(Unit) {
                 appState.refreshOverdue()
@@ -55,10 +55,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            // Which UI this is depends on the build type, and this activity does not know. Two
-            // files named AppRoot.kt - one in src/current, one in src/next - and exactly one of them
-            // is compiled. See the sourceSets block in app/build.gradle.kts.
-            AppRoot(activity = this, appState = appState)
+            AppRoot(appState = appState)
         }
     }
 
@@ -69,7 +66,7 @@ class MainActivity : ComponentActivity() {
      * copy, and guarded by day rather than by launch - a phone opened six times before lunch would
      * otherwise write six copies of an unchanged record and push five real days out of the seven a
      * folder keeps. Outside the root like the overdue refresh above and for the same reason: it is
-     * app behaviour, so both versions of the UI get it without either owning it.
+     * app behaviour, and no screen should have to own it.
      *
      * **Only into a chosen folder, never into Downloads.** The manual button falls back there, and
      * that is right for something somebody pressed; doing it daily would pile a file per day into

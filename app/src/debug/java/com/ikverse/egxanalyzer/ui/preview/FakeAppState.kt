@@ -112,7 +112,13 @@ class FakeAppState(
 
     override suspend fun exportReport(saved: SavedAnalysis) = Unit
 
-    override suspend fun saveDatabaseToDownloads(): String = ""
+    override suspend fun saveDiagnosticsToDownloads(): List<String> = emptyList()
+
+    override fun lastCrash(): String? = null
+
+    override fun crashCount(): Int = 0
+
+    override fun forgetCrashes() = Unit
 
     override suspend fun priceSeriesSummary(): PriceSeriesSummary = PriceSeriesSummary.EMPTY
 

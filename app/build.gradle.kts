@@ -83,23 +83,6 @@ android {
 
         buildConfigField("int", "TELEGRAM_API_ID", telegramApiId)
         buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
-
-        /**
-         * The private Telegram channel every device syncs through.
-         *
-         * A build setting rather than a constant in the source, so a build installed *beside* the
-         * real app can be pointed somewhere on purpose. See the `next` build type below, which
-         * shares this one and is held off writing to it by SYNC_READ_ONLY.
-         */
-        buildConfigField("String", "SYNC_CHAT_TITLE", "\"EGX Analyzer sync\"")
-
-        /**
-         * Whether a build may write to that channel.
-         *
-         * False everywhere the app is the app. True only for `next`, which reads the record and must
-         * not be able to change it - see TelegramRepository.READ_ONLY, where the guard actually sits.
-         */
-        buildConfigField("boolean", "SYNC_READ_ONLY", "false")
     }
 
     signingConfigs {
@@ -143,7 +126,16 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // On since 2026-09-12, and for one dependency above all: material-icons-extended ships
+            // every Material icon as code and this app draws a few dozen. See proguard-rules.pro,
+            // which also says why names are kept rather than obfuscated - the crash log is only
+            // worth having if its stack traces can be read without a mapping file.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             // Null where the key is not configured, which leaves the APK unsigned rather than
             // failing the build. An unsigned APK cannot be installed, so nothing can mistake one
             // for a release.
@@ -153,86 +145,6 @@ android {
             // A sideloaded build should be obvious in Settings without checking a commit hash.
             versionNameSuffix = "-debug"
         }
-
-        /**
-         * The redesign, installed beside the real app rather than over it.
-         *
-         * A build type and deliberately not a product flavour. A flavour dimension inserts itself
-         * into every output path, which would move `app-debug.apk` out from under the install
-         * command this repository documents and out from under the release job at the same time.
-         * This leaves `assembleDebug` and `assembleRelease` exactly where they are and adds
-         * `assembleNext` beside them.
-         *
-         * Its own `applicationId`, so it is a second app with its own data, its own Telegram session
-         * and its own launcher entry. That is what makes the redesign revertible: abandoning it is
-         * uninstalling this app, where replacing the real one would mean a downgrade Android
-         * refuses - uninstall, reinstall, and a fresh QR sign-in.
-         *
-         * Release-signed and not debuggable, inherited from `release`. A UI is being judged on how it
-         * feels to use, and a debuggable build does not feel like the one that would ship.
-         *
-         * Declared after `release` because `initWith` copies whatever that block has already been
-         * configured with - the signing config most of all, which is null when the keystore is
-         * absent, so a checkout without the key still builds.
-         */
-        create("next") {
-            initWith(getByName("release"))
-            applicationIdSuffix = ".next"
-            versionNameSuffix = "-next"
-            // Named again rather than left to initWith. Whether initWith carries a signing config
-            // is not something this machine can check - it holds no key, so every build here is
-            // unsigned either way - and the first build that could tell us would be a published
-            // prerelease no device can install. Same expression `release` uses: null without the
-            // key, which leaves the APK unsigned rather than failing.
-            signingConfig = signingConfigs.findByName("release")
-
-            /**
-             * The real app's channel, read and never written.
-             *
-             * It started with a channel of its own, which was the safe answer and the useless one: a
-             * fresh channel is empty, so the redesign opened on a record with nothing in it - and a
-             * dense screen full of prices is exactly the thing that looks fine with no rows. It
-             * shares the real channel now and gets every report, trade and rule the app has.
-             *
-             * What kept the two apart was the channel; what keeps them apart now is this flag.
-             * Reports, positions, rules, settings and prompt versions all travel as revisions that
-             * merge newest-wins, so a single write from here could overwrite something the real app
-             * meant - and deleting a report is worse than that, because it takes the report off
-             * every device permanently. `TelegramRepository.READ_ONLY` holds all seven paths; the
-             * list, and how to tell when it is complete, is documented there.
-             *
-             * Prices are not synced at all, so this build still has to fetch its own before any
-             * figure is worth looking at. The provider API key is not synced either, which is why
-             * this build cannot start an analysis even by accident.
-             */
-            buildConfigField("boolean", "SYNC_READ_ONLY", "true")
-        }
-    }
-
-    /**
-     * Which UI a build draws, chosen by build type rather than by a branch in the code.
-     *
-     * `next` is being rebuilt from zero and shares only the data layer, so the two UIs are two
-     * bodies of source that must never be compiled together - and Android source sets *merge* with
-     * `main` rather than replacing it, so a file of the same name in both is a duplicate class.
-     *
-     * So the entry point lives per build type. `src/current/java` and `src/next/java` each hold one
-     * `ui/AppRoot.kt`, identical in signature and nothing else, and `MainActivity` calls it without
-     * knowing which it got. Everything under `src/main` - AppState, the repositories, the scoring,
-     * the database - is shared by both, which is the whole point.
-     *
-     * `src/current` rather than leaving today's UI in `main`: named for what it is, and a single
-     * directory to delete on the day `next` becomes the app.
-     *
-     * Registered on `kotlin` and not only on `java`: `src/next/java` is a source directory the
-     * Android plugin creates for a build type by itself, but `src/current` is not a build type and
-     * has to be named. Added to `java` alone it compiles nothing - the Kotlin compilation does not
-     * follow the Java source dirs - and `MainActivity` fails to resolve `AppRoot` for debug and
-     * release while `next` builds perfectly, which reads as the split being backwards.
-     */
-    sourceSets {
-        getByName("debug").kotlin.srcDir("src/current/java")
-        getByName("release").kotlin.srcDir("src/current/java")
     }
 
     compileOptions {
@@ -281,6 +193,18 @@ dependencies {
     implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
+    // Compose, tested on this machine rather than on a phone.
+    //
+    // `createComposeRule` needs an Android to draw into, and Robolectric is already here supplying
+    // one for the migration tests - so a Compose test is a plain unit test and runs in the same
+    // `testDebugUnitTest` as everything else. The alternative was `src/androidTest`, which needs a
+    // device or the emulator for every run, and the emulator is the slowest thing in this project.
+    //
+    // `ui-test-manifest` is a `debugImplementation` and not a `testImplementation`: what it
+    // contributes is a manifest entry for the empty activity the rule hosts the composable in, and
+    // a manifest has to be merged into the variant rather than put on the test classpath.
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
     // android.jar stubs org.json in local unit tests, so supply a real implementation.
     testImplementation(libs.json)
     // Enough of Android to open a real SQLite database in a plain unit test, which is the only way

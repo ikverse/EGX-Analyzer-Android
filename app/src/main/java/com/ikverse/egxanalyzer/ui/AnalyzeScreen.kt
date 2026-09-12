@@ -29,7 +29,10 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoGraph
 import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.TextFields
@@ -287,6 +290,9 @@ internal fun AnalyzeScreen(appState: AppState) {
         },
         refreshing = appState.chatsRefreshing,
     ) {
+        // Above everything on a phone that has never got a report out of this app, and gone
+        // entirely on one that has. See SetupCard.
+        SetupCard(appState)
         // Chat selection leads, because choosing sources is the first step of a run - and on a
         // wide screen it sits beside the settings that shape it rather than above them, so both
         // are visible while either is being changed.
@@ -802,6 +808,150 @@ internal enum class AnalyzeBlocker(
     NO_CONTENT_TYPE("Select at least one content type."),
     NO_SOURCES("No messages are loaded. Select chats in Telegram, then load them here."),
 }
+
+/**
+ * One step of getting this app to the point where it can do anything.
+ *
+ * @param done whether it has been carried out on this phone.
+ * @param title what to do, in the imperative - the reader is being given instructions.
+ * @param detail where it is done, in one line. Never the word "above" or "below": the cards on this
+ *   page move with the window width, so a direction is wrong on half the screens it runs on.
+ * @param settings whether the step is carried out in Settings rather than on this page, which is
+ *   what decides whether the row offers to go there.
+ */
+internal data class SetupStep(
+    val done: Boolean,
+    val title: String,
+    val detail: String,
+    val settings: Boolean = false,
+)
+
+/**
+ * What a phone that has never produced a report still has to do, all of it at once.
+ *
+ * **Every one of these was already enforced and none of them was ever stated together.**
+ * [analyzeBlocker] returns the *first* thing stopping a run and each card draws its own, which is
+ * right once somebody knows the app: the complaint sits with the control that answers it. For a
+ * first run it is four round trips - press the button, be told about the key, press again, be told
+ * about the model, press again, the content types, press again, the sources - and each one is
+ * discovered only by pressing a button that then refuses. Nowhere said what the four were.
+ *
+ * That matters more than it used to. The app was built for one person who knew all of this, and is
+ * now meant for people who do not; a stranger opening it meets a page of controls with no order to
+ * them and a button that says no.
+ *
+ * **It states, and it never does.** Every step here is carried out by the control that already owns
+ * it - this card carries no key field, no chat picker and no model list, because a second way to do
+ * something is a second thing to keep in step with the first. The one action it offers is *Open
+ * Settings*, for the two steps that genuinely live there.
+ *
+ * Gone the moment there is a report on this phone, and dismissible before that: somebody using this
+ * only for the portfolio must be able to wave it away. The dismissal is session-only and kept on
+ * [PageState] rather than in this composition - see `PageState.analyzeSetupDismissed`.
+ */
+@Composable
+internal fun SetupCard(appState: AppState) {
+    if (appState.savedResults.isNotEmpty()) return
+    var dismissed by appState.pages.analyzeSetupDismissed
+    if (dismissed) return
+    val steps = setupSteps(appState)
+    // Nothing left to say. This goes before the first run rather than waiting for one, so a phone
+    // that is ready and has simply not been asked yet is not still being told how to get ready.
+    if (steps.all(SetupStep::done)) return
+    SectionCard(
+        title = "Getting started",
+        icon = Icons.Outlined.Checklist,
+        accent = CardHue.AMBER.color,
+        about = infoNote(
+            "Getting started",
+            "The four things this app needs before it can read anything, in the order they are " +
+                "wanted. Each one is done by the card that owns it; this only says what is left.",
+            "It goes as soon as this phone has a report, and Not now hides it until the app is " +
+                "next opened.",
+        ),
+    ) {
+        steps.forEach { step ->
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
+            ) {
+                Icon(
+                    if (step.done) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                    contentDescription = if (step.done) "Done" else "Still to do",
+                    tint = if (step.done) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(IconSize.Inline),
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    Text(
+                        step.title,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (step.done) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                    Text(
+                        step.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            // Offered only while something in Settings is actually outstanding. A button that takes
+            // the reader somewhere with nothing to do there is the app wasting the one instruction
+            // it has their attention for.
+            if (steps.any { !it.done && it.settings }) {
+                SettingsButton(onClick = { appState.navigate(AppDestination.SETTINGS) }) {
+                    Text("Open Settings")
+                }
+            }
+            SettingsButton(onClick = { dismissed = true }) {
+                Text("Not now")
+            }
+        }
+    }
+}
+
+/**
+ * The four steps, in the order a run needs them.
+ *
+ * Internal rather than private so it can be tested as the plain function it is - the four states
+ * and their order are the part worth holding, and none of it needs a composition to check.
+ *
+ * Read off the same state [analyzeBlocker] reads, deliberately: two lists of what a run requires,
+ * kept in two places, is one list that will quietly stop matching what the button enforces.
+ */
+internal fun setupSteps(appState: AppState): List<SetupStep> = listOf(
+    SetupStep(
+        done = appState.telegramAuthState.step == TelegramAuthStep.READY,
+        title = "Sign in to Telegram",
+        detail = "Scan the code on the Chats card. It is the only account this app needs.",
+    ),
+    SetupStep(
+        done = appState.channels.any(ChannelSelection::selected),
+        title = "Choose the chats to read",
+        detail = "Tick the channels whose recommendations should be scored.",
+    ),
+    SetupStep(
+        done = appState.cloudConfiguration.hasCredential,
+        title = "Add a provider API key",
+        detail = "Settings, Cloud provider. A run is sent to that provider and billed by them.",
+        settings = true,
+    ),
+    SetupStep(
+        done = appState.cloudConfiguration.model.isNotBlank(),
+        title = "Choose the model",
+        detail = "It has to accept images: a run sends screenshots.",
+        settings = true,
+    ),
+)
 
 /**
  * What is stopping a run, or null when nothing is.

@@ -10,6 +10,7 @@ import com.ikverse.egxanalyzer.data.AnalysisService
 import com.ikverse.egxanalyzer.data.AndroidKeystoreCredentialStore
 import com.ikverse.egxanalyzer.data.CallAlertNotifier
 import com.ikverse.egxanalyzer.data.CloudAnalysisRepository
+import com.ikverse.egxanalyzer.data.CrashLog
 import com.ikverse.egxanalyzer.data.IntradayRepository
 import com.ikverse.egxanalyzer.data.PriceSeriesStore
 import com.ikverse.egxanalyzer.data.JobScheduler
@@ -36,6 +37,18 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 class EgxApplication : Application() {
+
+    /**
+     * Before anything else, and before [appState] exists.
+     *
+     * A crash during the first launch of a process is the one most worth having written down and
+     * the one a handler installed any later would miss - so this runs ahead of the database, the
+     * scheduler and Telegram, none of which it needs. See [CrashLog].
+     */
+    override fun onCreate() {
+        super.onCreate()
+        CrashLog.install(this)
+    }
 
     /**
      * Whether the thing that started this process was the clock rather than its owner.

@@ -53,6 +53,47 @@ physical id `4630946872173396372`, and the **inner** panel is `displayId=1`, `46
 `dumpsys display | grep uniqueId` reads them back as `local:<id>`. Whichever panel is shut reports
 `isActive=false`, which is the cheapest way to tell whether the phone is open without asking.
 
+## Tests, and the two kinds there are
+
+```bash
+export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
+./gradlew :app:assembleDebug :app:testDebugUnitTest 2>&1 | grep -E "^e:|FAILED|BUILD"
+```
+
+One task runs both kinds, which is the point of how the second one is set up.
+
+- **Plain JVM tests** are most of them: `Scoring`, `PerformanceCalculator`, the parsers, the
+  chunking. Functions of their arguments, no Android, milliseconds each.
+- **Robolectric tests** open a real SQLite database in a plain unit test, which is the only way an
+  `onUpgrade` path can be checked without a phone. See the migration note under **Gotchas**.
+- **Compose tests, since 2026-09-12**, drive the UI in the same run — `createComposeRule` hosted by
+  Robolectric, so there is no `src/androidTest` and no device or emulator in the loop. Robolectric
+  needs **Java 21**; CI pins it, and the JBR above is 21.
+
+**Why this exists at all.** The box that disappeared on the first letter (2026-09-11) reached the
+owner's phone and was reported from it, and nothing in ninety-odd test files could have caught it:
+every one of them was a function of its arguments, and that fault was a composition losing state it
+should never have been holding. The working agreement above says not to verify on screen, which is
+right — screenshots are expensive twice over — but it left the UI with no net under it at all. This
+is the net, and it costs seconds rather than an emulator.
+
+- `PageHeaderTest` holds the 2026-09-11 fix in the shape it was reported: open the box, type into
+  it, **rebuild the header from scratch**, and the box is still open with the letters in it. The
+  rebuild is the whole mechanism of the bug, so the test does it on purpose with a `key(generation)`
+  it can bump.
+- `RecommendationTableTest` holds the property the 2026-09-09 table rebuild was for — no width shows
+  fewer columns than a narrower one — by moving the container across the three real containers this
+  app is drawn at (614 / 682 / 715dp) and asserting every column at each. That mistake has been made
+  twice here, once in the table and once in the `TodayCard` tile grid.
+- **One `setContent` per test.** The rule refuses a second, so a property that varies with width is
+  tested by making the width `mutableIntStateOf` and moving it, not by calling `setContent` in a
+  loop. That failure reads as "has already set content" and says nothing about the loop.
+- **Find the field, not the placeholder.** `onNodeWithText("Search stocks")` reaches the `Text`
+  drawn under an empty field, which has no `SetText` action and refuses `performTextInput`.
+  `onNode(hasSetTextAction())` is the field.
+- **The header's icons arrive with the last of the collapse**, so a test that wants to press one
+  passes `collapse = 1f`. At `0f` there is nothing to press, which is the header working as designed.
+
 ## Devices and their real geometry
 
 | Device | Serial | Width |
@@ -107,6 +148,12 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `model/CallShortlist.kt` — which card is worth a paid question. See below.
 - `model/CallAlerts.kt` + `data/CallAlertNotifier.kt` — a stock reaching a buy zone nobody took.
 - `model/PerformanceCalculator.kt` — per-channel and per-session rollups, and the ranking.
+- `data/CrashLog.kt` — what the app was doing when it died, kept in `filesDir` until somebody asks
+  for it. Installed before anything else; travels out with Save diagnostics. See **Reading a problem
+  off a device**.
+- `state/LiveUpdates.kt` + `state/StatusChannel.kt` — the updater, which is the one region that
+  could leave `LiveAppState`, and the status line it needed to be able to write from outside it. See
+  **How big `LiveAppState` actually is**.
 - `model/SettledCall.kt` — the verdict of a call the market has finished with, frozen once and never
   replayed. See below.
 - `ui/ChannelScoreSheet.kt` — how a source is scored, opened by pressing its card in the ranking.
@@ -219,8 +266,33 @@ Two rules keep it that way:
   no I/O in them, so a screen calls them directly. Routing those through `AppState` would have made
   the interface a phone book. What goes behind the interface is anything that touches a device.
 
-`src/next` predates this and still takes an `Activity` and reaches into `data` directly. It builds,
-and converting it is the obvious next step if that redesign is ever picked up again.
+### How big `LiveAppState` actually is, and what can leave it
+
+4,427 lines, of which **2,674 are code** — 35% of that file is documentation, so the headline number
+overstates it by a third. It is still the largest thing here and every change touches it, so on
+2026-09-12 it was asked what could be lifted out. The answer was: one region, and the reason the
+rest cannot go is worth writing down so it is not rediscovered.
+
+- **The updater went**, to `state/LiveUpdates.kt`. It reads no price, no report and no trade; it is
+  a function of `UpdateRepository`, one preference and the status line, and nothing recomputes when
+  it moves. `AppUpdates` is the sub-interface carved off `AppState` for it, and `LiveAppState` says
+  `AppUpdates by updates`, so all nine members arrive with **no forwarding written by hand**.
+- **`StatusChannel` is what made it possible.** `statusMessage` was a property of `LiveAppState`, so
+  anything that needed to say something had to *be* that class — which is a good part of how the
+  file grew. The line now lives in a small object both hold, and `LiveAppState.statusMessage` reads
+  and writes straight through to it.
+- **Built as a constructor parameter with a default**, because a default may read the parameters
+  declared before it but never `this`. That is what keeps this a one-step build: a collaborator
+  needing the host's `appScope` or its cached `appPreferences` would have to be made first and told
+  about its host afterwards, and a half-built collaborator is a worse thing than a long file.
+- **Ask AI, the backup and the exports did not go, and it is the same reason each time.**
+  `askAboutCall` reads `performance`, `portfolio` and `runAction`; the backup reads `databaseFile`,
+  `checkpointDatabase`, `settingsDocument` and `restoreFrom`. Those are the heart of the class, so
+  handing a collaborator live references back into its host would be the same object graph with an
+  extra hop in it — longer to read, not shorter. **Splitting those is a design change about who owns
+  the recompute, not a move**, and it was left alone rather than churned on a guess.
+- The pattern is now here for the next region that earns it: sub-interface on `AppState`, a class in
+  `state/`, everything it needs as a parameter, `by` at the declaration.
 
 ## What a run sends, and what it does not send twice
 
@@ -861,6 +933,30 @@ one place that does.
   on a different screen from the record it describes.
 - No Android in it, like `PriceSanity`, and it borrows that file's `MAX_SESSION_AGE_DAYS` rather
   than choosing its own — two answers to "how old is too old" is one of them being wrong.
+
+### The first run, for somebody who did not build this
+
+`SetupCard`, at the top of Analyze, since 2026-09-12. It lists the four things a run needs, ticks
+the ones this phone has done, and goes away for good once there is a report on the device.
+
+- **Every one of these was already enforced and none of them was ever stated together.**
+  `analyzeBlocker` returns the *first* thing stopping a run, and each card draws its own — which is
+  the right arrangement once somebody knows the app, because the complaint sits with the control
+  that answers it. For a first run it is four round trips: press the button, be told about the key,
+  press again, be told about the model, press again, the content types, press again, the sources.
+  Each is discovered only by pressing a button that then refuses, and nothing said what the four
+  were. That was tolerable while the only user had built the thing; see **going multi-user**.
+- **It states and it never does.** No key field, no chat picker, no model list on this card: a
+  second way to do something is a second thing to keep in step with the first. The one action it
+  offers is *Open Settings*, and only while a step that lives there is actually outstanding.
+- **`setupSteps` reads the same state `analyzeBlocker` reads.** Two lists of what a run requires,
+  kept in two places, is one list that quietly stops matching what the button enforces.
+- **Three things, not four, on a fresh install** — `CloudConfiguration` ships with its provider's
+  default model, so that row arrives ticked. The row stays in the list because the blank it guards
+  against is reachable: clearing the field is what `NO_MODEL` exists for. `SetupCardTest` asserts
+  the three so a change that starts counting four is caught saying so.
+- **Dismissed on `PageState`, not in the composition**, session-only — the rule the stock box was
+  written in blood for. A card that came back on every fold could not be dismissed at all.
 
 ## The portfolio
 
@@ -1861,6 +1957,40 @@ data means uninstalling this one and taking the record with it.
   stocks each check was about.
 - **No credential travels in it.** Provider keys and the Telegram database key are encrypted by
   Android Keystore in their own preferences file and have never been in this database.
+- **The crash log goes with it, when there is one** — `egx-crashes-<date>.txt` beside the `.db`, and
+  no second file on a phone that has not crashed. See below.
+
+### What the app was doing when it died
+
+Nothing logged anything here until 2026-09-12 — not a `Log.e`, not a handler — so a crash left the
+process and took the only account of itself with it. On this machine that costs a `logcat`; on
+somebody else's phone it costs the whole report, because *"it closed itself"* is all they can say
+and all that can be asked of them. `data/CrashLog.kt` is the file that puts the record on the device
+before anybody tries to read one off it.
+
+- **Installed in `EgxApplication.onCreate`, ahead of everything.** Before the database, the
+  scheduler and Telegram, none of which it needs — a crash during a process's first launch is the
+  one most worth having and the one a handler installed any later would miss.
+- **A plain file in `filesDir`, never the database.** The database can itself be the reason the app
+  is dying, SQLite in a dying process is the last place to ask for a write, and the record is synced
+  and backed up — a crash is a fact about one phone, and shipping it to every other device is the
+  opposite of what this is for. It stays out of the backup by construction: `writeBackupTo` takes a
+  named database and a settings document rather than sweeping a directory.
+- **The handler does as little as it can**: one read, one write, no coroutines, no `AppState`, all
+  of it inside `runCatching`, and then it hands the throwable to whatever handler was already there
+  so Android still shows its dialog and still ends the process. A crash logger that throws replaces
+  the exception the user actually hit with its own; one that swallows leaves a dead app on screen
+  looking alive. `CrashLogTest` holds both of those, the second with a throwable whose own
+  `printStackTrace` fails.
+- **Newest first, twenty entries and 64 KB, whichever comes first.** Either budget alone has a hole:
+  one enormous stack trace would spend the lot, and twenty small ones is twenty nobody reads. A
+  phone crashing in a loop must not fill its own storage saying so. An entry larger than the whole
+  budget is kept **whole and alone** — a trace cut at a byte offset reads as a crash inside the
+  logger rather than as a trim.
+- **The line in Settings is what makes the button get pressed.** A crash log nobody knows about is a
+  crash log nobody sends, and the reader will not think to look: the app reappeared, so as far as
+  they know it recovered. `Closed unexpectedly <when> · v<version>` in the error colour above *Save
+  diagnostics*, only where there is something to say, with **Forget** beside it.
 
 ## Backing up, and getting it back
 
@@ -3581,45 +3711,53 @@ parameter being threaded anywhere. Added 2026-09-08.
   `vX.Y.Z`, push both. The tag is the whole process — CI runs the tests, signs the release APKs, and
   publishes them as a GitHub release, which is where the app looks. A tag whose tests fail publishes
   nothing.
-- **The redesign was abandoned on 2026-08-19 — the shipping UI is the UI.** The three `next` bullets
-  that follow are kept as a record of how the side-by-side app worked, not as a live plan. `next`,
-  `src/next` and `src/current` are left in place but dormant: no new UI work goes into them, no
-  `-next` tag gets published, and UI changes are edits to `src/main/java/…/ui/`. Nothing here
-  affects `assembleDebug` or `assembleRelease`, which never compile `src/next`.
-- **A redesign is judged as a second app: the `next` build type.** Its own `applicationId`, launcher
-  label (`EGX Next`) and splash ground, so it installs beside the real app rather
-  than over it — the downgrade Android refuses. A tag ending `-next` runs `assembleNext` and
-  publishes a **prerelease**, which keeps it out of `releases/latest`, the one endpoint the updater
-  reads. A build type and not a product flavour: a flavour dimension moves `app-debug.apk` out from
-  under the install command above and the release job at once. `assembleDebug` and `assembleRelease`
-  are untouched. It was removed once, when the 2.1.0 redesign shipped, and restored on 2026-08-13
-  when that redesign was judged too close to the original.
-- **Two UIs, chosen by build type, never compiled together.** `next` is being rebuilt from zero and
-  shares only the data layer, so today's UI and the redesign are two bodies of source — and Android
-  source sets *merge* with `main`, so a same-named file in both is a duplicate class. The entry
-  point is what varies: `src/current/java/…/ui/AppRoot.kt` and `src/next/java/…/ui/AppRoot.kt`,
-  identical in signature and nothing else, each applying its own theme. `MainActivity` calls
-  `AppRoot` and does not know which it got. `src/current` is registered on **`kotlin`**, not only
-  `java` — the Kotlin compilation does not follow Java source dirs, and getting that wrong builds
-  `next` perfectly while debug and release fail to resolve `AppRoot`, which reads as the split being
-  backwards. The redesign lives under `src/next/java/…/next/` and imports nothing from `ui` except
-  `AppState` and `AppDestination`; the day it imports a screen is the day it starts copying what it
-  replaces. `src/current` is one directory to delete when `next` becomes the app.
-- **`next` reads the real sync channel and cannot write to it.** It started with a channel of its
-  own, which was safe and useless: a fresh channel is empty, and a screen full of prices is exactly
-  the thing that looks fine with no rows in it. It shares `EGX Analyzer sync` now, so it opens on the
-  whole record. What keeps the two apart is `BuildConfig.SYNC_READ_ONLY` →
-  `TelegramRepository.READ_ONLY`, and it guards **seven** paths, not the five `upload*` calls it
-  looks like. The sixth is `resolveSyncChat`, which must not *create* a channel — a read-only build
-  that failed to find the real one would otherwise put a second channel of that name in the owner's
-  Telegram, the duplicate that function exists to prevent. The seventh is **`buryReport`**, which
-  does not read like a write and is the one that could do lasting harm: it deletes the report's
-  message and publishes a tombstone, so a delete pressed in `next` would take that report off every
-  device for good. The test for completeness is not "which functions upload" but which TDLib calls
-  mutate — today `sendMessage`, `deleteMessages` and `createNewSupergroupChat`. Prices never sync, so `next`
-  still needs its own refresh before any figure means anything; the API key never syncs, which is why
-  `next` cannot start an analysis even by accident.
+- **The redesign was abandoned on 2026-08-19 and deleted on 2026-09-12 — the shipping UI is the
+  UI.** What went with it: `app/src/next` (7,901 lines under `…/next/`), the `next` build type, the
+  `src/current` source set and the `sourceSets` block that registered it, the `SYNC_CHAT_TITLE` and
+  `SYNC_READ_ONLY` build settings, `TelegramRepository.READ_ONLY` and its seven guards, and the CI
+  step that turned a `-next` tag into a prerelease. `AppRoot` is one file in `src/main/java/…/ui/`
+  again and `MainActivity` calls it with an `AppState` alone — the `activity` parameter existed
+  only because the redesign's copy of the file still wanted one, and the two signatures had to
+  agree. The channel name is a plain `const` in `TelegramRepository`, because there is one app
+  looking for one channel. **Nothing guards the sync channel from a second build any more**, which
+  is the one thing this removal gave up: if a side-by-side app is ever wanted again, the read-only
+  mode is in the history at `01e4d57` and the seven mutating paths it covered are `sendMessage`,
+  `deleteMessages` and `createNewSupergroupChat`, wherever they are called from.
 - **`-PabiSplits` is passed by CI and nowhere else.** The ABI split is off by default on purpose:
   enabled everywhere, an ordinary `assembleDebug` would stop producing `app-debug.apk` and start
   producing one file per architecture, breaking the install command above and the CI artifact. To
   reproduce what a release ships, pass the flag by hand.
+
+### R8, and the 50 MB of icons nobody draws
+
+Release builds have been minified since 2026-09-12. The arm64 APK — the one every real phone here
+downloads, and downloads again on every update — went from **81.3 MB to 30.7 MB**, which is 62% of
+it gone. Measured, not estimated: build `:app:assembleRelease -PabiSplits` with the flag either way
+and compare.
+
+- **It is one dependency.** `material-icons-extended` is a 36 MB artifact that ships every Material
+  icon as generated code, and this app draws a few dozen of them. The library is built on the
+  assumption that R8 strips the rest; unminified it put **56 MB of dex** in the APK, against 6.1 MB
+  after. Everything else the shrinker did is a rounding error beside that.
+- **Nothing it does touches the native half.** TDLib is 15–26 MB of `.so` per architecture, which is
+  what the ABI split is for and what no Java shrinker has an opinion about.
+- **`-dontobfuscate`, deliberately.** The saving above is *shrinking* — removing code nothing
+  reaches — and not renaming what is left. Renaming buys a few per cent more and would cost the
+  crash log built the same day: a stack trace out of an obfuscated build reads as
+  `a.b.c(Unknown Source)` and means nothing without the mapping file for that exact release. If that
+  trade is ever revisited, `mapping.txt` has to be published with every release and kept forever — a
+  mapping file that has been lost is a crash log that cannot be read.
+- **TDLib needs no rules here.** `tdl-coroutines.aar` carries its own consumer rules, keeping
+  `org.drinkless.tdlib.JsonClient`'s native methods and its log callback, and AGP applies them
+  unasked. `proguard-rules.pro` says so, because their absence otherwise reads as an omission.
+- **No rules are needed for this app's own code either**: there is no reflection in it — no
+  `Class.forName`, no `getDeclaredField`, no `getIdentifier` (`StockLogos` says in as many words
+  why it is 222 lines instead) — and the eight manifest components are kept because the manifest
+  names them. A dependency that looks classes up by name is the thing that would change that.
+- **What has been checked, and what has not.** The minified APK was read back: `JsonClient`,
+  `MainActivity`, `EgxApplication`, `CrashLog`, `TodayWidget` and `OverdueWorker` are all in the
+  dex, `ic_launcher` and all seven fonts are in the resource table, and the strings behind the
+  update card, the crash line, the header and the table are all present. **It has not been run.**
+  The unit suite tests the debug variant, which is not minified, so nothing here proves the release
+  starts. **Install the release APK once and open it before the next tag** — that is the whole of
+  the remaining risk, and it costs one install.

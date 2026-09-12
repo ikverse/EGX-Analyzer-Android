@@ -107,7 +107,8 @@ internal fun saveToDownloads(context: Context, saved: SavedAnalysis): String =
     }
 
 /**
- * Copies the app's database into Downloads, for reading a problem off the device that has it.
+ * Copies the app's record - and its crash log, where it has one - into Downloads, for reading a
+ * problem off the device that has it.
  *
  * A screenshot of a wrong figure says what happened and nothing about why; the record behind it is
  * what answers that, and there is no other way off a release-signed build - `run-as` refuses a
@@ -121,16 +122,24 @@ internal fun saveToDownloads(context: Context, saved: SavedAnalysis): String =
  * a side file until one happens - copying the database alone would hand over a record missing
  * exactly the recent activity worth asking about.
  */
-internal fun saveDatabaseToDownloads(
+internal fun saveDiagnosticsToDownloads(
     context: Context,
     database: File,
     checkpoint: () -> Unit,
-): String {
+): List<String> {
     checkpoint()
     val stamp = LocalDate.now().toString()
-    return writeToDownloads(context, "egx-diagnostics-$stamp.db", DATABASE_MIME_TYPE) { out ->
+    val record = writeToDownloads(context, "egx-diagnostics-$stamp.db", DATABASE_MIME_TYPE) { out ->
         database.inputStream().use { it.copyTo(out) }
     }
+    // Only when there is one. A second file in Downloads saying nothing happened is a file the
+    // reader has to open to learn that, and every save on a healthy phone would write one.
+    val crashes = CrashLog.read(context)
+    if (crashes.isBlank()) return listOf(record)
+    val written = writeToDownloads(context, "egx-crashes-$stamp.txt", TEXT_MIME_TYPE) { out ->
+        out.write(crashes.toByteArray())
+    }
+    return listOf(record, written)
 }
 
 /**
@@ -228,6 +237,9 @@ internal const val DATABASE_MIME_TYPE = "application/octet-stream"
 
 /** A spreadsheet opens it, a script reads it, and nothing has to be installed to do either. */
 internal const val CSV_MIME_TYPE = "text/csv"
+
+/** The crash log beside the record. Anything opens it, which is the point of handing it over. */
+internal const val TEXT_MIME_TYPE = "text/plain"
 
 /** What Downloads actually called the file, which is not always what was asked for. */
 private fun savedName(resolver: ContentResolver, uri: Uri): String? = runCatching {

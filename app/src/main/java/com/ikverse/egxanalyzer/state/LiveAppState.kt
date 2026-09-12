@@ -9,7 +9,8 @@ import com.ikverse.egxanalyzer.data.RequestTrace
 import com.ikverse.egxanalyzer.data.saveToDownloads
 import com.ikverse.egxanalyzer.data.stageExport
 import com.ikverse.egxanalyzer.data.exportIntent
-import com.ikverse.egxanalyzer.data.saveDatabaseToDownloads
+import com.ikverse.egxanalyzer.data.CrashLog
+import com.ikverse.egxanalyzer.data.saveDiagnosticsToDownloads
 import com.ikverse.egxanalyzer.data.holdsBackupFolder
 import com.ikverse.egxanalyzer.data.backupsInFolder
 import com.ikverse.egxanalyzer.data.backupFolderLabel
@@ -18,6 +19,7 @@ import com.ikverse.egxanalyzer.data.readBackup
 import com.ikverse.egxanalyzer.ui.AnalysisStatus
 import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppState
+import com.ikverse.egxanalyzer.ui.AppUpdates
 import com.ikverse.egxanalyzer.ui.EGX_ZONE
 import com.ikverse.egxanalyzer.ui.NavStack
 import com.ikverse.egxanalyzer.ui.NavStop
@@ -331,7 +333,23 @@ class LiveAppState(
      */
     private val modelUsageStore: ModelUsageStore? = null,
     private val headless: Boolean = false,
-) : AppState {
+    /**
+     * The status line, held in its own object so that something other than this class can write it.
+     *
+     * A parameter with a default rather than a field, because [updates] below is built from it and
+     * a constructor default may read the parameters before it but never `this`. See [StatusChannel].
+     */
+    private val status: StatusChannel = StatusChannel(),
+    /**
+     * The updater, which is a whole region of this class that now lives outside it.
+     *
+     * Built here so it can be delegated to on the line below: `AppUpdates by updates` gives this
+     * class all nine of those members with no forwarding written by hand. Everything it needs is a
+     * parameter declared above it, which is what let it be lifted out in one move. See [LiveUpdates]
+     * for why it was the piece that could go and Ask AI was not.
+     */
+    private val updates: LiveUpdates = LiveUpdates(updateRepository, status, settingsRepository),
+) : AppState, AppUpdates by updates {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /** Started by whichever path first needs Telegram, and never by merely existing. */
@@ -509,9 +527,15 @@ class LiveAppState(
         succeeded = false,
     )
 
-    override suspend fun saveDatabaseToDownloads(): String = withContext(Dispatchers.IO) {
-        saveDatabaseToDownloads(context, databaseFile(), ::checkpointDatabase)
+    override suspend fun saveDiagnosticsToDownloads(): List<String> = withContext(Dispatchers.IO) {
+        saveDiagnosticsToDownloads(context, databaseFile(), ::checkpointDatabase)
     }
+
+    override fun lastCrash(): String? = CrashLog.latest(context)
+
+    override fun crashCount(): Int = CrashLog.count(context)
+
+    override fun forgetCrashes() = CrashLog.clear(context)
 
     private val backupFolderUri: Uri? get() = backupFolder?.let(Uri::parse)
 
@@ -563,8 +587,18 @@ class LiveAppState(
         insightsSeenAt = at
     }
 
-    /** One-shot banner text for an action that has just finished. */
-    override var statusMessage by mutableStateOf<StatusMessage?>(null)
+    /**
+     * One-shot banner text for an action that has just finished.
+     *
+     * Straight through to [StatusChannel], which is where it actually lives now. Nothing about the
+     * line changed - it is still one message and still consumed once - but holding it out there is
+     * what lets [LiveUpdates] speak without being this class.
+     */
+    override var statusMessage: StatusMessage?
+        get() = status.message
+        set(value) {
+            status.message = value
+        }
 
     /** Non-null while a named action is running, so the shell can show progress. */
     override var busyLabel by mutableStateOf<String?>(null)
@@ -1962,7 +1996,7 @@ class LiveAppState(
         }
         // Independent of Telegram, unlike the sync: this is one public URL, so it does not have to
         // wait for a session that may never arrive on a phone whose owner has not signed in.
-        checkForUpdateQuietly()
+        updates.checkQuietly()
         // Nothing about a previous session carries into this one: a restart starts from the
         // chat list Telegram reports now, with nothing selected.
         localDataStore.forgetChannelSelections()
@@ -2012,169 +2046,6 @@ class LiveAppState(
 
     private var caughtUp = false
 
-    /** How far the app has got with finding, fetching and checking a newer build. */
-    override var updateState by mutableStateOf<UpdateState>(UpdateState.Idle)
-        private set
-
-    /**
-     * Asks GitHub whether a newer build exists, and answers either way.
-     *
-     * The button is a question, so "you are on the newest version" is an answer worth giving. The
-     * launch check is not, which is why it is [checkForUpdateQuietly] and not this.
-     */
-    override fun checkForUpdate() {
-        val updates = updateRepository ?: return
-        if (updateState is UpdateState.Checking || updateState is UpdateState.Downloading) return
-        updateState = UpdateState.Checking
-        appScope.launch {
-            updateState = runCatching { updates.check() }.fold(
-                onSuccess = { update ->
-                    if (update == null) {
-                        UpdateState.UpToDate(updates.currentVersionName)
-                    } else {
-                        UpdateState.Available(update)
-                    }
-                },
-                onFailure = { error ->
-                    UpdateState.Failed(
-                        error.message?.takeIf(String::isNotBlank) ?: "The update check failed.",
-                    )
-                },
-            )
-        }
-    }
-
-    /**
-     * The launch check, which speaks only when there is something new.
-     *
-     * The same rule the launch sync follows: telling someone who never asked that nothing has
-     * changed is a notification about nothing. A failure is silent for the same reason - the phone
-     * was offline, which is not news either.
-     */
-    private fun checkForUpdateQuietly() {
-        val updates = updateRepository ?: return
-        appScope.launch {
-            // The disk before the network, and whatever the setting says: an update already fetched
-            // was asked for by someone, and the only thing left to do with it is install it. This is
-            // what carries a download through the app being restarted by the permission grant that
-            // was needed to install it.
-            val waiting = runCatching { updates.downloaded() }.getOrNull()
-            if (waiting != null) {
-                updateState = UpdateState.Ready(waiting.first, waiting.second)
-                statusMessage = StatusMessage(
-                    "Version ${waiting.first.versionName} is downloaded and ready to install",
-                    succeeded = true,
-                )
-            }
-            if (!appPreferences.updateChecksEnabled) return@launch
-            val update = runCatching { updates.check() }.getOrNull() ?: return@launch
-            // A download in hand beats an offer of the same version, and loses to a newer one.
-            val ready = (updateState as? UpdateState.Ready)?.update?.version
-            if (ready != null && ready >= update.version) return@launch
-            updateState = UpdateState.Available(update)
-            statusMessage = StatusMessage(
-                "Version ${update.versionName} is available",
-                succeeded = true,
-            )
-        }
-    }
-
-    /**
-     * Fetches the APK and checks it before offering to install it.
-     *
-     * The signing check is what turns Android's "App not installed" into a sentence that says what
-     * to do about it. It is not a second opinion on Android's own check - it is the same check,
-     * made early enough to be explained.
-     */
-    override fun downloadUpdate(update: AvailableUpdate) {
-        val updates = updateRepository ?: return
-        if (updateState is UpdateState.Downloading) return
-        updateState = UpdateState.Downloading(update, 0f)
-        appScope.launch {
-            updateState = runCatching {
-                // Nothing to fetch if it is already here. A download interrupted by the permission
-                // grant used to be paid for twice, at seventy megabytes a time.
-                val waiting = runCatching { updates.downloaded() }.getOrNull()
-                if (waiting != null && waiting.first.version >= update.version) {
-                    return@runCatching UpdateState.Ready(waiting.first, waiting.second)
-                }
-                // The progress callback arrives on the thread doing the reading. Compose state
-                // takes a write from any thread, and marshalling each percent back to the main one
-                // would cost a coroutine per percent to move a number nobody is racing for.
-                val file = updates.download(update) { progress ->
-                    updateState = UpdateState.Downloading(update, progress)
-                }
-                when (updates.inspect(file)) {
-                    DownloadedApk.MATCHES -> UpdateState.Ready(update, file)
-                    // Damaged and wrong-key used to be the same sentence, and it was this one -
-                    // so an interrupted download accused the release of being signed by someone
-                    // else, which was true of nothing and sent the search a long way from the
-                    // network fault that caused it.
-                    DownloadedApk.WRONG_KEY -> {
-                        file.delete()
-                        UpdateState.Failed(
-                            "Version ${update.versionName} is signed with a different key, so " +
-                                "Android will not install it over this build. Uninstall this one " +
-                                "and install that release by hand.",
-                        )
-                    }
-                    DownloadedApk.DAMAGED -> {
-                        file.delete()
-                        UpdateState.Failed(
-                            "The download of version ${update.versionName} arrived damaged. " +
-                                "Press Download to fetch it again.",
-                        )
-                    }
-                }
-            }.getOrElse { error ->
-                UpdateState.Failed(
-                    error.message?.takeIf(String::isNotBlank) ?: "The download failed.",
-                )
-            }
-        }
-    }
-
-    /** Puts the card back to the button, after an answer has been read. */
-    override fun dismissUpdate() {
-        updateState = UpdateState.Idle
-    }
-
-    /**
-     * Hands the downloaded APK to Android to install.
-     *
-     * The confirmation is Android's own and arrives a moment later, through
-     * [com.ikverse.egxanalyzer.data.UpdateInstallReceiver]. A failure to even start says so here,
-     * because a button that appears to do nothing is what this whole path cost three releases.
-     */
-    override fun installUpdate(file: File) {
-        val updates = updateRepository ?: return
-        appScope.launch {
-            runCatching { updates.install(file) }.onFailure { error ->
-                reportUpdateProblem(
-                    error.message?.takeIf(String::isNotBlank)
-                        ?: "The install could not be started.",
-                )
-            }
-        }
-    }
-
-    /**
-     * Says why a button could not do what it says, without throwing away what the card holds.
-     *
-     * Android refusing to open the installer used to be invisible: the system closed it without a
-     * word and the phone looked like it had ignored the press. A downloaded update is still a
-     * downloaded update afterwards, so this speaks rather than resetting anything.
-     */
-    override fun reportUpdateProblem(reason: String) {
-        statusMessage = StatusMessage(reason, succeeded = false)
-    }
-
-    /** True once the user has allowed this app to install apps; Android is the only one who can ask. */
-    override fun canInstallUpdates(): Boolean = updateRepository?.canInstall() ?: false
-
-    override fun installPermissionIntent(): Intent? = updateRepository?.permissionIntent()
-
-    override fun releasesPageIntent(): Intent? = updateRepository?.releasesPageIntent()
 
     override fun updateAutomaticUpdateChecks(enabled: Boolean) {
         if (enabled == appPreferences.updateChecksEnabled) return

@@ -159,6 +159,18 @@ class PageState {
     val portfolioStock: MutableState<String> get() = portfolioStockBox.picked
     val portfolioFiltersOpen: MutableState<Boolean> = mutableStateOf(false)
 
+    // ── Analyze ──────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Whether the reader has waved away the setup card on Analyze.
+     *
+     * Out here rather than in a `remember` inside the screen, like everything else in this class and
+     * for the reason the stock box records against itself: a card that came back every time the
+     * phone was folded would be a card that cannot be dismissed. Session-only all the same - it is
+     * a hint, and a hint that stays hidden across launches is one nobody can find again.
+     */
+    val analyzeSetupDismissed: MutableState<Boolean> = mutableStateOf(false)
+
     // ── What is narrowing a tab ──────────────────────────────────────────────────────────────
 
     /**

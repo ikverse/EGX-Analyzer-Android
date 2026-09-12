@@ -72,6 +72,40 @@ enum class AppDestination(
 enum class AnalysisStatus { IDLE, RUNNING, COMPLETED, FAILED, CANCELLED }
 
 /**
+ * Finding, fetching and installing a newer build.
+ *
+ * Carved off [AppState] on 2026-09-12 so that the code behind it could leave `LiveAppState`: a
+ * sub-interface is what lets the live class say `AppUpdates by LiveUpdates(...)` and gain all of
+ * these at once, with no forwarding written by hand. A screen sees no difference - [AppState] still
+ * carries every one of them, because it extends this.
+ *
+ * `updateAutomaticUpdateChecks` is deliberately **not** here. It is a write to `AppPreferences`,
+ * which the live state holds and persists, so it belongs with the other preference writers rather
+ * than with the updater that happens to read it.
+ */
+interface AppUpdates {
+
+    /** How far the app has got with finding, fetching and checking a newer build. */
+    val updateState: UpdateState
+
+    fun checkForUpdate()
+
+    fun downloadUpdate(update: AvailableUpdate)
+
+    fun dismissUpdate()
+
+    fun installUpdate(file: File)
+
+    fun reportUpdateProblem(reason: String)
+
+    fun canInstallUpdates(): Boolean
+
+    fun installPermissionIntent(): Intent?
+
+    fun releasesPageIntent(): Intent?
+}
+
+/**
  * Everything a screen may read and every action it may take - and nothing else.
  *
  * The whole of the UI's view of the app. Screens are written against this and never against the
@@ -85,7 +119,7 @@ enum class AnalysisStatus { IDLE, RUNNING, COMPLETED, FAILED, CANCELLED }
  * calling something below rather than by assigning to it. The two exceptions are marked where
  * they are declared.
  */
-interface AppState {
+interface AppState : AppUpdates {
 
     val destination: AppDestination
     val pages: PageState
@@ -140,7 +174,6 @@ interface AppState {
     val opinions: Map<String, StockOpinion>
     val opinionPending: String?
     val opinionSettingsRevision: Int
-    val updateState: UpdateState
     val canGoBack: Boolean
     val scrollToTopRequest: Pair<AppDestination, Int>?
     val tradeWatchWanted: Boolean
@@ -188,8 +221,28 @@ interface AppState {
     /** Writes the report as a spreadsheet and offers it onward. */
     suspend fun exportReport(saved: SavedAnalysis)
 
-    /** Copies this device's saved record into Downloads, and returns the name it landed under. */
-    suspend fun saveDatabaseToDownloads(): String
+    /**
+     * Copies this device's saved record into Downloads, and names what landed there.
+     *
+     * One file usually, two where the app has crashed: the record, and the crash log beside it.
+     * A list rather than a string, so the message can name both without this having to compose
+     * English for a screen it cannot see.
+     */
+    suspend fun saveDiagnosticsToDownloads(): List<String>
+
+    /**
+     * The newest crash on record, as the line Settings shows, or null where there is none.
+     *
+     * Read on demand rather than published as state: it changes when the process dies, which is
+     * the one moment nothing is observing it, and it is wanted by one line on one screen.
+     */
+    fun lastCrash(): String?
+
+    /** How many crashes are on record. */
+    fun crashCount(): Int
+
+    /** Forgets them, for the reader who has handed the file over. */
+    fun forgetCrashes()
 
     /**
      * How much the kept five-minute archive holds.
@@ -367,22 +420,6 @@ interface AppState {
     suspend fun priceHistory(ticker: String, from: LocalDate): List<DailySession>
 
     fun enterForeground()
-
-    fun checkForUpdate()
-
-    fun downloadUpdate(update: AvailableUpdate)
-
-    fun dismissUpdate()
-
-    fun installUpdate(file: File)
-
-    fun reportUpdateProblem(reason: String)
-
-    fun canInstallUpdates(): Boolean
-
-    fun installPermissionIntent(): Intent?
-
-    fun releasesPageIntent(): Intent?
 
     fun updateAutomaticUpdateChecks(enabled: Boolean)
 
