@@ -814,10 +814,14 @@ private fun SavedAnalysisCard(
             // state a card should go grey for.
             disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
-        border = arrivalFlash(highlighted, onHighlightShown) ?: cardOutline,
+        border = arrivalFlash(highlighted, onHighlightShown) ?: Glass.outline,
         shape = MaterialTheme.shapes.large,
+        elevation = CardDefaults.cardElevation(defaultElevation = Glass.lift),
     ) {
-        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        Column(
+            Modifier.glassSheen().padding(Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
             // Top-aligned: the heading below runs to two lines and a menu centred against both sits
             // level with neither. The floor is what keeps two cards in a grid row level: a report
             // older than a week gets no relative word, and would otherwise stand a line shorter
@@ -1029,6 +1033,7 @@ private fun SavedAnalysisCard(
 
     if (confirmDelete) {
         AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
             onDismissRequest = { confirmDelete = false },
             title = { Text("Delete this analysis?") },
             text = {

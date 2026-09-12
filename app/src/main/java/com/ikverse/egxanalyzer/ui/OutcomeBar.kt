@@ -58,7 +58,7 @@ internal fun OutcomeBar(
     modifier: Modifier = Modifier,
     height: Dp = OutcomeBarHeight,
     /** The surface behind the bar, which the softened segment is mixed onto. */
-    on: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    on: Color = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
 ) = OutcomeBar(score.verdicts(), modifier, height, on)
 
 /**
@@ -76,7 +76,7 @@ internal fun OutcomeBar(
     tally: CallTally,
     modifier: Modifier = Modifier,
     height: Dp = OutcomeBarHeight,
-    on: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    on: Color = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
 ) = OutcomeBar(tally.verdicts(), modifier, height, on)
 
 /**
@@ -229,7 +229,10 @@ private fun Verdicts.spoken(): String = buildString {
 @Composable
 internal fun OutcomeLegend(modifier: Modifier = Modifier) {
     val target = PriceRole.target
-    val surface = MaterialTheme.colorScheme.surfaceContainer
+    // Opaque, because this is what the derived hue is composited **over** rather than a surface
+    // being drawn: composited over a see-through colour the result is see-through too, and a legend
+    // swatch that let the card through would report a colour the bar beside it does not use.
+    val surface = Glass.solid(MaterialTheme.colorScheme.surfaceContainer)
     val entries = listOf(
         target to "target 1 only",
         PriceRole.derived(target).compositeOver(surface) to "target 2",

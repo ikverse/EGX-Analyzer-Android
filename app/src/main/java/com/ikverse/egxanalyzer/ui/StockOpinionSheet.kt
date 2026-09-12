@@ -532,6 +532,7 @@ internal fun AskAiDialog(
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
+        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
         onDismissRequest = onDismiss,
         title = { Text("Ask about ${call.ticker}?") },
         text = {

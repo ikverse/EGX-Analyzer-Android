@@ -752,6 +752,7 @@ private fun DuplicateAnalysisDialog(appState: AppState) {
             .format(duplicate.result.completedAt)
     }
     AlertDialog(
+        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
         onDismissRequest = appState::dismissDuplicateWarning,
         title = { Text("This session is already analysed") },
         text = {

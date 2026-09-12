@@ -169,6 +169,17 @@ internal class PageBackdrop(val layer: GraphicsLayer) {
  */
 internal val LocalPageBackdrop = staticCompositionLocalOf<PageBackdrop?> { null }
 
+/**
+ * The page's **ground** - its wash and its aurora and nothing that stands on them.
+ *
+ * A card cannot frost against [LocalPageBackdrop]: a card is part of the page that recording is of,
+ * so it would be reading a layer while that layer is being written. It can frost against the ground
+ * under the page, because nothing standing on the page is in it - and a ground with an aurora on it
+ * is the one thing that makes frosting a card worth doing at all. A flat colour blurred is the
+ * colour.
+ */
+internal val LocalPageGround = staticCompositionLocalOf<PageBackdrop?> { null }
+
 @Composable
 internal fun rememberPageBackdrop(): PageBackdrop {
     val layer = rememberGraphicsLayer()
@@ -203,8 +214,15 @@ internal fun Modifier.recordBackdrop(backdrop: PageBackdrop): Modifier = this
  * clamped rather than faded - a decal edge leaves a pale rim around a surface this small.
  */
 @Composable
-internal fun Modifier.frostedBackdrop(radius: Dp = FrostRadius): Modifier {
-    val backdrop = LocalPageBackdrop.current ?: return this
+internal fun Modifier.frostedBackdrop(
+    /**
+     * What to frost against. The page for something floating over it, the ground under the page for
+     * a card standing on it - see [LocalPageGround] for why a card cannot take the first.
+     */
+    backdrop: PageBackdrop? = LocalPageBackdrop.current,
+    radius: Dp = FrostRadius,
+): Modifier {
+    backdrop ?: return this
     val blurred = rememberGraphicsLayer()
     val blur = with(LocalDensity.current) { radius.toPx() }
     val position = remember { mutableStateOf(Offset.Zero) }
@@ -359,14 +377,16 @@ val cardOutline: BorderStroke
  */
 internal object Glass {
     /**
-     * See-through enough that the page changes the card, opaque enough to carry a figure.
+     * A container role with its alpha taken back off, for something floating outside the page.
      *
-     * A shade heavier on the light theme: the same alpha over near-white leaves less contrast under
-     * the small grey type than it does over near-black, and the type is what the card is for.
+     * The three container roles are see-through in the theme, which is what makes every surface in
+     * the app glass in one place - see `GlassSection`. A dialog and a menu are the exception and not
+     * an oversight: a dialog sits on a scrim and a menu sits on whatever it was opened over, so
+     * neither has the page behind it that the material means anything against. See-through, a
+     * confirm dialog shows the very card it is asking about through its own words.
      */
-    val fill: Color
-        @Composable get() = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh
-            .copy(alpha = if (LocalDarkTheme.current) 0.70f else 0.76f)
+    @Composable
+    fun solid(color: Color): Color = color.copy(alpha = 1f)
 
     /**
      * Light along the top edge, falling away down the sides.
@@ -421,7 +441,7 @@ internal object Glass {
 @Composable
 internal fun Modifier.glassSheen(): Modifier = background(
     Brush.linearGradient(
-        0f to Color.White.copy(alpha = if (LocalDarkTheme.current) 0.07f else 0.50f),
+        0f to Color.White.copy(alpha = if (LocalDarkTheme.current) 0.12f else 0.55f),
         0.45f to Color.Transparent,
     ),
 )

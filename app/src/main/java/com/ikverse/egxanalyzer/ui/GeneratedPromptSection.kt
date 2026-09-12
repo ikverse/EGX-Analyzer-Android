@@ -119,6 +119,7 @@ internal fun GeneratedPromptSection(appState: AppState) {
 
     viewing?.let { version ->
         AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
             onDismissRequest = { viewing = null },
             title = { Text("v${version.sequence} · ${version.id}") },
             text = {

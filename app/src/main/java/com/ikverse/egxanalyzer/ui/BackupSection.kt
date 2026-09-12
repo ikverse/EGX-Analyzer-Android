@@ -133,6 +133,7 @@ fun BackupControls(appState: AppState) {
 
     pendingRestore?.let { source ->
         AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
             onDismissRequest = { pendingRestore = null },
             title = { Text("Restore from this backup?") },
             // Says what it will not do, because that is the question somebody hesitating over this

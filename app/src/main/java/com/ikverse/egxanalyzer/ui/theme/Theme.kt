@@ -30,6 +30,42 @@ import com.ikverse.egxanalyzer.model.ThemeMode
  * hue**, swapped per destination by [withAccent]. See [PageAccent] for why that is safe here and
  * would not have been before `market` was given a role of its own.
  */
+/**
+ * **The app's surfaces are glass, and these are what make them that.**
+ *
+ * Every card, tile, sheet, field and chip in this app reads one of the three container roles, so
+ * the material is decided here and nowhere else - a treatment applied card by card is a treatment
+ * that is on some of them.
+ *
+ * The alphas **rise as the surfaces nest**, which is the opposite of what glass suggests and the
+ * whole reason the hierarchy survives being see-through. A section card sits on the page and may
+ * let a lot of it up; a card inside that card must let less up, or it drifts toward the colour of
+ * its parent; a tile inside that must let less again, or the smallest surface in the app - the one
+ * carrying a bare figure with no heading to anchor it - ends up standing on the page three levels
+ * below where it looks like it is.
+ *
+ * `surfaceContainerLow` and `Lowest` keep their opacity. They are the page well and the table's own
+ * banding - grounds rather than things standing on one - and a well that let the page through would
+ * not be a well. Anything floating **outside** the page keeps its opacity too: a dialog sits on a
+ * scrim and a menu sits on whatever it was opened over, and neither has a page behind it that the
+ * material means anything against. See `Glass.solid` in the ui package, which is what those pass.
+ *
+ * **The figures are derived, not chosen.** `GlassContrastTest` composites every level over the
+ * brightest the ground is ever lit, for all five accents and both themes, and pins two properties:
+ * that body text holds its contrast, and that each level stays clear of the one above it. The first
+ * set of numbers written here failed the second - at a 0.09 ground the lit page came out *brighter*
+ * than the section card standing on it, so a card crossing a light disappeared into it. These are
+ * the most see-through values that pass.
+ */
+internal const val GlassSection = 0.66f
+internal const val GlassCard = 0.76f
+internal const val GlassTile = 0.86f
+
+/** A step more opaque each: the same alpha over near-white passes less contrast to the type on it. */
+internal const val LightGlassSection = 0.70f
+internal const val LightGlassCard = 0.80f
+internal const val LightGlassTile = 0.90f
+
 private val DarkColors = darkColorScheme(
     // Overwritten per page by withAccent. The values here are Analyze's, so anything drawn outside
     // a destination - a sheet, a preview, a dialog raised by the shell - still gets a whole scheme
@@ -66,9 +102,10 @@ private val DarkColors = darkColorScheme(
     onSurfaceVariant = Color(0xFF9AA7BD),
     surfaceContainerLowest = Color(0xFF06090F),
     surfaceContainerLow = Color(0xFF101724),
-    surfaceContainer = Color(0xFF141C2C),
-    surfaceContainerHigh = Color(0xFF1C2638),
-    surfaceContainerHighest = Color(0xFF243046),
+    // See GlassSection for what the alphas are and why they run the way they do.
+    surfaceContainer = Color(0xFF141C2C).copy(alpha = GlassSection),
+    surfaceContainerHigh = Color(0xFF1C2638).copy(alpha = GlassCard),
+    surfaceContainerHighest = Color(0xFF243046).copy(alpha = GlassTile),
     outline = Color(0xFF6B7684),
     outlineVariant = Color(0xFF2A364B),
 )
@@ -98,9 +135,9 @@ private val LightColors = lightColorScheme(
     onSurfaceVariant = Color(0xFF55617A),
     surfaceContainerLowest = Color.White,
     surfaceContainerLow = Color(0xFFF1F4FD),
-    surfaceContainer = Color(0xFFFFFFFF),
-    surfaceContainerHigh = Color(0xFFEDF1FC),
-    surfaceContainerHighest = Color(0xFFE4EAF8),
+    surfaceContainer = Color(0xFFFFFFFF).copy(alpha = LightGlassSection),
+    surfaceContainerHigh = Color(0xFFEDF1FC).copy(alpha = LightGlassCard),
+    surfaceContainerHighest = Color(0xFFE4EAF8).copy(alpha = LightGlassTile),
     outline = Color(0xFF71787E),
     outlineVariant = Color(0xFFD7DFF0),
 )

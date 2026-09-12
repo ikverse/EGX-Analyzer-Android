@@ -397,6 +397,7 @@ private fun OutcomeLabel(call: ScoredCall) {
     )
     if (showing) {
         AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
             onDismissRequest = { showing = false },
             title = { Text("${call.ticker} · ${call.outcome.label}") },
             text = { Text(call.reason()) },
@@ -1630,6 +1631,7 @@ private fun TimingLabel(call: ScoredCall) {
     )
     if (showing) {
         AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
             onDismissRequest = { showing = false },
             title = { Text("${call.ticker} · a T+1 trade") },
             text = {
@@ -1684,6 +1686,7 @@ private fun ExtractionWarning(call: ScoredCall) {
     )
     if (showing) {
         AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
             onDismissRequest = { showing = false },
             title = { Text("${call.ticker} · levels to check") },
             text = {

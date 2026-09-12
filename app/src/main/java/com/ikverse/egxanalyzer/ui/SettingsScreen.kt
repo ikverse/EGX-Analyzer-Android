@@ -88,6 +88,7 @@ internal fun SettingsScreen(appState: AppState) {
 
     if (confirmDeleteAll) {
         AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
             onDismissRequest = { confirmDeleteAll = false },
             title = { Text("Delete all saved analyses?") },
             text = {

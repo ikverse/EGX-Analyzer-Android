@@ -76,6 +76,7 @@ internal fun AnalysisRulesSection(appState: AppState) {
 
     confirmDelete?.let { rule ->
         AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
             onDismissRequest = { confirmDelete = null },
             title = { Text("Delete \"${rule.phrase}\"?") },
             text = {
@@ -274,6 +275,7 @@ private fun RuleEditor(
     var rejection by remember(rule.id) { mutableStateOf<String?>(null) }
 
     AlertDialog(
+        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
         onDismissRequest = onDismiss,
         title = {
             Text(

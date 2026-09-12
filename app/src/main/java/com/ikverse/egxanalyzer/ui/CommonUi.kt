@@ -82,6 +82,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -103,6 +104,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.takeOrElse
 import com.ikverse.egxanalyzer.R
 import com.ikverse.egxanalyzer.model.isEgx33
+import com.ikverse.egxanalyzer.ui.theme.LocalDarkTheme
 import com.ikverse.egxanalyzer.ui.theme.pageAccent
 import java.time.LocalDate
 import kotlin.math.max
@@ -276,6 +278,13 @@ internal fun Screen(
     // actually behind it. Recorded around the wash and the page together and **not** around the
     // floating action below, which has to stay outside the recording it reads. See PageBackdrop.
     val backdrop = rememberPageBackdrop()
+    // The ground the page stands on, recorded separately so a card can frost against it. Only
+    // Results carries one while the frosted treatment is being judged - see PageGround.
+    //
+    // Nested inside the page's own recording rather than drawn beside it: the ground is part of the
+    // page, so a floating action frosting against `backdrop` gets the wash and the aurora it is
+    // actually sitting over. Beside it, the action's frost had the wash and not the lights, and a
+    // card's frost had the lights and not the wash - which is the same page drawn two ways.
     CompositionLocalProvider(LocalViewportTop provides viewportTop) {
     Box(Modifier.fillMaxSize().nestedScroll(headerScroll)) {
       Box(Modifier.fillMaxSize().recordBackdrop(backdrop)) {
@@ -552,9 +561,15 @@ internal fun SectionCard(
     val hue = accent ?: pageAccent.ink
     Card(
         modifier = modifier.fillMaxWidth(),
+        // The colour is see-through in the theme itself - see GlassSection - so what this adds is
+        // only what a **first-level** card gets: the light along its top edge, the sheen under it,
+        // and the lift that sits it off the page. A card inside this one takes none of the three.
+        // Repeated at every level they read as glitter rather than as depth, and the app nests
+        // three deep.
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = MaterialTheme.shapes.large,
-        border = cardOutline,
+        border = Glass.outline,
+        elevation = CardDefaults.cardElevation(defaultElevation = Glass.lift),
     ) {
         // Drawn behind the content rather than as a `Row` beside it: the edge runs the whole height
         // of the card, which is not known until everything inside it has been laid out, and a column
@@ -569,7 +584,7 @@ internal fun SectionCard(
         // amounts. Both were one padding on this Column until the nesting above made the two
         // different questions.
         Column(
-            Modifier.padding(vertical = Space.l),
+            Modifier.glassSheen().padding(vertical = Space.l),
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             if (title != null) {
@@ -633,6 +648,10 @@ internal fun SectionCard(
  * then gets out of the way, because a permanent tint behind the first card would be one more thing
  * every card on the page has to be read against.
  *
+ * Inside the page's own recording, which is what lets the floating action frost against the wash it
+ * is actually sitting over rather than against a page that does not have it - see [recordBackdrop].
+ * The lights behind it are the window's and not the page's: see `appGround`.
+ *
  * **Faded on the scroll rather than pinned**, and the scroll is read inside the draw lambda for the
  * reason [PageHeader]'s collapse is passed as a lambda: read at composition, every frame of a
  * scroll would recompose the whole page, where here a frame costs one rectangle repainted.
@@ -662,14 +681,16 @@ private fun PageWash(scroll: ScrollState, taken: () -> Float) {
  * How far down the page the wash reaches, and so how far it takes to scroll it away.
  *
  * Measured from the top of the *window* rather than from the top of the content, since the page
- * runs up behind the status bar now - see `AppContent`. The extra 40dp over the old 120 is roughly
- * the bar it has to cover before it starts on the page, so the tint fades over the same stretch of
- * reading as it did rather than appearing to burn off faster.
+ * runs up behind the status bar now - see `AppContent`. 120 became 160 for the bar it has to cover
+ * before it starts on the page at all, and 160 became 280 because covering the bar is not the same
+ * as reaching the page: at 160 the hue was spent by the second card, which reads as a band that
+ * stopped rather than a page that opens in its own colour. The start alpha is untouched, so the top
+ * of the page looks the same and the difference is only how far down the colour is still there.
  *
  * Published because the rail measures its own wash from it - one number, or the two halves of the
  * band across the top of a wide window would fade out at different rates. See `AppRail`.
  */
-internal val PageWashHeight = 160.dp
+internal val PageWashHeight = 280.dp
 
 /** A hairline of the card's own hue. Wider and it is a stripe the content has to sit clear of. */
 private val AccentEdgeWidth = 3.dp
@@ -764,11 +785,14 @@ internal fun ExpandableSection(
             containerColor = containerColor ?: MaterialTheme.colorScheme.surfaceContainer,
         ),
         shape = MaterialTheme.shapes.large,
-        border = cardOutline,
+        // A session card stands on the page exactly as a section card does, so it is lit and lifted
+        // exactly as one. See SectionCard.
+        border = Glass.outline,
+        elevation = CardDefaults.cardElevation(defaultElevation = Glass.lift),
     ) {
         Column(
-            // SectionCard's edge, drawn the same way and for the same reason.
-            Modifier.drawBehind {
+            // SectionCard's edge and sheen, drawn the same way and for the same reasons.
+            Modifier.glassSheen().drawBehind {
                 drawRect(hue, size = Size(AccentEdgeWidth.toPx(), size.height))
             },
         ) {
@@ -1524,7 +1548,8 @@ internal fun AppMenu(
         modifier = modifier,
         offset = offset,
         shape = MaterialTheme.shapes.large,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        // Opaque: a menu is not on the page, it is over whatever it was opened from. See Glass.solid.
+        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
         border = cardOutline,
         shadowElevation = MenuShadow,
         content = content,

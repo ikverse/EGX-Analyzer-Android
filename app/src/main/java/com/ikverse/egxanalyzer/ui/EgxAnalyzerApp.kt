@@ -100,6 +100,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -114,6 +115,9 @@ import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.ui.theme.LocalDarkTheme
 import com.ikverse.egxanalyzer.ui.theme.PageTheme
 import com.ikverse.egxanalyzer.ui.theme.accentFor
+import com.ikverse.egxanalyzer.ui.theme.groundAlpha
+import com.ikverse.egxanalyzer.ui.theme.LightGroundLift
+import com.ikverse.egxanalyzer.ui.theme.GroundLift
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import androidx.window.layout.WindowLayoutInfo
@@ -212,6 +216,10 @@ fun EgxAnalyzerApp(appState: AppState) {
         // here are every ticker on every card on the page.
         LocalOpenStock provides remember(appState) { appState::openStock },
     ) {
+      // The ground every surface in the app is see-through *to*. Drawn once, here, across the whole
+      // window - the rail included - because a ground that began at the page's edge would put a
+      // seam down the side of every wide window, which is exactly what the first attempt did.
+      Box(Modifier.fillMaxSize().appGround(appState.destination)) {
         if (rail) {
             // **The mark is not drawn in the chrome at all.** It used to be drawn in the header
             // beside the app's name and travel across into the rail's top gap as that header
@@ -243,7 +251,10 @@ fun EgxAnalyzerApp(appState: AppState) {
                     Modifier.fillMaxSize().consumeWindowInsets(
                         NavigationRailDefaults.windowInsets.only(WindowInsetsSides.Start),
                     ),
-                    color = MaterialTheme.colorScheme.background,
+                    // Transparent, because the ground is painted once for the whole window now -
+                    // see appGround. Painted here as well it would cover the light on this half of
+                    // the window and put back the seam beside the rail.
+                    color = Color.Transparent,
                 ) {
                     AppContent(appState, rail = true)
                 }
@@ -256,15 +267,74 @@ fun EgxAnalyzerApp(appState: AppState) {
             Box(Modifier.fillMaxSize()) {
                 Surface(
                     Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
+                    // Transparent for appGround's reason, as above.
+                    color = Color.Transparent,
                 ) {
                     AppContent(appState, rail = false)
                 }
                 FloatingNavBar(appState, Modifier.align(Alignment.BottomCenter))
             }
         }
+      }
     }
 }
+
+/**
+ * The page's hue as two soft lights behind the whole window.
+ *
+ * **Half of the material, and the half that is not on any card.** The surfaces above are glass and
+ * glass over a flat colour is that colour: without this the whole treatment is a tint, which is the
+ * lesson of the first attempt at it - built, shipped and looked at on a device before anyone could
+ * see that nothing had changed.
+ *
+ * Faint on purpose. It was 0.20 and the band behind a page title read as a coloured header, which
+ * is a decoration the app does not have and a ground the type then had to be read against. At these
+ * alphas the lit ground and the unlit differ by about five L\*, which is enough for a card crossing
+ * the boundary to show it and little enough that no figure is read against a different ground than
+ * the one beside it.
+ *
+ * The lights are held low and wide for the same reason: the top of a window is where the title, the
+ * status line and the first card all are, and it is the one part of the page that must stay quiet.
+ *
+ * The hue follows the destination the way the rail's wash does, and animates for the same reason -
+ * an instant change of ground under a cross-fading page reads as a flash.
+ */
+@Composable
+private fun Modifier.appGround(destination: AppDestination): Modifier {
+    val dark = LocalDarkTheme.current
+    val hue = animateColorAsState(
+        accentFor(destination.accent, dark).base,
+        label = "appGround",
+    )
+    val page = MaterialTheme.colorScheme.background
+    // Solved from the hue rather than written down, so every page is lit to one brightness and only
+    // the colour of the light changes. See groundAlpha - a single alpha across five hues of very
+    // different luminance is what put a lit page above the cards standing on it.
+    val alpha = groundAlpha(hue.value, page, if (dark) GroundLift else LightGroundLift)
+    return this.drawBehind {
+        drawRect(page)
+        val tint = hue.value
+        // Two lights and not three: a third left no unlit ground for the lit parts to be lighter
+        // than, which is a page with a colour rather than a page with light on it. Both carry the
+        // same alpha, which is what the solve above is solved for.
+        drawGroundLight(tint, alpha, Offset(size.width * 0.08f, size.height * 0.62f), size.width * 0.75f)
+        drawGroundLight(tint, alpha, Offset(size.width * 1.02f, size.height * 0.22f), size.width * 0.80f)
+    }
+}
+
+/** One light: the hue at its middle, gone by its edge. */
+private fun DrawScope.drawGroundLight(hue: Color, alpha: Float, centre: Offset, radius: Float) {
+    drawCircle(
+        brush = Brush.radialGradient(
+            listOf(hue.copy(alpha = alpha), hue.copy(alpha = 0f)),
+            center = centre,
+            radius = radius,
+        ),
+        radius = radius,
+        center = centre,
+    )
+}
+
 
 /** Icons carry the rail on a glance, so they are a size up from the Material default of 24dp. */
 private val NavigationIconSize = 28.dp
@@ -494,7 +564,8 @@ private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
         // it and under the destinations. A `containerColor` is drawn by the rail's own surface,
         // which is below everything a modifier draws.
         modifier = modifier
-            .background(MaterialTheme.colorScheme.background)
+            // No ground of its own any more: the window's is already under it, and a rail that
+            // painted its own would be the one part of the window the light stopped at.
             .drawBehind {
                 val left = wash.floatValue
                 if (left <= 0f) return@drawBehind
@@ -797,7 +868,8 @@ private fun AppContent(appState: AppState, rail: Boolean) {
         // The page's ground, not the chrome colour. The `Surface` below is padded out of the
         // horizontal and bottom safe-drawing insets, so what this paints is the strip behind the
         // gesture bar - and in `surfaceContainer` that was a band across the foot of every page.
-        containerColor = MaterialTheme.colorScheme.background,
+        // Transparent: the window's ground is already under this - see appGround.
+        containerColor = Color.Transparent,
     ) { padding ->
         // No chrome above the page any more - no name band, no progress hairline, no status
         // line. The first two are gone; the third moved on to the page, under its own title. See
@@ -809,7 +881,8 @@ private fun AppContent(appState: AppState, rail: Boolean) {
         // hairline there is a line under the status bar.
         Surface(
             Modifier.padding(padding).fillMaxSize(),
-            color = MaterialTheme.colorScheme.background,
+            // Transparent for appGround's reason, as above.
+            color = Color.Transparent,
         ) {
             if (rail) {
                 // Screens cross-fade and rise slightly, so changing destination reads as moving

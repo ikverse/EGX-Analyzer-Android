@@ -290,6 +290,7 @@ private fun KeepOpenDialog(onDismiss: () -> Unit, onConfirm: (String?) -> Unit) 
     var note by remember { mutableStateOf("") }
 
     AlertDialog(
+        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
         onDismissRequest = onDismiss,
         title = { Text("Keep this trade open?") },
         text = {
@@ -423,6 +424,7 @@ private fun SellDialog(
     }
 
     AlertDialog(
+        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
         onDismissRequest = onDismiss,
         title = { Text("Record the sale") },
         text = {
@@ -571,6 +573,7 @@ internal fun TradeDialog(
     val windowValid = initialWindow == null || parsedWindow != null
 
     AlertDialog(
+        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {

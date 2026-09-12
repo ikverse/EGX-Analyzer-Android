@@ -78,17 +78,15 @@ internal fun PositionCard(
     var editing by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
 
-    // Glass rather than a slab, on this card and the Results occurrence card, while the treatment
-    // is being judged. Only the fill and the sheen: this card's edge always carries the trade's
-    // status, and what a card means outranks how it is lit. See Glass.
-    val colors = CardDefaults.cardColors(containerColor = Glass.fill)
+    // A **second-level** surface: it sits inside the session card, so it takes the container role's
+    // own alpha - see GlassSection - and none of the lighting a card standing on the page gets.
+    val colors = CardDefaults.cardColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    )
     // The arrival flash takes the edge for as long as it runs, then the status outline has it back.
     val border = arrivalFlash(highlighted, onHighlightShown) ?: heldBorder(view)
     val body: @Composable ColumnScope.() -> Unit = {
-        Column(
-            Modifier.glassSheen().padding(Space.m),
-            verticalArrangement = Arrangement.spacedBy(Space.s),
-        ) {
+        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             // A fixed two lines for the name, so a company whose name wraps does not make its card
             // taller than the one beside it.
             Row(Modifier.heightIn(min = PositionHeaderHeight), verticalAlignment = Alignment.Top) {
@@ -412,7 +410,6 @@ internal fun PositionCard(
             colors = colors,
             border = border,
             shape = MaterialTheme.shapes.medium,
-            elevation = CardDefaults.cardElevation(defaultElevation = Glass.lift),
             content = body,
         )
     } else {
@@ -425,7 +422,6 @@ internal fun PositionCard(
             colors = colors,
             border = border,
             shape = MaterialTheme.shapes.medium,
-            elevation = CardDefaults.cardElevation(defaultElevation = Glass.lift),
             content = body,
         )
     }
@@ -452,6 +448,7 @@ internal fun PositionCard(
     }
     if (confirmRemove) {
         AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
             onDismissRequest = { confirmRemove = false },
             title = { Text("Remove this position?") },
             text = {
@@ -554,6 +551,7 @@ private fun TPlusOneChip(position: Position) {
                 "trade's deadline, not your default."
         }
         AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
             onDismissRequest = { showing = false },
             title = { Text("${position.ticker} · a T+1 trade") },
             text = { Text("$call $deadline") },
