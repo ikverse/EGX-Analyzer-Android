@@ -236,6 +236,7 @@ private fun StockBlock(
     ) {
         Column {
             StockHeading(stock, latest)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             ColumnHeader()
             stock.dataPoints.forEachIndexed { index, point ->
                 CallRow(
@@ -357,7 +358,7 @@ private fun StockHeading(stock: ConsolidatedRecommendation, latest: LatestPrice?
                 )
                 Text(
                     formatPrice(latest.session.close),
-                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
+                    style = MaterialTheme.typography.bodyLarge.copy(fontFamily = TabularFigures),
                     color = PriceRole.market,
                 )
             }
@@ -413,10 +414,14 @@ private fun CallRow(
             .fillMaxWidth()
             .background(
                 if (striped) {
-                    // A step down from the block rather than the near-invisible
-                    // `surfaceContainerLowest` at 0.4 it was, which is why the old table needed a
-                    // rule under every row to find the one it was following.
-                    MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.55f)
+                    // `surfaceContainer`'s own RGB sits only a few units per channel from the
+                    // block's `surfaceContainerHigh`, so no alpha over it reads as a separate
+                    // band - composited by hand it came out within 1 unit of the card in dark
+                    // theme and within 4 in light. `onSurface` is guaranteed to differ sharply
+                    // from any surface tier in both themes, so a low-alpha tint of it moves the
+                    // stripe a comparable amount either way: lighter in dark theme, darker in
+                    // light - the same state-layer trick Material uses for hover and press.
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
                 } else {
                     Color.Transparent
                 },
