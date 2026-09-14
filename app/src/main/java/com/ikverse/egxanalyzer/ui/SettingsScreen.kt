@@ -53,8 +53,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
-import com.ikverse.egxanalyzer.ui.theme.CardHue
-import com.ikverse.egxanalyzer.ui.theme.color
 import com.ikverse.egxanalyzer.BuildConfig
 import com.ikverse.egxanalyzer.model.UpdateState
 import com.ikverse.egxanalyzer.model.ModelUsageRecord
@@ -462,7 +460,6 @@ internal fun SettingsScreen(appState: AppState) {
         ExpandableSection(
             "Ask AI",
             icon = Icons.Outlined.QuestionAnswer,
-            accent = CardHue.PINK.color,
             summary = askAiSummary,
             contentMaxWidth = FormWidth,
             about = infoNote(
@@ -594,7 +591,6 @@ internal fun SettingsScreen(appState: AppState) {
         ExpandableSection(
             "Telegram",
             icon = Icons.Outlined.Forum,
-            accent = CardHue.BLUE.color,
             summary = if (appState.telegramAuthState.step == TelegramAuthStep.READY) "Signed in · ${appState.channels.size} chats" else "Not connected",
             contentMaxWidth = FormWidth,
             summaryTone = if (appState.telegramAuthState.step == TelegramAuthStep.READY) null else MaterialTheme.colorScheme.error,
@@ -653,7 +649,6 @@ internal fun SettingsScreen(appState: AppState) {
         ExpandableSection(
             "Notifications",
             icon = Icons.Outlined.NotificationsNone,
-            accent = CardHue.CYAN.color,
             summary = "$notificationsOn of $NOTIFICATION_COUNT on",
             contentMaxWidth = FormWidth,
             about = infoNote(
@@ -826,7 +821,6 @@ internal fun SettingsScreen(appState: AppState) {
         ExpandableSection(
             "General",
             icon = Icons.Outlined.Tune,
-            accent = CardHue.VIOLET.color,
             summary = "Theme and trade defaults",
             contentMaxWidth = FormWidth,
         ) {
@@ -911,7 +905,6 @@ internal fun SettingsScreen(appState: AppState) {
         ExpandableSection(
             "Data and backup",
             icon = Icons.Outlined.Backup,
-            accent = CardHue.GREEN.color,
             summary = "${appState.savedResults.size} saved analyses",
             contentMaxWidth = FormWidth,
             about = infoNote(
@@ -1029,7 +1022,6 @@ internal fun SettingsScreen(appState: AppState) {
         ExpandableSection(
             "About",
             icon = Icons.Outlined.Info,
-            accent = CardHue.AMBER.color,
             summary = when (val state = appState.updateState) {
                 is UpdateState.Available -> "Version ${state.update.versionName} available"
                 is UpdateState.Ready -> "Version ${state.update.versionName} ready"
