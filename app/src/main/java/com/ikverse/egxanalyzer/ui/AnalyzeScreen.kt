@@ -61,6 +61,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -142,12 +143,6 @@ internal fun AnalyzeScreen(appState: AppState) {
             // One instance across both branches, so the mark keeps turning through the moment a run
             // starts rather than restarting from nothing there.
             val motion = rememberActionMotion()
-            // The halo falls outside the surface, so it goes on the modifier the surface is given
-            // rather than inside the shape's clip. The fill goes inside, where the flat tint was.
-            val haloed = actionModifier.drawBehind {
-                drawAiHalo(accent.actionGlow, ActionCorner.toPx(), motion.breath())
-            }
-            val teal = remember(accent.actionFill) { Brush.horizontalGradient(accent.actionFill) }
             // The edge, in the same family and its own stops - see ExtraColors.actionLine for why
             // it cannot simply be the fill: the fill sits inside this line.
             val actionEdge = remember(accent.actionLine) { Brush.horizontalGradient(accent.actionLine) }
@@ -159,17 +154,17 @@ internal fun AnalyzeScreen(appState: AppState) {
             // button the whole time it is on screen, so there is something behind it to soften.
             // See frostedBackdrop - and ActionFrost for why the fills above it had to come down.
             val frost = Modifier.frostedBackdrop()
+            // Ready wears the same ground running does, held on one frame rather than in motion -
+            // the button no longer changes what it is made of the moment a run starts, only how fast
+            // it moves. No halo either state: it was the one piece of chrome answering "is this
+            // pressable" with a glow, and the ground itself answers that now.
             val fill = frost.drawBehind {
-                if (running) {
-                    drawActionAurora(
-                        accent.actionAuroraBase,
-                        accent.actionAurora,
-                        motion.lights(size.width, size.height),
-                        alpha = ActionFrost,
-                    )
-                } else {
-                    drawRect(teal, alpha = ActionFrost)
-                }
+                drawActionAurora(
+                    accent.actionAuroraBase,
+                    accent.actionAurora,
+                    if (running) motion.lights(size.width, size.height) else restLights(size.width, size.height),
+                    alpha = ActionFrost,
+                )
             }
             if (running) {
                 AnalyzeAction(
@@ -225,7 +220,7 @@ internal fun AnalyzeScreen(appState: AppState) {
                     // this state has worn since the button went see-through.
                     container = Color.Transparent,
                     content = if (ready) accent.onAction else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = if (ready) haloed else actionModifier,
+                    modifier = actionModifier,
                     painted = if (ready) {
                         fill
                     } else {
@@ -975,13 +970,19 @@ private val BigActionHeight = 88.dp
 private val ActionHeight = 56.dp
 
 /**
- * The corner the halo has to match, which is `shapes.large` read as a number.
+ * Where the three lights sit on a ready button that isn't moving - the same paths [ActionMotion.lights]
+ * drifts along, frozen at their midpoint rather than at either end they drift between.
  *
- * Restated rather than measured: the shape is handed to the surface as a `Shape`, and the halo is
- * drawn outside that surface by a lambda that never sees it. Kept beside the heights so the two are
- * changed together if the action ever stops taking the page's card radius.
+ * The midpoint rather than `t = 0`: two of the three start their drift off the button's edge, which
+ * is right for a light that is always arriving or leaving but reads as a light half missing on a
+ * single held frame.
  */
-private val ActionCorner = 22.dp
+private fun restLights(width: Float, height: Float): List<Offset> = listOf(
+    Offset(0.225f * width, 0.10f * height),
+    Offset(0.475f * width, -0.05f * height),
+    Offset(0.725f * width, 0.60f * height),
+)
+
 private val ActionIcon = 24.dp
 private val BigActionIcon = 34.dp
 
