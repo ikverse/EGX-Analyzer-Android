@@ -18,8 +18,8 @@ import androidx.compose.material.icons.outlined.Rule
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.NotificationsNone
-import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.material.icons.outlined.Cancel
+import androidx.compose.material.icons.outlined.QuestionAnswer
+import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
@@ -454,22 +454,26 @@ internal fun SettingsScreen(appState: AppState) {
 
             }
             }
+        }
 
-            // Ask AI shares the provider and the key with a run and nothing else - not the
-            // prompt, not the model, not the wording rules - so it sits last, after everything
-            // a run actually uses.
-            SubSection(
+        // Its own card rather than the last subsection of Analysis: it is a distinct feature
+        // reached from a call card in Insights, and it shares only the provider and the key with
+        // a run - not the prompt, the model, or the wording rules.
+        ExpandableSection(
+            "Ask AI",
+            icon = Icons.Outlined.QuestionAnswer,
+            accent = CardHue.PINK.color,
+            summary = askAiSummary,
+            contentMaxWidth = FormWidth,
+            about = infoNote(
                 "Ask AI",
-                summary = askAiSummary,
-                about = infoNote(
-                    "Ask AI",
-                    "The button on a call card in Insights. It asks what the model makes of the " +
-                        "stock at today's price and what it makes of the levels the channel " +
-                        "printed, and it answers in Arabic.",
-                    "Each press is one paid request, confirmed first, and the answer is kept on " +
-                        "the card - opening it again costs nothing.",
-                ),
-            ) {
+                "The button on a call card in Insights. It asks what the model makes of the " +
+                    "stock at today's price and what it makes of the levels the channel " +
+                    "printed, and it answers in Arabic.",
+                "Each press is one paid request, confirmed first, and the answer is kept on " +
+                    "the card - opening it again costs nothing.",
+            ),
+        ) {
             OutlinedTextField(
                 value = askModel,
                 onValueChange = appState::updateOpinionModel,
@@ -585,25 +589,6 @@ internal fun SettingsScreen(appState: AppState) {
                     ),
                 )
             }
-            }
-
-            // Last in the section because it is about every request the section can start - a
-            // run's chunks and its consolidation, and each Ask AI above.
-            SubSection(
-                "Token usage",
-                summary = tokenUsageSummary(appState.modelUsage),
-                about = infoNote(
-                    "Token usage",
-                    "Every request comes back with the token count the provider billed it at. " +
-                        "This is those counts added up per model, on this phone alone - it is " +
-                        "not synced, because a token count describes one phone's spending.",
-                    "A record, not a limit: nothing here stops or slows a run. Clearing it " +
-                        "forgets the record and not the spending, and the provider's own billing " +
-                        "page remains the account that matters.",
-                ),
-            ) {
-            ModelUsageSection(appState)
-            }
         }
 
         ExpandableSection(
@@ -618,7 +603,7 @@ internal fun SettingsScreen(appState: AppState) {
                 "The account is how this app reads anything at all: the chats ticked on Analyze " +
                     "are read as you, on this device, and no chat you have not ticked is opened.",
                 "It is also where your saved reports are kept - in a private channel of your own - " +
-                    "so signing out here stops both. Sending them there is under General.",
+                    "so signing out here stops both. Sending them there is under Data and backup.",
             ),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
@@ -829,27 +814,20 @@ internal fun SettingsScreen(appState: AppState) {
                         "On by default, because it reports the app being unable to do its job rather " +
                             "than something the market did. Said once when it starts, and not again " +
                             "until the feed comes back and goes quiet a second time. Prices under " +
-                            "General says how many stocks are affected and how much of the record " +
-                            "they are holding.",
+                            "Data and backup says how many stocks are affected and how much of the " +
+                            "record they are holding.",
                     ),
                 )
             }
         }
 
-        // The four settings that were a card each. Appearance, the trade window, Sync and the
-        // price refresh had one control apiece, so each of them cost a card header, a summary line
-        // and a tap to reach a single dropdown or a single button - four cards that could not be
-        // told apart at a glance because each said nothing but its own name.
-        //
-        // They are not one subject and this card does not pretend they are. What they have in
-        // common is that none of them is worth a card, which is what a General is for. The two at
-        // the bottom do belong together: Sync and Prices are the free, unpaid ways this device
-        // keeps its own copy current, and neither sends anything to the AI provider.
+        // Appearance and the trade default are what is left with no home of their own - one
+        // control apiece, not worth a card each.
         ExpandableSection(
             "General",
             icon = Icons.Outlined.Tune,
             accent = CardHue.VIOLET.color,
-            summary = "Theme, trade defaults, sync and prices",
+            summary = "Theme and trade defaults",
             contentMaxWidth = FormWidth,
         ) {
             SubSection(
@@ -922,7 +900,26 @@ internal fun SettingsScreen(appState: AppState) {
                     steps = Scoring.MAX_WINDOW_SESSIONS - Scoring.MIN_WINDOW_SESSIONS - 1,
                 )
             }
+        }
 
+        // Everything that is your data rather than a setting: the copy this device keeps current
+        // for free (Sync, Prices), the copy you can take with you (Backup), what a run has cost
+        // (Token usage), a copy for chasing a bug (Diagnostics), and the one irreversible button
+        // that removes it all (Delete). One card because they are one question - what this app
+        // holds, and how to get it out or rid of it - not five settings that happen to touch a
+        // database.
+        ExpandableSection(
+            "Data and backup",
+            icon = Icons.Outlined.Backup,
+            accent = CardHue.GREEN.color,
+            summary = "${appState.savedResults.size} saved analyses",
+            contentMaxWidth = FormWidth,
+            about = infoNote(
+                "Data and backup",
+                "Provider keys and the Telegram database key are encrypted using Android " +
+                    "Keystore. App backup is disabled and cloud requests use HTTPS.",
+            ),
+        ) {
             SubSection(
                 "Sync",
                 summary = "${appState.savedResults.size} reports on this device",
@@ -950,23 +947,10 @@ internal fun SettingsScreen(appState: AppState) {
             }
 
             PricesSubSection(appState)
-        }
 
-        ExpandableSection(
-            "Saved data and privacy",
-            icon = Icons.Outlined.Shield,
-            accent = CardHue.PINK.color,
-            summary = "${appState.savedResults.size} saved analyses",
-            contentMaxWidth = FormWidth,
-            about = infoNote(
-                "Saved data and privacy",
-                "Provider keys and the Telegram database key are encrypted using Android " +
-                    "Keystore. App backup is disabled and cloud requests use HTTPS.",
-            ),
-        ) {
-            // Backup here rather than beside Save diagnostics in About, which is the other thing
+            // Backup here rather than beside Save diagnostics below, which is the other thing
             // that writes the record to a file. That one is for whoever is chasing a bug; this is
-            // about the record itself, and it belongs with the section that says how much of it
+            // about the record itself, and it belongs with the group that says how much of it
             // there is and offers to delete it.
             SubSection(
                 "Backup",
@@ -987,6 +971,36 @@ internal fun SettingsScreen(appState: AppState) {
             ) {
                 Text("${appState.savedResults.size} analyses saved on this device")
                 BackupControls(appState)
+            }
+
+            SubSection(
+                "Token usage",
+                summary = tokenUsageSummary(appState.modelUsage),
+                about = infoNote(
+                    "Token usage",
+                    "Every request comes back with the token count the provider billed it at. " +
+                        "This is those counts added up per model, on this phone alone - it is " +
+                        "not synced, because a token count describes one phone's spending.",
+                    "A record, not a limit: nothing here stops or slows a run. Clearing it " +
+                        "forgets the record and not the spending, and the provider's own billing " +
+                        "page remains the account that matters.",
+                ),
+            ) {
+                ModelUsageSection(appState)
+            }
+
+            SubSection(
+                "Diagnostics",
+                summary = "A device copy for chasing a bug",
+                about = infoNote(
+                    "Diagnostics",
+                    "Copies this device's saved record into Downloads, and the crash log with it " +
+                        "where the app has closed unexpectedly.",
+                    "No provider key and no Telegram key travels in it - those are encrypted " +
+                        "separately by Android Keystore and have never been part of it.",
+                ),
+            ) {
+                DiagnosticsControl(appState)
             }
 
             // Its own group, at the bottom, with nothing else in it. The one irreversible button
@@ -1029,8 +1043,7 @@ internal fun SettingsScreen(appState: AppState) {
             contentMaxWidth = FormWidth,
             about = infoNote(
                 "About",
-                "Which build this phone is running, whether there is a newer one, and the button " +
-                    "that puts this device's record into Downloads for somebody chasing a bug.",
+                "Which build this phone is running, and whether there is a newer one.",
                 "Updates are read from this app's own GitHub releases. Nothing is downloaded or " +
                     "installed without you pressing for it, twice.",
             ),
@@ -1045,7 +1058,6 @@ internal fun SettingsScreen(appState: AppState) {
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 UpdateControls(appState)
-                DiagnosticsControl(appState)
             }
         }
     }

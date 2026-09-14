@@ -158,8 +158,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   replayed. See below.
 - `ui/ChannelScoreSheet.kt` — how a source is scored, opened by pressing its card in the ranking.
 - `data/PriceHealth.kt` — which stocks the feed has gone quiet about and what it costs. The Settings
-  card that explained it in words was removed on 2026-09-03; one line in `General → Prices` is what
-  is left on screen, and `feed_checks` / `feed_faults` in `LocalDataStore` are the log that replaced
+  card that explained it in words was removed on 2026-09-03; one line in `Data and backup → Prices`
+  is what is left on screen, and `feed_checks` / `feed_faults` in `LocalDataStore` are the log that replaced
   the rest of it, for a diagnostics copy read off a device. See below.
 - `data/PortfolioCalculator.kt` + `model/Position.kt` — the trades the user actually took. See below.
 - `model/TradeAlerts.kt` + `data/TradeStatusNotifier.kt` — what has changed about a trade since the
@@ -868,7 +868,7 @@ one place that does.
   `PriceHealthTest` still covers it. What went is the page — the per-stock fault list, `FeedFaultRow`
   and `FeedFault.plainly`, the sentences that named each affected stock and said whether fetching
   again could help. `FeedFault.detail` is unaffected; it is the short form the record keeps.
-- **What is left of it is one line**, in `General → Prices` and only when something is actually
+- **What is left of it is one line**, in `Data and backup → Prices` and only when something is actually
   wrong: how many stocks are not coming through and how many calls they are holding, in the error
   colour where any call is waiting. That is the half of the card anybody acted on — the count of
   broken symbols is trivia, and how much of the record they are holding is the reason to read it at
@@ -890,7 +890,7 @@ one place that does.
   checked", which is exactly what the card's always-present list existed to say.
 - **Pruned to the newest 200 checks**, inside the same transaction as the write that makes room, so
   a log that never changes is never opened for writing at all. Nothing reads it back for the
-  screen — the line in `General → Prices` is derived from `priceHealth` on every recompute exactly
+  screen — the line in `Data and backup → Prices` is derived from `priceHealth` on every recompute exactly
   as it always was, so the table cannot disagree with what is on screen. Device-local and never
   synced, like `price_events` and `session_events`.
 - A **Fetch prices** button sits under that line, offered whatever the state, because it is also how
@@ -1934,7 +1934,7 @@ through the filter dropdowns on row 1.
 
 ## Reading a problem off a device
 
-**Settings → About → Save diagnostics** copies `egx_analyzer.db` into Downloads, from where
+**Settings → Data and backup → Diagnostics → Save diagnostics** copies `egx_analyzer.db` into Downloads, from where
 `adb pull //sdcard/Download/egx-diagnostics-<date>.db` reaches it. It exists because there is no
 other way off a release-signed build: `run-as` refuses a package that is not debuggable,
 `adb backup` is closed by `android:allowBackup="false"`, and installing a debug build to get at the
@@ -1988,7 +1988,7 @@ before anybody tries to read one off it.
 
 ## Backing up, and getting it back
 
-**Settings → Saved data and privacy** holds three buttons: *Back up now*, *Choose a folder*, and
+**Settings → Data and backup → Backup** holds three buttons: *Back up now*, *Choose a folder*, and
 *Restore from a backup*. The gap they close is not which cloud the record sits in — the sync channel
 was already that, and it is the right answer for a multi-user app, because signing into Telegram is
 what makes this app work at all, so it is the one cloud account every user is certain to have. The
@@ -2299,7 +2299,8 @@ moving parts were most of what this whole area cost to build and maintain. `Anal
 and the schedule editor in Settings are gone. What is left below is exactly the three free things
 that shared its alarm, none of which needed any of that machinery in the first place.
 
-- **Keeping prices fresh** — `model/MarketRefresh.kt`, switched on in Settings under General → Prices.
+- **Keeping prices fresh** — `model/MarketRefresh.kt`, switched on in Settings under Data and backup →
+  Prices.
   Every 15 minutes, Sunday to Thursday, 10:00 to 14:45 Cairo. Free: it reads the same public feed
   the Fetch prices button does. Fifteen minutes because Android holds
   `setExactAndAllowWhileIdle` to roughly one alarm every ten while dozing, so anything shorter is
@@ -2965,19 +2966,34 @@ app's.
 
 ### How Settings is grouped
 
-Ten cards became **seven** on 2026-09-03, and nothing was removed but the price-feed fault list (see
-**When the feed goes quiet**). In order: **Analysis**, **Scheduled analysis**, **Telegram**,
-**Notifications**, **General**, **Saved data and privacy**, **About**.
+Seven cards, reorganized again on 2026-09-14, on the owner's request to group what belonged together
+and cut down what each card said about itself: **Analysis**, **Ask AI**, **Telegram**,
+**Notifications**, **General**, **Data and backup**, **About**. Ask AI and Data and backup are new;
+Saved data and privacy is gone, folded into Data and backup along with Sync, Prices, Token usage and
+Diagnostics.
 
-- **The problem was cards holding one control each.** Appearance, Sync, Trades and the price refresh
-  were four cards, and each cost a header, a summary line and a tap to reach a single dropdown or a
-  single button — four cards that could not be told apart at a glance because each said nothing but
-  its own name. `General` is where they went, as four `SubSection`s: *Appearance*, *Trade defaults*,
-  *Sync*, *Prices*.
-- **`General` does not claim they are one subject.** What they have in common is that none of them is
-  worth a card — which is what a General is for, and saying so in the source is what stops the next
-  reader trying to find the theme. The bottom two do belong together: Sync and Prices are the free,
-  unpaid ways this device keeps its own copy current, and neither sends anything to the AI provider.
+- **Ask AI got its own card**, out of Analysis, where it sat as the last of seven subsections on the
+  reasoning that it shares the provider and the key with a run. Sharing a key is not sharing a
+  purpose — it is reached from a call card on Insights, not from a run — and burying a whole feature
+  as the sixth thing under "Analysis" cost it to anyone who did not already know it was there.
+- **Data and backup answers one question — what this app holds, and how to get it out or rid of
+  it — instead of five settings that happen to touch a database.** Sync and Prices were two of four
+  unrelated `General` subsections; Backup and Delete were their own card; Token usage sat inside
+  Analysis as a spend report with nothing to do with configuring a run; Diagnostics was a bare
+  `DiagnosticsControl` call loose in About. None of the four is a *setting* the way Analysis,
+  Notifications or General hold settings — each is either a copy of the record (Sync, Prices,
+  Backup), a report about it (Token usage), or a way to get a copy out or delete it (Diagnostics,
+  Delete). One card is what makes "where is my data" answerable by opening one thing rather than
+  three.
+- **`General` is left with exactly what nothing else claims**: Appearance and Trade defaults, one
+  control apiece, still not worth a card each.
+- **About is left with only what it is named for**: the version and the update controls. Diagnostics
+  moving out is what makes that true again — a device copy for chasing a bug was never about the
+  build number.
+- **The 2026-09-03 pass is not undone, only continued.** Appearance, Sync, Trades and the price
+  refresh were four cards holding one control each, and `General`'s four `SubSection`s were the fix
+  for that. This pass moves two of those four (Sync, Prices) into the card their content actually
+  belongs with; Appearance and Trade defaults stay exactly where that pass put them.
 - **A group nests once and never twice.** `SubSection` is a heading, a chevron and a rule, precisely
   because a card drawn inside a card reads as a mistake — so every one of these is a group inside a
   card and not a card inside one. `PricesSubSection` is drawn by its own file for length, not because
@@ -2985,16 +3001,15 @@ Ten cards became **seven** on 2026-09-03, and nothing was removed but the price-
 - **Every group carries a summary, and the summary is the point of folding it.** A closed group that
   said nothing would put the reader back to opening all of them to find the switch they came for,
   which is what the grouping was for.
-- **Sync sits under General rather than under Telegram**, which was the other candidate and is the
-  owner's call: the account is what Telegram is about, and pressing Sync now is housekeeping. The
-  Telegram card's own note says where sync went, so the two do not become a place each to look.
+- **Sync sits under Data and backup rather than under Telegram**, the same call the owner made on
+  2026-09-03 for General: the account is what Telegram is about, and pressing Sync now is
+  housekeeping. The Telegram card's own note says where sync went, so the two do not become a place
+  each to look.
 - **Every card and every group carries an `about`**, on the rule above: the note goes on the smallest
-  thing it is true of, and a group-wide one is reachable without opening the group. The pass on
-  2026-09-03 filled the gaps — `Analysis → Model`, `→ What to send`, `→ Validation`, the Telegram
-  card, all four General groups, the three Notifications groups, and the About card.
-- **`Delete all saved analyses` has a group to itself, at the bottom of Saved data and privacy.** The
-  one irreversible button on the page should not sit at the end of a run of buttons that are not, and
-  its note says to take a backup first.
+  thing it is true of, and a group-wide one is reachable without opening the group.
+- **`Delete all saved analyses` keeps its own group, at the bottom of Data and backup.** The one
+  irreversible button on the page should not sit at the end of a run of buttons that are not, and its
+  note says to take a backup first.
 
 ## A hue per page
 

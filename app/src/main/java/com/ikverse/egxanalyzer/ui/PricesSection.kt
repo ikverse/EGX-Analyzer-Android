@@ -26,9 +26,9 @@ import java.util.Locale
 /**
  * Where prices come from and when: the market-hours refresh, what it is doing, and Fetch now.
  *
- * A group inside **General** rather than a card of its own. It sits beside Sync because the two are
- * the same kind of thing - the free, unpaid ways this device keeps its own copy current - and
- * neither is worth a card holding one control.
+ * A group inside **Data and backup** rather than a card of its own. It sits beside Sync because the
+ * two are the same kind of thing - the free, unpaid ways this device keeps its own copy current -
+ * and neither is worth a card holding one control.
  *
  * **The per-stock fault list that used to lead this section is gone**, on the owner's decision of
  * 2026-09-03. `PriceHealth` is still computed and still raises the "price feed has gone quiet"
