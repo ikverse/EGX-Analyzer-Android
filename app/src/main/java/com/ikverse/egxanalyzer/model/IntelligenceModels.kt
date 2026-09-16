@@ -246,44 +246,6 @@ data class StockScore(
 )
 
 /**
- * One subset of the record set beside the rest of it.
- *
- * Built for the two questions the app could always have answered and never asked - whether calls
- * several sources agree on do better, and whether calls a source keeps re-posting do - and shaped
- * so a third costs a line rather than a type.
- *
- * **It states two figures and never a verdict.** At the ten to thirty judged calls each side of one
- * of these actually has, the spread of stock returns swamps the gap between two means; saying
- * "consensus calls do better" would be reading noise out loud. The counts are printed beside the
- * figures for exactly that reason, and [stateable] is what keeps a split off the screen entirely
- * until both sides have enough behind them to be worth a reader's time.
- */
-data class RecordSplit(
-    /** What the matching calls have in common, as a heading. */
-    val subject: String,
-    /** What the split is asking, in a sentence, for the reader who wants to know why it is here. */
-    val detail: String,
-    val matching: CallTally,
-    val rest: CallTally,
-) {
-    /**
-     * Whether both sides carry enough judged calls to be worth printing at all.
-     *
-     * Higher than the ranking floor on purpose. Ranking picks one source out of several and is
-     * wrong in a recoverable way; a split makes a claim about a *difference*, and a difference
-     * needs more behind it than an ordering does.
-     */
-    val stateable: Boolean
-        get() = matching.judged >= MINIMUM_JUDGED_TO_COMPARE &&
-            rest.judged >= MINIMUM_JUDGED_TO_COMPARE
-
-    companion object {
-        /** Judged calls needed on **each** side before a split is shown. */
-        const val MINIMUM_JUDGED_TO_COMPARE = 10
-    }
-}
-
-/**
  * What the call offered against what it risked, measured from the middle of the buy zone.
  *
  * The first target rather than the second: it is the one a reader can realistically take, and the
@@ -589,13 +551,6 @@ data class PerformanceReport(
      * record beside rates that have been narrowed.
      */
     val stocks: List<StockScore> = emptyList(),
-    /**
-     * Subsets of the record set beside the rest of it, for the questions no single rate answers.
-     *
-     * Always built, and each one shown only where [RecordSplit.stateable] - so the screen has them
-     * ready the day there is enough behind them, and says nothing until then.
-     */
-    val splits: List<RecordSplit> = emptyList(),
     val sessions: List<ScoredSession> = emptyList(),
     /**
      * Where each stock stands now, as of the last refresh.

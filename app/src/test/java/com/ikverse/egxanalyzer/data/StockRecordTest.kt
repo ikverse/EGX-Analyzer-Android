@@ -2,22 +2,19 @@ package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceCalculator
-import com.ikverse.egxanalyzer.model.RecordSplit
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.StockScore
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 
 /**
- * What happens when one stock gets recommended, and the two questions the record can ask itself.
+ * What happens when one stock gets recommended.
  *
  * A stock's record and a source's are one piece of arithmetic over two groupings - `tally` - so the
  * rules argued out for channels hold here without being restated. What is worth pinning is that the
- * grouping is right, that the split refuses to speak on too little, and that a stock's record uses
- * the same floor the channels do.
+ * grouping is right and that a stock's record uses the same floor the channels do.
  */
 class StockRecordTest {
 
@@ -106,55 +103,6 @@ class StockRecordTest {
         assertEquals(40.0, scores.single { it.ticker == "SWDY" }.tally.averageReturn!!, 1e-9)
         // And it does not out-rank eight calls, which is the whole point of the floor.
         assertEquals("AMOC", scores.first().ticker)
-    }
-
-    @Test
-    fun `a split says nothing until both sides carry enough`() {
-        // Two calls each side. At these numbers the gap between two averages is noise, and printing
-        // it would be reading noise out loud.
-        val thin = PerformanceCalculator.splits(
-            listOf(
-                call("AMOC", "one").copy(alsoCalledBy = 1),
-                call("AMOC", "two").copy(alsoCalledBy = 1),
-                call("SWDY", "one"),
-                call("ETEL", "one"),
-            ),
-        )
-
-        assertTrue(thin.none(RecordSplit::stateable))
-    }
-
-    @Test
-    fun `a split speaks once both sides carry enough`() {
-        val floor = RecordSplit.MINIMUM_JUDGED_TO_COMPARE
-        val crowded = List(floor) { index ->
-            call("AMOC", "one", returnPct = 6.0, openedOn = called.plusDays(index.toLong()))
-                .copy(alsoCalledBy = 1)
-        }
-        val alone = List(floor) { index ->
-            call("SWDY", "one", returnPct = 2.0, openedOn = called.plusDays(index.toLong()))
-        }
-
-        val consensus = PerformanceCalculator.splits(crowded + alone).first()
-
-        assertTrue(consensus.stateable)
-        assertEquals(floor, consensus.matching.judged)
-        assertEquals(floor, consensus.rest.judged)
-        assertEquals(6.0, consensus.matching.averageReturn!!, 1e-9)
-        assertEquals(2.0, consensus.rest.averageReturn!!, 1e-9)
-    }
-
-    @Test
-    fun `a split with nothing on one side is not stateable`() {
-        // The ordinary state of a fresh record: nothing has been re-posted yet, so one side is
-        // empty and the comparison is between a record and nothing.
-        val splits = PerformanceCalculator.splits(
-            List(20) { index ->
-                call("AMOC", "one", openedOn = called.plusDays(index.toLong()))
-            },
-        )
-
-        assertFalse(splits.any(RecordSplit::stateable))
     }
 
     @Test

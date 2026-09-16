@@ -7,6 +7,7 @@ import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.background
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.height
@@ -143,9 +144,9 @@ internal fun ResultsScreen(appState: AppState) {
                 },
                 onClear = { channelFilter = emptySet() },
             )
-            SingleSelectSection(
+            DateFilterSection(
                 label = "Dates",
-                options = allDates,
+                dates = allDates,
                 selected = dateFilter,
                 onSelect = { dateFilter = it },
             )
@@ -243,12 +244,14 @@ internal fun ResultsScreen(appState: AppState) {
                     saved: SavedAnalysis,
                     expanded: Boolean,
                     stack: StackPosition?,
+                    onBringForward: (() -> Unit)?,
                     cardModifier: Modifier,
                 ) {
                     SavedAnalysisCard(
                         modifier = cardModifier,
                         saved = saved,
                         stack = stack,
+                        onBringForward = onBringForward,
                         // Built per run: every card inside it dates its call from this run's target
                         // session, which is what the scorer does too.
                         trades = remember(appState, saved.id) {
@@ -304,8 +307,8 @@ internal fun ResultsScreen(appState: AppState) {
                         // run to keep in step with, and its pager is free to be swiped.
                         openRunId = openRun.takeIf { open },
                         modifier = stackModifier,
-                    ) { saved, expanded, stack, cardModifier ->
-                        card(saved, expanded, stack, cardModifier)
+                    ) { saved, expanded, stack, onBringForward, cardModifier ->
+                        card(saved, expanded, stack, onBringForward, cardModifier)
                     }
                 }
 
@@ -353,55 +356,60 @@ internal fun ResultsScreen(appState: AppState) {
 private val SavedRunMinWidth = 300.dp
 
 /**
- * How much of the card behind shows past the side and the foot of the one in front.
+ * How much of the card behind shows below the one in front, per step of the deck.
  *
- * Enough to read as a second card and no more. The inset is what makes it read as behind rather
- * than beside: an edge running the full height of the card in front is a border, not a card under
- * it, so the card behind is held down from the top while it shows past the bottom.
- *
- * It was 6dp and 8dp and read as neither. Both cards are `surfaceContainer` with the same hairline,
- * so six units of a second one against the page is a slab with a line through it - the mistake the
- * filter shelf made with `surfaceContainerLow` on this palette, where six units of difference reads
- * as one continuous ground rather than two surfaces. Widening alone would have made a fatter
- * border; what separates them is [StackBackAlpha].
+ * Below rather than beside, which is most of why this reads at all. Offset to the side, the card
+ * behind showed a vertical strip down the edge of the one in front - which is exactly where every
+ * card in the app already draws a hairline, so it read as a border before it read as a card. It
+ * also charged the width to the wrong card: the front one was inset to make room for it. Stepped
+ * down out of the foot the strip sits where the list has a gap anyway, the front card gives up
+ * nothing, and the shrink takes the width off the cards behind, where it belongs.
  */
-private val StackEdgeDepth = 10.dp
-private val StackEdgeInset = 10.dp
+private val StackStep = 9.dp
 
 /**
- * How much of the row's width each card gives up so the peek has somewhere to sit.
+ * How many cards are drawn behind the front one.
  *
- * Half the depth on each side rather than the whole of it on the right. Reserved on the right
- * alone, the front card sat ten units nearer the left edge of the screen than the right and read
- * as hung crooked - the peek is drawn behind the card, so nothing filled the gap it left. Taken
- * evenly the card is centred in its row again, and the card behind still shows down the right
- * because the offset that puts it there is measured from the front card, not from the screen.
+ * Two, so that a session read twice and a session read three times do not look the same: the depth
+ * of the deck is the count, up to here, and past it the dots and `Run 2/5` carry it. Each further
+ * step costs [StackStep] of the row's height and another [StackShrink] off that card's width - at
+ * two the deepest card is 9% narrower, which still reads as a card further away, and at three it is
+ * 13% and reads as a fanned hand of playing cards.
  *
- * Charged to every day and not only the ones that were run twice: a card ten units wider than the
- * one under it is the mismatch the pager's own comment refuses a peek to avoid.
+ * Everything deeper than the last step rests exactly under it, covered by it and drawn at nothing.
+ * A long stack drawn there is a pile of full-height cards redrawn on every frame of a drag for
+ * pixels nobody can see.
  */
-private val StackSideInset = StackEdgeDepth / 2
+private const val StackDepth = 2
 
 /**
- * How solid the card behind is drawn, once it is a whole page back.
+ * How much narrower each step back is drawn, as a fraction.
  *
- * Depth is dimness. It is the half of the peek that says the strip is a card lying under this one
- * rather than an edge drawn around it, and it is what stops two identical fills meeting at a
- * hairline. Interpolated on the same distance the offset and the shrink use, so a card coming
- * forward gains its weight back over exactly the travel it gains its size back over.
+ * A card further away is a smaller card, and that is what separates a deck from a rule drawn under
+ * one card. Small on purpose: a shrink deep enough to notice on its own makes the type on the card
+ * behind look as though it is set at a different size from the type on the one in front.
  */
-private const val StackBackAlpha = 0.6f
+private const val StackShrink = 0.045f
 
 /**
- * How big the card behind is drawn, as a fraction of the one in front, and how far the card being
- * turned swells as it leaves.
+ * How solid the second step is drawn.
  *
- * Both are small on purpose. A card further back is a smaller card, and that is most of what
- * separates a stack from a border drawn down one side - but a shrink deep enough to notice on its
- * own turns a stack of readings into a fanned deck of playing cards, and the type on the card
- * behind starts to look as though it is set at a different size to the type on the one in front.
+ * The **first** step is not dimmed at all, and that is the fault this whole arrangement exists to
+ * fix. Every surface in the app has been glass since 2026-09-12, so a 0.6 alpha laid over a 0.66
+ * fill left the one strip a reader actually sees about four shades off the bare page - measured on
+ * this palette, not guessed. Depth is dimness only once there is a nearer step to read it against.
  */
-private const val StackBackScale = 0.94f
+private const val StackDeepAlpha = 0.8f
+
+/** How far past the last drawn step a card has faded out completely. */
+private const val StackFadeTail = 0.2f
+
+/**
+ * How far the card being turned swells as it leaves.
+ *
+ * The lift is what makes it read as a card taken off the top of the deck rather than a page shoved
+ * sideways.
+ */
 private const val StackFrontLift = 1.03f
 
 /**
@@ -560,32 +568,40 @@ private fun UnreadableNotice(count: Int) {
  * only thing separating them was a line of small print naming the time each was run at. One row per
  * session, with the readings behind it, is what the list was always describing.
  *
- * A day with a single run draws exactly as it always did: no dots, no edge. Most days are that day,
- * and a stack drawn around a stack of one is chrome reporting nothing.
+ * A day with a single run draws exactly as it always did: no deck, no dots, and still glass. Most
+ * days are that day, and a deck drawn around a stack of one is chrome reporting nothing.
  *
- * The card behind shows down its side and along its foot, offset down-and-right and drawn a little
- * smaller, like a card laid under this one rather than a border drawn around it. Sitting it back at
- * full size is what made it read as a border: a card further away is a smaller card, and the shrink
- * is most of the difference. The edge to the right is the one that says which way to push; the edge
- * below says there is more of the same behind it.
+ * **The cards behind step down out of the foot**, each one narrower than the one over it, so the
+ * depth of the deck is the number of readings and the front card keeps its full width. See
+ * [StackStep] for why they are not offset to the side, which is what this replaced.
+ *
+ * **A deck is opaque, the card in front included.** Glass shows what is behind a card, and behind
+ * a card in a deck is another card - so the material would be showing one reading's figures through
+ * another's, which is the one thing a page of figures cannot do. The fill is the page's own colour
+ * laid under each card, so its glass resolves to exactly the value it resolves to anywhere else on
+ * the page and a deck sits in the list at the same weight as the cards beside it.
  *
  * The peek is the real card behind, not a blank standing in for one, so there is nothing for the
  * card to land on and no step where a ghost is swapped for the thing it stood in for. Under the
- * thumb it grows into the front slot; the card being turned lifts fractionally and fades on a
+ * thumb it rises into the front slot; the card being turned lifts fractionally and fades on a
  * squared curve, so it has gone before it has crossed the one behind rather than dragging across it.
+ *
+ * **A card behind is brought forward, never opened.** A press on the strip below the front card
+ * used to open whichever reading was under the thumb, which is never the one the reader meant - the
+ * card they can read is the one in front.
  */
 @Composable
-private fun SavedRunStack(
+internal fun SavedRunStack(
     runs: List<SavedAnalysis>,
     /** The run whose report is open, when it is one of these. Null while the whole stack is shut. */
     openRunId: Long?,
     modifier: Modifier = Modifier,
-    card: @Composable (SavedAnalysis, Boolean, StackPosition?, Modifier) -> Unit,
+    card: @Composable (SavedAnalysis, Boolean, StackPosition?, (() -> Unit)?, Modifier) -> Unit,
 ) {
     if (runs.size == 1) {
-        // The same side inset a stacked day takes, so one width runs down the whole list.
-        val inset = if (openRunId != null) Modifier else Modifier.padding(horizontal = StackSideInset)
-        card(runs.single(), openRunId != null, null, modifier.then(inset))
+        // Untouched: no deck to make room for, so the card keeps the page's full width and the
+        // glass every other card on the page is drawn in.
+        card(runs.single(), openRunId != null, null, null, modifier)
         return
     }
     val open = openRunId != null
@@ -627,26 +643,30 @@ private fun SavedRunStack(
             stiffness = Spring.StiffnessMediumLow,
         ),
     )
+    val scope = rememberCoroutineScope()
+    // How many steps of the deck are actually drawn, which is what the row is made taller by. A
+    // session read twice holds one step of room below itself and a session read six times holds two.
+    val steps = (runs.size - 1).coerceAtMost(StackDepth)
+    // The page's own colour, laid under every card in the deck so that its glass resolves over the
+    // page rather than over the reading behind it. See this function's note on why a deck is opaque.
+    val backing = MaterialTheme.colorScheme.background
+    val cardShape = MaterialTheme.shapes.large
     Box(modifier.fillMaxWidth()) {
         HorizontalPager(
             state = pager,
             flingBehavior = fling,
-            // Open, the report takes back the strip the card behind was showing through, so it
-            // runs out to the edge rather than stopping short of one for a card that is no longer
-            // drawn.
-            modifier = if (open) {
-                Modifier
-            } else {
-                Modifier.padding(
-                    start = StackSideInset,
-                    end = StackSideInset,
-                    bottom = StackEdgeInset,
-                )
-            },
-            // No peek. Insetting only the sessions that were run twice would make their cards
-            // narrower than the rest, and a grid row of cards that do not match reads as a fault
-            // before it reads as a hint. The dots and the edge carry the hint instead.
+            // No horizontal peek: the deck steps down rather than across, so every card in the list
+            // is the same width whether its session was read once or four times. A grid row of
+            // cards that do not match reads as a fault before it reads as a hint.
             pageSpacing = StackPageSpacing,
+            // Without this there is no deck, and that is the fault this whole change began as.
+            // Every card behind is laid out a full page away and carried back under the front one
+            // by its own layer, so as far as the pager is concerned not one of them is in the
+            // viewport - it composed exactly one page, the layers of the rest never ran, and the
+            // strip a reader was meant to see was never drawn at any colour. Nothing about that
+            // reads as broken on a device: the row draws, the dots draw, and a session read twice
+            // simply never says so. `SavedRunStackTest` is the net under it.
+            beyondViewportPageCount = StackDepth,
             verticalAlignment = Alignment.Top,
             // Nothing is swiped past an open report. It holds its own sideways pager over a stock's
             // occurrences and tables that scroll sideways, and a drag landing on either would be
@@ -662,51 +682,70 @@ private fun SavedRunStack(
                 // same gesture: what the dots report is where the stack stands, which is the one
                 // thing a card behind and a card in front cannot disagree about.
                 stackPosition,
+                // A reading behind the front of the deck answers a press by coming forward. Read
+                // against the settled page rather than the live position, so a press landing
+                // mid-swipe cannot be answered by a card that is already on its way to the front.
+                // Null while a report is open: nothing in the deck is pressable behind one.
+                if (!open && page != pager.settledPage) {
+                    { scope.launch { pager.animateScrollToPage(page) } }
+                } else {
+                    null
+                },
                 if (expanded) {
                     // An open report is as tall as its report. Holding it to the shut cards' floor
                     // would be measuring it against something it is not.
                     Modifier.fillMaxWidth()
                 } else {
                     Modifier.fillMaxWidth()
+                        // The room the deck steps down into, held by the page itself rather than
+                        // taken off the pager. A pager clips its pages, and the slack it leaves on
+                        // the cross axis is an implementation detail of the platform (30dp, for
+                        // shadows) - a deck that fitted inside it would be a deck drawn at the
+                        // mercy of a constant nobody here chose. Held by the page, the steps are
+                        // inside the bounds they are drawn in whatever the depth.
+                        .padding(bottom = StackStep * steps)
                         // A lower run number is always the card on top. Left to the pager, page 2
                         // draws over page 1, and the card that is meant to be underneath swipes
                         // across the front of the one it is behind.
                         .zIndex(-page.toFloat())
                         .graphicsLayer {
                             // How far this card is from the front, in pages: 0 while it is the
-                            // one in front, 1 where it sits one back, and fractional under the
-                            // thumb. Read here rather than in the composable body - read at
+                            // one in front, 1 where it sits one step back, and fractional under
+                            // the thumb. Read here rather than in the composable body - read at
                             // composition every card of every stack would recompose for each
                             // frame of a drag; read in the layer they only redraw.
                             val distance =
                                 (page - pager.currentPage) + pager.currentPageOffsetFraction
                             // Every card grows and shrinks about the middle of its own top edge.
-                            // About its centre the shrink pulls the right-hand side inwards and
-                            // eats the very peek the offset is drawn to show; held at the top, the
-                            // card sits down and to the side and keeps its edge proud.
+                            // About its centre the shrink would pull the foot up by half of what
+                            // it takes and eat the very step the deck is drawn to show; held at
+                            // the top, a card's head stays where its neighbour's is and the whole
+                            // of the shrink is spent below, which is where it can be seen.
                             transformOrigin = TransformOrigin(0.5f, 0f)
                             if (distance > 0f) {
                                 // Behind: this card does not travel with the pager at all. Its
-                                // translation cancels the scroll and puts it at the resting offset
-                                // instead, so it grows into the front slot as the card over it
+                                // translation cancels the scroll and holds it at its own step
+                                // instead, so it rises into the front slot as the card over it
                                 // leaves rather than sliding in from off-screen.
-                                val t = distance.coerceAtMost(1f)
-                                val travelled = distance * (size.width + StackPageSpacing.toPx())
-                                translationX = StackEdgeDepth.toPx() * t - travelled
-                                translationY = StackEdgeInset.toPx() * t
-                                val shrunk = 1f - (1f - StackBackScale) * t
+                                val t = distance.coerceAtMost(StackDepth.toFloat())
+                                val shrunk = 1f - StackShrink * t
                                 scaleX = shrunk
                                 scaleY = shrunk
-                                // Everything further back than the first card behind sits at that
-                                // same resting offset, exactly covered by it. Drawing the rest of a
-                                // long stack there is a pile of full-height cards redrawn every
-                                // frame for pixels nobody can see. What is still drawn dims as it
-                                // goes back, which is what makes the strip read as a card under
-                                // this one rather than a border around it.
-                                alpha = if (distance > 1.5f) {
-                                    0f
-                                } else {
-                                    1f - (1f - StackBackAlpha) * t
+                                translationX = -distance * (size.width + StackPageSpacing.toPx())
+                                // The shrink lifts this card's foot by its own height times what
+                                // was taken off it; adding that back is what makes the step below
+                                // the card in front exactly StackStep whatever height the deck
+                                // settled on, rather than a figure that shrinks as the cards do.
+                                translationY =
+                                    size.height * (1f - shrunk) + StackStep.toPx() * t
+                                // The step a reader can actually see is never dimmed - see
+                                // StackDeepAlpha. Everything past the last drawn step sits under
+                                // it at nothing, exactly covered.
+                                alpha = when {
+                                    distance > StackDepth + StackFadeTail -> 0f
+                                    distance <= 1f -> 1f
+                                    else -> 1f - (1f - StackDeepAlpha) *
+                                        (distance - 1f).coerceAtMost(1f)
                                 }
                             } else {
                                 // In front, on its way out: it slides as the pager takes it, lifts
@@ -725,6 +764,10 @@ private fun SavedRunStack(
                                 scaleY = lifted
                             }
                         }
+                        // Inside the layer, so it travels and shrinks with the card it backs.
+                        // What makes the deck opaque: the card's own glass then resolves over the
+                        // page's colour rather than over the reading behind it.
+                        .background(backing, cardShape)
                         .onSizeChanged { if (it.height > tallest) tallest = it.height }
                         .heightIn(min = floor)
                 },
@@ -741,7 +784,7 @@ private fun SavedRunStack(
  * crosses the halfway mark. A lambda for the reason the cards' transforms are read in their layer -
  * read as a value, every card of every stack would recompose for each frame of a drag.
  */
-private class StackPosition(val count: Int, val position: () -> Float)
+internal class StackPosition(val count: Int, val position: () -> Float)
 
 @Composable
 private fun SavedAnalysisCard(
@@ -749,6 +792,12 @@ private fun SavedAnalysisCard(
     saved: SavedAnalysis,
     /** Which reading of its session this is, where the session was read more than once. */
     stack: StackPosition? = null,
+    /**
+     * Set on a reading sitting behind the front of its day's deck: a press brings it forward
+     * instead of opening it. The reader can only read the card in front, so that is the only one a
+     * press can honestly mean.
+     */
+    onBringForward: (() -> Unit)? = null,
     /** Records what the user did about the calls in this run. */
     trades: TradeBook,
     /** Corrects what the model read off the cards in this run. */
@@ -805,7 +854,10 @@ private fun SavedAnalysisCard(
         // toolbar, its call cards and the source trace, so a card-wide toggle would close the whole
         // report on a tap that landed in the gap between any two of them - and the reader would have
         // no idea what they had pressed. The footer row below is what closes it again.
-        onClick = { onExpandedChange(true) },
+        //
+        // Behind another reading in its deck, the same press means come forward rather than open:
+        // one press path, so a card cannot be pressable in one place and dead in another.
+        onClick = onBringForward ?: { onExpandedChange(true) },
         modifier = modifier.fillMaxWidth(),
         enabled = !expanded,
         colors = CardDefaults.cardColors(

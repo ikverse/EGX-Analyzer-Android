@@ -695,24 +695,22 @@ own shortlist signals, and the list inside the Ask AI prompt.
 - `sources` counts distinct channels **over every posting**, repeats included: a source that named a
   stock named it, however many mornings it went on saying so.
 
-### The two questions the record can ask itself
+### The two questions the record used to ask itself
 
-`RecordSplit` sets one subset of the record beside the rest of it. Both instances rest on something
-the app has always detected and always thrown away — that several sources named one stock for one
-session, and that a source kept re-posting a call rather than saying it once.
+`RecordSplit` set one subset of the record beside the rest of it — calls several sources named for
+one session against calls only one named, and calls a source kept re-posting against calls it posted
+once — under **"Does it matter?"** on Insights. The section and the arithmetic behind it are both
+gone. At the ten to thirty judged calls each side ever carried, the spread of stock returns swamped
+the gap between two means, so the honest version of the section was one a reader opened to be told
+that two figures differ by less than can be read; the dishonest version would have been "consensus
+calls do better", which is reading noise out loud. Nothing replaced it, and `PerformanceReport` no
+longer computes a split for a screen that would not print it.
 
-- **Two figures, never a verdict.** At the ten to thirty judged calls each side actually has, the
-  spread of stock returns swamps the gap between two means, so "consensus calls do better" would be
-  reading noise out loud. The counts are printed beside the percentages and the section ends by
-  saying so in as many words.
-- **`MINIMUM_JUDGED_TO_COMPARE` is 10, higher than the ranking floor**, and deliberately: ranking
-  picks one source out of several and is wrong recoverably, while a split makes a claim about a
-  *difference*, which needs more behind it than an ordering does. Below it the split is **absent**
-  rather than hedged — and on a fresh record one side is usually empty, which is exactly the state
-  a hedge would dress up as a finding.
-- `ScoredCall.alsoCalledBy` counts the **other** sources, not all of them: a card saying "1 source"
-  about itself is a card counting itself as company. `repostings` is zero on a repeat, because the
-  figure belongs to the call that was kept standing rather than to the standing.
+- **What detected it stays, because a call card says it.** `ScoredCall.alsoCalledBy` counts the
+  **other** sources, not all of them: a card saying "1 source" about itself is a card counting
+  itself as company. `repostings` is zero on a repeat, because the figure belongs to the call that
+  was kept standing rather than to the standing. Both are still filled in by `enrich` and still
+  printed on the card — as facts about a call, which is all they ever were.
 
 ### Aiming the paid question
 
@@ -2641,14 +2639,17 @@ along with the rounded well the page used to sit in.
   heading on a page in one column an inset in from the card edges, and the title used to sit in it.
   It cannot now: the icon takes the page-edge inset and the name sits to the right of it. The title
   left the page to become chrome, so it stopped obeying a rule about text on a page.
-- **The two icons arrive with the collapsed bar**, over the last 40% of the shrink, and are not
-  pressable until they have finished arriving — a tap aimed at the page must not land on a glyph
-  that is fading in. At rest the page name is the only thing up there, which is the point of the
-  change; a control that had to be present always would be a title bar with things in it again.
-  **The one exception is a page that is filtered**, where both are on screen from the first frame —
-  see **A page's filters live in a sheet** under Gotchas for why that exception exists and what it
-  costs. `HeaderAction` draws either of them, so the fade, the press target and the "not pressable
-  until 1" rule are stated once.
+- **The two icons are on screen from the first frame, sized on the destination icon's own curve**
+  (`lerp(ExpandedIcon, CollapsedIcon, collapse)`, 30dp → 22dp) rather than fading in over the last
+  40% of the shrink at one fixed size — since 2026-09-17. The earlier version answered one gesture
+  with two different animations: the title shrinking continuously and the icons cutting in late,
+  and a page at the top of a long list gave no sign it could be searched or filtered until the
+  reader had scrolled. Now the big header carries both controls at full size and they shrink into
+  the collapsed bar's icons rather than appearing there — the same animation the page name already
+  makes. Always pressable, because there is no longer a partial-fade frame for a stray tap to land
+  on. A page that is filtered still carries a dot on the filter icon (`HeaderAction`'s `dot`
+  parameter), but no longer needs a separate "arrive early" case to be honest about it — every page
+  arrives early now.
 
 ### The stock filter, moved into the header
 
@@ -2903,10 +2904,9 @@ app's.
 - **One affordance, and it is `Icons.AutoMirrored.Outlined.HelpOutline`.** A question mark rather
   than an ⓘ, because `Icons.Outlined.Info` is already the About card's own icon and one glyph cannot
   mean both "the version number" and "explain this". The question mark was already doing this job on
-  the channel ranking and on "Does it matter?"; this makes it the rule rather than those two
-  screens' habit. Auto-mirrored, since half the content here is Arabic. Muted rather than `primary`:
-  it sits beside dozens of controls, and a page of coloured glyphs is the same clutter in a smaller
-  font.
+  the channel ranking; this makes it the rule rather than that one screen's habit. Auto-mirrored,
+  since half the content here is Arabic. Muted rather than `primary`: it sits beside dozens of
+  controls, and a page of coloured glyphs is the same clutter in a smaller font.
 - **It opens a `ModalBottomSheet` on `ChannelScoreSheet`'s terms** — same padding, same scroll, same
   skipped partial state. A reader who has opened one explanation in this app has opened all of them.
 - **The note goes on the smallest thing it is true of.** A rule about one checkbox rides that
@@ -3407,12 +3407,6 @@ parameter being threaded anywhere. Added 2026-09-08.
   of why it is honest** — it is the same one the shelf drew between `folded` and `active`. The stock
   box reports itself by staying open; a dot lit by it would report something the reader is already
   looking at, and would go on reporting it after they had cleared everything else.
-- **A filtered page keeps both header icons on screen from the first frame of the collapse**, and
-  that is the one place this bends the rule that at rest the page name is the only thing up there.
-  The sheet is modal, so with the icons faded out a page narrowed to two channels sits at the top of
-  its scroll with nothing on it saying so — and the reader's next thought is that rows have gone
-  missing, which is exactly what the shelf's lit chip existed to prevent. It costs the empty header
-  only on pages the reader has actually filtered.
 - **Every sheet is composed outside the guard its shelf sat inside.** Results drew its shelf only
   with runs on the page; the Portfolio drew its own inside the Positions card, below the early
   return for an empty record — which is why `PositionFilterSheet` is split out of `PositionSection`

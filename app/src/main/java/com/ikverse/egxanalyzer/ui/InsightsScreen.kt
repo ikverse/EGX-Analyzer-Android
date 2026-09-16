@@ -74,7 +74,6 @@ import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.PositionView
-import com.ikverse.egxanalyzer.model.RecordSplit
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.StockOpinion
@@ -273,7 +272,15 @@ internal fun InsightsScreen(appState: AppState) {
         // **Price feed** is a diagnostic, and it now lives with the diagnostics, in Settings. It
         // explains why a figure is missing rather than being one, and every reader of this page had
         // to scroll past a fault report about four stocks to reach the record of every call.
-        RecordSplits(report.splits)
+        //
+        // **Does it matter?** set two halves of the record beside each other - calls several
+        // sources named for one session, calls a source kept re-posting - and stated no verdict
+        // about either, because at the counts behind them the gap between two means is noise. A
+        // section a reader opens to be told that two figures differ by less than can be read costs
+        // more than it says. The arithmetic went with it, so nothing is computed and left unread;
+        // `alsoCalledBy` and `repostings` stay, and the call cards still say a stock had company
+        // and a call was kept standing.
+
         // One collapsed card per row wasted most of a wide screen: each held a single line of
         // text across the full width. The count is derived, so an untested width still behaves.
         // Collapsed cards share a row; an open one takes the whole width, because its contents are
@@ -599,67 +606,6 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
 
 /** Holds the label against the figure above it, which is four times its size. */
 private val HeroLabelBaseline = 4.dp
-
-/**
- * Two halves of the record set beside each other, for the questions no single rate answers.
- *
- * Both rest on something the app has always detected and always thrown away. **Neither states a
- * verdict** - at the judged calls each side actually has, the spread of stock returns swamps the
- * gap between two means, and "consensus calls do better" would be reading noise out loud. The
- * counts sit beside the figures for exactly that reason, and a split whose sides are too thin is
- * absent rather than hedged.
- */
-@Composable
-private fun ColumnScope.RecordSplits(splits: List<RecordSplit>) {
-    val stateable = splits.filter(RecordSplit::stateable)
-    if (stateable.isEmpty()) return
-    ExpandableSection(
-        title = "Does it matter?",
-        icon = Icons.Outlined.HelpOutline,
-        accent = CardHue.BLUE.color,
-        summary = "${stateable.size} ${if (stateable.size == 1) "question" else "questions"} " +
-            "the record can answer about itself",
-        about = infoNote(
-            "Does it matter?",
-            "Two figures, not a finding. At these numbers of calls the gap between two averages is " +
-                "smaller than the spread inside either of them, so read the counts as carefully " +
-                "as the percentages.",
-        ),
-    ) {
-        stateable.forEachIndexed { index, split ->
-            if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Text(split.subject, style = MaterialTheme.typography.titleSmall)
-            Text(
-                split.detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            FigureGroup(
-                "What one call was worth",
-                listOf(
-                    {
-                        Figure(
-                            "These calls",
-                            split.matching.averageReturn.signedPercent(),
-                            Modifier.weight(1f),
-                            tone = PriceRole.forReturn(split.matching.averageReturn),
-                            caption = "${split.matching.judged} judged",
-                        )
-                    },
-                    {
-                        Figure(
-                            "Everything else",
-                            split.rest.averageReturn.signedPercent(),
-                            Modifier.weight(1f),
-                            tone = PriceRole.forReturn(split.rest.averageReturn),
-                            caption = "${split.rest.judged} judged",
-                        )
-                    },
-                ),
-            )
-        }
-    }
-}
 
 @Composable
 private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
@@ -1568,9 +1514,8 @@ private fun SourceRecord(score: ChannelScore?) {
  *
  * **Crowding, not confirmation**, and the wording is the point: several channels reading one chart
  * on one morning is one idea going round, not three independent readings of it. Whether it is worth
- * anything is a question for the record - see the splits on this page - and not a claim a card
- * makes. The app has detected this since the two cards learned to press through to each other, and
- * counted it nowhere.
+ * anything is a question for the record and not a claim a card makes. The app has detected this
+ * since the two cards learned to press through to each other, and counted it nowhere.
  *
  * **Kept standing** is the other side of `repeatOf`, which exists to stop a daily table outweighing
  * a source that posts when it has something to say. Correct, and it threw the information away: a

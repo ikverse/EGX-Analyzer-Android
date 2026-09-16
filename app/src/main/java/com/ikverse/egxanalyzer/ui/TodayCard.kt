@@ -44,41 +44,30 @@ import com.ikverse.egxanalyzer.ui.theme.extraColors
  * was the question no screen answered. Everything here was already derived on every recompute and
  * dropped on the floor.
  *
- * **One card, drawn on two screens, from one [SessionDigest].** On the Portfolio it sits under
- * Overdue, which is the only thing on that tab asking to be acted on; on Insights under the hero,
- * which is the standing verdict that tab exists for. Second on both, and for one reason: each of
- * those is the thing its page is *for*, and this is what changed since the reader last looked -
- * perishable, so it goes above everything that takes scrolling to reach, and no higher. Its open
- * state is shared through
- * [PageState.todayExpanded] for the same reason the digest is: two cards reporting one session that
- * could be folded apart would read as two different cards that happen to agree.
- *
- * **The two scopes are different, and the arithmetic behind them is not.** [heldOnly] narrows the
- * Portfolio's card to the user's own trades through `SessionDigest.heldOnly`, so both cards are
- * still one pass over one set of rules and cannot count a session two ways - they simply count
- * different things. It began as one card on both tabs, which was right about the arithmetic and
- * wrong about the question: the Portfolio is the tab holding the reader's money, and a session
- * where three channels' calls reached targets and the reader held none of them was reported there
- * as though something of theirs had happened. On Insights the card is unchanged and still says
- * everything, including those calls.
+ * **Insights only now.** It sits under the hero, which is the standing verdict that tab exists
+ * for - second, and for the same reason the Portfolio holds Overdue above everything else: each is
+ * the thing its page is *for*, and this is what changed since the reader last looked, which is
+ * perishable and so goes above everything that takes scrolling to reach and no higher. The
+ * Portfolio carried the same card, narrowed to the reader's own trades, until 2026-09-17: a digest
+ * that says nothing on the far more common visit where nothing of the reader's own had changed was
+ * the wrong question for the tab holding their money, and `OpenPositionsCard` in
+ * `PortfolioScreen.kt` answers the one that tab actually asks - not what changed, but where every
+ * open position stands. `SessionDigest.heldOnly()` survives for `SessionDigestNotifier`, which
+ * still owes the reader that narrower answer once, in the shade, after the close.
  *
  * **Expanded by default**, alone among the cards in this app. Everything else here folds away
  * because a screen of open cards is unreadable; this one is read once and then scrolled past, and a
  * card that has to be opened before it says anything is a card nobody opens.
  *
- * **Not narrowed by any filter on either tab**, for the reason the Overdue card is not: a channel,
- * a stock or a date picked on screen is a view of the record, never a claim about what the market
- * did.
+ * **Not narrowed by any filter**, for the reason the Overdue card is not: a channel, a stock or a
+ * date picked on screen is a view of the record, never a claim about what the market did.
  */
 @Composable
-internal fun ColumnScope.TodayCard(appState: AppState, heldOnly: Boolean = false) {
-    val digest = appState.sessionDigest?.let { if (heldOnly) it.heldOnly() else it } ?: return
+internal fun ColumnScope.TodayCard(appState: AppState) {
+    val digest = appState.sessionDigest ?: return
     var expanded by appState.pages.todayExpanded
     ExpandableSection(
-        // Named for what it holds. The same title over two cards showing different things is the
-        // reading this split exists to prevent - a reader who has learnt what "What happened" means
-        // on Insights would carry that meaning to the Portfolio, where it is now narrower.
-        title = if (heldOnly) "What happened to your trades" else "What happened",
+        title = "What happened",
         icon = Icons.Outlined.Today,
         iconTone = digest.headline?.let { toneColor(it) },
         summaryContent = { Text(digest.headlineLine(), style = MaterialTheme.typography.bodySmall) },
@@ -91,13 +80,10 @@ internal fun ColumnScope.TodayCard(appState: AppState, heldOnly: Boolean = false
             // it would be furniture; "nothing moved this session" is a genuine answer to the
             // question being asked, and its absence would read as the app not having looked.
             Text(
-                when {
-                    // Narrower than "nothing moved", because on this tab it now is: the market can
-                    // have had a busy session that none of the reader's own trades were in, and
-                    // saying nothing moved would be the card overstating its own scope.
-                    heldOnly -> "None of your trades moved on this session"
-                    digest.newCalls > 0 -> "Nothing moved on this session, beyond the new calls above."
-                    else -> "Nothing moved on this session."
+                if (digest.newCalls > 0) {
+                    "Nothing moved on this session, beyond the new calls above."
+                } else {
+                    "Nothing moved on this session."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

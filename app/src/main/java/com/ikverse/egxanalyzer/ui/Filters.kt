@@ -21,6 +21,8 @@ import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -28,10 +30,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SelectableDates
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
@@ -45,6 +49,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 
 /**
  * A dropdown of checkboxes, for a filter that accepts any combination.
@@ -440,6 +447,72 @@ internal fun SingleSelectSection(
     FilterSection(label) {
         ChoiceChip("All", selected == null) { onSelect(null) }
         options.forEach { option -> ChoiceChip(option, option == selected) { onSelect(option) } }
+    }
+}
+
+/**
+ * A choice restricted to the dates that actually have something behind them, picked from a
+ * calendar rather than named as chips - the list of chips this replaced grew with the record and
+ * pushed the rest of a page's filters further down the sheet on every report saved.
+ *
+ * [SelectableDates] is what keeps a picked date honest: every date outside [dates] is greyed out
+ * and cannot be tapped, so the picker can never land on a date the page would show nothing for.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun DateFilterSection(
+    label: String,
+    dates: List<String>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+) {
+    if (dates.isEmpty()) return
+    val allowed = remember(dates) {
+        dates.mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.toSet()
+    }
+    var open by remember { mutableStateOf(false) }
+    FilterSection(label) {
+        ChoiceChip("All", selected == null) { onSelect(null) }
+        ChoiceChip(
+            selected
+                ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                ?.format(AppDates.DayMonthYear)
+                ?: "Pick a date",
+            selected != null,
+        ) { open = true }
+    }
+    if (open) {
+        val initial = selected?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            ?: allowed.maxOrNull()
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = initial?.let {
+                it.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+            },
+            selectableDates = remember(allowed) {
+                object : SelectableDates {
+                    override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                        Instant.ofEpochMilli(utcTimeMillis).atZone(ZoneOffset.UTC).toLocalDate() in allowed
+                }
+            },
+        )
+        DatePickerDialog(
+            onDismissRequest = { open = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        state.selectedDateMillis?.let { millis ->
+                            onSelect(
+                                Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().toString(),
+                            )
+                        }
+                        open = false
+                    },
+                ) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
+        ) {
+            DatePicker(state = state)
+        }
     }
 }
 

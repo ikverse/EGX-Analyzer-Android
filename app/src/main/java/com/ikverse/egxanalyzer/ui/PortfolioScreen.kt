@@ -106,15 +106,15 @@ internal fun PortfolioScreen(appState: AppState) {
         )
 
         // Under Overdue and above the record, which is where it belongs in the order those two
-        // already establish: Overdue is the one thing here asking to be acted on, this is what
-        // happened since the reader last looked, and the record underneath is reference. Built off
-        // the whole portfolio like Overdue, so a date chosen in the filter below cannot hide an
-        // event - a date picked on screen is a view of the trades, not a claim about the session.
-        //
-        // Held scope: on this tab the card reports the reader's own trades and nothing else. What
-        // the channels' calls did that session is a question for Insights, where the same card
-        // answers it in full.
-        TodayCard(appState, heldOnly = true)
+        // already establish: Overdue is the one thing here asking to be acted on, this is what is
+        // still running, and the record underneath is reference. Built off the whole portfolio like
+        // Overdue, so a date chosen in the filter below cannot hide a trade that is open.
+        OpenPositionsCard(
+            positions = remember(portfolio) {
+                portfolio.positions.filter { it.open }.sortedWith(PortfolioOrder.URGENT.positions)
+            },
+            onOpen = appState::openPosition,
+        )
 
         PortfolioSummary(portfolio.stats)
 
@@ -143,9 +143,9 @@ private fun PositionFilterSheet(groups: List<PortfolioGroup>, appState: AppState
         onClearAll = { appState.pages.clearFilters(AppDestination.PORTFOLIO) },
         title = "Filter positions",
     ) {
-        SingleSelectSection(
+        DateFilterSection(
             label = "Dates",
-            options = allDates,
+            dates = allDates,
             selected = dateFilter,
             onSelect = { dateFilter = it },
         )
@@ -417,6 +417,109 @@ internal fun overdueRoster(positions: List<PositionView>): List<PositionView> =
         .sortedWith(compareByDescending<PositionView> { it.overdueDays }.thenBy { it.ticker })
 
 /**
+ * Every trade still running, at a glance - what it is doing rather than what it has just done.
+ *
+ * Replaces the session digest this tab used to carry: a card naming only what changed since the
+ * reader last looked said nothing on the far more common visit where nothing had. This says where
+ * every open position stands, whether or not the session moved it. Absent entirely with nothing
+ * open, the rule [OverdueCard] already follows.
+ */
+@Composable
+private fun OpenPositionsCard(positions: List<PositionView>, onOpen: (String) -> Unit) {
+    if (positions.isEmpty()) return
+    SectionCard(title = "Open positions", icon = Icons.Outlined.AccountBalanceWallet) {
+        BoxWithConstraints {
+            val columns = responsiveColumns(minColumnWidth = OpenPositionTileMinWidth, maxColumns = 3)
+            Column {
+                ResponsiveRows(positions, columns, spacing = Space.s) { view, tileModifier ->
+                    OpenPositionTile(
+                        view = view,
+                        onOpen = { onOpen(view.position.id) },
+                        modifier = tileModifier,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One open trade: ticker, its own status word in the colour that status wears everywhere else, the
+ * return since entry, and - where there is room - the day it was bought. The same three-line shape
+ * [OverdueTile] and the day's event tiles already use, so a reader who has learned one has learned
+ * all of them.
+ */
+@Composable
+private fun OpenPositionTile(view: PositionView, onOpen: () -> Unit, modifier: Modifier = Modifier) {
+    val statusColor = view.status.tone()
+    Card(
+        onClick = onOpen,
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { onClick(label = "Open this trade", action = null) },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        border = cardOutline,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(Modifier.padding(horizontal = Space.m, vertical = Space.xs)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.weight(1f, fill = false),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    StockLogo(view.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                    Text(
+                        view.ticker,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Outlined.ArrowForward,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = Space.xs).size(IconSize.Hint),
+                )
+            }
+            Text(
+                view.status.label,
+                style = MaterialTheme.typography.labelSmall,
+                color = statusColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            view.returnPct?.let { pct ->
+                Text(
+                    formatPercent(pct),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = PriceRole.forReturn(pct),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // Only where there is room, the rule the day's event tiles already follow - see
+            // LocalWindowWidth there.
+            if (LocalWindowWidth.current != WindowWidth.COMPACT) {
+                Text(
+                    "bought ${shortDate(view.position.entryDate)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = PriceRole.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** Same shape as [EventTileMinWidth] in TodayCard.kt, for the same three-line tile content. */
+private val OpenPositionTileMinWidth = 170.dp
+
+/**
  * The trades, one card per session the calls were made for.
  *
  * One card rather than the same date appearing under an open heading and a closed one: a day's
@@ -458,7 +561,6 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
         title = "Positions",
         icon = Icons.Outlined.AccountBalanceWallet,
         contentInset = Space.s,
-        accent = CardHue.GREEN.color,
     ) {
         if (groups.isEmpty()) {
             Text(

@@ -50,9 +50,8 @@ class PageHeaderTest {
     /**
      * The header as a reader meets it, with the title finished shrinking.
      *
-     * `collapse = 1f` because the icons deliberately arrive with the last of the shrink: at
-     * `0f` there is nothing to press, which is the header working as designed and not a test
-     * fixture worth fighting.
+     * `collapse = 1f` is just the default rest state; the icons are on screen and pressable at
+     * every point of the collapse now, not only here - see the tests below that drive `0f`.
      *
      * @param generation bumping it disposes this composition and builds a new one. That is the
      *   whole mechanism of the bug below - anything that rebuilt the header used to take the box
@@ -141,22 +140,25 @@ class PageHeaderTest {
     }
 
     /**
-     * A filtered page carries its icons from the first frame of the scroll rather than fading them
-     * in with the collapse. Without it a page narrowed to two channels sits at the top of its
-     * scroll with nothing on screen saying so.
+     * The icons are on screen and pressable at the top of the scroll, not only once the header has
+     * collapsed - they shrink into the collapsed bar's icons rather than fading in there. Without
+     * this, a page at the top of a long list gave no sign that it could be searched or filtered at
+     * all until the reader had scrolled.
      */
     @Test
-    fun `a filtered page shows its controls before the header has collapsed`() {
+    fun `an unfiltered page at the top of its scroll still shows and presses its icons`() {
+        compose.setContent { Header(collapse = 0f) }
+
+        compose.onNodeWithContentDescription("Filter by stock").assertIsDisplayed().performClick()
+
+        compose.onNodeWithText("Search stocks").assertIsDisplayed()
+    }
+
+    /** The dot on the filter icon is unaffected by the collapse - it says the sheet is narrowing. */
+    @Test
+    fun `a filtered page's dot shows at the top of its scroll too`() {
         compose.setContent { Header(collapse = 0f, filtered = true) }
 
         compose.onNodeWithContentDescription("Filters, on").assertIsDisplayed()
-    }
-
-    @Test
-    fun `an unfiltered page at the top of its scroll shows none`() {
-        compose.setContent { Header(collapse = 0f) }
-
-        compose.onNodeWithContentDescription("Filter by stock").assertDoesNotExist()
-        compose.onNodeWithContentDescription("Filters").assertDoesNotExist()
     }
 }

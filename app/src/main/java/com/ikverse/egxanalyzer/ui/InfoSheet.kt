@@ -60,8 +60,7 @@ internal fun infoNote(title: String, vararg paragraphs: String) =
  * A question mark rather than an ⓘ, and deliberately: `Icons.Outlined.Info` is already the About
  * card's own icon in Settings, so the same glyph would have meant "the app's version number" in one
  * place and "explain this" in another. The question mark was already doing this job on the source
- * ranking and on "Does it matter?" in Insights - this makes it the rule rather than those two
- * screens' habit.
+ * ranking in Insights - this makes it the rule rather than that one screen's habit.
  *
  * Muted rather than `primary`. It sits beside dozens of controls, and a page of coloured glyphs
  * would be the same clutter in a smaller font.

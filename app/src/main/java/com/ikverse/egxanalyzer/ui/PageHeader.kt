@@ -94,8 +94,8 @@ import kotlin.math.roundToInt
  *   - `PageState.filtersOpen`. The icon sets it; the screen underneath draws what is inside, since
  *   this row has no idea what a page filters by. See `FilterSheet`.
  * @param filtered whether one of the filters **in that sheet** is narrowing the page, which puts a
- *   dot on the icon and holds both icons on screen from the first frame of the collapse. The stock
- *   box is not counted: it says so itself by staying open. See `PageState.filtersInSheet`.
+ *   dot on the filter icon. The stock box is not counted: it says so itself by staying open. See
+ *   `PageState.filtersInSheet`.
  */
 @Composable
 internal fun PageHeader(
@@ -288,48 +288,43 @@ private fun TitleRow(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        // **The icons arrive with the collapsed bar**, over the last of the shrink, rather than
-        // sitting there from the start: at rest the page name is the only thing at the top of the
-        // screen, which is the point of the change, and controls that had to be there always would
-        // be a title bar with things in it again. Composed at every collapse but only pressable
-        // once they have finished arriving, so a tap aimed at the page cannot land on a glyph that
-        // is still fading in.
-        //
-        // **Except on a page that is filtered, where they are there from the first frame.** The
-        // filter sheet is modal, so with the icons faded out a page narrowed to two channels sits
-        // at the top of its scroll with nothing on screen saying so - and the reader's next thought
-        // is that rows have gone missing, which is exactly what the shelf's lit chip existed to
-        // prevent. The stock box solves its own half by staying open; this is the other half. It
-        // costs the empty header only on pages the reader has actually filtered.
-        val arrived = ((collapse - SearchFadeStart) / (1f - SearchFadeStart)).coerceIn(0f, 1f)
-        val shown = if (filtered) 1f else arrived
-        if (shown > 0f) {
-            if (onSearch != null) {
-                HeaderAction(
-                    icon = Icons.Outlined.Search,
-                    description = "Filter by stock",
-                    shown = shown,
-                    onClick = onSearch,
-                )
-            }
-            if (onFilters != null) {
-                HeaderAction(
-                    icon = Icons.Outlined.FilterList,
-                    description = if (filtered) "Filters, on" else "Filters",
-                    shown = shown,
-                    dot = filtered,
-                    onClick = onFilters,
-                )
-            }
+        // **The icons are there from the first frame, sized on the same curve as the page's own
+        // icon beside them** - `lerp(ExpandedIcon, CollapsedIcon, collapse)`, the exact 30dp-to-22dp
+        // travel the destination glyph already makes. They used to fade in over the last 40% of the
+        // shrink instead, at one fixed size throughout, which is two different animations answering
+        // one gesture: the title shrinking continuously and the icons cutting in late. Now a page at
+        // the top of its scroll shows both controls large, in the header a reader is actually
+        // looking at, and they shrink into the collapsed bar's icons rather than appearing there.
+        // Always pressable, because there is no longer a partial-fade frame for a stray tap to land
+        // on. `filtered` no longer needs to force early arrival - every page arrives early now - and
+        // stays only to light the dot on the filter icon.
+        val searchIconSize = lerp(ExpandedIcon, CollapsedIcon, collapse)
+        if (onSearch != null) {
+            HeaderAction(
+                icon = Icons.Outlined.Search,
+                description = "Filter by stock",
+                size = searchIconSize,
+                onClick = onSearch,
+            )
+        }
+        if (onFilters != null) {
+            HeaderAction(
+                icon = Icons.Outlined.FilterList,
+                description = if (filtered) "Filters, on" else "Filters",
+                size = searchIconSize,
+                dot = filtered,
+                onClick = onFilters,
+            )
         }
     }
 }
 
 /**
- * One of the header's two glyphs, fading in as the title collapses.
+ * One of the header's two glyphs, shrinking with the title as the header collapses.
  *
- * @param shown 0 before it has begun arriving, 1 once it is fully there. **Pressable only at 1**,
- *   so a tap meant for the page cannot land on something half drawn.
+ * @param size the glyph's edge, lerped by the caller on the same curve as the destination icon
+ *   beside it - see [TitleRow]. The touch target stays [SearchTarget] throughout; only the glyph
+ *   inside it grows and shrinks.
  * @param dot a mark in the corner saying this control is doing something right now. Only the
  *   filters carry one: the search box reports itself by being open.
  */
@@ -337,7 +332,7 @@ private fun TitleRow(
 private fun HeaderAction(
     icon: ImageVector,
     description: String,
-    shown: Float,
+    size: Dp,
     onClick: () -> Unit,
     dot: Boolean = false,
 ) {
@@ -345,14 +340,14 @@ private fun HeaderAction(
         Modifier
             .size(SearchTarget)
             .clip(CircleShape)
-            .then(if (shown == 1f) Modifier.clickable(onClick = onClick) else Modifier),
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             icon,
             contentDescription = description,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = shown),
-            modifier = Modifier.size(lerp(SearchIconSize * 0.7f, SearchIconSize, shown)),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(size),
         )
         if (dot) {
             Box(
@@ -364,7 +359,7 @@ private fun HeaderAction(
                     // The page's own hue, which is what the title's icon beside it is tinted with:
                     // a dot in any other colour would be the one mark on this row that belongs to
                     // no page in particular.
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = shown)),
+                    .background(MaterialTheme.colorScheme.primary),
             )
         }
     }
@@ -597,18 +592,14 @@ private val CollapsedTitle = 20.sp
 private val ExpandedTracking = (-0.5).sp
 private val CollapsedTracking = (-0.2).sp
 
-/** Where in the collapse the search icon starts arriving. */
-private const val SearchFadeStart = 0.6f
-
-/** A press target for the glyph, not the size of it. */
+/** A press target for the glyph, not the size of it - the glyph itself is [ExpandedIcon]/[CollapsedIcon]. */
 private val SearchTarget = 40.dp
-private val SearchIconSize = 22.dp
 
 /**
  * The mark on the filter icon, and how far in from the corner of its target it sits.
  *
- * Placed against the glyph rather than the 40dp press target - the glyph is 22 of that 40, so a dot
- * hung in the target's own corner floats in the gap beside the icon instead of touching it.
+ * Placed against the glyph rather than the 40dp press target - the glyph is 22 to 30 of that 40, so
+ * a dot hung in the target's own corner floats in the gap beside the icon instead of touching it.
  */
 private val DotSize = 7.dp
 private val DotInset = 8.dp

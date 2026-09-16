@@ -204,7 +204,6 @@ object PerformanceCalculator {
             byOutcome = counted.groupingBy(ScoredCall::outcome).eachCount(),
             channels = channelScores(calls),
             stocks = stockScores(calls),
-            splits = splits(calls),
             sessions = enriched,
             // Every stock the record names, not only the ones with a call on screen: `refine` keeps
             // this untouched, so a filtered view still knows where its stocks stand.
@@ -257,7 +256,6 @@ object PerformanceCalculator {
             byOutcome = counted.groupingBy(ScoredCall::outcome).eachCount(),
             channels = channelScores(calls),
             stocks = stockScores(calls),
-            splits = splits(calls),
             sessions = sessions,
         )
     }
@@ -718,37 +716,6 @@ object PerformanceCalculator {
                 .thenByDescending { it.tally.anyTargetRateFloor ?: 0.0 }
                 .thenBy(StockScore::ticker),
         )
-
-    /**
-     * The two questions the record could always have answered and nobody ever asked it.
-     *
-     * Both rest on something the app already detects and then throws away: that several sources
-     * named one stock for one session, and that a source kept re-posting a call rather than saying
-     * it once. Neither is stated as a verdict - see [RecordSplit], which prints two figures with
-     * their counts and lets the reader see how little is behind them.
-     */
-    internal fun splits(calls: List<ScoredCall>): List<RecordSplit> {
-        val (crowded, alone) = calls.partition { it.alsoCalledBy > 0 }
-        val (standing, once) = calls.partition { it.repostings > 0 }
-        return listOf(
-            RecordSplit(
-                subject = "Called by more than one source",
-                detail = "Whether a stock several channels named for the same session did better " +
-                    "than one only a single channel named. Crowding, not confirmation: several " +
-                    "sources reading one chart on one morning is one idea going round.",
-                matching = tally(crowded),
-                rest = tally(alone),
-            ),
-            RecordSplit(
-                subject = "Kept standing by its source",
-                detail = "Whether a call its channel re-posted on later sessions did better than " +
-                    "one posted once and dropped. The re-postings themselves are counted in " +
-                    "neither figure - they are the same bet as the call they repeat.",
-                matching = tally(standing),
-                rest = tally(once),
-            ),
-        )
-    }
 
     /**
      * A second pass over the scored calls, for the figures that need every other call to exist.
