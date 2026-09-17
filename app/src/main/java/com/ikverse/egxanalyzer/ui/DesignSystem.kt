@@ -294,7 +294,7 @@ val PillHeight: Dp = 32.dp
  * Not [PillHeight]: that is the height of something you press, and the extra 12dp is the fingertip,
  * not the label. The two are deliberately the only two.
  */
-val LabelPillHeight: Dp = 20.dp
+val LabelPillHeight: Dp = 24.dp
 
 /**
  * The corner every pill in the app is cut at.

@@ -774,6 +774,7 @@ internal fun ExpandableSection(
      * rather than assumed, because only the caller knows what it is sitting on.
      */
     containerColor: Color? = null,
+    showAccentEdge: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var localExpanded by remember { mutableStateOf(initiallyExpanded) }
@@ -791,9 +792,9 @@ internal fun ExpandableSection(
     ) {
         Column(
             // SectionCard's edge, drawn the same way and for the same reason.
-            Modifier.drawBehind {
+            if (showAccentEdge) Modifier.drawBehind {
                 drawRect(hue, size = Size(AccentEdgeWidth.toPx(), size.height))
-            },
+            } else Modifier,
         ) {
             Row(
                 Modifier

@@ -20,7 +20,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -270,10 +269,6 @@ internal fun PriceChart(
         val step = size.width / (points.size - 1)
 
         if (levels != null) {
-            val dash = PathEffect.dashPathEffect(
-                floatArrayOf(DashOn.toPx(), DashOff.toPx()),
-                0f,
-            )
             val bandLow = levels.entryLow
             val bandHigh = levels.entryHigh
             if (bandLow != null && bandHigh != null && bandLow != bandHigh) {
@@ -286,11 +281,11 @@ internal fun PriceChart(
                     size = Size(size.width, maxOf(bottomY - topY, MinBand.toPx())),
                 )
             } else {
-                (bandLow ?: bandHigh)?.let { guide(y(it), entryColor, dash, size.width) }
+                (bandLow ?: bandHigh)?.let { guide(y(it), entryColor, size.width) }
             }
-            levels.stopLoss?.let { guide(y(it), stopColor, dash, size.width) }
-            levels.target1?.let { guide(y(it), targetColor, dash, size.width) }
-            levels.target2?.let { guide(y(it), targetColor, dash, size.width) }
+            levels.stopLoss?.let { guide(y(it), stopColor, size.width) }
+            levels.target1?.let { guide(y(it), targetColor, size.width) }
+            levels.target2?.let { guide(y(it), targetColor, size.width) }
             // Solid, and alone in that among the levels: what the reader paid is a fact, where
             // every other line here is somebody's claim about where the price should go.
             levels.paid?.let { paid ->
@@ -375,20 +370,19 @@ internal fun PriceChart(
                 label.layout,
                 color = on,
                 topLeft = at,
-                drawStyle = Stroke(width = LabelHaloWidth.toPx(), join = StrokeJoin.Round),
+                drawStyle = Stroke(width = LabelHaloWidth.toPx(), join = StrokeJoin.Round, cap = StrokeCap.Round),
             )
             drawText(label.layout, color = label.color, topLeft = at)
         }
     }
 }
 
-private fun DrawScope.guide(y: Float, color: Color, dash: PathEffect, width: Float) {
+private fun DrawScope.guide(y: Float, color: Color, width: Float) {
     drawLine(
         color = color,
         start = Offset(0f, y),
         end = Offset(width, y),
         strokeWidth = GuideStroke.toPx(),
-        pathEffect = dash,
     )
 }
 
@@ -602,10 +596,6 @@ private val LineStroke = 2.dp
 
 private val GuideStroke = 1.dp
 
-private val DashOn = 4.dp
-
-private val DashOff = 4.dp
-
 /** Faint enough to read the price line through, strong enough to find the band's edges. */
 private const val BandAlpha = 0.14f
 
@@ -626,7 +616,7 @@ private val LabelInset = 2.dp
 private val LabelHeight = 15.dp
 
 /** The halo stroked behind a label's own glyphs, now that nothing else lifts it off the chart. */
-private val LabelHaloWidth = 3.dp
+private val LabelHaloWidth = 6.dp
 
 /** How far past a ring's own edge a label needs before the two read as clearly apart. */
 private val RingLabelClearance = 3.dp

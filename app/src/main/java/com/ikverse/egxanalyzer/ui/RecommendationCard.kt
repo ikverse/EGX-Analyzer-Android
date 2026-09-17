@@ -275,13 +275,6 @@ private fun StockHeader(
                 stock.stockNameArabic?.let {
                     Text(it, style = MaterialTheme.typography.bodyMedium)
                 }
-                stock.stockNameEnglish?.takeIf { it != stock.stockCode }?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 // Two cards for one stock can be identical apart from who said it.
                 channel?.takeIf(String::isNotBlank)?.let {
                     Text(

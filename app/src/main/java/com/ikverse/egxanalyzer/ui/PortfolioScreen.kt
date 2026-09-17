@@ -702,6 +702,7 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
                         openGroups - group.recommendationDate
                     }
                 },
+                showAccentEdge = false,
             ) {
                 // Expired above closed: everything in it is a trade the app stopped tracking without
                 // being told how it ended, which is the only part of a session still asking for
