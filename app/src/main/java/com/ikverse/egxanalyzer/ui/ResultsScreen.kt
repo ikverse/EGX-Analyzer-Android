@@ -628,8 +628,8 @@ internal fun SavedRunStack(
     val fling = PagerDefaults.flingBehavior(
         state = pager,
         snapAnimationSpec = spring(
-            dampingRatio = 0.85f,
-            stiffness = Spring.StiffnessMediumLow,
+            dampingRatio = 0.92f,
+            stiffness = Spring.StiffnessMedium,
         ),
     )
     val scope = rememberCoroutineScope()
@@ -714,14 +714,25 @@ internal fun SavedRunStack(
                         .zIndex(-page.toFloat())
                         .then(
                             if (!isStep) {
-                                // The page under the thumb, or the one just swiped past: left
-                                // alone entirely. The pager's own drag, fling and spring already
-                                // do everything this needs - it tracks the finger while it is
-                                // held and clears the frame or springs back once it is let go,
-                                // fully opaque throughout because nothing here dims it. Building a
-                                // second version of that tracking was the whole of what kept
-                                // reading the pager's own offset backwards two changes running.
-                                Modifier
+                                if (page == pager.currentPage) {
+                                    // Front card sinks into the deck as it leaves. The scale and
+                                    // translate mirror the step-card formulas exactly, so the card
+                                    // reads as joining the stack it came from rather than just
+                                    // sliding off the edge. Only applied while swiping left (toward
+                                    // the stack); swiping right toward a card already passed carries
+                                    // no stack behind it, so the transform stays at identity then.
+                                    Modifier.graphicsLayer {
+                                        transformOrigin = TransformOrigin(0.5f, 0f)
+                                        val t = (-pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+                                        val shrunk = 1f - StackShrink * t
+                                        scaleX = shrunk
+                                        scaleY = shrunk
+                                        translationY = size.height * (1f - shrunk) + StackStep.toPx() * t
+                                    }
+                                } else {
+                                    // Already swiped past: pager carries it off-screen to the left.
+                                    Modifier
+                                }
                             } else {
                                 Modifier.graphicsLayer {
                                     // How far behind the front this step sits, in pages: 1 for
