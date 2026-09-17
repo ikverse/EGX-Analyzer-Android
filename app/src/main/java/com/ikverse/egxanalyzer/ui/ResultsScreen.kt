@@ -392,16 +392,13 @@ private const val StackDepth = 2
 private const val StackShrink = 0.045f
 
 /**
- * How solid the second step is drawn.
+ * How far past the last drawn step a card is dropped rather than drawn.
  *
- * The **first** step is not dimmed at all, and that is the fault this whole arrangement exists to
- * fix. Every surface in the app has been glass since 2026-09-12, so a 0.6 alpha laid over a 0.66
- * fill left the one strip a reader actually sees about four shades off the bare page - measured on
- * this palette, not guessed. Depth is dimness only once there is a nearer step to read it against.
+ * Cut outright rather than dimmed: nothing in this deck fades, ever, because a fade is the exact
+ * fault the opaque backing exists to rule out. Everything past this sits exactly under the last
+ * drawn step, covered rather than faded away, so the cut only has to clear the fractional overshoot
+ * a live drag can still put a deep card through.
  */
-private const val StackDeepAlpha = 0.8f
-
-/** How far past the last drawn step a card has faded out completely. */
 private const val StackFadeTail = 0.2f
 
 /**
@@ -697,6 +694,12 @@ internal fun SavedRunStack(
                     // would be measuring it against something it is not.
                     Modifier.fillMaxWidth()
                 } else {
+                    // Whether this card gets a step at all, read as a plain Int rather than the
+                    // fractional position below: it only changes on an actual page commit, not
+                    // once per frame of a drag, so reading it here costs a recomposition a swipe
+                    // and not a redraw. A page the reader is on, or has already swiped past, is
+                    // never a step - seeing what a finger is doing to it is the pager's own job.
+                    val isStep = page > pager.currentPage
                     Modifier.fillMaxWidth()
                         // The room the deck steps down into, held by the page itself rather than
                         // taken off the pager. A pager clips its pages, and the slack it leaves on
@@ -709,85 +712,72 @@ internal fun SavedRunStack(
                         // draws over page 1, and the card that is meant to be underneath swipes
                         // across the front of the one it is behind.
                         .zIndex(-page.toFloat())
-                        .graphicsLayer {
-                            // How far this card is from the front, in pages: 0 while it is the
-                            // one in front, 1 where it sits one step back, and fractional under
-                            // the thumb. Read here rather than in the composable body - read at
-                            // composition every card of every stack would recompose for each
-                            // frame of a drag; read in the layer they only redraw.
-                            val distance =
-                                (page - pager.currentPage) + pager.currentPageOffsetFraction
-                            // Every card grows and shrinks about the middle of its own top edge.
-                            // About its centre the shrink would pull the foot up by half of what
-                            // it takes and eat the very step the deck is drawn to show; held at
-                            // the top, a card's head stays where its neighbour's is and the whole
-                            // of the shrink is spent below, which is where it can be seen.
-                            transformOrigin = TransformOrigin(0.5f, 0f)
-                            // The pager's own horizontal placement for every card, cancelled so
-                            // none of them travel sideways at all - depth, step and fade are the
-                            // whole of what a swipe is allowed to move here.
-                            //
-                            // Its sign is `distance` above with the fractional term flipped, and
-                            // that is not a typo: a page ahead of the one snapped is carried
-                            // further along by a drag *toward* it, not pulled back by one, which
-                            // `distance` has backwards - it was written for the shrink and the
-                            // fade, where the sign of the fractional term never had to be exact,
-                            // only steady either side of the front. The two agree exactly at rest
-                            // - a drag's fraction is zero between drags - which is why the deck's
-                            // still geometry never exposed the mismatch, and it opens into a
-                            // visible slide the instant a finger moves: cancelling `distance`
-                            // itself left this card still travelling at roughly twice the
-                            // fraction of the drag, which is what read as the page still being
-                            // turned rather than dissolving where it stood.
-                            val nativeOffset =
-                                (page - pager.currentPage) - pager.currentPageOffsetFraction
-                            translationX = -nativeOffset * (size.width + StackPageSpacing.toPx())
-                            if (distance > 0f) {
-                                // Behind: depth and step are all that move it now that the drag
-                                // itself is cancelled above; it rises into the front slot as the
-                                // card over it leaves rather than sliding in from off-screen.
-                                val t = distance.coerceAtMost(StackDepth.toFloat())
-                                val shrunk = 1f - StackShrink * t
-                                scaleX = shrunk
-                                scaleY = shrunk
-                                // The shrink lifts this card's foot by its own height times what
-                                // was taken off it; adding that back is what makes the step below
-                                // the card in front exactly StackStep whatever height the deck
-                                // settled on, rather than a figure that shrinks as the cards do.
-                                translationY =
-                                    size.height * (1f - shrunk) + StackStep.toPx() * t
-                                // The step a reader can actually see is never dimmed - see
-                                // StackDeepAlpha. Everything past the last drawn step sits under
-                                // it at nothing, exactly covered.
-                                alpha = when {
-                                    distance > StackDepth + StackFadeTail -> 0f
-                                    distance <= 1f -> 1f
-                                    else -> 1f - (1f - StackDeepAlpha) *
-                                        (distance - 1f).coerceAtMost(1f)
-                                }
+                        .then(
+                            if (!isStep) {
+                                // The page under the thumb, or the one just swiped past: left
+                                // alone entirely. The pager's own drag, fling and spring already
+                                // do everything this needs - it tracks the finger while it is
+                                // held and clears the frame or springs back once it is let go,
+                                // fully opaque throughout because nothing here dims it. Building a
+                                // second version of that tracking was the whole of what kept
+                                // reading the pager's own offset backwards two changes running.
+                                Modifier
                             } else {
-                                // In front, on its way out: sideways motion is cancelled above
-                                // like every other card in the deck, and it stays fully opaque
-                                // for every frame of leaving - a fade here is the exact fault the
-                                // deck's own opaque backing exists to rule out, one card and the
-                                // reading behind it both readable at once. The step between them
-                                // is a fraction of a card's height, so at any alpha short of 0 or
-                                // 1 the two do not read as "the front card, faintly" - they read
-                                // as both reports' figures on the same pixels.
-                                //
-                                // What it does instead is shrink toward its own anchored top
-                                // edge - see the origin above - so the room it used to cover
-                                // opens from its foot upward, one card ending before the next
-                                // one is ever seen through it rather than the two overlapping.
-                                val gone = (-distance).coerceIn(0f, 1f)
-                                val shrunkAway = 1f - gone
-                                scaleX = shrunkAway
-                                scaleY = shrunkAway
-                            }
-                        }
-                        // Inside the layer, so it travels and shrinks with the card it backs.
-                        // What makes the deck opaque: the card's own glass then resolves over the
-                        // page's colour rather than over the reading behind it.
+                                Modifier.graphicsLayer {
+                                    // How far behind the front this step sits, in pages: 1 for
+                                    // the first step, fractional as the drag ahead of it closes
+                                    // the gap. Read inside the layer, not the composable body -
+                                    // this one *does* change every frame of a drag, and reading
+                                    // it up there would recompose every card of every stack for
+                                    // each of them.
+                                    val distance =
+                                        (page - pager.currentPage) + pager.currentPageOffsetFraction
+                                    // Every card grows and shrinks about the middle of its own
+                                    // top edge. About its centre the shrink would pull the foot
+                                    // up by half of what it takes and eat the very step the deck
+                                    // is drawn to show; held at the top, a card's head stays
+                                    // where its neighbour's is and the whole of the shrink is
+                                    // spent below, which is where it can be seen.
+                                    transformOrigin = TransformOrigin(0.5f, 0f)
+                                    // Held at its own step regardless of how far a drag ahead of
+                                    // it has gone - the pager's own placement for this page is
+                                    // cancelled outright, using the same distance above with the
+                                    // fractional term flipped, because a page ahead of the one
+                                    // snapped is carried further along by a drag *toward* it, not
+                                    // pulled back by one. It only ever reaches the front slot once
+                                    // it becomes the page under the thumb - see `isStep` above -
+                                    // and hands off to the pager's own placement at that point.
+                                    val nativeOffset =
+                                        (page - pager.currentPage) - pager.currentPageOffsetFraction
+                                    translationX =
+                                        -nativeOffset * (size.width + StackPageSpacing.toPx())
+                                    val t = distance.coerceAtMost(StackDepth.toFloat())
+                                    val shrunk = 1f - StackShrink * t
+                                    scaleX = shrunk
+                                    scaleY = shrunk
+                                    // The shrink lifts this card's foot by its own height times
+                                    // what was taken off it; adding that back is what makes the
+                                    // step below the card in front exactly StackStep whatever
+                                    // height the deck settled on, rather than a figure that
+                                    // shrinks as the cards do.
+                                    translationY =
+                                        size.height * (1f - shrunk) + StackStep.toPx() * t
+                                    // The step a reader can actually see is never dimmed. Fully
+                                    // opaque throughout, like the page under the thumb above -
+                                    // nothing in this deck fades, ever, because a fade is the
+                                    // exact fault the opaque backing below exists to rule out:
+                                    // one card and the reading behind it both readable at once.
+                                    // Everything past the last drawn step sits under it at
+                                    // nothing, exactly covered rather than faded away.
+                                    alpha = if (distance > StackDepth + StackFadeTail) 0f else 1f
+                                }
+                            },
+                        )
+                        // Inside the layer for a step, so it travels and shrinks with the card it
+                        // backs; painted plain for the page under the thumb, which has no layer
+                        // to sit inside. What makes the deck opaque either way: the card's own
+                        // glass then resolves over the page's colour rather than over the reading
+                        // behind it.
                         .background(backing, cardShape)
                         .onSizeChanged { if (it.height > tallest) tallest = it.height }
                         .heightIn(min = floor)

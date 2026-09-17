@@ -238,6 +238,7 @@ class SettingsRepository(
 
     fun loadPreferences(): AppPreferences = AppPreferences(
         themeMode = enumPreference(KEY_THEME_MODE, ThemeMode.SYSTEM),
+        pureBlackDarkMode = preferences.getBoolean(KEY_PURE_BLACK_DARK, false),
         analysisLanguage = enumPreference(KEY_ANALYSIS_LANGUAGE, AnalysisLanguage.BILINGUAL),
         responseTimeoutSeconds = preferences.getInt(KEY_RESPONSE_TIMEOUT, ResponseTimeout.DEFAULT)
             .coerceIn(ResponseTimeout.MIN, ResponseTimeout.MAX),
@@ -273,6 +274,7 @@ class SettingsRepository(
     fun savePreferences(value: AppPreferences) {
         preferences.edit()
             .putString(KEY_THEME_MODE, value.themeMode.name)
+            .putBoolean(KEY_PURE_BLACK_DARK, value.pureBlackDarkMode)
             .putString(KEY_ANALYSIS_LANGUAGE, value.analysisLanguage.name)
             .putInt(
                 KEY_RESPONSE_TIMEOUT,
@@ -673,6 +675,7 @@ class SettingsRepository(
     private companion object {
         const val KEY_PROVIDER = "provider"
         const val KEY_THEME_MODE = "theme_mode"
+        const val KEY_PURE_BLACK_DARK = "pure_black_dark_mode"
         const val KEY_ANALYSIS_LANGUAGE = "analysis_language"
         const val KEY_RESPONSE_TIMEOUT = "response_timeout"
         const val KEY_DEFAULT_CONTENT_TYPES = "default_content_types"

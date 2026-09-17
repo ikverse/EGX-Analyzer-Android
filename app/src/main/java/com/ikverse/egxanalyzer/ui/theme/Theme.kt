@@ -120,6 +120,47 @@ private val DarkColors = darkColorScheme(
     outlineVariant = Color(0xFF2A364B),
 )
 
+/**
+ * [DarkColors] with the navy ground replaced by true black and neutral greys.
+ *
+ * Every signal colour - primary, secondary, tertiary, error - is copied verbatim: this is a ground
+ * swap, not a second palette, and a card that reads amber under [DarkColors] must read amber here
+ * too. Only the roles that were painting the navy itself change, and their replacements are chosen
+ * off the grey axis rather than off navy's own hue - a glass panel tinted toward `#141C2C` sitting
+ * on a pure black page would read as the app forgetting to finish the swap, not as a design.
+ */
+private val BlackColors = darkColorScheme(
+    primary = Color(0xFF35D7F2),
+    onPrimary = Color(0xFF04222A),
+    primaryContainer = Color(0xFF004E5A),
+    onPrimaryContainer = Color(0xFFB3ECF8),
+    secondary = Color(0xFF35D7F2),
+    onSecondary = Color(0xFF04222A),
+    secondaryContainer = Color(0x2935D7F2),
+    onSecondaryContainer = Color(0xFF35D7F2),
+    tertiary = Color(0xFF2FE39B),
+    onTertiary = Color(0xFF00391F),
+    tertiaryContainer = Color(0xFF11512F),
+    onTertiaryContainer = Color(0xFF89FAB5),
+    error = Color(0xFFFF6B7A),
+    onError = Color(0xFF4E0002),
+    errorContainer = Color(0xFF6E1512),
+    onErrorContainer = Color(0xFFFFDAD5),
+    background = Color(0xFF000000),
+    onBackground = Color(0xFFE8ECF4),
+    surface = Color(0xFF000000),
+    onSurface = Color(0xFFE8ECF4),
+    surfaceVariant = Color(0xFF1A1A1A),
+    onSurfaceVariant = Color(0xFFA3A3A3),
+    surfaceContainerLowest = Color(0xFF000000),
+    surfaceContainerLow = Color(0xFF0D0D0D),
+    surfaceContainer = Color(0xFF141414).copy(alpha = GlassSection),
+    surfaceContainerHigh = Color(0xFF1C1C1C).copy(alpha = GlassCard),
+    surfaceContainerHighest = Color(0xFF262626).copy(alpha = GlassTile),
+    outline = Color(0xFF6B6B6B),
+    outlineVariant = Color(0xFF2A2A2A),
+)
+
 private val LightColors = lightColorScheme(
     primary = Color(0xFF00788E),
     onPrimary = Color.White,
@@ -662,6 +703,7 @@ private val AppShapes = Shapes(
 @Composable
 fun EgxAnalyzerTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
+    pureBlackDarkMode: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val darkTheme = when (themeMode) {
@@ -697,7 +739,11 @@ fun EgxAnalyzerTheme(
         LocalPageAccent provides accentFor(AccentKey.CYAN, darkTheme),
     ) {
         MaterialTheme(
-            colorScheme = if (darkTheme) DarkColors else LightColors,
+            colorScheme = when {
+                !darkTheme -> LightColors
+                pureBlackDarkMode -> BlackColors
+                else -> DarkColors
+            },
             shapes = AppShapes,
             typography = AppTypography,
             content = content,

@@ -851,6 +851,18 @@ internal fun SettingsScreen(appState: AppState) {
                         }
                     }
                 }
+                SettingToggle(
+                    label = "Pure black background",
+                    checked = appState.appPreferences.pureBlackDarkMode,
+                    onCheckedChange = appState::updatePureBlackDarkMode,
+                    about = infoNote(
+                        "Pure black background",
+                        "Replaces dark mode's navy background and cards with true black and " +
+                            "neutral greys.",
+                        "Only visible while dark mode is actually showing - under System it takes " +
+                            "effect whenever the phone's own setting lands on dark.",
+                    ),
+                )
             }
 
             // "Trade defaults" rather than "Trades": every control in here is about the user's own

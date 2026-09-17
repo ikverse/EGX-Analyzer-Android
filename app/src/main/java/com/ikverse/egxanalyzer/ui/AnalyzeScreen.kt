@@ -70,8 +70,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.ikverse.egxanalyzer.ui.theme.CardHue
-import com.ikverse.egxanalyzer.ui.theme.color
 import com.ikverse.egxanalyzer.model.AnalysisChunking
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisInput
@@ -324,7 +322,6 @@ internal fun AnalyzeScreen(appState: AppState) {
                     title = "Content types",
                     icon = Icons.Outlined.TextFields,
                     modifier = Modifier.fillMaxHeight(),
-                    accent = CardHue.VIOLET.color,
                 ) {
                     // Wraps rather than switching, because the threshold it replaces had the fold
                     // exactly backwards. It was measured against the card's own content width, and
@@ -369,7 +366,6 @@ internal fun AnalyzeScreen(appState: AppState) {
                     title = "Recommendation target date",
                     icon = Icons.Outlined.CalendarMonth,
                     modifier = Modifier.fillMaxHeight(),
-                    accent = CardHue.AMBER.color,
                 ) {
                     RecommendationDateOption(
                         selected = appState.analysisMode == AnalysisMode.NEXT_DAY,
@@ -571,7 +567,6 @@ private fun MessagesPreview(
     SectionCard(
         title = "Messages preview",
         icon = Icons.Outlined.Preview,
-        accent = CardHue.PINK.color,
         about = infoNote(
             "Messages preview",
             "Selected Telegram chats are collected automatically for the resolved source window.",
@@ -855,7 +850,6 @@ internal fun SetupCard(appState: AppState) {
     SectionCard(
         title = "Getting started",
         icon = Icons.Outlined.Checklist,
-        accent = CardHue.AMBER.color,
         about = infoNote(
             "Getting started",
             "The four things this app needs before it can read anything, in the order they are " +

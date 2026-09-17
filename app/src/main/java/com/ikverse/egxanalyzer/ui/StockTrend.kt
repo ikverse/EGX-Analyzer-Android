@@ -315,9 +315,12 @@ internal fun PriceChart(
         )
 
         val ring = CallRing.toPx()
-        points.forEachIndexed { index, session ->
-            if (session.date !in calls) return@forEachIndexed
-            val at = Offset(index * step, y(session.close!!))
+        // Kept as a list rather than re-filtered inline, because the label placement below needs
+        // the same positions to know which labels a ring is actually sitting under.
+        val ringPositions = points.mapIndexedNotNull { index, session ->
+            if (session.date in calls) Offset(index * step, y(session.close!!)) else null
+        }
+        ringPositions.forEach { at ->
             drawCircle(color = on, radius = ring, center = at)
             drawCircle(
                 color = markColor,
@@ -349,25 +352,32 @@ internal fun PriceChart(
             drawCircle(color = lineColor, radius = TouchDot.toPx(), center = at)
         }
 
-        val placed = layoutChartLabels(
-            (labels + edges).map { y(it.value) },
-            with(density) { LabelHeight.toPx() },
-            size.height,
+        val allLabels = labels + edges
+        val boxes = placeLabels(
+            values = allLabels.map { it.value },
+            widths = allLabels.map { it.layout.size.width.toFloat() },
+            rowHeight = with(density) { LabelHeight.toPx() },
+            labelInset = LabelInset.toPx(),
+            chartWidth = size.width,
+            chartHeight = size.height,
+            rings = ringPositions,
+            ringRadius = ring + RingLabelClearance.toPx(),
+            y = ::y,
         )
-        (labels + edges).forEachIndexed { index, label ->
-            val left = size.width - label.layout.size.width - LabelInset.toPx()
-            // A pad of the surface behind it, so a label never has to be read through the price
-            // line or a guide passing under it.
-            drawRoundRect(
+        allLabels.forEachIndexed { index, label ->
+            val at = Offset(boxes[index].x, boxes[index].y)
+            // A stroke in the surface behind the glyphs rather than a pill under them: a label
+            // now has no card of its own to sit on, so it has to survive the price line, a guide
+            // or a ring passing directly behind it on its own. `paint-order` is a CSS idea and
+            // Compose has no such flag - the halo is a second pass of the same text, stroked
+            // rather than filled, drawn first so the fill goes on top of it rather than beside it.
+            drawText(
+                label.layout,
                 color = on,
-                topLeft = Offset(left - LabelPad.toPx(), placed[index]),
-                size = Size(
-                    label.layout.size.width + LabelPad.toPx() * 2,
-                    label.layout.size.height.toFloat(),
-                ),
-                cornerRadius = CornerRadius(LabelPad.toPx()),
+                topLeft = at,
+                drawStyle = Stroke(width = LabelHaloWidth.toPx(), join = StrokeJoin.Round),
             )
-            drawText(label.layout, color = label.color, topLeft = Offset(left, placed[index]))
+            drawText(label.layout, color = label.color, topLeft = at)
         }
     }
 }
@@ -409,6 +419,78 @@ private fun layoutChartLabels(wanted: List<Float>, rowHeight: Float, height: Flo
         ceiling = placed[index] - rowHeight
     }
     return placed.toList()
+}
+
+/** One label's drawn rectangle, in the same pixel space the chart itself is drawn in. */
+private data class LabelBox(val x: Float, val y: Float, val width: Float, val height: Float) {
+    fun overlaps(other: LabelBox): Boolean =
+        x < other.x + other.width && x + width > other.x &&
+            y < other.y + other.height && y + height > other.y
+
+    fun overlaps(ring: Offset, radius: Float): Boolean =
+        x < ring.x + radius && x + width > ring.x - radius &&
+            y < ring.y + radius && y + height > ring.y - radius
+}
+
+/**
+ * Every label's box, right-aligned and stacked by [layoutChartLabels] - except the ones a call's
+ * ring is sitting under, which slide left along their own guide line instead.
+ *
+ * A label and a recent call's ring want the same corner for the same reason: labels are pinned to
+ * the right edge on purpose, so scrubbing always finds them in one place, and a call made in the
+ * last few sessions is by definition drawn near that same edge. Stacking the label further down
+ * does not fix that - it is still in the corner, just at a different height, still touching the
+ * ring it was crowding. A label a ring actually collides with is given its own true row instead,
+ * at the height its value really sits at, and slid left until it clears every ring and every
+ * other label. **Only the label that collides moves** - every other one keeps the row
+ * [layoutChartLabels] already gave it, because a chart carrying enough calls at once to need more
+ * than one has never come up, and a full two-dimensional solver was not written for a collision
+ * that has one offender on every chart seen so far.
+ *
+ * Deliberately blind to the price line itself: the text keeps its own [LabelHaloWidth] stroke for
+ * exactly the case of a line, a guide or a ring passing behind it, and that is a cheaper and more
+ * honest fix than trying to steer every label clear of a line that moves with every stock.
+ */
+private fun placeLabels(
+    values: List<Double>,
+    widths: List<Float>,
+    rowHeight: Float,
+    labelInset: Float,
+    chartWidth: Float,
+    chartHeight: Float,
+    rings: List<Offset>,
+    ringRadius: Float,
+    y: (Double) -> Float,
+): List<LabelBox> {
+    val stackedY = layoutChartLabels(values.map(y), rowHeight, chartHeight)
+    val boxes = values.indices.map { index ->
+        LabelBox(chartWidth - widths[index] - labelInset, stackedY[index], widths[index], rowHeight)
+    }.toMutableList()
+
+    values.indices.forEach { index ->
+        val box = boxes[index]
+        if (rings.none { box.overlaps(it, ringRadius) }) return@forEach
+        val trueY = y(values[index]) - rowHeight / 2
+        var x = box.x
+        var slid = LabelBox(x, trueY, widths[index], rowHeight)
+        var guard = 0
+        while (guard < MaxSlideAttempts) {
+            val hitRing = rings.firstOrNull { slid.overlaps(it, ringRadius) }
+            val hitLabel = boxes.withIndex().firstOrNull { (other, b) -> other != index && slid.overlaps(b) }
+            x = when {
+                hitRing != null -> hitRing.x - ringRadius - widths[index]
+                hitLabel != null -> hitLabel.value.x - widths[index]
+                else -> break
+            }
+            slid = LabelBox(x, trueY, widths[index], rowHeight)
+            guard++
+        }
+        // Nowhere clear of everything at all - past what one horizontal slide can fix - keeps the
+        // row layoutChartLabels already gave it rather than sliding off the left edge of the
+        // chart to find one.
+        if (x >= 0f && guard < MaxSlideAttempts) boxes[index] = slid
+    }
+    return boxes
 }
 
 private data class ChartLabel(val value: Double, val text: String, val color: Color)
@@ -496,8 +578,16 @@ private fun RangeCaption(text: String) {
     )
 }
 
-/** Tall enough to carry five guides and a price line without either becoming furniture. */
-private val ChartHeight = 150.dp
+/**
+ * Tall enough that levels within a few percent of each other still land whole rows apart.
+ *
+ * 150dp was tuned for a price line and one or two guides; a stock whose stop, entry and two
+ * targets sit within five percent of each other - not an unusual call - pushed every label to the
+ * legal minimum gap and read as one crowded block at the top of the chart. 220dp gives that same
+ * cluster real room without [placeLabels] needing to move more than the one label a ring actually
+ * collides with.
+ */
+private val ChartHeight = 220.dp
 
 /**
  * How far the scale may grow beyond the price's own range to take the levels in.
@@ -532,10 +622,17 @@ private val TouchDot = 4.5.dp
 
 private val LabelInset = 2.dp
 
-private val LabelPad = 3.dp
-
 /** A `labelSmall` line plus the gap that keeps two of them apart. */
 private val LabelHeight = 15.dp
+
+/** The halo stroked behind a label's own glyphs, now that nothing else lifts it off the chart. */
+private val LabelHaloWidth = 3.dp
+
+/** How far past a ring's own edge a label needs before the two read as clearly apart. */
+private val RingLabelClearance = 3.dp
+
+/** Safety bound on how many times [placeLabels] may nudge a colliding label further left. */
+private const val MaxSlideAttempts = 8
 
 /** The track, plus the overhang the close marker is drawn with above and below it. */
 private val RangeHeight = 14.dp

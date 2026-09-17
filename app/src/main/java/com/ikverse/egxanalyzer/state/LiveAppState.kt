@@ -1689,7 +1689,7 @@ class LiveAppState(
         // Third, off the same rebuild: it reads the trades reviewTrades has just written down, and
         // a trade that settled on this pass is no longer approaching anything.
         reviewApproaches(rebuilt, announceChanges)
-        reviewSessions(rebuilt, performance, announceChanges)
+        reviewSessions(rebuilt, performance, announceChanges, finalThrough)
     }
 
     /**
@@ -1709,6 +1709,7 @@ class LiveAppState(
         rebuilt: Portfolio,
         report: PerformanceReport,
         announceChanges: Boolean = false,
+        finalThrough: LocalDate,
     ) {
         val calls = report.sessions.flatMap(ScoredSession::calls)
         // The sessions the record actually knows about, which is the exchange's own calendar as
@@ -1735,7 +1736,7 @@ class LiveAppState(
             ).also(localDataStore::saveSessionDigests)
         }
         sessionDigest = digests.firstOrNull()
-        announceSession(digests.firstOrNull(), announceChanges)
+        announceSession(digests.firstOrNull(), announceChanges, finalThrough)
     }
 
     /**
@@ -1754,10 +1755,23 @@ class LiveAppState(
      *
      * Gated on [announceChanges] like the two sweeps above, so an edit the user just made cannot
      * produce a summary of the session.
+     *
+     * **And gated on the session having actually closed.** The daily feed hands back a row for
+     * today the moment the market opens, so `pricesTo` turns over to today on the first refresh of
+     * the morning - long before there is anything to say about it. Without this, that first refresh
+     * announced today's (barely started) session immediately and marked the date said, so the real
+     * digest the close sweep built at 14:45 never went out at all. [finalThrough] is the same
+     * `ScheduleClock.lastFinalSession()` reading the rest of a recompute is judged against, so this
+     * waits for the same close the scorer does rather than inventing a second definition of it.
      */
-    private suspend fun announceSession(digest: SessionDigest?, announceChanges: Boolean) {
+    private suspend fun announceSession(
+        digest: SessionDigest?,
+        announceChanges: Boolean,
+        finalThrough: LocalDate,
+    ) {
         if (!announceChanges || !appPreferences.sessionDigestEnabled) return
         val newest = digest?.takeIf { !it.isEmpty } ?: return
+        if (newest.date > finalThrough) return
         val fresh = withContext(Dispatchers.IO) {
             if (localDataStore.sessionDigestAnnounced(newest.date)) {
                 false
@@ -2303,6 +2317,10 @@ class LiveAppState(
 
     override fun updateThemeMode(value: ThemeMode) {
         saveAppPreferences(appPreferences.copy(themeMode = value))
+    }
+
+    override fun updatePureBlackDarkMode(value: Boolean) {
+        saveAppPreferences(appPreferences.copy(pureBlackDarkMode = value))
     }
 
     override fun updateAnalysisLanguage(value: AnalysisLanguage) {

@@ -16,7 +16,10 @@ import com.ikverse.egxanalyzer.ui.theme.EgxAnalyzerTheme
  */
 @Composable
 internal fun AppRoot(appState: AppState) {
-    EgxAnalyzerTheme(themeMode = appState.appPreferences.themeMode) {
+    EgxAnalyzerTheme(
+        themeMode = appState.appPreferences.themeMode,
+        pureBlackDarkMode = appState.appPreferences.pureBlackDarkMode,
+    ) {
         EgxAnalyzerApp(appState = appState)
     }
 }

@@ -43,8 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.ikverse.egxanalyzer.ui.theme.CardHue
-import com.ikverse.egxanalyzer.ui.theme.color
 import com.ikverse.egxanalyzer.model.ModelUsageRecord
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudModelInfo
@@ -70,7 +68,7 @@ internal fun ColumnScope.AnalysisModelCard(
     attempted: Boolean,
 ) {
     var picking by remember { mutableStateOf(false) }
-    SectionCard(title = "Analysis model", icon = Icons.Outlined.SmartToy, accent = CardHue.BLUE.color) {
+    SectionCard(title = "Analysis model", icon = Icons.Outlined.SmartToy) {
         ModelTile(appState.cloudConfiguration) { picking = true }
         // Drawn here rather than under the sources, where it used to sit: the card that is wrong is
         // the card that should say so.

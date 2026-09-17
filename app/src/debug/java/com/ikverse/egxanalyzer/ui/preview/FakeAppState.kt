@@ -318,6 +318,8 @@ class FakeAppState(
 
     override fun updateThemeMode(value: ThemeMode) = Unit
 
+    override fun updatePureBlackDarkMode(value: Boolean) = Unit
+
     override fun updateAnalysisLanguage(value: AnalysisLanguage) = Unit
 
     override fun updateResponseTimeout(value: Int) = Unit

@@ -451,6 +451,8 @@ interface AppState : AppUpdates {
 
     fun updateThemeMode(value: ThemeMode)
 
+    fun updatePureBlackDarkMode(value: Boolean)
+
     fun updateAnalysisLanguage(value: AnalysisLanguage)
 
     fun updateResponseTimeout(value: Int)

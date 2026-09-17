@@ -40,18 +40,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.FeedFault
 import com.ikverse.egxanalyzer.model.PerformanceCalculator
 import com.ikverse.egxanalyzer.model.CallTally
 import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.PositionView
-import com.ikverse.egxanalyzer.model.Sale
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.Scoring
-import com.ikverse.egxanalyzer.model.StockOpinion
 import com.ikverse.egxanalyzer.model.StockScore
-import com.ikverse.egxanalyzer.model.opinionId
 import com.ikverse.egxanalyzer.model.positionId
 import java.time.LocalDate
 import java.util.Locale
@@ -91,11 +89,11 @@ internal val LocalOpenStock = staticCompositionLocalOf<(String) -> Unit> { {} }
  * back simple, because Compose's own `ModalBottomSheet` takes the press before [NavStack] ever sees
  * it. And it can be opened from any tab without moving the reader off the one they are reading.
  *
- * **Three fixed bands rather than one long scroll.** The heading and the price are what the sheet
- * was opened to see and they no longer scroll away; the record, the trades and the calls run
- * between them; the two things a reader does about a stock sit on the bottom edge where a thumb is
- * already resting. What was one column of dividers is now a header, a scroller and an action bar,
- * which is the shape every other screen in this app already has.
+ * **A fixed header over one scroller, rather than one long column of dividers.** The identity, the
+ * price and the held/sources/settled chips are what the sheet was opened to see and do not scroll
+ * away; the record, the trades and the calls run beneath them, each in a card of its own. There is
+ * deliberately no action bar under the scroller any more - Ask AI and Bought/Sold are not reachable
+ * from this sheet at all right now, which is a real gap and not a decision this file argues for.
  *
  * **It states one thing that is new.** Every figure here but the line was drawn somewhere else
  * already; what this adds is that they are drawn together. [Sparkline] is the exception, and it is
@@ -185,21 +183,20 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        StockSheetHeading(key, score, calls.firstOrNull(), latest, history)
+        StockSheetHeading(key, score, calls.firstOrNull(), latest, history, trades, faults)
         Column(
             Modifier
                 .fillMaxWidth()
-                // Bounded by what the header and the action bar leave, and no taller than its own
-                // content: a short record must not stretch the sheet to the full screen with the
-                // action bar stranded at the bottom of it.
+                // Bounded by what the header leaves, and no taller than its own content: a short
+                // record must not stretch the sheet to the full screen with nothing at all
+                // anchoring its bottom edge.
                 .weight(1f, fill = false)
                 .sheetDragSlop()
                 .scrollableColumn()
                 .padding(horizontal = Space.l)
-                .padding(top = Space.s, bottom = Space.m),
+                .padding(top = Space.s, bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            StockSheetChips(trades, score, faults)
             StockSheetPrice(latest, history, chartLevels, callDates, appState.pages)
             if (score != null) StockSheetRecord(score)
             if (trades.isNotEmpty()) {
@@ -225,24 +222,32 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
                 )
             }
         }
-        calls.firstOrNull()?.let { newest ->
-            StockSheetActions(newest, latest, appState)
-        }
     }
 }
 
 /**
- * The ticker, what the record knows it as, and where it stands - on one fixed line.
+ * The ticker, what the record knows it as, where it stands, and the one-word answers - all fixed,
+ * none of it scrolling away.
  *
- * Four stacked lines before any figure was what the old heading cost: the label, the ticker, and a
- * name in each script, with the price below the fold on a short phone. The names share a line here
- * and the price comes up beside them, so the two things the sheet was opened for are both above
- * everything else and stay there while the record scrolls under them.
+ * Four stacked lines before any figure was what the original heading cost: the label, the ticker,
+ * and a name in each script, with the price below the fold on a short phone. The names share a
+ * line here and the price comes up beside them, so the two things the sheet was opened for are
+ * both above everything else. **Every size in this function is a copy of its role's, not the role
+ * itself** - `titleLarge.copy(fontSize = …)` rather than `titleMedium` - because the shipped sizes
+ * read as too large once the chips joined the header: reported 2026-09-17, and the fix asked for
+ * was explicitly "keep the layout, turn the type down," not a rearrangement. The ticker keeps the
+ * display face and its weight; only its size moved.
  *
  * The names come from the score where there is one and from the newest call otherwise: a stock
  * called once has no score and still has a company behind it. Both scripts, because the channels
  * print Arabic and the catalog holds English, and a reader who knows one should not have to know
  * the other.
+ *
+ * The chips used to be the first thing in the scroller and vanished the instant it moved -
+ * **Held**, **sources** and **settled calls** are exactly the three answers a reader wants before
+ * anything else on this sheet, and a fact that disappears on the first scroll is not one this
+ * sheet is actually leading with. They sit in the fixed band now, under the identity row, for the
+ * same reason the price is up here and not lower down.
  */
 @Composable
 private fun StockSheetHeading(
@@ -251,89 +256,136 @@ private fun StockSheetHeading(
     newest: ScoredCall?,
     latest: LatestPrice?,
     history: List<DailySession>,
+    trades: List<PositionView>,
+    faults: Set<FeedFault>,
 ) {
     val english = score?.companyEnglish ?: newest?.companyEnglish
     val arabic = score?.companyArabic ?: newest?.companyArabic
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Space.l)
-            .padding(bottom = Space.s),
-        horizontalArrangement = Arrangement.spacedBy(Space.s),
-        verticalAlignment = Alignment.Top,
-    ) {
-        StockLogo(ticker, LogoSize.Header)
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(ticker, style = MaterialTheme.typography.titleLarge)
-                Egx33Badge(ticker, Modifier.padding(start = Space.s))
-            }
-            // One line for both names rather than one line each. A first-strong isolate round the
-            // Arabic, as every Arabic name in this app carries: without it a digit in the name
-            // drifts to the wrong end of it.
-            listOfNotNull(english, arabic?.let { "⁨$it⁩" })
-                .takeIf(List<String>::isNotEmpty)
-                ?.let {
+    Column {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Space.l)
+                .padding(bottom = Space.s),
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+            verticalAlignment = Alignment.Top,
+        ) {
+            StockLogo(ticker, LogoSize.Row)
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        it.joinToString(" · "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-        }
-        if (latest != null) {
-            // The move since the session before it, which is the figure a price is always read
-            // against and the one the sheet never carried. Measured off the stored history rather
-            // than the report, which keeps one session per stock and so has nothing to compare
-            // against.
-            val move = history.dayMove()
-            Column(horizontalAlignment = Alignment.End) {
-                // Labelled, because a bare figure at the top of a sheet is a number the reader has
-                // to work out the meaning of - and the label is also where the one thing that
-                // changes its meaning is said: a session still trading is a price, not a close.
-                Text(
-                    if (latest.provisional) "LATEST PRICE" else "LAST CLOSE",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    formatPrice(latest.session.close),
-                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
-                    color = PriceRole.market,
-                )
-                if (move != null) {
-                    // In pounds as well as percent. The app has never printed a price move in money
-                    // anywhere, and on a stock trading at 0.24 a percent is the figure that says
-                    // nothing - the two together are what a holder actually reads.
-                    Text(
-                        formatSignedPrice(move.amount) + " (" + formatPercent(move.percent) + ")",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontFamily = TabularFigures,
+                        ticker,
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontSize = HeadingTickerSize,
+                            lineHeight = HeadingTickerLine,
                         ),
-                        color = PriceRole.forReturn(move.percent),
+                    )
+                    Egx33Badge(ticker, Modifier.padding(start = Space.s))
+                }
+                // One line for both names rather than one line each. A first-strong isolate round the
+                // Arabic, as every Arabic name in this app carries: without it a digit in the name
+                // drifts to the wrong end of it.
+                listOfNotNull(english, arabic?.let { "⁨$it⁩" })
+                    .takeIf(List<String>::isNotEmpty)
+                    ?.let {
+                        Text(
+                            it.joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = HeadingNamesSize,
+                                lineHeight = HeadingNamesLine,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+            }
+            if (latest != null) {
+                // The move since the session before it, which is the figure a price is always read
+                // against and the one the sheet never carried. Measured off the stored history rather
+                // than the report, which keeps one session per stock and so has nothing to compare
+                // against.
+                val move = history.dayMove()
+                Column(horizontalAlignment = Alignment.End) {
+                    // Labelled, because a bare figure at the top of a sheet is a number the reader has
+                    // to work out the meaning of - and the label is also where the one thing that
+                    // changes its meaning is said: a session still trading is a price, not a close.
+                    Text(
+                        if (latest.provisional) "LATEST PRICE" else "LAST CLOSE",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = HeadingLabelSize,
+                            lineHeight = HeadingLabelLine,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        formatPrice(latest.session.close),
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontFamily = TabularFigures,
+                            fontSize = HeadingPriceSize,
+                            lineHeight = HeadingPriceLine,
+                        ),
+                        color = PriceRole.market,
+                    )
+                    if (move != null) {
+                        // In pounds as well as percent. The app has never printed a price move in money
+                        // anywhere, and on a stock trading at 0.24 a percent is the figure that says
+                        // nothing - the two together are what a holder actually reads.
+                        Text(
+                            formatSignedPrice(move.amount) + " (" + formatPercent(move.percent) + ")",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = TabularFigures,
+                                fontSize = HeadingLabelSize,
+                                lineHeight = HeadingLabelLine,
+                            ),
+                            color = PriceRole.forReturn(move.percent),
+                            textAlign = TextAlign.End,
+                        )
+                    }
+                    // A session still trading says so instead of naming its own date: the close is
+                    // going to move, and a date under it reads as settled.
+                    Text(
+                        if (latest.provisional) {
+                            "still trading"
+                        } else {
+                            (if (move != null) "since " else "") +
+                                AppDates.DayMonth.format(move?.from ?: latest.session.date)
+                        },
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = HeadingLabelSize,
+                            lineHeight = HeadingLabelLine,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.End,
                     )
                 }
-                // A session still trading says so instead of naming its own date: the close is
-                // going to move, and a date under it reads as settled.
-                Text(
-                    if (latest.provisional) {
-                        "still trading"
-                    } else {
-                        (if (move != null) "since " else "") +
-                            AppDates.DayMonth.format(move?.from ?: latest.session.date)
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.End,
-                )
             }
         }
+        StockSheetChips(
+            trades,
+            score,
+            faults,
+            Modifier.padding(horizontal = Space.l).padding(bottom = Space.s),
+        )
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
+
+/** [MaterialTheme.typography.titleLarge] is 19sp; the heading's ticker is turned down to this. */
+private val HeadingTickerSize = 16.sp
+private val HeadingTickerLine = 20.sp
+
+/** [MaterialTheme.typography.bodySmall] is 13sp; the heading's names are turned down to this. */
+private val HeadingNamesSize = 11.5.sp
+private val HeadingNamesLine = 15.sp
+
+/** [MaterialTheme.typography.titleMedium] is 16sp; the heading's price is turned down to this. */
+private val HeadingPriceSize = 14.sp
+private val HeadingPriceLine = 16.sp
+
+/** [MaterialTheme.typography.labelSmall] is 11sp; every small line in the heading shares this. */
+private val HeadingLabelSize = 9.5.sp
+private val HeadingLabelLine = 12.sp
 
 /**
  * The one-word answers, before any of the figures behind them.
@@ -352,12 +404,13 @@ private fun StockSheetChips(
     trades: List<PositionView>,
     score: StockScore?,
     faults: Set<FeedFault>,
+    modifier: Modifier = Modifier,
 ) {
     val open = trades.firstOrNull(PositionView::open)
     val settled = score?.tally?.judged ?: 0
     if (open == null && score == null && faults.isEmpty()) return
     FlowRow(
-        Modifier.fillMaxWidth(),
+        modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(Space.xs),
         verticalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
@@ -775,148 +828,6 @@ private fun StockSheetCalls(calls: List<ScoredCall>, onOpen: (String) -> Unit) {
     }
 }
 
-/**
- * The two things a reader does about a stock, on the edge the thumb is already on.
- *
- * Both were reachable from here and neither was offered: buying meant finding the call card the
- * trade would be taken on, and the paid question meant the same trip. They are the same two
- * controls those cards carry, taking the same confirmations, writing the same trade - `TradeAction`
- * is the app's only way of recording a purchase and this is one more surface that asks it, not a
- * second way of asking.
- *
- * **Against the newest call, and the sheet says so.** A question about a stock is a question about
- * what somebody said about it, and a trade is recorded against the call it was taken on - neither
- * has any meaning without one. The newest is the only defensible choice: it is the call a reader
- * opening a stock this morning is acting on, and naming it under the buttons is what stops the bar
- * from looking like it belongs to the stock in general.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun StockSheetActions(call: ScoredCall, latest: LatestPrice?, appState: AppState) {
-    val held = appState.heldFor(call.ticker, call.openedOn)
-    val opinion: StockOpinion? = appState.opinionFor(call)
-    val asking = appState.opinionPending == opinionId(call.ticker, call.openedOn, call.channel)
-    // Chrome, so a `remember` is the right home for all three: the answer behind them is on disk
-    // rather than in the composition. See PageState.
-    var confirming by remember(call.positionId) { mutableStateOf(false) }
-    var showing by remember(call.positionId) { mutableStateOf(false) }
-    // Set while this sheet's own request is out, so the answer opens itself when it lands. Without
-    // it a sheet opened over a stock that already holds an opinion would spring the answer open the
-    // moment any other request anywhere finished.
-    var awaiting by remember(call.positionId) { mutableStateOf(false) }
-    LaunchedEffect(opinion) {
-        if (awaiting && opinion != null) {
-            awaiting = false
-            showing = true
-        }
-    }
-    // Read once for the bar rather than inside the dialog: each is a SharedPreferences lookup, and
-    // a call from inside a conditional would be a `remember` that comes and goes with the dialog.
-    // Keyed on the revision, so changing either in Settings reaches a sheet already on screen.
-    val askModel = remember(appState.opinionSettingsRevision, appState.cloudConfiguration) {
-        appState.opinionModel()
-    }
-    val searching = remember(appState.opinionSettingsRevision) { appState.opinionSearchEnabled() }
-    val newsWindow = remember(appState.opinionSettingsRevision) { appState.opinionNewsWindowDays() }
-    if (confirming) {
-        AskAiDialog(
-            call = call,
-            model = askModel,
-            searching = searching,
-            newsWindowDays = newsWindow,
-            onConfirm = {
-                confirming = false
-                awaiting = true
-                appState.askAboutCall(call)
-            },
-            onDismiss = { confirming = false },
-        )
-    }
-    if (showing && opinion != null) {
-        StockOpinionSheet(
-            call = call,
-            opinion = opinion,
-            onAskAgain = if (asking) {
-                null
-            } else {
-                {
-                    showing = false
-                    awaiting = true
-                    appState.askAboutCall(call, askAgain = true)
-                }
-            },
-            onDismiss = { showing = false },
-        )
-    }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Space.l)
-            .padding(top = Space.s, bottom = Space.xl),
-        verticalArrangement = Arrangement.spacedBy(Space.xs),
-    ) {
-        // Wrapped rather than laid in a row, exactly as the call card wraps them: at 280dp the two
-        // labels together are wider than the sheet, and a button pushed off the edge is a button
-        // nobody can press.
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-            AskAiButton(
-                label = when {
-                    asking -> "Asking…"
-                    // Named for what it holds once there is something to open. The button that
-                    // spends money and the button that reopens a saved answer must not read alike.
-                    opinion != null -> "AI Response"
-                    else -> "Ask AI"
-                },
-                onClick = { if (opinion == null) confirming = true else showing = true },
-                look = if (opinion != null && !asking) AiLook.Outlined else AiLook.Filled,
-                enabled = !asking,
-                working = asking,
-                phaseKey = call.ticker,
-            )
-            TradeAction(
-                held = held,
-                suggestedEntry = call.entryMidpoint(),
-                defaultWindow = call.offeredWindow(
-                    appState.appPreferences.defaultTradeWindowSessions,
-                ),
-                tPlusOne = call.isTPlusOne,
-                suggestedExit = latest?.session?.close,
-                onBuy = { price, date, window ->
-                    appState.recordPurchase(
-                        ticker = call.ticker,
-                        companyEnglish = call.companyEnglish,
-                        companyArabic = call.companyArabic,
-                        channel = call.channel,
-                        recommendationDate = call.openedOn,
-                        entryPrice = price,
-                        entryDate = date,
-                        entryLow = call.entryLow,
-                        entryHigh = call.entryHigh,
-                        target1 = call.target1,
-                        target2 = call.target2,
-                        stopLoss = call.stopLoss,
-                        windowSessions = window,
-                        // What the dialog showed them, so accepting a T+1 call's two sessions is
-                        // not recorded as a deadline they set by hand.
-                        offeredWindow = call.offeredWindow(
-                            appState.appPreferences.defaultTradeWindowSessions,
-                        ),
-                        isTPlusOne = call.isTPlusOne,
-                    )
-                },
-                onSell = { sale: Sale -> held?.let { appState.recordSale(it.position, sale) } },
-            )
-        }
-        Text(
-            "on ⁨${call.channel}⁩'s call of " +
-                AppDates.DayMonth.format(call.openedOn),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
 /** What a stock did between its last two stored sessions, and which one it moved from. */
 private data class DayMove(val amount: Double, val percent: Double, val from: LocalDate)
 
@@ -943,25 +854,6 @@ private fun ScoredCall.entryBand(): String? = when {
         formatPrice(entryLow) + "–" + formatPrice(entryHigh)
 
     else -> (entryLow ?: entryHigh)?.let(::formatPrice)
-}
-
-/** The middle of that band, which is what a fill is usually nearest. */
-private fun ScoredCall.entryMidpoint(): Double? = when {
-    entryLow != null && entryHigh != null -> (entryLow + entryHigh) / 2
-    else -> entryLow ?: entryHigh
-}
-
-/**
- * What a trade taken from this sheet is offered as its window.
- *
- * The same rule `offeredTradeWindow` applies to a recommendation on the Results tab: the setting
- * for an ordinary call, and a T+1 call's own two sessions for one the channel dated for tomorrow.
- * What the *channel* is judged over is fixed and is no business of this trade's.
- */
-private fun ScoredCall.offeredWindow(setting: Int): Int = if (isTPlusOne) {
-    Scoring.T_PLUS_ONE_WINDOW_SESSIONS
-} else {
-    Scoring.clampWindow(setting)
 }
 
 /**

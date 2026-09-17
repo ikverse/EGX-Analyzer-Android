@@ -26,7 +26,10 @@ import com.ikverse.egxanalyzer.ui.theme.EgxAnalyzerTheme
  */
 @Composable
 private fun Previewed(state: AppState = FakeAppState(), content: @Composable () -> Unit) {
-    EgxAnalyzerTheme(themeMode = state.appPreferences.themeMode) { content() }
+    EgxAnalyzerTheme(
+        themeMode = state.appPreferences.themeMode,
+        pureBlackDarkMode = state.appPreferences.pureBlackDarkMode,
+    ) { content() }
 }
 
 @Preview(name = "Analyze", showBackground = true)

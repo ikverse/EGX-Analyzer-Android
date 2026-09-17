@@ -29,6 +29,15 @@ object ResponseTimeout {
 
 data class AppPreferences(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /**
+     * Whether dark mode replaces its navy background with true black.
+     *
+     * A sub-option of [themeMode] rather than a fourth mode: it has no meaning under Light, and
+     * folding it into the mode enum would make "System" and "Black" mutually exclusive when they
+     * are not - somebody following the system's dark/light switch may still want black rather than
+     * navy whenever the system side lands on dark.
+     */
+    val pureBlackDarkMode: Boolean = false,
     val analysisLanguage: AnalysisLanguage = AnalysisLanguage.BILINGUAL,
     val responseTimeoutSeconds: Int = ResponseTimeout.DEFAULT,
     val defaultContentTypes: Set<AnalysisContentType> = AnalysisContentType.entries.toSet(),
