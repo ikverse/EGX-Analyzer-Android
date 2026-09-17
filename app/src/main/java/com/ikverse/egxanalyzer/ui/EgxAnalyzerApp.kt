@@ -100,6 +100,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
@@ -345,7 +346,7 @@ private val NavigationIconSize = 28.dp
  * Material leaves a bar 80dp. This one is drawn over the page rather than under it, so its height is
  * page it is covering, and a shorter pill covers less of it.
  */
-private val NavigationBarHeight = 74.dp
+private val NavigationBarHeight = 82.dp
 
 /** How far the pill is held in from the sides of the window, which is what makes it read as a pill. */
 internal val PillSideMargin = 12.dp
@@ -367,7 +368,7 @@ internal val PillBottomMargin = 10.dp
 internal val NavBarFootprint = NavigationBarHeight + PillBottomMargin
 
 /** A shade under the rail's 28dp: the pill has to leave room for a label under the glyph. */
-private val BarIconSize = 26.dp
+private val BarIconSize = 29.dp
 
 /**
  * A size down from Material's 12sp `labelMedium`.
@@ -376,7 +377,7 @@ private val BarIconSize = 26.dp
  * divide what is left of a 411dp cover screen into slots too narrow for "Portfolio" at the full
  * size. Shrinking the label rather than dropping it keeps all five named.
  */
-private val BarLabelSize = 11.sp
+private val BarLabelSize = 12.sp
 
 /** Between the header above the line and the first card under it. */
 private val StatusLineGap = 6.dp
@@ -707,7 +708,7 @@ private fun FloatingNavBar(appState: AppState, modifier: Modifier = Modifier) {
         FloatingSurface(
             // The same corner the action button above it takes, which is the page's own card radius.
             shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = lerp(MaterialTheme.colorScheme.surfaceContainerHigh, Color.Black, 0.20f),
             modifier = Modifier.height(NavigationBarHeight),
         ) {
             // No icon here: five destinations already divide a 411dp cover screen, and a sixth thing
@@ -794,10 +795,10 @@ private fun PillItem(
 }
 
 /** Wide enough to hold the icon clear of a five-slot 411dp screen's edges, and no wider. */
-private val IndicatorWidth = 60.dp
+private val IndicatorWidth = 66.dp
 
 /** Material leaves 32dp around a 24dp icon; this holds the same margin around a 26dp one. */
-private val IndicatorHeight = 34.dp
+private val IndicatorHeight = 38.dp
 
 /** Close enough that the icon and its name read as one item, far enough that they do not touch. */
 private val IndicatorLabelGap = 3.dp
@@ -808,7 +809,7 @@ private val IndicatorLabelGap = 3.dp
  * Enough that the selected one still leads the bar, not so far that the other four stop being
  * colours - at much under this they grey out and the bar goes back to being a legend for one page.
  */
-private const val RestingIconAlpha = 0.62f
+private const val RestingIconAlpha = 0.82f
 
 @Composable
 private fun NavigationIcon(
