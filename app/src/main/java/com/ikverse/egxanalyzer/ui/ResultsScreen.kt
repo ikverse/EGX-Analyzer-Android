@@ -405,14 +405,6 @@ private const val StackDeepAlpha = 0.8f
 private const val StackFadeTail = 0.2f
 
 /**
- * How far the card being turned swells as it leaves.
- *
- * The lift is what makes it read as a card taken off the top of the deck rather than a page shoved
- * sideways.
- */
-private const val StackFrontLift = 1.03f
-
-/**
  * The gap the pager leaves between two readings of a session.
  *
  * Named rather than written twice: a card behind cancels the pager's own travel to hold its place
@@ -675,6 +667,15 @@ internal fun SavedRunStack(
         ) { page ->
             val saved = runs[page]
             val expanded = saved.id == openRunId
+            // Nothing behind an open report is drawn at all - not dimmed, not invisible-but-still-
+            // there, simply absent. A shut sibling still sits close behind the front slot the open
+            // report now occupies, since its own position is measured off its own collapsed height,
+            // not the report's; left drawn there, its opaque backing shows through the top of the
+            // report's ordinary glass fill, which is the report's own material working exactly as
+            // every other open report's does and disagreeing with what is supposed to be behind it.
+            // Skipped rather than hidden with alpha, or the sibling's `Card` would still answer a
+            // touch meant for whatever the report draws in the same place.
+            if (open && !expanded) return@HorizontalPager
             card(
                 saved,
                 expanded,
@@ -722,16 +723,33 @@ internal fun SavedRunStack(
                             // the top, a card's head stays where its neighbour's is and the whole
                             // of the shrink is spent below, which is where it can be seen.
                             transformOrigin = TransformOrigin(0.5f, 0f)
+                            // The pager's own horizontal placement for every card, cancelled so
+                            // none of them travel sideways at all - depth, step and fade are the
+                            // whole of what a swipe is allowed to move here.
+                            //
+                            // Its sign is `distance` above with the fractional term flipped, and
+                            // that is not a typo: a page ahead of the one snapped is carried
+                            // further along by a drag *toward* it, not pulled back by one, which
+                            // `distance` has backwards - it was written for the shrink and the
+                            // fade, where the sign of the fractional term never had to be exact,
+                            // only steady either side of the front. The two agree exactly at rest
+                            // - a drag's fraction is zero between drags - which is why the deck's
+                            // still geometry never exposed the mismatch, and it opens into a
+                            // visible slide the instant a finger moves: cancelling `distance`
+                            // itself left this card still travelling at roughly twice the
+                            // fraction of the drag, which is what read as the page still being
+                            // turned rather than dissolving where it stood.
+                            val nativeOffset =
+                                (page - pager.currentPage) - pager.currentPageOffsetFraction
+                            translationX = -nativeOffset * (size.width + StackPageSpacing.toPx())
                             if (distance > 0f) {
-                                // Behind: this card does not travel with the pager at all. Its
-                                // translation cancels the scroll and holds it at its own step
-                                // instead, so it rises into the front slot as the card over it
-                                // leaves rather than sliding in from off-screen.
+                                // Behind: depth and step are all that move it now that the drag
+                                // itself is cancelled above; it rises into the front slot as the
+                                // card over it leaves rather than sliding in from off-screen.
                                 val t = distance.coerceAtMost(StackDepth.toFloat())
                                 val shrunk = 1f - StackShrink * t
                                 scaleX = shrunk
                                 scaleY = shrunk
-                                translationX = -distance * (size.width + StackPageSpacing.toPx())
                                 // The shrink lifts this card's foot by its own height times what
                                 // was taken off it; adding that back is what makes the step below
                                 // the card in front exactly StackStep whatever height the deck
@@ -748,20 +766,23 @@ internal fun SavedRunStack(
                                         (distance - 1f).coerceAtMost(1f)
                                 }
                             } else {
-                                // In front, on its way out: it slides as the pager takes it, lifts
-                                // fractionally, and fades on a squared curve so it has gone by
-                                // about two thirds of the travel. Faded flat it stayed legible
-                                // across the card behind for the whole swipe, and two readings of
-                                // the same session laid over each other is unreadable in the way
-                                // that reads as a fault before it reads as motion. The lift is what
-                                // makes the leaving read as a card taken off the top rather than a
-                                // page shoved sideways.
+                                // In front, on its way out: sideways motion is cancelled above
+                                // like every other card in the deck, and it stays fully opaque
+                                // for every frame of leaving - a fade here is the exact fault the
+                                // deck's own opaque backing exists to rule out, one card and the
+                                // reading behind it both readable at once. The step between them
+                                // is a fraction of a card's height, so at any alpha short of 0 or
+                                // 1 the two do not read as "the front card, faintly" - they read
+                                // as both reports' figures on the same pixels.
+                                //
+                                // What it does instead is shrink toward its own anchored top
+                                // edge - see the origin above - so the room it used to cover
+                                // opens from its foot upward, one card ending before the next
+                                // one is ever seen through it rather than the two overlapping.
                                 val gone = (-distance).coerceIn(0f, 1f)
-                                val remaining = 1f - gone
-                                alpha = remaining * remaining
-                                val lifted = 1f + (StackFrontLift - 1f) * gone
-                                scaleX = lifted
-                                scaleY = lifted
+                                val shrunkAway = 1f - gone
+                                scaleX = shrunkAway
+                                scaleY = shrunkAway
                             }
                         }
                         // Inside the layer, so it travels and shrinks with the card it backs.

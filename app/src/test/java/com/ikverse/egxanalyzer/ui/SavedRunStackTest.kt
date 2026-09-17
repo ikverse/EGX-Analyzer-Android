@@ -121,4 +121,17 @@ class SavedRunStackTest {
         assertNull(presses[1])
         assertNull(presses[2])
     }
+
+    /**
+     * A shut sibling used to go on being positioned right behind the front slot even once that
+     * slot held an open report - its own opaque backing then showed through the top of the
+     * report's ordinary glass fill, since a report's card is exactly as translucent as any other
+     * open report's and nothing said there was a sibling still sitting under it.
+     */
+    @Test
+    fun `an open report is drawn alone, with nothing composed behind it`() {
+        stack(listOf(run(1), run(2), run(3)), openRunId = 1L)
+
+        assertEquals(setOf(1L), presses.keys)
+    }
 }
