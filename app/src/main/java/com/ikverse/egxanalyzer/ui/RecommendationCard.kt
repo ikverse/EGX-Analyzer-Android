@@ -252,31 +252,27 @@ private fun StockHeader(
     // on a line under it. Space.s between them is what the card's own Column already puts between
     // every other pair of blocks on it.
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        // Top-aligned so the menu and the dots start level with the ticker rather than floating
-        // against the middle of however many name lines this stock happens to have.
         Row(verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
-                // The logo rides the ticker's own line rather than sitting beside the whole column.
-                // Beside the column it left a hole under itself the height of the names below the
-                // ticker, and it pushed those names in past the ladder and the levels, which start at
-                // the card's edge - one card, two left edges. Here the names stay flush with them.
-                // The logo and the ticker press together as one target rather than the text alone:
-                // a 12sp glyph beside a headline is two touch targets where the reader sees one thing.
-                // See LocalOpenStock.
                 val openStock = LocalOpenStock.current
-                Row(
-                    Modifier.clickable { openStock(stock.stockCode) },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
-                    Text(
-                        stock.stockCode,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        Modifier.clickable { openStock(stock.stockCode) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
+                        Text(
+                            stock.stockCode,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
+                    }
+                    if (point != null) {
+                        Spacer(Modifier.weight(1f))
+                        TimingChip(point)
+                    }
                 }
-                // The Arabic name is the one printed in the source, so it is the reliable identity.
                 stock.stockNameArabic?.let {
                     Text(it, style = MaterialTheme.typography.bodyMedium)
                 }
@@ -290,7 +286,6 @@ private fun StockHeader(
                 }
             }
             if (point != null) {
-                TimingChip(point)
                 Spacer(Modifier.width(Space.s))
                 CallMenu(stock, point, channel, session, editor, onEdit)
             }

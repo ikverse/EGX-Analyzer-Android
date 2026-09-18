@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.6] — 2026-09-18
+
+- Recommendation card: timing pill top aligned with ticker logo by moving it into the ticker row
+
 ## [3.7.5] — 2026-09-18
 
 - Recommendation card: timing pill moved inline with ticker, right-aligned before the ⋮ menu
