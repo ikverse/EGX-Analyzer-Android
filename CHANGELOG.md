@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.4] — 2026-09-18
+
+- Price chart: level guide lines restored to dashed; label halo stroke removed
+
 ## [3.7.3] — 2026-09-18
 
 - Nav bar height increased from 74 dp to 82 dp

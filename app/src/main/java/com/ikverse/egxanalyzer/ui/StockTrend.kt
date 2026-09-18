@@ -20,6 +20,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -361,17 +362,6 @@ internal fun PriceChart(
         )
         allLabels.forEachIndexed { index, label ->
             val at = Offset(boxes[index].x, boxes[index].y)
-            // A stroke in the surface behind the glyphs rather than a pill under them: a label
-            // now has no card of its own to sit on, so it has to survive the price line, a guide
-            // or a ring passing directly behind it on its own. `paint-order` is a CSS idea and
-            // Compose has no such flag - the halo is a second pass of the same text, stroked
-            // rather than filled, drawn first so the fill goes on top of it rather than beside it.
-            drawText(
-                label.layout,
-                color = on,
-                topLeft = at,
-                drawStyle = Stroke(width = LabelHaloWidth.toPx(), join = StrokeJoin.Round, cap = StrokeCap.Round),
-            )
             drawText(label.layout, color = label.color, topLeft = at)
         }
     }
@@ -383,6 +373,7 @@ private fun DrawScope.guide(y: Float, color: Color, width: Float) {
         start = Offset(0f, y),
         end = Offset(width, y),
         strokeWidth = GuideStroke.toPx(),
+        pathEffect = PathEffect.dashPathEffect(floatArrayOf(DashOn.toPx(), DashOff.toPx())),
     )
 }
 
@@ -596,6 +587,10 @@ private val LineStroke = 2.dp
 
 private val GuideStroke = 1.dp
 
+private val DashOn = 4.dp
+
+private val DashOff = 4.dp
+
 /** Faint enough to read the price line through, strong enough to find the band's edges. */
 private const val BandAlpha = 0.14f
 
@@ -614,9 +609,6 @@ private val LabelInset = 2.dp
 
 /** A `labelSmall` line plus the gap that keeps two of them apart. */
 private val LabelHeight = 15.dp
-
-/** The halo stroked behind a label's own glyphs, now that nothing else lifts it off the chart. */
-private val LabelHaloWidth = 6.dp
 
 /** How far past a ring's own edge a label needs before the two read as clearly apart. */
 private val RingLabelClearance = 3.dp

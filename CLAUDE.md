@@ -6,6 +6,8 @@ delivered. The Windows desktop counterpart was retired on 2026-08-12 at v0.1.126
 kept in the sibling repo, unchanged and unreleased. This is the only app under development, so
 nothing here is constrained by keeping the two in step.
 
+Release history from 3.6 onwards is in [`CHANGELOG.md`](CHANGELOG.md). Update it as part of every release.
+
 ## Working agreements
 
 - **Never implement without approval.** State the change as a list and wait for the literal word
