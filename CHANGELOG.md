@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.5] — 2026-09-18
+
+- Recommendation card: timing pill moved inline with ticker, right-aligned before the ⋮ menu
+- Recommendation card: navigation dots moved to center bottom of card
+- Recommendation card: spacing added between Arabic stock name and channel name
+
 ## [3.7.4] — 2026-09-18
 
 - Price chart: level guide lines restored to dashed; label halo stroke removed

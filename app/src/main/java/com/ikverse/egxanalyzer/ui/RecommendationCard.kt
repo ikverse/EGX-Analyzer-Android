@@ -220,6 +220,11 @@ private fun RecommendationCard(
                     OccurrenceDetail(point, imagePath) { viewingImage = true }
                 }
             }
+            if (pageCount > 1) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    PageDots(page, pageCount)
+                }
+            }
         }
     }
 
@@ -275,8 +280,8 @@ private fun StockHeader(
                 stock.stockNameArabic?.let {
                     Text(it, style = MaterialTheme.typography.bodyMedium)
                 }
-                // Two cards for one stock can be identical apart from who said it.
                 channel?.takeIf(String::isNotBlank)?.let {
+                    Spacer(Modifier.height(Space.xs))
                     Text(
                         it,
                         style = MaterialTheme.typography.labelMedium,
@@ -285,54 +290,14 @@ private fun StockHeader(
                 }
             }
             if (point != null) {
-                // Only where there is something to page through. One occurrence needs no map.
-                if (pageCount > 1) {
-                    // Held in a box the height of the ticker's own line and centred in it, so the
-                    // dots sit against the ticker at any font scale rather than at one guessed size.
-                    val tickerLine = with(LocalDensity.current) {
-                        MaterialTheme.typography.titleLarge.lineHeight.toDp()
-                    }
-                    Box(
-                        Modifier.height(tickerLine),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        PageDots(page, pageCount)
-                    }
-                    // The dots and the menu were flush against one another, which read as one control
-                    // wearing a label rather than as a hint standing beside a menu.
-                    Spacer(Modifier.width(Space.xs))
-                }
-                // The ⋮ the position card has carried since it was built, arriving on the other card
-                // that holds a call. One item, because there is one thing to do with a call that the
-                // card cannot already do: get its numbers out of the app intact. A report exports as a
-                // spreadsheet, which is the right shape for a record and the wrong one for the four
-                // figures somebody is about to retype into an order ticket.
+                TimingChip(point)
+                Spacer(Modifier.width(Space.s))
                 CallMenu(stock, point, channel, session, editor, onEdit)
             }
-            }
+        }
 
-        // Every pill on this card, on one line under the header and starting at the card's own
-        // inset - level with the ticker above it and with ENTRY below it.
-        //
-        // They were stacked in the top-right corner, against a name block three or four lines tall,
-        // so the one annotation this card always carries floated at the very top of it aligned with
-        // nothing: not the ticker's line, not the menu beside it, not a single figure underneath.
-        // Reported 2026-09-11 as pills "at the very top of the card, not aligned, placed randomly".
-        // This is the shape the position card was given the same day - identity on the left of the
-        // header, the menu on its right, and every ring on one row beneath.
-        //
-        // Edited beside Timing rather than over it: what dated a call and whether anybody has
-        // corrected it are two different facts about the same card, and stacked the pill that is on
-        // every card sat under the one that is on almost none - so the card's own annotation moved
-        // a line whenever somebody corrected it.
-        if (point != null) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(Space.s),
-                verticalArrangement = Arrangement.spacedBy(Space.xs),
-            ) {
-                if (editor?.editFor(stock, point) != null) EditedChip(onEdit)
-                TimingChip(point)
-            }
+        if (point != null && editor?.editFor(stock, point) != null) {
+            EditedChip(onEdit)
         }
     }
 }
