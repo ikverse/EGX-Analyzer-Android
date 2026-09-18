@@ -609,3 +609,364 @@ parameter being threaded anywhere. Added 2026-09-08.
   through the whole collapse. `AppMark`'s aurora phase was the third reader of this rule until the
   mark went; the rule is the same one, and the next always-on animation drawn over a page wants it.
 
+
+## Gotchas
+
+- **The bar follows every page turn except the ones a travel started in the shell passes over, and
+  the effect that scrolls is keyed on the pager.** The bar and the pager move the same pointer, so
+  each follows the other, and all three ways that link can go wrong have now been shipped. Keyed on
+  `appState.destination`, the scrolling effect was restarted by the very thing it was meant to serve
+  — a swipe publishes its own arrival — and the restarted copy compared a target read at
+  recomposition against a page read a frame or more later, so a second swipe arriving inside that
+  window scrolled the reader **back to the page they had just left**. One `LaunchedEffect(pager)`
+  owns the whole link now; nothing the pager says can restart it, so no stale target survives to be
+  acted on. The guard against the write-back was the other two faults, and both came of the guard
+  naming the **gesture** rather than the travel. Raised *inside* the scrolling coroutine it went up a
+  frame after the scroll started and down a frame after it ended, and a page that turned over inside
+  either gap was swallowed. Read from the pager's own `interactionSource` instead — up on
+  `DragInteraction.Start`, down when the pager reported itself at rest — it was no better, because
+  **Compose runs a swipe as two scroll sessions**, the finger's and the settling fling's, and
+  `isScrollInProgress` reads false in the gap between them: the guard came down in that gap, so a
+  *flick* — where the page is decided by velocity on the fling rather than by crossing the halfway
+  mark under the hand — turned its page with the guard already closed and left the bar lit on the tab
+  the reader had just left. A slow drag past halfway still worked, which is what made it look
+  intermittent, and the same flag silently dropped a tap made while a swipe was still settling. The
+  guard is `travelling` now: the page a travel started here is heading for, `null` otherwise. It is
+  written by the only coroutine that scrolls, before it suspends, so nothing about how Compose splits
+  a gesture into sessions can reach it. Page and guard are read in **one** `snapshotFlow` pair, so a
+  turn is never delivered against a guard that changed after the turn was taken. What falls out of
+  that: every turn the reader causes is an arrival however it turned — under the hand, on the fling,
+  or as the pager settled — while the pages a travel crosses stay silent, and so does **the page a
+  travel is abandoned on when a second send replaces it**, which left to speak wins the race against
+  the send that cancelled it. Sends run through `collectLatest`, which starts each block
+  **undispatched**, so a replacement raises the guard in the same continuation the cancelled block
+  lowered it in and the abandoned page never gets a frame to name itself. A travel is outranked by
+  nothing but a hand, so a tab tapped while the pages are still coasting is answered rather than
+  dropped; a drag refuses it outright, and that refusal is swallowed — the guard comes down, the
+  gesture names where they land, and if it puts the pager back on the page it set out from, turning
+  no page and so naming nothing, the resting page is published so the bar cannot be left on a tab the
+  pager never travelled to.
+- **Pressing the destination already showing takes that page back to the top.** The press every
+  bottom bar on this platform answers, and this app answered it with nothing — the way back from a
+  session card deep inside Insights was to scroll all of it by hand. `AppState.scrollToTopRequest`
+  is a **destination and a counter**, and both halves are load-bearing: the destination because the
+  pager keeps the neighbouring pages composed, so a bare signal would take those to the top too and
+  throw away a scroll position on a tab nobody touched; the counter because a second press is a
+  second request, and a value that repeated would restart no effect. The shell publishes it through
+  `LocalScrollToTop` from `DestinationScreen` — the one place both shells build a page and so the
+  only place that knows which destination is being composed — and `Screen` animates the scroll, so
+  all five pages get it from one change. **Deliberately not folded into `navigate()`**: the pager
+  calls that on every swipe and its `snapshotFlow` reports the page it is already on the moment it
+  starts collecting, so a scroll-to-top in there would fire on first composition and again on every
+  settle, throwing the reader to the top for having swiped to a tab.
+- **The Analyze action never leaves, and it follows the bar down.** It used to go with the bar on
+  the same scroll — tidy, and it meant the one control that starts a run was reachable only from the
+  top of the page. It is always on screen now, and rather than holding its height over the hole the
+  bar leaves, it travels into the bar's own place: `animateDpAsState` between
+  `NavBarFootprint + PillBottomMargin` (94dp, clear of the bar and then the same gap again, so the
+  two read as one stack) and `PillBottomMargin` (10dp, the bar's own float off the bottom). The
+  travel is exactly `NavBarFootprint`, which is what makes it land there rather than near there.
+  **This was the rule `toastClearance` in the shell followed**, back when an outcome was a toast at
+  the foot of the screen — same problem, same `animateDpAsState`, and its comment said why: "so a
+  toast raised on a scrolled page does not hang over the gap where the bar used to be". The status
+  line lives in the header now and that clearance is gone with it, so the action is the only
+  floating chrome left that has to follow the bar at all. The wide layout draws it unconditionally with no bar to follow, so all of this is
+  the compact branch only.
+- **The action's ground is 0.84 in both states, against the bar's 0.94.** `actionFill` and
+  `actionAuroraBase` carry the same figure deliberately. The bar tidies itself away while a page is
+  read and the action does not, so the action is a permanent object over a page still being
+  scrolled — and at the bar's opacity it reads as a slab parked on the page rather than as a control
+  floating above it. The two states match because the transparency is a property of the button, not
+  of one of its states: a button that changed weight the moment a run started would report the run
+  twice, once in a way nobody could name. Only the grounds carry it — `onAction` stays opaque so the
+  label survives whatever scrolls behind, and the `actionAurora` circles are the light *inside* the
+  ground, so thinning those would dim the one thing saying a model is working.
+- **The action's edge is a gradient in its own colours, and the bar's beside it is not.** Both are
+  `FloatingSurface`, so they are the same material; they are deliberately not the same edge, because
+  two identically outlined slabs at the foot of the screen said nothing about which of them did
+  anything. `PageAccent.actionLine` carries it, and it has **its own stops rather than
+  `actionFill`'s** for the reason `aiLine` has its own beside `aiFill`: the fill sits *inside* the
+  line, so a line in the fill's colours is a line against itself and disappears. What it has to read
+  against is the page scrolling behind the button — dark on one theme, near-white on the other — so
+  the stops invert between the two while the hue does not. The hues are the aurora's own, in the
+  aurora's own order, rather than a fourth set invented for the edge — derived per page from the
+  seed table rather than written out five times, so the relationship between a page's fill, edge and
+  aurora is stated once.
+- **The edge is 0.74 against the ground's 0.84, and its hues run about a third under the aurora's.**
+  It shipped opaque and full-strength on the argument that an edge letting the page through stops
+  holding the shape — which was wrong on the device: it read as a bright cyan wire around the button,
+  the loudest thing on a dark page and competing with the label it was meant to frame. The shape
+  still holds, because what draws it is the contrast with the page rather than the weight of the
+  line. `ActionPaletteTest` pins the properties and not the figures — nothing the action is drawn
+  with is solid, every stop in a ramp shares one alpha (a ramp that fades along its length reads as
+  a mistake), and the edge shares no stop with the fill, which is the slip that produces an invisible
+  edge: reaching for `actionFill` when adding the gradient, because it is right there and already
+  the right family. **Every case sweeps all five accents in both themes**, since the ramps are
+  derived per page now and a property that holds for the one hue somebody looked at is exactly the
+  kind that quietly fails on the other four.
+- **Only the ready state wears it.** Running keeps the red `aiStop` hairline: that is the only state
+  where pressing cancels, and no edge in the action's own colours could say so — the moving fill
+  says a model is working, which is a different sentence. Blocked keeps the neutral outline every
+  other floating thing has, for the reason it does not wear the fill either: a blocked button with
+  the action's own edge round it would be inviting a press that does nothing.
+- **`FloatingSurface.outline` is a `Brush`, not a `Color`.** One parameter rather than two that can
+  both be set and disagree; a flat edge passes `SolidColor(…)`. The width stays 1dp for every
+  floating edge in the app, gradient or not — the bar sits directly under the action on a compact
+  screen, and an edge thicker on one of them would read as the two not matching rather than as one
+  of them being the control. The colour is what separates them.
+- **Every pill in the app is one shape and one of two heights**, `PillShape` and `LabelPillHeight`
+  / `PillHeight` in `DesignSystem.kt`. Before 2026-09-11 they were all `CircleShape` at whatever
+  height their own padding produced, which is what the owner reported as pills "too rounded" and
+  "different sizes in one card": a capsule is a shape nothing else on a screen of 14dp cards makes,
+  and a height derived from padding moves with the text, the font scale and whoever wrote that
+  particular chip. Six families had grown - the ring on a card, the button on a card, the EGX 33
+  badge, the stock sheet's filled flags and two chips spelled inline in the table - across four
+  corners and five heights. They are one now: **6dp**; **20dp** for anything only read, with the text
+  centred in a fixed box rather than propping it open; **32dp** for anything pressed, where the extra
+  12dp is the fingertip. **The 6 is not a free number and 8 was tried first.** `CircleShape` takes
+  half the *shorter* side, so the capsule on a 20dp pill was already only a 10dp corner - 8dp moved
+  every label pill by two, shipped, and looked identical on the device, while making the EGX 33 badge
+  *rounder* than the 4dp it had. 6dp is the largest corner that visibly cuts a 20dp pill. `OutlinePill` is the ring and
+  `FilledPill` is the block of colour, and both draw one `PillLabel`, so a pill's padding and type
+  cannot be restated anywhere. **What stays round is round by nature** and not by drift: avatars,
+  logos, the empty state's glyph, the navigation indicator, the header's search field, `DayChip`
+  (a seven-across day toggle) and `RiskRewardBar` (a bar, not a pill).
+- **A card says its pills in one place.** The position card drew the status chip in the header and
+  the rest of them a block lower down, and the call card stacked Edited over Timing in the top-right
+  corner - against a name block three or four lines tall, so the one annotation every call card
+  carries floated at the very top aligned with nothing: not the ticker's line, not the menu beside
+  it, not a figure underneath. Both cards are now the same shape - identity on the left of the
+  header, the menu on its right, every pill on one row beneath it, starting at the card's own inset
+  so it lines up with the ticker above and `ENTRY` below. The status chip leads the position card's
+  row (which is unconditional now, since a status is always there to say). No fact was added or
+  removed by either move. The call card's own regroup was missed on the first pass and reported on
+  2026-09-11 as pills "at the very top of the card, not aligned, placed randomly".
+- **The EGX 33 badge is deliberately outside `PillShape`**, and was folded in once and had to come
+  back out the same day. It is a 4dp square because round its outline sits concentric with the star
+  inside it and the pair reads as a settings cog; the shared 6dp made it rounder than the 4dp it had
+  and it read as a gear on the device within the hour. The pill rule is about labels, and this
+  carries no wording.
+- **T+1 is neutral, like every other note pill.** It was `primary` in all three places that draw it -
+  the call card, the position card, Insights - on the reasoning that it is neither a verdict nor a
+  warning and so may take the app's own voice. True, and not a reason to be the one differently
+  coloured ring in a row of them; the wording already says the call named its own deadline. Asked
+  for on 2026-09-11. It is still tappable in the two places it explains itself.
+- **A button on a card is one of two things, and its colour says which.** `ActionPill` in
+  `CommonUi.kt` is anything that changes the record — Bought, Sold, Keep open — as a `PillHeight`
+  ring in the app's own `primary` at half strength. `DisclosureButton` is anything that only opens
+  or closes a section — View / Hide recommendations, Source, Source trace — as a bare `primary`
+  label with an arrow that flips with the section. They were a filled tonal button, two outlined
+  ones and two text ones, which said that recording a purchase is a heavier act than recording a
+  sale, and put those two in one row on a position card disagreeing about it. **Three things are
+  deliberately outside the system**: the Ask AI pill, because violet is the model speaking and the
+  one hue on these screens that is not a measurement; the Analyze action, which is 56dp of teal
+  aurora and a tier above anything drawn on a card (see the entries above); and an `AlertDialog`'s
+  buttons, which are Material's convention rather than this app's. **The pills are 32dp and the
+  touch target is still 48**, through `minimumInteractiveComponentSize` — the trick the Ask AI pill
+  already used, and the reason a smaller button here costs nothing to press. Settings, Backup and
+  Prices were finished on 2026-09-09 by `SettingsButton`, the bullet below. **Channels is
+  deliberately still Material's own**: its eight `Button`s are the steps of the Telegram sign-in,
+  each the sole action of the card it is on and correctly the point of that screen.
+- **`SettingsButton` is the third kind, for a page of settings rather than a card about one call.**
+  `PillHeight` and `Space.m` against Material's 40dp and 24, and `labelMedium` like both card
+  buttons — at the default it was the heaviest thing on a card whose subject is the words beside it,
+  standing next to switches 32dp tall. It stays an `OutlinedButton` rather than becoming an
+  `ActionPill`: a pill takes the page's own hue to say that pressing it changes the record, and a
+  column of cyan rings down Settings is the page of coloured glyphs the question mark is muted to
+  avoid. It carries a `filled` flag for the four card primaries — Save and verify, Sync now,
+  Download, Install — **because they share a row with the outlined ones**, and a `FlowRow` 40dp tall
+  at one end and 32 at the other reads as a layout fault rather than as emphasis. Which button is
+  filled did not change; only how tall the row is. `AlertDialog` buttons stay Material's, the same
+  exception the card pills make.
+- **A report card opens on a press anywhere, and only while it is shut.** `Card(onClick = …,
+  enabled = !expanded)` in `SavedAnalysisCard`, with `disabledContainerColor` pinned to the same
+  fill so "disabled" does not read as greyed out. Open, that card holds the report's own toolbar,
+  its call cards and the source trace, so a card-wide toggle would close the whole report on a tap
+  landing in the gap between any two of them. The footer row — a `DisclosureButton`, which replaced
+  a full-width filled button doing the same job as the card under it — is what closes it again.
+- **Nothing inside the `NavigationRail` may fill its width, and one `fillMaxWidth()` took the whole
+  unfolded layout out.** Material sizes a rail with `widthIn(min = ContainerWidth)` — a floor, not a
+  width — so a child that fills the width stretches the rail to whatever it is measured against.
+  `NavigationSuiteScaffoldLayout` measures the navigation suite against the entire window and then
+  hands the page `width - railWidth`, so the rail became the screen and the page was measured at
+  zero: five destinations centred on an empty display. It arrived with the app mark on 2026-09-09,
+  as `Box(Modifier.fillMaxWidth().height(RailTopInset))` holding the mark in the rail's top gap, and
+  was fixed in 3.6.2 by deleting that one call — the rail's column centres its children already.
+  **A phone cannot show this**: there is no rail on the compact layout, so it shipped through a
+  release that was checked folded, and only the Fold opened shows it. Anything new drawn in the rail
+  wants a bounded width for the same reason.
+- **A page's filters live in a sheet the header opens, not on a shelf on the page.** The page
+  header's filter icon opens a `ModalBottomSheet` holding that page's filters; it replaced
+  `FilterBar` on 2026-09-09, the day after the stock box left that shelf for the header.
+- **What was wrong with the shelf was what the stock box left behind.** `FilterBar` was a search box
+  and a Filters chip on one line, standing off the page on a shadow once a scroll had pushed it to
+  the top. Take the box away and it is a chip alone: a loose one-control row above every list, and
+  the row was the cheapest thing on it to keep — the chip opened a panel of three more chips, each
+  of which opened a menu. Three levels deep for a question the reader asks in one press. The lift,
+  the pin, the clamp against the parent's foot, `LocalViewportTop`, the transparent-until-floating
+  fill and its `floatingColor` override all existed to make that one row behave on a scroll, and
+  all of it went.
+- **The trigger is in the header and the content is on the page, and neither could hold the other.**
+  The header does not know what a page filters by — channels come off `savedResults`, dates off the
+  trades — and the screen is composed below the icon that opens it. So the flag lives on
+  `PageState.filtersOpen(destination)`, which is exactly the shape `stockBox(destination)` has
+  and for the same reason. It is also why it survives a fold, where a `remember` inside the sheet
+  would not: see the head of `PageState`.
+- **A sheet, not a panel hanging off the header.** A sheet already means one thing here — the longer
+  version of the thing that was pressed, which is what `StockSheet` and `InfoSheet` are — and a
+  panel over a scrolling page would have to re-solve, in a second place, the pinning the shelf was
+  written to solve. The width is the rest of it: the choices are **shown open**, as chips under a
+  heading, where the shelf had room only for a chip that opened a menu. `MultiSelectSection`,
+  `SingleSelectSection` and `SortSection` are that; `MultiSelectFilter` and its siblings stay in the
+  file because the in-report toolbar still uses them, inside a card where there is no room for
+  anything else.
+- **The `All` chip leads every section and is selected while nothing else is.** "Untouched means
+  everything" is the rule the menus had to state in words; on a surface with room for it, it is just
+  the first chip.
+- **The sort is below a rule, under its own heading, and there is no `All` in it.** An order is not
+  a filter: it hides nothing, `filtersActive` leaves it out and Clear filters does not touch it. On
+  the shelf it sat on the same line as the filters and was kept out of the clear-all by a comment no
+  reader could see. And a list is always in *some* order, so there is nothing for an `All` to mean.
+- **`Clear filters` is on the title's line, not at the foot.** The sections are as long as the page
+  has channels, and a button under them is one the reader has to scroll to in order to undo
+  something they can see from the top. It is offered on `filtersActive`, which counts the stock box
+  too, because clearing means clearing.
+- **The dot on the icon is `filtersInSheet`, not `filtersActive`, and that distinction is the whole
+  of why it is honest** — it is the same one the shelf drew between `folded` and `active`. The stock
+  box reports itself by staying open; a dot lit by it would report something the reader is already
+  looking at, and would go on reporting it after they had cleared everything else.
+- **Every sheet is composed outside the guard its shelf sat inside.** Results drew its shelf only
+  with runs on the page; the Portfolio drew its own inside the Positions card, below the early
+  return for an empty record — which is why `PositionFilterSheet` is split out of `PositionSection`
+  and called above that return. The icon in the header is there either way, so a sheet that composed
+  only sometimes would be an icon that opened nothing. The sections drop themselves when they have
+  no options, so an empty page opens on the sort alone.
+- **The Portfolio's sheet is titled `Filter positions`.** Its date and its order narrow the Positions
+  card; Your record and Overdue are built from the whole portfolio on purpose, so a date picked here
+  cannot hide a trade that is late. The shelf said that by sitting inside the card it filtered. A
+  sheet reached from the page header would be claiming the page, so the title says it instead.
+- **A breakpoint that *adds* content spends the width on itself.** `RecommendationTable` grew columns
+  at 620dp and 900dp and `TodayCard`'s tiles capped their grid at four columns, and both produced the
+  same result: the wider device showed **less** of what the reader came for — 49% of a table row on
+  the tablet against 64% on the smaller Fold. The check that catches it is not "does the breakpoint
+  fire at the right width" but **what fraction of the content is visible at each real container
+  width**, computed for the Fold's 614dp, the tablet's 682 and the emulator's 715 — and remember all
+  three are the *container*, after the rail's 80dp, the page's `Space.l` either side and the card's
+  own inset. Both are fixed the same way, and it is worth stating as the rule: extra width goes into
+  the elements already on screen, and anything a wider window adds must already be present in some
+  form at every narrower one. See **A report's calls on screen** and the tile table under **What
+  happened this session**.
+- **`AdaptivePanes` is the only "side by side, or stacked when it will not fit" rule in the app**, and
+  a second one would be a second threshold, a second fallback and a second gap to keep in step. A
+  pair of equals is that helper with `mainWeight = 1f`, not a layout of its own — which is how
+  Analyze's **Content types** and **Recommendation target date** now sit beside each other above
+  600dp of container: stacked on the 379dp cover screen, 313dp each on the 638dp unfolded Fold, 347
+  each on the tablet. Note the outer pane split is 720dp and **no real device here reaches it** on
+  that page (the emulator's 739 does), so those two cards get the page's full width to divide.
+  `alignHeights` stretches both columns to the taller; it is off by default because it is wrong for
+  the case the helper was built for — a tall main pane would drag a short side column's last card
+  down to meet it — and right for a pair, where two cards of equal standing ending at two heights
+  reads as one of them having failed to load. **It measures rather than asking for an intrinsic, and
+  that distinction shipped a crash.** `Modifier.height(IntrinsicSize.Max)` is the obvious way to
+  write it and it throws: intrinsic measurement of a `SubcomposeLayout` is unsupported, and a pane
+  holds whatever the screen puts in one — at the time a `BoxWithConstraints` in the Content types
+  card, since replaced by a `FlowRow`. Because the Row branch is only taken above
+  `minWidth`, it stood up on the cover screen and died the moment the phone was unfolded — v2.1.31,
+  reported from the device. The rule outlived that call site: the next `BoxWithConstraints`,
+  `LazyRow` or `SubcomposeAsyncImage` a pane acquires brings the crash straight back, and nothing
+  about the panes says so. `ResponsiveRows` carries the identical warning about
+  `IntrinsicSize.Min` a few hundred lines above, which is the part worth remembering: **the trap was
+  already written down and got walked into anyway.** The height is read back with `onSizeChanged`
+  and can only grow, so it settles in one pass, and its reset key is the width so a fold cannot
+  carry one layout's height into the other.
+- **Both were hand-built copies of `SectionCard` and are not any more.** That is what let them drift:
+  same container and shape, and then one tinting its icon `primary` and the other leaving the
+  calendar untinted, each spelling its own header row and divider. Drawing the background twice is
+  how two cards meant to match stop matching. The **"Change date" button is gone** with them — the
+  "Specific date" row has always opened the picker itself, so the button was a second control doing
+  one job, and it was the reason that card changed height the instant the mode changed, which is the
+  one thing a card sitting beside another must not do. The affordance moved into the line already
+  there: the date, then `· tap to change`.
+- **The checkboxes wrap rather than switching on a width, and the helper that switched them is
+  gone.** `AdaptiveInline` asked the card how wide it was and laid three checkboxes across above
+  420dp, and it had the fold exactly backwards: the card is at its *narrowest* when there is room to
+  put it beside the date card, so the 379dp cover screen gave it 347 of content and got the compact
+  row, while the unfolded Fold split 638 into two 313 columns, left 281, missed the threshold and
+  stacked three long labels down a column. **The larger screen got the taller layout.** A `FlowRow`
+  asks the labels how wide they actually are instead of guessing from a number written in the
+  source, so one row survives the cover screen, the unfolded Fold and the tablet alike and a large
+  font scale wraps instead of clipping. That left `AdaptiveInline` with no callers and it was
+  deleted rather than kept: a five-line wrapper over `BoxWithConstraints` whose KDoc named the one
+  card it was written for was never a general primitive, and a public helper nobody calls is read as
+  the house answer by whoever needs the next one. Deleting it also takes a `SubcomposeLayout` back
+  out of a pane `alignHeights` has to measure — see the crash above, whose rule stands without it.
+- **A `remember` keyed on `saved.id` goes stale now that a report's contents can change.** A
+  report's id never changes, and until corrections existed nothing else about a report ever changed
+  either, so keying the parsed stocks on the id alone was correct for as long as it was written.
+  The first correction made a stored run mutable and the report went on drawing the stocks as the
+  model first read them — while **Insights showed the fix**, because it rebuilds from the record on
+  every recompute, and leaving the screen fixed it, because that disposed the memo. Anything in
+  `ResultDetail` derived from a report's *contents* is keyed on `saved.result.editRevision` as well
+  as its id: the stocks, the channel names, and the timing and channel option lists. The revision
+  rather than `saved` itself, so it is an integer comparison per recomposition rather than a deep
+  compare of every call in the run. **View state stays keyed on the id alone** — the search box, the
+  context toggle, the open filter panel — because those are about the reader rather than about the
+  report.
+- **A filter stores what is hidden, not what is shown**, for the same reason. Seeded once from the
+  report, a set of shown names cannot contain a value that did not exist when it was seeded — so
+  re-dating a card as Watching created a timing the filter had never heard of and the card the
+  reader had just corrected **vanished** instead of updating. Storing the exclusions gives both
+  halves: filters set on purpose survive a correction, and anything a correction creates is shown
+  because nobody ever chose to hide it. `narrowed` is still measured against what the report
+  actually offers, so an exclusion naming a timing the report no longer has lights nothing.
+- **A sheet holds an anchor, not the objects it was opened with.** `ResultDetail`'s occurrence sheet
+  captured the stock and the point it was opened with, so a correction made *from inside it* left it
+  drawing the figures that had just been replaced. It holds `(originalStockCode, parseIndex)` and
+  re-resolves on every recomposition — against the whole report rather than the filtered list, so a
+  filter can never close a sheet the reader has open.
+- **The two shells are two call sites, so no page may hold its own state.** `EgxAnalyzerApp` branches
+  on `rail` around one `AppContent` for the rail and another for the pill, and again around
+  `AnimatedContent` versus `DestinationPager`. Folding the phone flips `rail`, Compose disposes one
+  subtree whole and composes the other from nothing, and every `remember` in every screen dies with
+  it — which is how an open report vanished on unfolding and left the reader on the list of runs.
+  Anything the reader would notice losing goes in `PageState`, hung off the application-scoped
+  `AppState`; only transient chrome (a dropdown, a confirm dialog) stays in a `remember`.
+  `rememberSaveable` under a `SaveableStateHolder` does **not** work here and was shipped once
+  before it was understood: the branches swap inside one frame, so the arriving page reads the
+  holder before the leaving page has written to it, and on the way back it restores what the
+  previous fold left there. `movableContentOf` cannot reach across `HorizontalPager`'s lazy
+  subcomposition. `PageState`'s own comment carries the whole reasoning.
+- **A `bringIntoView` escapes the page it was asked from.** The request travels up through every
+  scrollable ancestor, and on a phone the outermost one is `DestinationPager` — so a reveal fired
+  from a page the reader has left scrolls *that page* back into view, which is the pager travelling
+  back to the tab they were leaving. `beyondViewportPageCount = 1` is what keeps the page alive to
+  fire it: the Portfolio is still composed, and still running the effect that reveals a trade, while
+  Insights is the tab on screen. It beat a tab press rather than losing to one — `animateScrollToPage`
+  and a reveal scroll run at the same `MutatePriority`, so the later of the two wins — while a swipe
+  survived, because a drag holds the pager at `UserInput` where no reveal can take it, which is what
+  made this read as the navigation bar alone being broken. Every reveal now goes through
+  `revealIfOnScreen`, which drops the request unless `AppState.destination` is the tab the page is
+  drawn on. Three call sites: the Portfolio's trade, Insights' call, the Results report. The card is
+  left unfolded either way, and a reveal the reader has walked away from is dropped rather than held
+  for their return — the rule `NavStop` already states, that revealing the wrong card is worse than
+  revealing none.
+- **The tab is not the arrival, and checking it alone fixed half of this.** A press sets
+  `AppState.destination` in the same breath it starts the pager travelling, so a page that composes
+  *during* that travel passes a destination check and cancels the very scroll carrying the reader to
+  it — the pager, barely off the tab they pressed from, snaps back to it. Only a tab two or more
+  pages away can do this: a neighbour is already composed and its effects do not run again. That is
+  the whole of why the Portfolio reached Insights, next door, and never Results, two along, and why
+  Results failed only once a report had been opened — `openRun` is `PageState.openResultId`, which
+  outlives the tab, so it is null at a cold start and non-null forever after. `revealIfOnScreen`
+  waits on `LocalTabsSettled` — written by `DestinationPager` off `pager.isScrollInProgress`, true
+  beside a rail, and put back to true on dispose so a fold cannot strand it — then asks about the
+  destination a second time on the other side of the wait. Waited out rather than dropped, because
+  an arrival that *should* reveal composes its page mid-travel too: a notification opening a saved
+  report is one, and dropping it would answer the notification with a page scrolled to wherever it
+  was last left.
+- Scrollbar overlays must be applied **outside** the scrolling node, or they are measured against
+  the content and slide away with it.
+- `NavigationSuiteScaffoldLayout` does **not** consume window insets for its content; the full
+  `NavigationSuiteScaffold` does, through a private helper the layout never calls. Left alone the
+  page pads itself clear of the gesture strip that the bar below it is already holding, and the
+  cover screen shows a band of dead chrome the width of the strip — 15dp on the Fold 7.
