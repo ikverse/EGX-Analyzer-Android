@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -503,6 +504,11 @@ private fun StockSheetPrice(
             }
         }
         if (visible.count { it.close != null } > 1) {
+            // An extra `Space.xs` on top of the section's own gap - 8dp total rather than 4 - so
+            // the move% above never crowds a level pinned to the chart's own top edge, which sits
+            // almost flush against it. Only this one gap grows; the rest of the section keeps the
+            // tighter spacing.
+            Spacer(Modifier.height(Space.xs))
             PriceChart(
                 visible,
                 shown,

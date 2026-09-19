@@ -159,6 +159,16 @@ class PageState {
     val portfolioStock: MutableState<String> get() = portfolioStockBox.picked
     val portfolioFiltersOpen: MutableState<Boolean> = mutableStateOf(false)
 
+    /**
+     * Which position cards have their chart open, by position id.
+     *
+     * The same shape [openReportMarkdown] already has, for the same reason: a bare `remember` in
+     * `PositionCard` died on every fold, which on the Fold 7 is not a rare event but the ordinary
+     * way the phone is used - expand a chart on the cover screen, open the phone the rest of the
+     * way, and the card that greeted the reader had quietly closed it again.
+     */
+    val expandedPositionCharts: MutableState<Set<String>> = mutableStateOf(emptySet())
+
     // ── Analyze ──────────────────────────────────────────────────────────────────────────────
 
     /**

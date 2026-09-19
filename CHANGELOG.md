@@ -4,6 +4,14 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.13] — 2026-09-19
+
+- Position card: PriceLadder now hides while the chart is open, and returns the moment it's collapsed, instead of the two ever stacking
+- Position card: whether the chart is open now survives folding the Fold — moved off a bare `remember` onto `PageState.expandedPositionCharts`, the same shape `openReportMarkdown` already uses
+- Price chart's range/levels chips are tighter still — `PillPaddingH` instead of `Space.s`
+- Price chart's target labels read "t1"/"t2" instead of "target 1"/"target 2" (StockSheet and the position card both, since the chart is shared)
+- Price chart: extra clearance between the section heading's move% and the chart itself, so a level pinned to the chart's top edge doesn't crowd it
+
 ## [3.7.12] — 2026-09-19
 
 - Price chart's range chips and Levels toggle (stock sheet and position card) are more compact — a house-style pill instead of Material's default FilterChip, same tap target

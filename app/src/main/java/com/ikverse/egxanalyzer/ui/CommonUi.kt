@@ -1381,7 +1381,10 @@ internal fun CompactFilterChip(
         shape = PillShape,
     ) {
         Box(
-            Modifier.height(PillHeight).padding(horizontal = Space.s),
+            // PillPaddingH, not Space.s: the same tight ring every label pill in the app already
+            // hugs its word with, rather than the looser padding a pressed pill usually carries -
+            // five ranges and a toggle need every point of width this row can give back.
+            Modifier.height(PillHeight).padding(horizontal = PillPaddingH),
             contentAlignment = Alignment.Center,
         ) {
             Text(

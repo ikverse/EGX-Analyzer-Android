@@ -216,8 +216,11 @@ internal fun PriceChart(
                 }
             }
             levels.paid?.let { add(ChartLabel(it, "you paid " + formatPrice(it), paidColor)) }
-            levels.target1?.let { add(ChartLabel(it, "target 1 " + formatPrice(it), targetColor)) }
-            levels.target2?.let { add(ChartLabel(it, "target 2 " + formatPrice(it), targetColor)) }
+            // "t1"/"t2" rather than "target 1"/"target 2" - the pinned-arrow case prefixes this
+            // with "↑ " below, and the full words were the string most often clipped or crowding
+            // the section's own move% at the same right edge above the chart.
+            levels.target1?.let { add(ChartLabel(it, "t1 " + formatPrice(it), targetColor)) }
+            levels.target2?.let { add(ChartLabel(it, "t2 " + formatPrice(it), targetColor)) }
         }.map { label ->
             // The arrow is what separates a level pinned to the edge from one that really sits
             // there, which is the whole risk of a capped scale.

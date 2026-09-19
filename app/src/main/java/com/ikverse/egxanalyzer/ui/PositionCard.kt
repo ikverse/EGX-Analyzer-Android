@@ -98,7 +98,15 @@ internal fun PositionCard(
     // Hidden by default: the chart is the deeper "how did it get here", worth a press rather than
     // height every card on the tab spends whether or not it is read. Closed for a trade with
     // nothing left to run - see the chart section below.
-    var chartExpanded by remember(position.id) { mutableStateOf(false) }
+    //
+    // Held on `PageState` rather than a bare `remember`, because a bare one does not survive a
+    // fold: `EgxAnalyzerApp` disposes the compact shell's whole subtree and composes the rail
+    // shell from nothing (or back), which on the Fold 7 happens on the ordinary act of opening the
+    // phone. `expandedPositionCharts` is a set of ids for exactly the reason `openReportMarkdown`
+    // is - several cards can have their chart open at once, and re-sorting the list must not move
+    // which card that is.
+    var expandedCharts by appState.pages.expandedPositionCharts
+    val chartExpanded = position.id in expandedCharts
     val chevronRotation by animateFloatAsState(if (chartExpanded) 180f else 0f, label = "chartChevron")
 
     // A **second-level** surface: it sits inside the session card, so it takes the container role's
@@ -120,7 +128,13 @@ internal fun PositionCard(
                     .clickable(
                         enabled = view.open,
                         onClickLabel = if (chartExpanded) "Hide price chart" else "Show price chart",
-                    ) { chartExpanded = !chartExpanded },
+                    ) {
+                        expandedCharts = if (chartExpanded) {
+                            expandedCharts - position.id
+                        } else {
+                            expandedCharts + position.id
+                        }
+                    },
                 verticalAlignment = Alignment.Top,
             ) {
                 Column(Modifier.weight(1f)) {
@@ -290,21 +304,27 @@ internal fun PositionCard(
                 )
             }
 
-            PriceLadder(
-                stopLoss = position.stopLoss,
-                // One price, not a band. The trade opened where it opened, and the drawing keeps a
-                // zero-width band visible rather than losing the mark; the levels either side of it
-                // are still the call's, which is what makes the picture worth reading at all.
-                entryLow = position.entryPrice,
-                entryHigh = position.entryPrice,
-                target1 = position.target1,
-                target2 = position.target2,
-                // The arrow is where this trade stands: today's close while it runs, and where it
-                // ended once it has. Nothing is plotted across a change of scale - the levels are
-                // quoted in the old money and the price in the new, so the arrow would point at a
-                // place on the axis that does not exist.
-                reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
-            )
+            // Hidden while the chart is open: the chart already draws these same levels against
+            // the close, so the two would only ever say the same thing twice, one above the other.
+            // Returns the moment the chart closes, in the space it just gave up.
+            if (!chartExpanded) {
+                PriceLadder(
+                    stopLoss = position.stopLoss,
+                    // One price, not a band. The trade opened where it opened, and the drawing
+                    // keeps a zero-width band visible rather than losing the mark; the levels
+                    // either side of it are still the call's, which is what makes the picture
+                    // worth reading at all.
+                    entryLow = position.entryPrice,
+                    entryHigh = position.entryPrice,
+                    target1 = position.target1,
+                    target2 = position.target2,
+                    // The arrow is where this trade stands: today's close while it runs, and
+                    // where it ended once it has. Nothing is plotted across a change of scale -
+                    // the levels are quoted in the old money and the price in the new, so the
+                    // arrow would point at a place on the axis that does not exist.
+                    reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
+                )
+            }
 
             FigureGroup(
                 // On the heading rather than in a figure of its own, because it is not a fifth
