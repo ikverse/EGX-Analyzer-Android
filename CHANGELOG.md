@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.16] — 2026-09-19
+
+- Insights call card: "risk : reward" moved out of "The call" heading to a grey caption under its four figures, instead of running in the panel's own rose accent
+- Insights call card: outcome and T+1 pills moved out of the stacked top-right corner into a left-aligned wrapping row under the ticker, so the header's height is no longer set by whichever of the name block or the pill stack was taller
+- Insights call card: "this source" and "also called by" lines moved up into the header, grouped with the channel name and called/settled line, ahead of the divider that now separates source info from what the app measured
+
 ## [3.7.15] — 2026-09-19
 
 - Insights call card: channel name and the called/settled/repeat line moved into the header, closed by a divider, instead of running the source into the tight meta line below the name block

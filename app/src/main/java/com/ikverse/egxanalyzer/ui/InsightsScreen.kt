@@ -1239,59 +1239,53 @@ private fun ScoredCallRow(
     val border = arrivalFlash(highlighted, onHighlightShown) ?: heldBorder(held)
     val body: @Composable ColumnScope.() -> Unit = {
         Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.m)) {
-            // Identity, then who called it and when - closed by a rule, so everything the app
-            // measured starts on a clean line below it instead of running straight into it.
+            // Identity, then the verdict, then who called it and when and what that source is
+            // worth - closed by a rule, so everything the app measured starts on a clean line
+            // below it instead of running straight into it.
             Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                 // A fixed two lines for the name, so a company whose name wraps does not make its
                 // card taller than the one beside it. This is what left the pair ragged when they
                 // sat side by side.
-                Row(
-                    Modifier.heightIn(min = CardHeaderHeight),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        // On the ticker's line, not beside the block: this row is held at a minimum
-                        // height, so a logo beside the column left a fixed gap under itself on every
-                        // card however short the name was.
-                        //
-                        // The logo and the ticker press together as one target rather than the text
-                        // alone, exactly as they do on the recommendation card: a 12sp glyph beside a
-                        // title is two touch targets where the reader sees one thing. The card's own
-                        // press, where it has one, opens the trade taken on this call - so this is a
-                        // second target on a card that already had one, and the smaller of the two is
-                        // the one that leads to the stock. See LocalOpenStock.
-                        val openStock = LocalOpenStock.current
-                        Row(
-                            Modifier.clickable { openStock(call.ticker) },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
-                            Text(call.ticker, style = MaterialTheme.typography.titleSmall)
-                            Egx33Badge(call.ticker, Modifier.padding(start = Space.s))
-                        }
-                        // Arabic only - the English name read as a second, redundant label beside a
-                        // ticker that already says the stock in Latin letters.
-                        call.companyArabic?.takeIf(String::isNotBlank)?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    // Stacked rather than set loose on the card: both chips are about how this one
-                    // call was judged - what the market did with it, and how long it was ever given -
-                    // and the timing used to sit a line under the channel's name, where it read as
-                    // part of the date. Right-aligned, so the two rings share an edge.
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(Space.xs),
+                Column(Modifier.heightIn(min = CardHeaderHeight)) {
+                    // On the ticker's line, not beside the block: this row is held at a minimum
+                    // height, so a logo beside the column left a fixed gap under itself on every
+                    // card however short the name was.
+                    //
+                    // The logo and the ticker press together as one target rather than the text
+                    // alone, exactly as they do on the recommendation card: a 12sp glyph beside a
+                    // title is two touch targets where the reader sees one thing. The card's own
+                    // press, where it has one, opens the trade taken on this call - so this is a
+                    // second target on a card that already had one, and the smaller of the two is
+                    // the one that leads to the stock. See LocalOpenStock.
+                    val openStock = LocalOpenStock.current
+                    Row(
+                        Modifier.clickable { openStock(call.ticker) },
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        OutcomeLabel(call)
-                        TimingLabel(call)
+                        StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                        Text(call.ticker, style = MaterialTheme.typography.titleSmall)
+                        Egx33Badge(call.ticker, Modifier.padding(start = Space.s))
                     }
+                    // Arabic only - the English name read as a second, redundant label beside a
+                    // ticker that already says the stock in Latin letters.
+                    call.companyArabic?.takeIf(String::isNotBlank)?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                // Wrapped rather than stacked in the top-right corner: a fixed vertical stack
+                // there forced the header's height to the taller of the name block and the two
+                // pills, which left empty air under whichever was shorter - most often the name.
+                // Flowed here, left-aligned like everything else in the header, the row costs only
+                // the height it actually needs and grows sideways before it grows down.
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    OutcomeLabel(call)
+                    TimingLabel(call)
                 }
                 // Who made the call, picked out by weight rather than run in with the dates - it
                 // is a fact about the source, not about the stock, so it starts at the card's own
@@ -1331,10 +1325,14 @@ private fun ScoredCallRow(
                         }
                     }
                 }
+                // The source's own record and what the other channels around this call are doing -
+                // both are about who made the call rather than about the call's own numbers, so
+                // they read with the rest of the header instead of falling below the rule with the
+                // figures the app measured.
+                SourceRecord(channelScore)
+                CallContext(call)
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            SourceRecord(channelScore)
-            CallContext(call)
             ExtractionWarning(call)
             // What the outline means, in one line. Everything else on this card judges the channel
             // on the levels it printed; this is the only figure here measured from what was paid.
@@ -1391,45 +1389,54 @@ private fun ScoredCallRow(
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
                     .padding(Space.m),
             ) {
-                FigureGroup(
-                    // On the heading rather than in a figure of its own, because it is not a fifth
-                    // level - it is what the four below come to. Without it the card prints four prices
-                    // and leaves the reader dividing them to find out what the call was actually worth.
-                    "The call" + (call.riskReward?.let { " · risk : reward ${it.asRatio()}" } ?: ""),
-                    listOf(
-                        // Paid and risked first, aimed at second: wrapped two-up this keeps the targets
-                        // side by side in reading order rather than splitting them across rows.
-                        {
-                            Figure(
-                                "Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry,
-                                // The base the three percentages below are measured from, said once
-                                // where they can all be read against it.
-                                caption = call.entryMidCaption(),
-                            )
-                        },
-                        // A price on its own says nothing across stocks: 59.80 is a wide stop on one
-                        // share and a tight one on another, and the distance is the half that compares.
-                        {
-                            Figure(
-                                "Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f),
-                                tone = PriceRole.stop, caption = call.fromEntry(call.stopLoss).distance(),
-                            )
-                        },
-                        {
-                            Figure(
-                                "Target 1", formatPrice(call.target1), Modifier.weight(1f),
-                                tone = PriceRole.target, caption = call.fromEntry(call.target1).distance(),
-                            )
-                        },
-                        {
-                            Figure(
-                                "Target 2", formatPrice(call.target2), Modifier.weight(1f),
-                                tone = PriceRole.target, caption = call.fromEntry(call.target2).distance(),
-                            )
-                        },
-                    ),
-                    titleColor = pageAccent.ink,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    FigureGroup(
+                        "The call",
+                        listOf(
+                            // Paid and risked first, aimed at second: wrapped two-up this keeps the targets
+                            // side by side in reading order rather than splitting them across rows.
+                            {
+                                Figure(
+                                    "Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry,
+                                    // The base the three percentages below are measured from, said once
+                                    // where they can all be read against it.
+                                    caption = call.entryMidCaption(),
+                                )
+                            },
+                            // A price on its own says nothing across stocks: 59.80 is a wide stop on one
+                            // share and a tight one on another, and the distance is the half that compares.
+                            {
+                                Figure(
+                                    "Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f),
+                                    tone = PriceRole.stop, caption = call.fromEntry(call.stopLoss).distance(),
+                                )
+                            },
+                            {
+                                Figure(
+                                    "Target 1", formatPrice(call.target1), Modifier.weight(1f),
+                                    tone = PriceRole.target, caption = call.fromEntry(call.target1).distance(),
+                                )
+                            },
+                            {
+                                Figure(
+                                    "Target 2", formatPrice(call.target2), Modifier.weight(1f),
+                                    tone = PriceRole.target, caption = call.fromEntry(call.target2).distance(),
+                                )
+                            },
+                        ),
+                        titleColor = pageAccent.ink,
+                    )
+                    // What the four figures above come to, said once rather than dividing them by eye.
+                    // Grey rather than the panel's own accent: it is arithmetic on the channel's own
+                    // numbers, not a verdict the app is drawing attention to.
+                    call.riskReward?.let {
+                        Text(
+                            "risk : reward ${it.asRatio()}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
             // The market's own hue, not the neutral tile above: it is the one group on this card
             // measured from what actually happened rather than what the channel asked for.
