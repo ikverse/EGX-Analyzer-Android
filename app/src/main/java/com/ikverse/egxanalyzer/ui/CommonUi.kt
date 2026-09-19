@@ -1349,6 +1349,54 @@ internal fun FilledPill(text: String, container: Color, content: Color) {
     }
 }
 
+/**
+ * One choice in a row where exactly one is chosen - a price chart's range and its levels toggle.
+ *
+ * Not Material's own `FilterChip`: its padding is fixed and generous, which is what made five
+ * ranges and a toggle need 290dp of scrolling room on a card that can have as little as 313dp to
+ * give in total. Drawn at [PillHeight] and [PillShape] instead, the size every other pressed pill
+ * on a card already carries, filled when chosen and ringed when not - the same two states
+ * [FilledPill] and [OutlinePill] already draw, so choosing an option reads the same way reading one
+ * does. [minimumInteractiveComponentSize] keeps the tap target at 48dp regardless, the same trick
+ * [ActionPill] and [DisclosureButton] already rely on.
+ */
+@Composable
+internal fun CompactFilterChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ink = if (selected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        onClick = onClick,
+        modifier = modifier.minimumInteractiveComponentSize(),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        contentColor = ink,
+        border = if (selected) null else BorderStroke(ChipOutline, MaterialTheme.colorScheme.outline),
+        shape = PillShape,
+    ) {
+        Box(
+            Modifier.height(PillHeight).padding(horizontal = Space.s),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** A hairline, matching every other pill's own edge. */
+private val ChipOutline = 1.dp
+
 /** One label, one height, one padding - the whole of what the two pills have in common. */
 @Composable
 private fun PillLabel(text: String) {

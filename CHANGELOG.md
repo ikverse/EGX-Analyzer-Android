@@ -4,6 +4,11 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.12] — 2026-09-19
+
+- Price chart's range chips and Levels toggle (stock sheet and position card) are more compact — a house-style pill instead of Material's default FilterChip, same tap target
+- Position card's chart no longer draws an entry/"you paid" line — it duplicated the ladder and the Entry figure at the exact same price; stop and both targets still show
+
 ## [3.7.11] — 2026-09-19
 
 - Position card: the price chart is now hidden by default and slides open on a press anywhere on the header (outside the ticker, which still opens the stock sheet); a chevron beside the menu flips to show it

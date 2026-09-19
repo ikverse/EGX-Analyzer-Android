@@ -15,11 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
-import androidx.compose.material.icons.outlined.Timeline
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -593,27 +591,20 @@ internal fun ChartControls(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ChartRange.entries.forEach { option ->
-            FilterChip(
+            CompactFilterChip(
+                label = option.label,
                 selected = option == range,
                 onClick = { onRange(option) },
-                label = { Text(option.label, maxLines = 1) },
             )
         }
         if (levels != null) {
             // A fixed gap and not a weight: this row scrolls, so its width is unbounded and a
             // weighted child inside one cannot be measured at all.
             Spacer(Modifier.width(Space.m))
-            FilterChip(
+            CompactFilterChip(
+                label = "Levels",
                 selected = levels,
                 onClick = { onLevels(!levels) },
-                label = { Text("Levels", maxLines = 1) },
-                leadingIcon = {
-                    Icon(
-                        Icons.Outlined.Timeline,
-                        contentDescription = null,
-                        modifier = Modifier.size(IconSize.Inline),
-                    )
-                },
             )
         }
     }

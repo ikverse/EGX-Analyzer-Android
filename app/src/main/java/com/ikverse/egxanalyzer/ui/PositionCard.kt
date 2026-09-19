@@ -588,13 +588,16 @@ private fun PositionChartSection(appState: AppState, position: Position, on: Col
         ChartLevels(
             source = "your trade",
             stopLoss = position.stopLoss,
-            // One price, not a band - the same reasoning PriceLadder draws this way: the trade
-            // opened where it opened, and the levels either side of it are still the call's.
-            entryLow = position.entryPrice,
-            entryHigh = position.entryPrice,
+            // No entry and no paid line here - the ladder above and the Entry figure below already
+            // say what was paid, and at entryLow == entryHigh == paid the chart drew two labels,
+            // "entry X" and "you paid X", stacked on the exact same price. What is left to ask the
+            // chart is whether the close is drifting toward the stop or running for a target, which
+            // needs only the three levels still ahead of the trade.
+            entryLow = null,
+            entryHigh = null,
             target1 = position.target1,
             target2 = position.target2,
-            paid = position.entryPrice,
+            paid = null,
         )
     } else {
         null
