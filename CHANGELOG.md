@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.17] — 2026-09-19
+
+- Insights: the call card grid drops from two columns to one — a call card always spans the full container width now, on a phone and once the Fold opens alike
+- Insights call card: above ~480dp of container the card draws its wide layout instead of the phone one — a two-pane header (identity/pills on the left, channel/record on the right), a full price chart in place of the ladder, and "The call"/"What happened" running side by side instead of stacked
+- Insights call card: `CallChartSection` is the same `PriceChart` the stock sheet and the position card draw — range chips, levels drawn across the line, a touch readout — built from the sessions the call was already judged on, so it costs no extra query
+
 ## [3.7.16] — 2026-09-19
 
 - Insights call card: "risk : reward" moved out of "The call" heading to a grey caption under its four figures, instead of running in the panel's own rose accent
