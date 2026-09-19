@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.11] — 2026-09-19
+
+- Position card: the price chart is now hidden by default and slides open on a press anywhere on the header (outside the ticker, which still opens the stock sheet); a chevron beside the menu flips to show it
+- Position card: the opened chart is the full one — range chips (1W–6M), a levels toggle, and the touch readout — built from the same pieces StockSheet draws rather than a smaller copy; PriceLadder is back to always showing
+- Position card: the header's status/T+1/overdue/kept-open/price-scale pills now scroll sideways instead of wrapping, when there isn't room for all of them
+
 ## [3.7.10] — 2026-09-19
 
 - Position card: an open trade now draws PriceChart in place of PriceLadder, so the levels are read against the month of closes behind them instead of a fixed ladder that never moves; a settled trade still gets the ladder

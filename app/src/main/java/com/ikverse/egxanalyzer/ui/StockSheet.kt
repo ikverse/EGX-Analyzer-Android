@@ -581,7 +581,7 @@ private fun StockSheetPrice(
  * than one that is not offered.
  */
 @Composable
-private fun ChartControls(
+internal fun ChartControls(
     range: ChartRange,
     onRange: (ChartRange) -> Unit,
     levels: Boolean?,
@@ -620,7 +620,7 @@ private fun ChartControls(
 }
 
 @Composable
-private fun ChartCaption(text: String) {
+internal fun ChartCaption(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.labelSmall,
@@ -864,29 +864,6 @@ private fun ScoredCall.entryBand(): String? = when {
  */
 private fun formatSignedPrice(value: Double): String =
     (if (value > 0) "+" else "") + formatPrice(value)
-
-/**
- * What the visible line adds up to, end to end, in percent.
- *
- * The figure the shape cannot carry: a chart scaled to its own range draws the same climb whether
- * the stock moved three percent or forty, which is the first thing a reader asks of it.
- */
-/** What the line had done by the touched session, measured from the left-hand end of the range. */
-private fun List<DailySession>.moveTo(session: DailySession): Double? {
-    val first = firstOrNull { it.close != null }?.close ?: return null
-    val close = session.close ?: return null
-    if (first <= 0.0) return null
-    return (close - first) / first * 100
-}
-
-private fun List<DailySession>.rangeMove(): Double? {
-    val priced = filter { it.close != null }
-    if (priced.size < 2) return null
-    val first = priced.first().close!!
-    val last = priced.last().close!!
-    if (first <= 0.0) return null
-    return (last - first) / first * 100
-}
 
 /** Enough recent calls to see who has been saying what, before the list is asked to open. */
 private const val CallsShown = 5

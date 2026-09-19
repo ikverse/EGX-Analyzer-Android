@@ -1,5 +1,11 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -32,6 +39,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,18 +55,20 @@ import com.ikverse.egxanalyzer.model.Scoring
 import java.time.LocalDate
 
 /**
- * A position card answers four questions in order: what did I buy, how did it get to where it is,
- * where is it now, and how long is left. The status outline says the last of those at a glance
- * before any of it is read.
+ * A position card answers three questions at a glance, and a fourth on request: what did I buy,
+ * where is it now, and how long is left, plus - open the chart, and only then - how did it get
+ * here. The status outline says the third of those before any of it is read.
  *
  * The prices are drawn before they are listed. Eight figures at equal weight said what every level
  * was and nothing about how they stood against each other - whether the stop was a whisker away or
- * a mile off, whether the price had crept most of the way to target 1 or none of it. On a running
- * trade, [PriceChart] draws those same levels - the entry mark is the price the user actually paid
- * rather than the band the channel printed - against the month of closes behind them, which is the
- * one thing [PriceLadder] cannot say: whether the close sitting near the stop got there over three
- * flat weeks or on one bad session. A trade with nothing left to run - sold, stopped, expired -
- * keeps the ladder; there is no "since" left for a chart to answer.
+ * a mile off, whether the price had crept most of the way to target 1 or none of it. [PriceLadder]
+ * answers that for every trade on the tab, at no cost in height. On a running trade the header
+ * slides a full [PriceChart] open beneath it on a press - the same drawing [StockSheet] uses, range
+ * chips and all - which is the one thing the ladder cannot say: whether a close sitting near the
+ * stop got there over three flat weeks or on one bad session. Hidden until asked for, because that
+ * is a question worth a press rather than height every card on the tab spends whether or not it is
+ * read. A trade with nothing left to run - sold, stopped, expired - opens no chart at all; there is
+ * no "since" left for one to answer, and its outcome is already told in full by the figures below.
  *
  * Then two groups rather than two unlabelled rows - what the trade is, and where it stands. The
  * split is what lets each figure carry a line of its own underneath, a distance from the entry or
@@ -84,6 +95,11 @@ internal fun PositionCard(
     var menuOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
+    // Hidden by default: the chart is the deeper "how did it get here", worth a press rather than
+    // height every card on the tab spends whether or not it is read. Closed for a trade with
+    // nothing left to run - see the chart section below.
+    var chartExpanded by remember(position.id) { mutableStateOf(false) }
+    val chevronRotation by animateFloatAsState(if (chartExpanded) 180f else 0f, label = "chartChevron")
 
     // A **second-level** surface: it sits inside the session card, so it takes the container role's
     // own alpha - see GlassSection - and none of the lighting a card standing on the page gets.
@@ -95,8 +111,18 @@ internal fun PositionCard(
     val body: @Composable ColumnScope.() -> Unit = {
         Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             // A fixed two lines for the name, so a company whose name wraps does not make its card
-            // taller than the one beside it.
-            Row(Modifier.heightIn(min = PositionHeaderHeight), verticalAlignment = Alignment.Top) {
+            // taller than the one beside it. Clickable on a running trade - anywhere outside the
+            // ticker row's own press, which still opens the stock sheet - to slide the chart open
+            // beneath it; a settled trade has no chart to open, so the header stays inert.
+            Row(
+                Modifier
+                    .heightIn(min = PositionHeaderHeight)
+                    .clickable(
+                        enabled = view.open,
+                        onClickLabel = if (chartExpanded) "Hide price chart" else "Show price chart",
+                    ) { chartExpanded = !chartExpanded },
+                verticalAlignment = Alignment.Top,
+            ) {
                 Column(Modifier.weight(1f)) {
                     // One target for the logo and the ticker, as on the call card. The card
                     // itself carries no press, so this takes none away. See LocalOpenStock.
@@ -125,14 +151,18 @@ internal fun PositionCard(
                     // Every pill on this card, still in the one row the card says them all in -
                     // moved up into the header itself, so identity and status read as one block
                     // above the rule that now separates them from the trade's own facts below it.
+                    // Scrolls sideways rather than wrapping to a second line when it does not fit -
+                    // the same `scrollableRow` a chip row already uses in the stock sheet's own
+                    // chart controls, and for the same reason: a card carrying five chips at once
+                    // (status, T+1, overdue, kept open, price scale) next to a ticker and a badge
+                    // has nowhere to wrap to without pushing the company name down.
                     //
                     // Every chip inside is named in the condition. Price scale was not, and a split
                     // under a trade that was neither overdue nor kept open had its chip written and
                     // never drawn.
-                    FlowRow(
-                        Modifier.padding(top = Space.xs),
+                    Row(
+                        Modifier.padding(top = Space.xs).scrollableRow(),
                         horizontalArrangement = Arrangement.spacedBy(Space.s),
-                        verticalArrangement = Arrangement.spacedBy(Space.xs),
                     ) {
                         // Where the trade stands leads, because it is the one fact here that is
                         // true of every trade and the one the rest of the row qualifies.
@@ -149,9 +179,24 @@ internal fun PositionCard(
                         if (view.priceScaleChanged) PriceScaleChip()
                     }
                 }
-                Box {
-                    MoreButton(onClick = { menuOpen = true })
-                    AppMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Points at what the header's own press does, and flips with it - the same
+                    // "arrow that flips with the section" a `DisclosureButton` draws, borrowed here
+                    // because the trigger is the header itself rather than a button of its own.
+                    if (view.open) {
+                        Icon(
+                            Icons.Outlined.ExpandMore,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .padding(end = Space.xs)
+                                .size(IconSize.Inline)
+                                .rotate(chevronRotation),
+                        )
+                    }
+                    Box {
+                        MoreButton(onClick = { menuOpen = true })
+                        AppMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         AppMenuItem(
                             "Edit trade",
                             Icons.Outlined.Edit,
@@ -178,12 +223,29 @@ internal fun PositionCard(
                             destructive = true,
                         )
                     }
+                    }
                 }
             }
 
             // Separates identity and status, read together above it, from the trade's own facts
             // below - the same rule the two figure groups further down are already ruled apart by.
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            // Slides open under the header on a running trade - see the header's own `clickable`.
+            // Hidden by default, because the ladder below already answers "where do the levels
+            // sit" for every trade on the tab at no cost in height; this is the deeper "how did it
+            // get here" a reader presses for. A settled trade never gets one: `chartExpanded` can
+            // only be true on a trade that was open when it was pressed, and `view.open` is checked
+            // again here rather than trusted, since a trade can settle while its card is expanded.
+            if (view.open) {
+                AnimatedVisibility(
+                    visible = chartExpanded,
+                    enter = expandVertically(clip = false) + fadeIn(),
+                    exit = shrinkVertically(clip = false) + fadeOut(),
+                ) {
+                    PositionChartSection(appState, position, colors.containerColor)
+                }
+            }
 
             // The line that names the call, which is exactly what a press on this card opens. The
             // date is the app's own short form rather than the raw ISO one this line used to
@@ -228,56 +290,21 @@ internal fun PositionCard(
                 )
             }
 
-            // A running trade gets the chart rather than the ladder - the ladder can only say
-            // where the levels sit, and "am I drifting toward the stop, or was that one bad
-            // session" is a question about the month behind the close, not about the close alone.
-            // A trade with nothing left to run keeps the ladder: sold, stopped or expired, there is
-            // no "since" left for a chart to answer, and its outcome is already told in full by the
-            // figures below.
-            //
-            // Priced history is fetched here rather than held on `view`, because the five-minute
-            // archive this reads is local-only - see `PriceSeriesStore` - and every other card on
-            // the tab would otherwise pay for a query nobody is looking at yet.
-            val chartHistory = if (view.open) rememberPositionHistory(appState, position.ticker) else null
-            if (chartHistory != null && chartHistory.count { it.close != null } >= 2) {
-                var touched by remember(position.id) { mutableStateOf<DailySession?>(null) }
-                PriceChart(
-                    sessions = chartHistory,
-                    levels = ChartLevels(
-                        source = "your trade",
-                        stopLoss = position.stopLoss,
-                        // One price, not a band - the same reasoning PriceLadder drew this way:
-                        // the trade opened where it opened, and the levels either side of it are
-                        // still the call's, which is what makes the picture worth reading at all.
-                        entryLow = position.entryPrice,
-                        entryHigh = position.entryPrice,
-                        target1 = position.target1,
-                        target2 = position.target2,
-                        paid = position.entryPrice,
-                    ),
-                    // No call-date rings here: the one date this card is about is the entry
-                    // already marked in the levels above, not every call anybody made on the
-                    // stock. Wiring the report in for that is a bigger change than this one.
-                    calls = emptySet(),
-                    on = colors.containerColor,
-                    selected = touched,
-                    onSelect = { touched = it },
-                    height = PositionChartHeight,
-                )
-            } else {
-                PriceLadder(
-                    stopLoss = position.stopLoss,
-                    entryLow = position.entryPrice,
-                    entryHigh = position.entryPrice,
-                    target1 = position.target1,
-                    target2 = position.target2,
-                    // The arrow is where this trade stands: today's close while it runs, and where
-                    // it ended once it has. Nothing is plotted across a change of scale - the
-                    // levels are quoted in the old money and the price in the new, so the arrow
-                    // would point at a place on the axis that does not exist.
-                    reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
-                )
-            }
+            PriceLadder(
+                stopLoss = position.stopLoss,
+                // One price, not a band. The trade opened where it opened, and the drawing keeps a
+                // zero-width band visible rather than losing the mark; the levels either side of it
+                // are still the call's, which is what makes the picture worth reading at all.
+                entryLow = position.entryPrice,
+                entryHigh = position.entryPrice,
+                target1 = position.target1,
+                target2 = position.target2,
+                // The arrow is where this trade stands: today's close while it runs, and where it
+                // ended once it has. Nothing is plotted across a change of scale - the levels are
+                // quoted in the old money and the price in the new, so the arrow would point at a
+                // place on the axis that does not exist.
+                reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
+            )
 
             FigureGroup(
                 // On the heading rather than in a figure of its own, because it is not a fifth
@@ -514,20 +541,128 @@ internal fun PositionCard(
 }
 
 /**
- * A month of closes for one ticker, fetched once per card rather than held on [PositionView].
+ * Six months of closes for one ticker, fetched once per card rather than held on [PositionView].
  *
  * Off the disk exactly as [StockSheet] reads it - a local read through [AppState.priceHistory],
  * no network - and only for a card that actually needs it: every other position on the tab keeps
- * whatever it already had, rather than every card on the grid paying for a query at once.
+ * whatever it already had, rather than every card on the grid paying for a query at once. The
+ * widest range rather than the default one, for the same reason [StockSheet] fetches it once: the
+ * chart's own range chips slice this in the composition, so no press ever waits on a second query.
  */
 @Composable
 private fun rememberPositionHistory(appState: AppState, ticker: String): List<DailySession> {
     val key = remember(ticker) { Scoring.normalizeTicker(ticker) }
     var history by remember(key) { mutableStateOf(emptyList<DailySession>()) }
     LaunchedEffect(key) {
-        history = appState.priceHistory(key, ChartRange.Default.since(LocalDate.now()))
+        history = appState.priceHistory(key, ChartRange.Widest.since(LocalDate.now()))
     }
     return history
+}
+
+/**
+ * The full chart a running trade's header slides open: range chips, a levels toggle, and the
+ * touch readout [StockSheet] already draws for the same [PriceChart] - built from the same pieces
+ * rather than a smaller chart invented for the card, so a reader who has learned the sheet is not
+ * taught a second, thinner version of it here.
+ *
+ * Deliberately without [DayRange] or the fault chips [StockSheet] draws beside its own chart: both
+ * are about the stock in general, and this section is answering one narrower question, about the
+ * one trade the card is already about.
+ */
+@Composable
+private fun PositionChartSection(appState: AppState, position: Position, on: Color) {
+    val history = rememberPositionHistory(appState, position.ticker)
+    // Local to this card rather than `PageState.stockChartRange` - that state is written for the
+    // one stock sheet the app ever has open at a time, and every position card on the grid needs
+    // its own range and its own toggle, not one shared by all of them at once.
+    var range by remember(position.id) { mutableStateOf(ChartRange.Default) }
+    var showLevels by remember(position.id) { mutableStateOf(true) }
+    // Measured back from the newest session the app holds, exactly as `StockSheet` does it - see
+    // its own comment: a feed running behind should shorten the line, not draw an empty box.
+    val visible = remember(history, range) {
+        val anchor = history.lastOrNull()?.date ?: return@remember history
+        history.filter { !it.date.isBefore(range.since(anchor)) }
+    }
+    val move = remember(visible) { visible.rangeMove() }
+    val levels = if (showLevels) {
+        ChartLevels(
+            source = "your trade",
+            stopLoss = position.stopLoss,
+            // One price, not a band - the same reasoning PriceLadder draws this way: the trade
+            // opened where it opened, and the levels either side of it are still the call's.
+            entryLow = position.entryPrice,
+            entryHigh = position.entryPrice,
+            target1 = position.target1,
+            target2 = position.target2,
+            paid = position.entryPrice,
+        )
+    } else {
+        null
+    }
+    var touched by remember(visible) { mutableStateOf<DailySession?>(null) }
+
+    Column(
+        Modifier.padding(top = Space.xs),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            SheetSectionLabel("Price chart")
+            // What the visible line adds up to, which is the one thing its shape cannot say.
+            if (move != null) {
+                Text(
+                    formatPercent(move),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                    color = PriceRole.forReturn(move),
+                )
+            }
+        }
+        if (visible.count { it.close != null } > 1) {
+            PriceChart(
+                sessions = visible,
+                levels = levels,
+                // No call-date rings here: the one date this section is about is the entry already
+                // marked in the levels above, not every call anybody made on the stock. Wiring the
+                // report in for that is a bigger change than this one.
+                calls = emptySet(),
+                on = on,
+                selected = touched,
+                onSelect = { touched = it },
+                height = PositionChartHeight,
+            )
+            // The readout takes the dates' own line rather than appearing above it, exactly as it
+            // does in the sheet: a caption that arrived on touch would push the chart up under the
+            // finger that asked for it.
+            val reading = touched
+            if (reading?.close != null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    Text(
+                        shortDate(reading.date) + " · " + formatPrice(reading.close),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    visible.moveTo(reading)?.let {
+                        ChartCaption(formatPercent(it) + " since " + shortDate(visible.first().date))
+                    }
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    ChartCaption(shortDate(visible.first().date))
+                    ChartCaption(shortDate(visible.last().date))
+                }
+            }
+            if (showLevels) ChartCaption("levels from your trade")
+        } else {
+            // Absent rather than an empty box, which reads as a chart that failed to load. A week
+            // of a stock that has barely traded is a real answer and this is what it looks like.
+            ChartCaption("No sessions stored in this range.")
+        }
+        ChartControls(
+            range = range,
+            onRange = { range = it },
+            levels = showLevels,
+            onLevels = { showLevels = it },
+        )
+    }
 }
 
 /**

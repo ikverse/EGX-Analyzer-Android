@@ -103,6 +103,31 @@ internal data class ChartLevels(
 }
 
 /**
+ * What the visible line adds up to, end to end, in percent.
+ *
+ * The figure the shape cannot carry: a chart scaled to its own range draws the same climb whether
+ * the stock moved three percent or forty, which is the first thing a reader asks of it. Shared by
+ * every screen that draws [PriceChart] over a range a reader can change, rather than computed once
+ * for the sheet and left there for the next screen to work out again.
+ */
+internal fun List<DailySession>.rangeMove(): Double? {
+    val priced = filter { it.close != null }
+    if (priced.size < 2) return null
+    val first = priced.first().close!!
+    val last = priced.last().close!!
+    if (first <= 0.0) return null
+    return (last - first) / first * 100
+}
+
+/** What the line had done by the touched session, measured from the left-hand end of the range. */
+internal fun List<DailySession>.moveTo(session: DailySession): Double? {
+    val first = firstOrNull { it.close != null }?.close ?: return null
+    val close = session.close ?: return null
+    if (first <= 0.0) return null
+    return (close - first) / first * 100
+}
+
+/**
  * Where a stock has been, with the levels it is being judged against drawn across it.
  *
  * The line alone answered one question and stopped: roughly up, roughly down. Every price anywhere
