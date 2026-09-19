@@ -258,9 +258,24 @@ internal fun InsightsScreen(appState: AppState) {
             return@Screen
         }
 
+        // Built once for the page, not once per card: `channels` is every chat this device has
+        // loaded from Telegram, and a card searching it on each recomposition would walk the whole
+        // list a hundred times a scroll. Keyed on the list, so signing in - which is what fills it -
+        // reaches cards already on screen.
+        //
+        // Matched on the name rather than on the chat id, because that is what the record holds: a
+        // ChannelScore is grouped by name so a renamed channel keeps one record, and both sides of
+        // this map have been through `cleanChannelName`. A name with no chat behind it is the
+        // ordinary case rather than a failure - see ChannelAvatar.
+        val channelPhotos = remember(appState.channels) {
+            appState.channels
+                .filter { it.photoPath != null }
+                .associate { it.displayName to it.photoPath }
+        }
+
         // The ranking leads. It is the question the tab exists to answer - which source is worth
         // reading - and it used to sit below two summary cards as a collapsed line.
-        ChannelRanking(report.channels)
+        ChannelRanking(report.channels) { channel -> channelPhotos[channel] }
         // What used to sit here and does not any more:
         //
         // **Stocks ranked** answered a question this tab is not asking. Which stock the market has
@@ -608,12 +623,30 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
 private val HeroLabelBaseline = 4.dp
 
 @Composable
-private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
+private fun ColumnScope.ChannelRanking(
+    channels: List<ChannelScore>,
+    photoFor: (String) -> String?,
+) {
     if (channels.isEmpty()) return
     // The order PerformanceCalculator already produced, which puts the MINIMUM_JUDGED_TO_RANK floor
     // first and the rate second. This used to re-sort on the rate alone, which floated a source with
     // three settled calls to the top of the list and into the summary line as "Best".
     val best = channels.firstOrNull { it.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK }
+    // Numbered over the sources that clear the floor, not over the list. A card below it already
+    // says "too few judged to rank" in as many words, and a position printed on that same card
+    // would be the screen ranking what it has just said it cannot - the fault the hero's own `best`
+    // rule exists to prevent. They keep their place in the order and simply carry no number.
+    val places = remember(channels) {
+        var place = 0
+        channels.associate { score ->
+            score.channel to if (score.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK) {
+                place += 1
+                place
+            } else {
+                null
+            }
+        }
+    }
     ExpandableSection(
         title = "Sources ranked",
         icon = Icons.Outlined.Leaderboard,
@@ -632,7 +665,12 @@ private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
             val columns = responsiveColumns(minColumnWidth = ChannelCardMinWidth, maxColumns = 2)
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 ResponsiveRows(channels, columns) { channel, cardModifier ->
-                    ChannelCard(channel, cardModifier)
+                    ChannelCard(
+                        channel,
+                        place = places[channel.channel],
+                        photoPath = photoFor(channel.channel),
+                        modifier = cardModifier,
+                    )
                 }
             }
         }
@@ -647,7 +685,14 @@ private fun ColumnScope.ChannelRanking(channels: List<ChannelScore>) {
  * way to ask how the verdict was reached.
  */
 @Composable
-private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
+private fun ChannelCard(
+    channel: ChannelScore,
+    /** Where this source comes in the ranking, or null where it has too little record to rank. */
+    place: Int?,
+    /** Telegram's picture of this chat on this device, where there is one. See [ChannelAvatar]. */
+    photoPath: String?,
+    modifier: Modifier = Modifier,
+) {
     var explaining by remember(channel.channel) { mutableStateOf(false) }
     if (explaining) ChannelScoreSheet(channel) { explaining = false }
     Card(
@@ -671,7 +716,12 @@ private fun ChannelCard(channel: ChannelScore, modifier: Modifier = Modifier) {
             Row(
                 Modifier.heightIn(min = ChannelHeaderHeight),
                 verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
+                // Top-aligned with everything else on this row, so a name that wraps to two lines
+                // grows downward away from the mark rather than pushing it off the first line.
+                if (place != null) PlaceChip(place)
+                ChannelAvatar(channel.channel, photoPath, LogoSize.Row)
                 Text(
                     channel.channel,
                     style = MaterialTheme.typography.titleSmall,
@@ -854,6 +904,39 @@ private fun ScoredSession.key(): String = (targetDate ?: lastRunAt).toString()
 
 /** Two lines of channel name, so a row of source cards stays level. */
 private val ChannelHeaderHeight = 44.dp
+
+/**
+ * Where a source comes in the ranking, said on the card rather than left to reading order.
+ *
+ * The cards have always been in ranked order and nothing on one said so - which reads as an order
+ * on a phone, where they are a column, and as nothing at all on the Fold, where they are a grid two
+ * wide and the eye has no reason to prefer left-then-right.
+ *
+ * **Only the leader is coloured.** A column of accented chips would be five equal claims about
+ * which source leads, and the hue is already spoken for by the rate beside it; neutral for the rest
+ * makes the one that leads readable without any of them competing with the figure the card is for.
+ *
+ * [FilledPill] rather than a chip of its own, so it is the app's one pill shape at the app's one
+ * label height - a single digit in it comes out very nearly square, which is what a place wants to
+ * look like.
+ */
+@Composable
+private fun PlaceChip(place: Int) {
+    val leads = place == 1
+    FilledPill(
+        place.toString(),
+        container = if (leads) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        content = if (leads) {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+    )
+}
 
 /**
  * How a session went, under its own date, so a folded card still says something.

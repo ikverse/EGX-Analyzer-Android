@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,6 +38,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -52,6 +54,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -459,7 +462,7 @@ internal val PageTextInset = Space.l
  * Faint enough that an idle stretch of the bar is a hint of the line rather than a second object,
  * and the eye follows the one lit piece travelling along it.
  */
-private const val BusyTrackAlpha = 0.14f
+internal const val BusyTrackAlpha = 0.14f
 
 /** Enough movement to be a scroll rather than a wobble, so the bar does not flicker on a nudge. */
 private val NavBarScrollSlop = 6.dp
@@ -999,6 +1002,116 @@ internal fun StatTile(
 
 /** Tighter than [Space.xs], which read as two facts where a dense tile is meant to read as one. */
 private val DenseFigureGap = 2.dp
+
+/**
+ * A handful of counts as one instrument rather than as loose numbers.
+ *
+ * Bounded and divided because figures in a strip are read *against each other* - twelve stocks from
+ * twenty-eight readings is a different report from twelve out of twelve, and 2.2M sent against 249K
+ * returned is a different bill from an even split. Numbers floating in open space with 24dp between
+ * them read as unrelated facts, which is what the divider is for.
+ *
+ * Lifted out of `ResultsScreen`'s own `ReportFigures` when the token usage section wanted the same
+ * instrument, for the reason [FigureGroup] was lifted out of the three screens that had each grown
+ * one: a strip of counts is a shape this app draws, not something a screen invents.
+ *
+ * Every cell is [StatTile] in its `dense` form and centred, so the figures line up under each other
+ * whatever the labels beneath them do. The first cell takes the page's own hue by default - it is
+ * the figure that says how much there is of whatever the strip is counting - and [leadTone] is for
+ * a caller whose lead figure means something other than "the page".
+ */
+@Composable
+internal fun StatStrip(
+    figures: List<Pair<String, String>>,
+    modifier: Modifier = Modifier,
+    leadTone: Color = MaterialTheme.colorScheme.primary,
+) {
+    if (figures.isEmpty()) return
+    // The width comes from the Row inside rather than from the surface, which is how the report
+    // card's own version was written: in a Row between two weighted spacers, a surface that filled
+    // the width itself would measure before them and leave them nothing.
+    Surface(
+        modifier,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.small,
+        border = cardOutline,
+    ) {
+        // Intrinsic height so the dividers run the full depth of the row rather than the height
+        // Material would otherwise give a divider with nothing to measure against.
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            figures.forEachIndexed { index, (value, label) ->
+                if (index > 0) VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                StatTile(
+                    value = value,
+                    label = label,
+                    modifier = Modifier.weight(1f).padding(vertical = Space.xs, horizontal = Space.xs),
+                    tone = if (index == 0) leadTone else MaterialTheme.colorScheme.onSurface,
+                    alignment = Alignment.CenterHorizontally,
+                    dense = true,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * How one quantity divides in two, as a bar rather than as a ratio the reader works out.
+ *
+ * Deliberately not [OutcomeBar], which is about *verdicts* - four fixed outcomes in four fixed
+ * colours, with a legend drawn once above the cards that use it. This is the general case: two
+ * parts of one total, where the second part is the first part's own colour thinned rather than a
+ * second hue, because the two halves are the same kind of thing and a second hue would claim they
+ * were not.
+ *
+ * It carries no figures. A share is a shape, and the sentence under it is where the numbers go -
+ * which is also what stops it being read as a second, rounder copy of them.
+ */
+@Composable
+internal fun ShareBar(
+    part: Long,
+    total: Long,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+    height: Dp = ShareBarHeight,
+) {
+    if (total <= 0L) return
+    val share = (part.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(ShareBarCorner)),
+    ) {
+        // Nothing is drawn for a part that rounds to none of the width: a sliver one pixel wide
+        // reads as a rendering fault rather than as a small share, and the line beneath says the
+        // figure anyway.
+        if (share > 0f) Box(Modifier.weight(share).fillMaxHeight().background(color))
+        if (share < 1f) {
+            Box(
+                Modifier
+                    .weight(1f - share)
+                    .fillMaxHeight()
+                    .background(color.copy(alpha = ShareRestAlpha)),
+            )
+        }
+    }
+}
+
+/** [OutcomeBarCompact]'s height, so a share and a verdict drawn on one screen are one object. */
+private val ShareBarHeight = 8.dp
+
+/** [PillCorner] would round a bar this short into a capsule; 3dp cuts it without closing it. */
+private val ShareBarCorner = 3.dp
+
+/**
+ * Enough that the remainder reads as the same quantity, unspent - and deliberately above
+ * [BusyTrackAlpha].
+ *
+ * A progress track is scenery behind the part that moves, so it wants to be nearly invisible. Both
+ * halves of a share are the answer, so the smaller half has to be legible on its own: at the track's
+ * own 0.14 the 10% end of a lopsided split read as the bar simply stopping short.
+ */
+private const val ShareRestAlpha = 0.22f
 
 /**
  * Every button on a card that changes the record: bought, sold, kept open.

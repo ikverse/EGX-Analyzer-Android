@@ -33,10 +33,21 @@ import java.time.LocalDate
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
 import com.ikverse.egxanalyzer.model.CloudProvider
+import com.ikverse.egxanalyzer.model.AnalysisProgress
 import com.ikverse.egxanalyzer.model.ExtractionPlan
 
 interface AnalysisRepository {
-    suspend fun analyze(request: AnalysisRequest): AnalysisResult
+    /**
+     * @param onProgress called as each batch comes back and again when the report is being
+     *   written, so a screen can say how far along a run is rather than counting seconds at it.
+     *   Called on whatever thread the run is on, which is not the main one - a caller writing
+     *   Compose state from it has to say so. Defaulted to nothing, because the scheduled run has
+     *   no screen to tell.
+     */
+    suspend fun analyze(
+        request: AnalysisRequest,
+        onProgress: (AnalysisProgress) -> Unit = {},
+    ): AnalysisResult
     suspend fun listModels(): List<CloudModelInfo>
     suspend fun cancel(requestId: String): Boolean
 
@@ -123,7 +134,10 @@ class CloudAnalysisRepository(
      * exists to keep IMAGE_REF small rather than to spread the work. Extraction judges sources;
      * consolidation ranks the occurrences and never sees an image.
      */
-    override suspend fun analyze(request: AnalysisRequest): AnalysisResult = withContext(Dispatchers.IO) {
+    override suspend fun analyze(
+        request: AnalysisRequest,
+        onProgress: (AnalysisProgress) -> Unit,
+    ): AnalysisResult = withContext(Dispatchers.IO) {
         val startedAt = System.nanoTime()
         val config = configuration()
         val appPreferences = preferences()
@@ -133,10 +147,23 @@ class CloudAnalysisRepository(
             ?: error("No credential is saved for ${config.provider.displayName}.")
         val trace = traceFor?.invoke(request.requestId)
         try {
-            val harvest = extract(request, config, appPreferences, credential, trace)
+            val harvest = extract(request, config, appPreferences, credential, trace, onProgress)
             var attempt = 0
             var correctionInstructions: String? = null
             while (true) {
+                // Announced before the request rather than after it, because this is the one the
+                // reader waits on with nothing else moving: everything read is in, and what is left
+                // is a single answer of unknown length. See AnalysisProgress.fraction.
+                onProgress(
+                    AnalysisProgress(
+                        stage = AnalysisProgress.Stage.WRITING,
+                        batchesDone = harvest.batches,
+                        batches = harvest.batches,
+                        imagesDone = harvest.imagesSent,
+                        images = harvest.imagesSent,
+                        correction = attempt,
+                    ),
+                )
                 val document = consolidate(
                     request, harvest, config, appPreferences, credential, correctionInstructions, trace,
                 )
@@ -231,6 +258,9 @@ class CloudAnalysisRepository(
             else -> inquiries
         }
 
+        /** How many batches the reading was divided into, for the diagnostics and the progress. */
+        var batches = 0
+
         /** What the run has spent so far, as the provider reported it request by request. */
         var usage = TokenUsage.NONE
 
@@ -251,6 +281,7 @@ class CloudAnalysisRepository(
         appPreferences: AppPreferences,
         credential: CharArray,
         trace: RequestTrace?,
+        onProgress: (AnalysisProgress) -> Unit,
     ): Harvest {
         val harvest = Harvest()
         // The numbering is assigned over every image the run carries, not over the ones it sends:
@@ -261,10 +292,40 @@ class CloudAnalysisRepository(
             images = request.inputs.map { it is AnalysisInput.Image },
         )
         val reused = harvest.reuse(request, plan.referencesBySource)
+        // Taken as a list rather than walked as a sequence, so the run knows how many batches there
+        // are before it sends the first one. That count is the whole of what makes progress
+        // reportable at all - see AnalysisProgress.
+        val sendings = plan.chunks(reused)
+        harvest.batches = sendings.size
+        val images = sendings.sumOf { it.references.size }
         var chunkNumber = 0
-        for (sending in plan.chunks(reused)) {
-            chunkNumber += 1
+        var imagesDone = 0
+        // Nothing is announced before the loop: its first pass reports the same state immediately,
+        // and a run whose every source an earlier run already read has no batches to send at all -
+        // that one goes straight to writing rather than flashing an empty reading stage.
+        //
+        // What the batch that has just finished held. Carried rather than added at the end of the
+        // body because the body has two exits - a batch the model never answers takes the
+        // `continue` below - and a bar that stalled on a dropped batch would be reporting the one
+        // failure this loop is written to survive.
+        var lastBatchImages = 0
+        for (sending in sendings) {
             coroutineContext.ensureActive()
+            imagesDone += lastBatchImages
+            lastBatchImages = sending.references.size
+            // Reported before the batch goes out, naming the one in flight. Counting it as done
+            // here would put the bar a batch ahead of the run and fill it while the last request
+            // was still out.
+            onProgress(
+                AnalysisProgress(
+                    stage = AnalysisProgress.Stage.READING,
+                    batchesDone = chunkNumber,
+                    batches = sendings.size,
+                    imagesDone = imagesDone,
+                    images = images,
+                ),
+            )
+            chunkNumber += 1
             val chunk = sending.positions.map(request.inputs::get)
             // The run's reference for each image this chunk holds, in the order it sends them.
             val globalRefs = sending.references

@@ -4,6 +4,13 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.7] — 2026-09-19
+
+- Analyze: a run now says which batch it is reading and how many images are read, as a determinate bar while it reads and an indeterminate one while it writes; a correction says which attempt it is
+- Insights: the channel ranking draws Telegram's own picture of each source, with its initials where there is none, and a place chip on the sources that clear the minimum judged to rank
+- Settings: the token tally leads with a figure strip and shows sent against returned as a bar, per model and overall
+- Report card figures and the token tally share one `StatStrip`; `ShareBar` is the new one-quantity-in-two instrument
+
 ## [3.7.6] — 2026-09-18
 
 - Recommendation card: timing pill top aligned with ticker logo by moving it into the ticker row

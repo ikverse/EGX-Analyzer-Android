@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -46,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -1365,41 +1367,29 @@ private fun ModelUsageSection(appState: AppState) {
             return@Column
         }
         val total = usage.fold(TokenUsage.NONE) { running, record -> running + record.usage }
-        SettingLabel(
-            "${groupedTokens(total.totalTokens)} tokens across ${usage.size} " +
-                if (usage.size == 1) "model" else "models",
-            style = MaterialTheme.typography.bodyLarge,
+        val requests = usage.sumOf(ModelUsageRecord::requests)
+        // The three figures the whole tally amounts to, in the strip a report card already uses.
+        // Abbreviated **here and nowhere else**: a tile is scanned, and the exact figure - the one
+        // checked against a provider's bill - is on every row below, where it always was.
+        StatStrip(
+            listOf(
+                formatTokenCount(total.totalTokens) to "tokens",
+                requests.toString() to "requests",
+                usage.size.toString() to if (usage.size == 1) "model" else "models",
+            ),
         )
-        usage.forEach { record ->
-            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                Text(record.model, style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    listOfNotNull(
-                        "${groupedTokens(record.usage.totalTokens)} tokens",
-                        "${groupedTokens(record.usage.promptTokens)} in / " +
-                            "${groupedTokens(record.usage.completionTokens)} out",
-                        "${record.requests} requests",
-                        record.lastUsed?.let {
-                            "last ${AppDates.DayMonthYear.format(it.atZone(ZoneId.systemDefault()))}"
-                        },
-                    ).joinToString(" \u00b7 "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                record.unreportedRequests.takeIf { it > 0 }?.let {
-                    Text(
-                        "$it request(s) came back with no usage, so this total is short by them.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Text(
-                    record.provider.displayName,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+        // Which way the spending actually runs, which no line of this section ever said. A run
+        // sends seventeen kilobytes of prompt against a few hundred tokens of answer, so the split
+        // is lopsided by design - and seeing it lopsided is what tells the reader that the cost is
+        // in what the app sends, not in what the model writes back.
+        ShareBar(total.promptTokens, total.totalTokens)
+        Text(
+            "${groupedTokens(total.promptTokens)} sent \u00b7 " +
+                "${groupedTokens(total.completionTokens)} returned",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        usage.forEach { record -> ModelUsageRow(record, total.totalTokens) }
         SettingsButton(onClick = appState::clearModelUsage) {
             Icon(Icons.Outlined.Delete, contentDescription = null)
             Spacer(Modifier.width(6.dp))
@@ -1407,6 +1397,70 @@ private fun ModelUsageSection(appState: AppState) {
         }
     }
 }
+
+/**
+ * One model's share of the tally, and what it is made of.
+ *
+ * The bar is this model against **everything spent**, not against its own total, which is the one
+ * question a list of models raises and four stacked sentences could not answer: two models at
+ * 2.10M and 378K are a sixth apart, and reading that off two grouped figures is arithmetic the
+ * screen can simply do.
+ *
+ * Every figure here stays exact. This is the screen where a total is checked against a bill, so the
+ * abbreviation belongs to the strip above and the bar carries no numbers at all - see [ShareBar].
+ */
+@Composable
+private fun ModelUsageRow(record: ModelUsageRecord, spent: Long) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                record.model,
+                style = MaterialTheme.typography.bodyMedium,
+                // A provider's id runs long and has no spaces to break on, so it takes the width it
+                // needs and the figure beside it keeps its own.
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.width(Space.s))
+            Text(
+                groupedTokens(record.usage.totalTokens),
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        ShareBar(record.usage.totalTokens, spent, height = ModelShareHeight)
+        Text(
+            listOfNotNull(
+                "${groupedTokens(record.usage.promptTokens)} in / " +
+                    "${groupedTokens(record.usage.completionTokens)} out",
+                "${record.requests} requests",
+                record.lastUsed?.let {
+                    "last ${AppDates.DayMonthYear.format(it.atZone(ZoneId.systemDefault()))}"
+                },
+                record.provider.displayName,
+            ).joinToString(" \u00b7 "),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        record.unreportedRequests.takeIf { it > 0 }?.let {
+            Text(
+                "$it request(s) came back with no usage, so this total is short by them.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * Thinner than the total's bar above it, because it is subordinate to it.
+ *
+ * One bar reading the whole tally and a column of bars reading the same weight would be five equal
+ * claims about one quantity; the row's job is to be compared with the rows beside it, and the
+ * total's is to be read on its own.
+ */
+private val ModelShareHeight = 4.dp
 
 /** The one line the closed section shows: what has been spent, and on how many models. */
 private fun tokenUsageSummary(usage: List<ModelUsageRecord>): String {

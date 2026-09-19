@@ -7,6 +7,7 @@ import android.content.Intent
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -68,12 +70,14 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.AnalysisChunking
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisMode
+import com.ikverse.egxanalyzer.model.AnalysisProgress
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
@@ -189,7 +193,7 @@ internal fun AnalyzeScreen(appState: AppState) {
                             Modifier.graphicsLayer { rotationZ = motion.angle },
                         )
                     },
-                    label = { RunningLabel(appState.analysisStartedAt, big) },
+                    label = { RunningLabel(appState.analysisStartedAt, appState.analysisProgress, big) },
                 )
             } else {
                 // Only the state that can actually spend money wears the fill. A blocked button in
@@ -418,14 +422,73 @@ internal fun AnalyzeScreen(appState: AppState) {
                 }
             }
         }
-        appState.analysisMessage?.let {
-            Text(
-                it,
-                color = if (appState.analysisStatus == AnalysisStatus.FAILED) {
-                    MaterialTheme.colorScheme.error
-                } else MaterialTheme.colorScheme.primary,
+        // While a run is going this is what it is doing now; otherwise it is what the last one
+        // ended up saying. The progress line replaces the message rather than sitting under it -
+        // "Sending 56 sources to OpenRouter…" is the same sentence a batch count says better, and
+        // two lines about one run would read as two things happening.
+        val progress = appState.analysisProgress
+        if (appState.analysisStatus == AnalysisStatus.RUNNING && progress != null) {
+            RunProgress(progress)
+        } else {
+            appState.analysisMessage?.let {
+                Text(
+                    it,
+                    color = if (appState.analysisStatus == AnalysisStatus.FAILED) {
+                        MaterialTheme.colorScheme.error
+                    } else MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * How far the run has got, as a bar and the sentence under it.
+ *
+ * **Determinate while it is reading and indeterminate while it is writing**, which is the whole of
+ * what [AnalysisProgress.fraction] decides - and the reason it is worth two branches rather than
+ * one bar that always moves. Reading is the countable part and nearly all of the cost; writing is
+ * one answer of unknown length, and a bar that crept along for it would be inventing the very
+ * figure this feature exists to stop inventing.
+ *
+ * The bar is animated to its new value rather than jumped: a batch comes back every few tens of
+ * seconds, so an instant step reads as the bar glitching where a half-second travel reads as
+ * progress.
+ *
+ * Drawn with the page's own hue and a thinned copy of it as the track, exactly as the busy bar
+ * under the header is - this is the same object in a second place, not a second kind of bar.
+ */
+@Composable
+private fun RunProgress(progress: AnalysisProgress) {
+    val fraction = progress.fraction
+    val track = MaterialTheme.colorScheme.primary.copy(alpha = BusyTrackAlpha)
+    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        if (fraction == null) {
+            LinearProgressIndicator(
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = track,
+                strokeCap = StrokeCap.Round,
+                // Material punches a gap either side of the moving piece, which on a bar this wide
+                // reads as three separate bars rather than as one thing in motion.
+                gapSize = 0.dp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            val shown by animateFloatAsState(fraction, label = "runProgress")
+            LinearProgressIndicator(
+                progress = { shown },
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = track,
+                strokeCap = StrokeCap.Round,
+                gapSize = 0.dp,
+                // Material draws a stop mark at the end of a determinate bar. It means "the track
+                // continues past here", which on a bar held to the page's own margin reads as a
+                // fleck of colour nothing explains.
+                drawStopIndicator = {},
+                modifier = Modifier.fillMaxWidth(),
             )
         }
+        Text(progress.line(), color = MaterialTheme.colorScheme.primary)
     }
 }
 
@@ -1054,11 +1117,23 @@ private fun AnalyzeAction(
  *
  * The clock is there because a run takes anywhere from seventy seconds to eleven minutes, one has
  * already died on a timeout, and nothing else on screen says how long this one has been waiting.
- * It counts elapsed rather than remaining: the repository reports nothing until it finishes, so
- * any figure claiming to know how far along the run is would be invented.
+ *
+ * **It used to count elapsed and nothing else, and the comment here said why**: the repository
+ * reported nothing until it finished, so any figure claiming to know how far along a run was would
+ * have been invented. It reports now - see [AnalysisProgress] - so the figure beside the clock is
+ * measured rather than guessed, and the two answer different questions. How far along says whether
+ * the run is nearly done; how long says whether it is moving at all, which on a run that has
+ * stalled is the only one of the two that changes.
+ *
+ * The batch alone, not the image count: this line shares a button with the clock, and the fuller
+ * version of the same fact is on the page. See [AnalysisProgress.badge].
  */
 @Composable
-private fun RunningLabel(startedAt: java.time.Instant?, big: Boolean) {
+private fun RunningLabel(
+    startedAt: java.time.Instant?,
+    progress: AnalysisProgress?,
+    big: Boolean,
+) {
     var elapsed by remember(startedAt) { mutableStateOf(elapsedSince(startedAt)) }
     LaunchedEffect(startedAt) {
         while (startedAt != null) {
@@ -1071,8 +1146,16 @@ private fun RunningLabel(startedAt: java.time.Instant?, big: Boolean) {
             "Cancel analysis",
             style = if (big) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge,
         )
-        elapsed?.let {
-            Text(it, style = MaterialTheme.typography.labelSmall)
+        // Null until the first batch goes out, which is the gap between the press and the first
+        // request - so the clock stands alone there rather than the line jumping from one shape to
+        // another, and the button's height never changes.
+        listOfNotNull(progress?.badge(), elapsed).takeIf { it.isNotEmpty() }?.let {
+            Text(
+                it.joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
