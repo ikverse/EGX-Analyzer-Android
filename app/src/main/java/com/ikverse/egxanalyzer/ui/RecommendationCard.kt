@@ -209,19 +209,20 @@ private fun RecommendationCard(
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(10.dp))
                     .padding(Space.m),
             ) {
-                LevelGrid(point)
-            }
-            // A Level row rather than a loose sentence, and tinted the market's own blue: the same
-            // treatment Insights gives risk : reward on its own call card, where it is the one
-            // figure measured from the four prices above it rather than printed by the channel -
-            // and the same tone Support and Resistance already wear two rows up.
-            point.riskRewardRatio()?.let { ratio ->
-                Level(
-                    "Risk / reward",
-                    "1 : ${"%.1f".format(ratio)}",
-                    PriceRole.market,
-                    Modifier.fillMaxWidth().height(IntrinsicSize.Min),
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                    LevelGrid(point)
+                    // Inside the same panel as the six prices it is measured from, rather than a
+                    // line loose on the card below it - tinted the market's own blue, the same
+                    // treatment Insights gives risk : reward on its own call card.
+                    point.riskRewardRatio()?.let { ratio ->
+                        Level(
+                            "Risk / reward",
+                            "1 : ${"%.1f".format(ratio)}",
+                            PriceRole.market,
+                            Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                        )
+                    }
+                }
             }
 
             // A line under the figures, because the two things below it are the only parts of this
@@ -398,73 +399,70 @@ private fun StockHeader(
     editor: CallEditor?,
     onEdit: () -> Unit = {},
 ) {
-    // A column, because the header is two things now: the identity row, and the card's own pills
-    // on a line under it. Space.s between them is what the card's own Column already puts between
-    // every other pair of blocks on it.
-    // Ticker style, name style and pill placement match the identity block Insights draws on its
-    // own call card (InsightsScreen.kt's ScoredCallRow) - same stock, two screens, one look.
-    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        Row(verticalAlignment = Alignment.Top) {
-            Column(Modifier.weight(1f)) {
-                val openStock = LocalOpenStock.current
-                // The logo sits beside the ticker-and-name pair rather than the ticker alone, and
-                // CenterVertically is what centers it against both lines rather than just the
-                // first - which is also what puts the name flush under the ticker with no padding
-                // hack: it is simply the next line in the same column.
-                Row(
-                    Modifier.clickable { openStock(stock.stockCode) },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(stock.stockCode, style = MaterialTheme.typography.titleSmall)
-                            Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
-                        }
-                        stock.stockNameArabic?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+    // Ticker style and name style match the identity block Insights draws on its own call card
+    // (InsightsScreen.kt's ScoredCallRow) - same stock, two screens, one look. The pills sit where
+    // the ⋮ menu used to: that menu is gone from this card (Copy call went unused and Edit call is
+    // reached by holding the card instead - see QuickEditPrompt), so the corner it occupied is free
+    // for the one thing worth a glance without opening anything.
+    Row(verticalAlignment = Alignment.Top) {
+        Column(Modifier.weight(1f)) {
+            val openStock = LocalOpenStock.current
+            // The logo sits beside the ticker-and-name pair rather than the ticker alone, and
+            // CenterVertically is what centers it against both lines rather than just the
+            // first - which is also what puts the name flush under the ticker with no padding
+            // hack: it is simply the next line in the same column.
+            Row(
+                Modifier.clickable { openStock(stock.stockCode) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(stock.stockCode, style = MaterialTheme.typography.titleSmall)
+                        Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
                     }
-                }
-                if (point != null) {
-                    Spacer(Modifier.height(Space.xs))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                        TimingChip(point)
-                    }
-                }
-                channel?.takeIf(String::isNotBlank)?.let {
-                    Spacer(Modifier.height(Space.xs))
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "Source:",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
+                    stock.stockNameArabic?.let {
                         Text(
                             it,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
             }
-            if (point != null) {
-                Spacer(Modifier.width(Space.s))
-                CallMenu(stock, point, channel, session, editor, onEdit)
+            channel?.takeIf(String::isNotBlank)?.let {
+                Spacer(Modifier.height(Space.xs))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Source:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         }
-
-        if (point != null && editor?.editFor(stock, point) != null) {
-            EditedChip(onEdit)
+        if (point != null) {
+            Spacer(Modifier.width(Space.s))
+            // Grouped and left-aligned to each other rather than centred, so Edited (narrower)
+            // starts at the same edge as Watching/T+1 instead of wandering to the middle under it.
+            // Top-aligned with the ticker: the outer Row's own Alignment.Top is what puts this
+            // group where the ⋮ menu used to sit.
+            Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                TimingChip(point)
+                if (editor?.editFor(stock, point) != null) {
+                    EditedChip(onEdit)
+                }
+            }
         }
     }
 }

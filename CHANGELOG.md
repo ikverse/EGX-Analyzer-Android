@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.20] — 2026-09-19
+
+- Results: the recommendation card's ⋮ menu is gone - Copy call went unused and Edit call is reached by holding the card; the corner it sat in now holds the Watching/T+1 pill (and Edited, when a call has been corrected), grouped and left-aligned, top-aligned with the ticker
+- Results: risk:reward moved inside the tinted panel with the six other figures, instead of sitting below it
+- Edit call sheet: "Undo all edits" moved here from the now-removed menu, shown in the button row only when there's something to undo
+
 ## [3.7.19] — 2026-09-19
 
 - Results: the recommendation card's logo now centers against the ticker and the Arabic name together, instead of just the ticker line

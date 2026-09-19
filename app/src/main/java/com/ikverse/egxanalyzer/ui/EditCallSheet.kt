@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -131,6 +132,26 @@ internal fun EditCallSheet(
                 verticalArrangement = Arrangement.spacedBy(Space.xs),
                 itemVerticalAlignment = Alignment.CenterVertically,
             ) {
+                // The one thing the card's own ⋮ menu used to offer that this sheet didn't: with
+                // that menu gone from the card, undoing a correction is reached from here instead,
+                // where the correction itself is made. Absent when there is nothing to undo, same
+                // guard the menu item used.
+                if (editor.hasEdits) {
+                    TextButton(
+                        onClick = {
+                            editor.undoAll()
+                            onDismiss()
+                        },
+                    ) {
+                        Icon(
+                            Icons.Outlined.Undo,
+                            contentDescription = null,
+                            modifier = Modifier.size(IconSize.Inline),
+                        )
+                        Spacer(Modifier.width(Space.xs))
+                        Text("Undo all edits")
+                    }
+                }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
                 ActionPill(
                     label = "Save",
