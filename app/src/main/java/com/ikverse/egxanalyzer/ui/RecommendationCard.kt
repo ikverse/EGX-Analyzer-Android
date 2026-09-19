@@ -152,7 +152,7 @@ private fun RecommendationCard(
         // the hairline every other card on the page is drawn with.
         border = heldBorder(held) ?: cardOutline,
     ) {
-        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.m)) {
             // The session the call was made for, from the same source the Bought button
             // reads it from, so the copied text and the trade agree about which day.
             StockHeader(
@@ -290,14 +290,13 @@ private fun StockHeader(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "SOURCE",
+                            "Source:",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
                         Text(
                             it,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
@@ -431,7 +430,7 @@ internal fun TimingChip(point: RecommendationDataPoint) {
  */
 @Composable
 internal fun LevelGrid(point: RecommendationDataPoint) {
-    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
         LevelPair(
             { Level("Entry", entryText(point), PriceRole.entry, it) },
             { Level("Stop loss", levelText(point.stopLoss, point.riskPct), PriceRole.stop, it) },

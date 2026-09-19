@@ -844,6 +844,7 @@ private fun ColumnScope.PositionGrid(
                 val revealed = view.position.id == jump.revealPosition
                 PositionCard(
                     view = view,
+                    appState = appState,
                     // A trade whose analysis has since been deleted leads nowhere, so it does not
                     // answer a press: the call it was taken on is no longer in the record.
                     onOpenCall = if (view.position.id in jump.scoredCalls) {

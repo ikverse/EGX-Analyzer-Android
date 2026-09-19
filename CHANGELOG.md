@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.10] — 2026-09-19
+
+- Position card: an open trade now draws PriceChart in place of PriceLadder, so the levels are read against the month of closes behind them instead of a fixed ladder that never moves; a settled trade still gets the ladder
+- Position card: status, T+1, overdue, kept-open and price-scale pills moved into the header, above a new divider separating identity and status from the trade's own facts below it
+- Recommendation card: source label set to labelSmall; card and level-grid spacing widened from Space.s to Space.m
+
 ## [3.7.9] — 2026-09-19
 
 - Recommendation card: header separated from the figure grid by a divider

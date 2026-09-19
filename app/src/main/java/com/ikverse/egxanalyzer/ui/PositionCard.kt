@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,23 +36,28 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.FULL_SPLIT_PCT
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.Sale
+import com.ikverse.egxanalyzer.model.Scoring
 import java.time.LocalDate
 
 /**
- * A position card answers three questions in order: what did I buy, where is it now, and how long
- * is left. The status outline says the third at a glance before any of it is read.
+ * A position card answers four questions in order: what did I buy, how did it get to where it is,
+ * where is it now, and how long is left. The status outline says the last of those at a glance
+ * before any of it is read.
  *
  * The prices are drawn before they are listed. Eight figures at equal weight said what every level
  * was and nothing about how they stood against each other - whether the stop was a whisker away or
- * a mile off, whether the price had crept most of the way to target 1 or none of it. The ladder is
- * the drawing Results and Insights already use for the same five levels, with the one difference
- * that is the point of this screen: the entry mark is the price the user actually paid rather than
- * the band the channel printed, and every percentage under the figures is measured from it.
+ * a mile off, whether the price had crept most of the way to target 1 or none of it. On a running
+ * trade, [PriceChart] draws those same levels - the entry mark is the price the user actually paid
+ * rather than the band the channel printed - against the month of closes behind them, which is the
+ * one thing [PriceLadder] cannot say: whether the close sitting near the stop got there over three
+ * flat weeks or on one bad session. A trade with nothing left to run - sold, stopped, expired -
+ * keeps the ladder; there is no "since" left for a chart to answer.
  *
  * Then two groups rather than two unlabelled rows - what the trade is, and where it stands. The
  * split is what lets each figure carry a line of its own underneath, a distance from the entry or
@@ -60,6 +66,7 @@ import java.time.LocalDate
 @Composable
 internal fun PositionCard(
     view: PositionView,
+    appState: AppState,
     /** Opens the call this trade was taken on, in Insights. Absent once its analysis is gone. */
     onOpenCall: (() -> Unit)?,
     highlighted: Boolean,
@@ -115,6 +122,32 @@ internal fun PositionCard(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
+                    // Every pill on this card, still in the one row the card says them all in -
+                    // moved up into the header itself, so identity and status read as one block
+                    // above the rule that now separates them from the trade's own facts below it.
+                    //
+                    // Every chip inside is named in the condition. Price scale was not, and a split
+                    // under a trade that was neither overdue nor kept open had its chip written and
+                    // never drawn.
+                    FlowRow(
+                        Modifier.padding(top = Space.xs),
+                        horizontalArrangement = Arrangement.spacedBy(Space.s),
+                        verticalArrangement = Arrangement.spacedBy(Space.xs),
+                    ) {
+                        // Where the trade stands leads, because it is the one fact here that is
+                        // true of every trade and the one the rest of the row qualifies.
+                        PositionStatusChip(view)
+                        // Then the fact that was true the day the trade was taken, which is what
+                        // the deadline further down the card is measured by.
+                        if (position.isTPlusOne) TPlusOneChip(position)
+                        if (view.overdue) OverdueChip(view.overdueDays)
+                        // One chip, not two saying the same thing: a trade can only be overdue by
+                        // being kept open now, so Overdue already carries the state and adds how
+                        // late it is. The instruction the chip also held is not lost - the Sell
+                        // button below is on the card for as long as no sale has been recorded.
+                        if (view.keptOpen && !view.overdue) KeptOpenChip()
+                        if (view.priceScaleChanged) PriceScaleChip()
+                    }
                 }
                 Box {
                     MoreButton(onClick = { menuOpen = true })
@@ -147,6 +180,10 @@ internal fun PositionCard(
                     }
                 }
             }
+
+            // Separates identity and status, read together above it, from the trade's own facts
+            // below - the same rule the two figure groups further down are already ruled apart by.
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
             // The line that names the call, which is exactly what a press on this card opens. The
             // date is the app's own short form rather than the raw ISO one this line used to
@@ -181,35 +218,6 @@ internal fun PositionCard(
                 }
             }
 
-            // Every pill on this card, in one row. The status used to sit up in the header while
-            // these sat down here, so a card carrying three facts about one trade said one of them
-            // in a different place and at a different height from the other two - which is what
-            // read as pills scattered over the card rather than as a line of them.
-            //
-            // The row is unconditional now, because the status is always there to say. It is no
-            // longer drawn only when something has gone wrong with the trade, and that costs the
-            // ordinary position the one line the header gives back.
-            //
-            // Every chip inside is named in the condition. Price scale was not, and a split under a
-            // trade that was neither overdue nor kept open had its chip written and never drawn.
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(Space.s),
-                verticalArrangement = Arrangement.spacedBy(Space.xs),
-            ) {
-                // Where the trade stands leads, because it is the one fact here that is true of
-                // every trade and the one the rest of the row qualifies.
-                PositionStatusChip(view)
-                // Then the fact that was true the day the trade was taken, which is what the
-                // deadline further down the card is measured by.
-                if (position.isTPlusOne) TPlusOneChip(position)
-                if (view.overdue) OverdueChip(view.overdueDays)
-                // One chip, not two saying the same thing: a trade can only be overdue by being
-                // kept open now, so Overdue already carries the state and adds how late it is.
-                // The instruction the chip also held is not lost - the Sell button below is on
-                // the card for as long as no sale has been recorded.
-                if (view.keptOpen && !view.overdue) KeptOpenChip()
-                if (view.priceScaleChanged) PriceScaleChip()
-            }
             position.keepOpenNote?.takeIf(String::isNotBlank)?.let { why ->
                 Text(
                     why,
@@ -220,21 +228,56 @@ internal fun PositionCard(
                 )
             }
 
-            PriceLadder(
-                stopLoss = position.stopLoss,
-                // One price, not a band. The trade opened where it opened, and the drawing keeps a
-                // zero-width band visible rather than losing the mark; the levels either side of it
-                // are still the call's, which is what makes the picture worth reading at all.
-                entryLow = position.entryPrice,
-                entryHigh = position.entryPrice,
-                target1 = position.target1,
-                target2 = position.target2,
-                // The arrow is where this trade stands: today's close while it runs, and where it
-                // ended once it has. Nothing is plotted across a change of scale - the levels are
-                // quoted in the old money and the price in the new, so the arrow would point at a
-                // place on the axis that does not exist.
-                reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
-            )
+            // A running trade gets the chart rather than the ladder - the ladder can only say
+            // where the levels sit, and "am I drifting toward the stop, or was that one bad
+            // session" is a question about the month behind the close, not about the close alone.
+            // A trade with nothing left to run keeps the ladder: sold, stopped or expired, there is
+            // no "since" left for a chart to answer, and its outcome is already told in full by the
+            // figures below.
+            //
+            // Priced history is fetched here rather than held on `view`, because the five-minute
+            // archive this reads is local-only - see `PriceSeriesStore` - and every other card on
+            // the tab would otherwise pay for a query nobody is looking at yet.
+            val chartHistory = if (view.open) rememberPositionHistory(appState, position.ticker) else null
+            if (chartHistory != null && chartHistory.count { it.close != null } >= 2) {
+                var touched by remember(position.id) { mutableStateOf<DailySession?>(null) }
+                PriceChart(
+                    sessions = chartHistory,
+                    levels = ChartLevels(
+                        source = "your trade",
+                        stopLoss = position.stopLoss,
+                        // One price, not a band - the same reasoning PriceLadder drew this way:
+                        // the trade opened where it opened, and the levels either side of it are
+                        // still the call's, which is what makes the picture worth reading at all.
+                        entryLow = position.entryPrice,
+                        entryHigh = position.entryPrice,
+                        target1 = position.target1,
+                        target2 = position.target2,
+                        paid = position.entryPrice,
+                    ),
+                    // No call-date rings here: the one date this card is about is the entry
+                    // already marked in the levels above, not every call anybody made on the
+                    // stock. Wiring the report in for that is a bigger change than this one.
+                    calls = emptySet(),
+                    on = colors.containerColor,
+                    selected = touched,
+                    onSelect = { touched = it },
+                    height = PositionChartHeight,
+                )
+            } else {
+                PriceLadder(
+                    stopLoss = position.stopLoss,
+                    entryLow = position.entryPrice,
+                    entryHigh = position.entryPrice,
+                    target1 = position.target1,
+                    target2 = position.target2,
+                    // The arrow is where this trade stands: today's close while it runs, and where
+                    // it ended once it has. Nothing is plotted across a change of scale - the
+                    // levels are quoted in the old money and the price in the new, so the arrow
+                    // would point at a place on the axis that does not exist.
+                    reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
+                )
+            }
 
             FigureGroup(
                 // On the heading rather than in a figure of its own, because it is not a fifth
@@ -471,6 +514,23 @@ internal fun PositionCard(
 }
 
 /**
+ * A month of closes for one ticker, fetched once per card rather than held on [PositionView].
+ *
+ * Off the disk exactly as [StockSheet] reads it - a local read through [AppState.priceHistory],
+ * no network - and only for a card that actually needs it: every other position on the tab keeps
+ * whatever it already had, rather than every card on the grid paying for a query at once.
+ */
+@Composable
+private fun rememberPositionHistory(appState: AppState, ticker: String): List<DailySession> {
+    val key = remember(ticker) { Scoring.normalizeTicker(ticker) }
+    var history by remember(key) { mutableStateOf(emptyList<DailySession>()) }
+    LaunchedEffect(key) {
+        history = appState.priceHistory(key, ChartRange.Default.since(LocalDate.now()))
+    }
+    return history
+}
+
+/**
  * How long the recommendation has left, counted in the sessions it is judged in.
  *
  * Trading sessions rather than days, and counted from the session the call was made for: a stock
@@ -619,3 +679,11 @@ private fun LocalDate?.dated(): String = this?.let { " on ${shortDate(it)}" }.or
 
 /** Ticker plus two lines of company name, so every position card starts the same height. */
 private val PositionHeaderHeight = 52.dp
+
+/**
+ * Shorter than [StockSheet]'s 220dp - that height was tuned for a sheet with nothing else on the
+ * page; this chart shares a card with two figure groups and a menu's worth of chrome besides, and
+ * a running position can carry as many as five levels within a few percent of each other. 180dp
+ * gives that cluster a full row before crowding the way the sheet's own 150dp used to.
+ */
+private val PositionChartHeight = 180.dp
