@@ -4,6 +4,14 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.19] — 2026-09-19
+
+- Results: the recommendation card's logo now centers against the ticker and the Arabic name together, instead of just the ticker line
+- Results: risk:reward is now a Level row in the market's own blue, matching the six figures above it, instead of a plain caption line
+- Results: a level pair's shorter tile now stretches to match its taller sibling, so a value that wraps to two lines (more likely at the folded, narrower width) no longer leaves the other side's colour bar short
+- Results: holding on a recommendation card opens a blurred two-button prompt (Edit call / Cancel) instead of requiring the ⋮ menu
+- Insights call card and the position card: the chart falls back to the price ladder when there isn't enough price history to draw a line, instead of an empty chart; history-fetching is shared between the two as `rememberPriceHistory` in `StockTrend.kt`
+
 ## [3.7.18] — 2026-09-19
 
 - Portfolio: the position card grid drops from two columns to one, the same move Insights' call card grid got

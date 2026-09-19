@@ -250,11 +250,31 @@ internal fun PositionCard(
                         }
                     }
                 }
-    
+
                 // Separates identity and status, read together above it, from the trade's own facts
                 // below - the same rule the two figure groups further down are already ruled apart by.
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    
+
+                // The ladder, named once so both the wide fallback below and the narrow gate
+                // further down can draw it without stating the same six lines twice.
+                val ladder: @Composable () -> Unit = {
+                    PriceLadder(
+                        stopLoss = position.stopLoss,
+                        // One price, not a band. The trade opened where it opened, and the drawing
+                        // keeps a zero-width band visible rather than losing the mark; the levels
+                        // either side of it are still the call's, which is what makes the picture
+                        // worth reading at all.
+                        entryLow = position.entryPrice,
+                        entryHigh = position.entryPrice,
+                        target1 = position.target1,
+                        target2 = position.target2,
+                        // The arrow is where this trade stands: today's close while it runs, and
+                        // where it ended once it has. Nothing is plotted across a change of scale -
+                        // the levels are quoted in the old money and the price in the new, so the
+                        // arrow would point at a place on the axis that does not exist.
+                        reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
+                    )
+                }
                 // Slides open under the header on a running trade - see the header's own `clickable` -
                 // or draws directly once the card is wide, the same width switch the Insights call card
                 // already makes. Hidden by default on a phone, because the ladder below already answers
@@ -264,15 +284,32 @@ internal fun PositionCard(
                 // and `view.open` is checked again here rather than trusted, since a trade can settle
                 // while its card is expanded.
                 if (view.open) {
-                    AnimatedVisibility(
-                        visible = chartExpanded || wide,
-                        enter = expandVertically(clip = false) + fadeIn(),
-                        exit = shrinkVertically(clip = false) + fadeOut(),
-                    ) {
-                        PositionChartSection(appState, position, colors.containerColor)
+                    if (wide) {
+                        // Fetched eagerly here, unlike the narrow branch below, because whether to
+                        // fall back to the ladder is a decision this card has to make before it
+                        // knows whether there is a line to draw - a wide card shows one or the
+                        // other, never an empty chart.
+                        val history = rememberPriceHistory(appState, position.ticker)
+                        if (history.count { it.close != null } > 1) {
+                            PositionChartSection(position, colors.containerColor, history)
+                        } else {
+                            ladder()
+                        }
+                    } else {
+                        AnimatedVisibility(
+                            visible = chartExpanded,
+                            enter = expandVertically(clip = false) + fadeIn(),
+                            exit = shrinkVertically(clip = false) + fadeOut(),
+                        ) {
+                            PositionChartSection(
+                                position,
+                                colors.containerColor,
+                                rememberPriceHistory(appState, position.ticker),
+                            )
+                        }
                     }
                 }
-    
+
                 // The line that names the call, which is exactly what a press on this card opens. The
                 // date is the app's own short form rather than the raw ISO one this line used to
                 // print: the tiles on the Overdue card above already date a trade "14 Aug", and this
@@ -326,7 +363,7 @@ internal fun PositionCard(
                         )
                     }
                 }
-    
+
                 position.keepOpenNote?.takeIf(String::isNotBlank)?.let { why ->
                     Text(
                         why,
@@ -336,30 +373,15 @@ internal fun PositionCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-    
+
                 // Hidden while the chart is open, on a press or because the card is wide: the chart
                 // already draws these same levels against the close, so the two would only ever say
                 // the same thing twice, one above the other. Returns the moment a narrow card's chart
                 // closes, in the space it just gave up.
                 if (!chartExpanded && !wide) {
-                    PriceLadder(
-                        stopLoss = position.stopLoss,
-                        // One price, not a band. The trade opened where it opened, and the drawing
-                        // keeps a zero-width band visible rather than losing the mark; the levels
-                        // either side of it are still the call's, which is what makes the picture
-                        // worth reading at all.
-                        entryLow = position.entryPrice,
-                        entryHigh = position.entryPrice,
-                        target1 = position.target1,
-                        target2 = position.target2,
-                        // The arrow is where this trade stands: today's close while it runs, and
-                        // where it ended once it has. Nothing is plotted across a change of scale -
-                        // the levels are quoted in the old money and the price in the new, so the
-                        // arrow would point at a place on the axis that does not exist.
-                        reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
-                    )
+                    ladder()
                 }
-    
+
                 // Two panels rather than two loose groups: a neutral tile for what the trade was, the
                 // page's own indigo wash for where it stands now - the same split and the same two
                 // tokens (`surfaceContainerHighest` / `pageAccent.soft`) the call card in Insights
@@ -528,7 +550,7 @@ internal fun PositionCard(
                     main = { yourTradePanel(Modifier.fillMaxWidth()) },
                     side = { whereItStandsPanel(Modifier.fillMaxWidth()) },
                 )
-    
+
                 Text(
                     view.profitLine(),
                     style = MaterialTheme.typography.bodySmall,
@@ -644,25 +666,6 @@ internal fun PositionCard(
 }
 
 /**
- * Six months of closes for one ticker, fetched once per card rather than held on [PositionView].
- *
- * Off the disk exactly as [StockSheet] reads it - a local read through [AppState.priceHistory],
- * no network - and only for a card that actually needs it: every other position on the tab keeps
- * whatever it already had, rather than every card on the grid paying for a query at once. The
- * widest range rather than the default one, for the same reason [StockSheet] fetches it once: the
- * chart's own range chips slice this in the composition, so no press ever waits on a second query.
- */
-@Composable
-private fun rememberPositionHistory(appState: AppState, ticker: String): List<DailySession> {
-    val key = remember(ticker) { Scoring.normalizeTicker(ticker) }
-    var history by remember(key) { mutableStateOf(emptyList<DailySession>()) }
-    LaunchedEffect(key) {
-        history = appState.priceHistory(key, ChartRange.Widest.since(LocalDate.now()))
-    }
-    return history
-}
-
-/**
  * The full chart a running trade's header slides open: range chips, a levels toggle, and the
  * touch readout [StockSheet] already draws for the same [PriceChart] - built from the same pieces
  * rather than a smaller chart invented for the card, so a reader who has learned the sheet is not
@@ -673,8 +676,7 @@ private fun rememberPositionHistory(appState: AppState, ticker: String): List<Da
  * one trade the card is already about.
  */
 @Composable
-private fun PositionChartSection(appState: AppState, position: Position, on: Color) {
-    val history = rememberPositionHistory(appState, position.ticker)
+private fun PositionChartSection(position: Position, on: Color, history: List<DailySession>) {
     // Local to this card rather than `PageState.stockChartRange` - that state is written for the
     // one stock sheet the app ever has open at a time, and every position card on the grid needs
     // its own range and its own toggle, not one shared by all of them at once.

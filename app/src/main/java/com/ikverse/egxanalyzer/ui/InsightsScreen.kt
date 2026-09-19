@@ -344,6 +344,7 @@ internal fun InsightsScreen(appState: AppState) {
                     if (open) {
                         SessionCard(
                             band.single(),
+                            appState,
                             expanded = true,
                             onExpandedChange = { openSession = null },
                             heldFor = appState::heldFor,
@@ -371,6 +372,7 @@ internal fun InsightsScreen(appState: AppState) {
                         ResponsiveRows(band, columns) { session, cardModifier ->
                             SessionCard(
                                 session,
+                                appState,
                                 expanded = false,
                                 onExpandedChange = { openSession = session.key() },
                                 heldFor = appState::heldFor,
@@ -1025,6 +1027,8 @@ private fun SessionSummary(run: ScoredSession, tally: CallTally, isNew: Boolean 
 @Composable
 private fun SessionCard(
     run: ScoredSession,
+    /** For a call card's own chart, once it is wide enough to draw one. Nothing else here reads it. */
+    appState: AppState,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     /** The position taken on a call, so a stock actually held is marked as such. */
@@ -1128,6 +1132,7 @@ private fun SessionCard(
                 val held = heldFor(call.ticker, call.openedOn)
                 ScoredCallRow(
                     call,
+                    appState,
                     latestFor(call.ticker),
                     scoreFor(call.channel),
                     opinionFor(call),
@@ -1156,6 +1161,8 @@ private fun SessionCard(
 @Composable
 private fun ScoredCallRow(
     call: ScoredCall,
+    /** For the chart's own price history, once the card is wide enough to draw one. */
+    appState: AppState,
     /** Where this stock stands as of the last refresh. Absent for a stock with no prices at all. */
     latest: LatestPrice?,
     /**
@@ -1393,17 +1400,12 @@ private fun ScoredCallRow(
                         }
                     }
                 }
-                if (wide) {
-                    // The full chart in the ladder's place: there's finally width to spend on how
-                    // the stock actually got from the entry to wherever it settled, not only where
-                    // the five levels sit.
-                    CallChartSection(call)
-                } else {
-                    // The shape of the call, which four prices in a column cannot show: whether it
-                    // risked a little for a lot or the reverse, and how far up that scale the stock
-                    // actually got. The same drawing the Results tab has always used for the same
-                    // five levels, so a call read on one tab and again on the other is the same
-                    // picture in both places.
+                // The shape of the call, which four prices in a column cannot show: whether it
+                // risked a little for a lot or the reverse, and how far up that scale the stock
+                // actually got. The same drawing the Results tab has always used for the same five
+                // levels, so a call read on one tab and again on the other is the same picture in
+                // both places. Named once so the wide fallback below can draw it too.
+                val ladder: @Composable () -> Unit = {
                     PriceLadder(
                         stopLoss = call.stopLoss,
                         entryLow = call.entryLow,
@@ -1413,6 +1415,22 @@ private fun ScoredCallRow(
                         // The extreme inside the judged window, which the figure below it says too.
                         reached = call.peakHigh,
                     )
+                }
+                if (wide) {
+                    // Fetched eagerly, because whether to fall back to the ladder is a decision
+                    // this card has to make before it knows whether there is a line to draw - a
+                    // wide card shows one or the other, never an empty chart.
+                    val history = rememberPriceHistory(appState, call.ticker)
+                    if (history.count { it.close != null } > 1) {
+                        // The full chart in the ladder's place: there's finally width to spend on
+                        // how the stock actually got from the entry to wherever it settled, not
+                        // only where the five levels sit.
+                        CallChartSection(call, history)
+                    } else {
+                        ladder()
+                    }
+                } else {
+                    ladder()
                 }
                 // Two groups rather than eight loose figures: what the channel asked for, and what
                 // the market did about it. Each in its own tinted panel now rather than ruled apart
@@ -1860,21 +1878,24 @@ private fun ExtractionWarning(call: ScoredCall) {
 /**
  * The chart [PriceLadder]'s five ticks cannot draw: how the stock actually got from the entry to
  * wherever it settled, rather than only where the five levels sit. Drawn in the ladder's place once
- * a card has the width for it - see the wide check in `ScoredCallRow` - out of the sessions the call
- * was already judged on, so this costs no query beyond what the card already had. No Levels toggle
- * and no "you paid" line, unlike the same chart on a position: every session here is either judged
- * against the call's own levels or it isn't on the card at all.
+ * a card has the width for it - see the wide check in `ScoredCallRow`, which also decides whether
+ * there is enough of [history] to draw a line from at all before calling this.
+ *
+ * Reads the same widest-range price history the position card's own chart does - [history] is
+ * fetched once by the caller, not here, so a card that ends up drawing the ladder instead never
+ * pays for the query. No Levels toggle and no "you paid" line, unlike the same chart on a
+ * position: every level here is the call's own, drawn or not at all.
  */
 @Composable
-private fun CallChartSection(call: ScoredCall) {
+private fun CallChartSection(call: ScoredCall, history: List<DailySession>) {
     // Local to this card, exactly as the position card's own chart range is: every call card on
     // the page needs its own range and its own toggle, not one shared by all of them at once.
     var range by remember(call.ticker, call.openedOn) { mutableStateOf(ChartRange.Default) }
-    // Measured back from the newest session the call holds, exactly as the stock sheet does it -
-    // a feed running behind should shorten the line, not draw an empty box.
-    val visible = remember(call.sessions, range) {
-        val anchor = call.sessions.lastOrNull()?.date ?: return@remember call.sessions
-        call.sessions.filter { !it.date.isBefore(range.since(anchor)) }
+    // Measured back from the newest session on record, exactly as the stock sheet does it - a
+    // feed running behind should shorten the line, not draw an empty box.
+    val visible = remember(history, range) {
+        val anchor = history.lastOrNull()?.date ?: return@remember history
+        history.filter { !it.date.isBefore(range.since(anchor)) }
     }
     val move = remember(visible) { visible.rangeMove() }
     val levels = remember(call) {

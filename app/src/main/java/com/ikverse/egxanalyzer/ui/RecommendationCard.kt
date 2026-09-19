@@ -2,9 +2,17 @@ package com.ikverse.egxanalyzer.ui
 
 import com.ikverse.egxanalyzer.model.timing
 
+import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,12 +30,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,6 +50,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Undo
@@ -47,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
+import kotlinx.coroutines.delay
 
 /**
  * Every occurrence of one stock, one card each, swiped through sideways.
@@ -137,10 +155,20 @@ private fun RecommendationCard(
     var expanded by remember(point) { mutableStateOf(false) }
     var viewingImage by remember(point) { mutableStateOf(false) }
     var editing by remember(point) { mutableStateOf(false) }
+    // Held on the card rather than reached through the menu: the owner's own habit is that Edit
+    // call is the item in CallMenu actually worth pressing and Copy call is not, so the one worth
+    // a shortcut gets one.
+    var quickEditOpen by remember(point) { mutableStateOf(false) }
     val held = trades?.heldFor(stock, point)
 
     Card(
-        modifier = modifier.fillMaxWidth().clickable { expanded = !expanded },
+        modifier = modifier.fillMaxWidth().combinedClickable(
+            onClick = { expanded = !expanded },
+            // Absent rather than always-on where there is no editor to open: a read-only card
+            // holding on it would show a shortcut to a screen it cannot reach, same guard CallMenu
+            // already puts around its own Edit call item.
+            onLongClick = editor?.let { { quickEditOpen = true } },
+        ),
         // A step up in container rather than a shadow. These sit inside the report's own card, which
         // is why they were elevated; the step is what separates them now that nothing on the page
         // casts a shadow.
@@ -183,11 +211,16 @@ private fun RecommendationCard(
             ) {
                 LevelGrid(point)
             }
+            // A Level row rather than a loose sentence, and tinted the market's own blue: the same
+            // treatment Insights gives risk : reward on its own call card, where it is the one
+            // figure measured from the four prices above it rather than printed by the channel -
+            // and the same tone Support and Resistance already wear two rows up.
             point.riskRewardRatio()?.let { ratio ->
-                Text(
-                    "Risk / reward  1 : ${"%.1f".format(ratio)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Level(
+                    "Risk / reward",
+                    "1 : ${"%.1f".format(ratio)}",
+                    PriceRole.market,
+                    Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                 )
             }
 
@@ -252,10 +285,106 @@ private fun RecommendationCard(
     if (viewingImage) {
         SourceImageViewer(imagePath, point.sourceImageRef, onDismiss = { viewingImage = false })
     }
+    if (quickEditOpen) {
+        QuickEditPrompt(
+            onEdit = { quickEditOpen = false; editing = true },
+            onDismiss = { quickEditOpen = false },
+        )
+    }
     if (editing && editor != null) {
         EditCallSheet(stock, point, editor, onDismiss = { editing = false })
     }
 }
+
+/**
+ * Two buttons over a blurred card, reached by holding rather than opening [CallMenu].
+ *
+ * Blurs what is behind it rather than dimming it flat - the platform's own way of saying "answer
+ * this and you're straight back", where a full-screen scrim would read as a new place navigated
+ * to. `Window.setBackgroundBlurRadius` is API 31, which is this app's `minSdk`, so there is no
+ * older path to fall back to.
+ *
+ * The dialog does not leave the moment a button is pressed: `visible` drives the exit animation
+ * and the dialog itself is only asked to close once that animation has actually run, so a press
+ * is answered by a shrink-and-fade rather than a cut.
+ */
+@Composable
+private fun QuickEditPrompt(onEdit: () -> Unit, onDismiss: () -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+    var editRequested by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+    LaunchedEffect(visible) {
+        if (!visible) {
+            delay(QuickEditExitMs.toLong())
+            if (editRequested) onEdit() else onDismiss()
+        }
+    }
+    Dialog(
+        onDismissRequest = { visible = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        val view = LocalView.current
+        DisposableEffect(Unit) {
+            val window = (view.parent as? DialogWindowProvider)?.window
+            window?.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            window?.setBackgroundBlurRadius(QuickEditBlurRadius)
+            window?.setDimAmount(QuickEditDim)
+            onDispose {}
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { visible = false },
+            contentAlignment = Alignment.Center,
+        ) {
+            AnimatedVisibility(
+                visible = visible,
+                enter = fadeIn(tween(QuickEditEnterMs)) +
+                    scaleIn(initialScale = 0.85f, animationSpec = tween(QuickEditEnterMs)),
+                exit = fadeOut(tween(QuickEditExitMs)) +
+                    scaleOut(targetScale = 0.85f, animationSpec = tween(QuickEditExitMs)),
+            ) {
+                Column(
+                    Modifier
+                        .padding(Space.xl)
+                        .background(
+                            Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
+                            RoundedCornerShape(24.dp),
+                        )
+                        // Swallows a press so it does not fall through to the scrim behind the
+                        // buttons and dismiss the dialog it landed on.
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {}
+                        .padding(Space.l),
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
+                ) {
+                    Button(
+                        onClick = { editRequested = true; visible = false },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Edit call")
+                    }
+                    OutlinedButton(
+                        onClick = { visible = false },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private const val QuickEditEnterMs = 220
+private const val QuickEditExitMs = 160
+private const val QuickEditDim = 0.32f
+private const val QuickEditBlurRadius = 48
 
 @Composable
 private fun StockHeader(
@@ -278,26 +407,30 @@ private fun StockHeader(
         Row(verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
                 val openStock = LocalOpenStock.current
+                // The logo sits beside the ticker-and-name pair rather than the ticker alone, and
+                // CenterVertically is what centers it against both lines rather than just the
+                // first - which is also what puts the name flush under the ticker with no padding
+                // hack: it is simply the next line in the same column.
                 Row(
                     Modifier.clickable { openStock(stock.stockCode) },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
-                    Text(stock.stockCode, style = MaterialTheme.typography.titleSmall)
-                    Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
-                }
-                // Indented to start under the ticker rather than the logo, on request - this is
-                // the one place on the card that does not start at the card's own left edge; see
-                // LogoSize's note on why every other line here does.
-                stock.stockNameArabic?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = LogoSize.Row + Space.s),
-                    )
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(stock.stockCode, style = MaterialTheme.typography.titleSmall)
+                            Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
+                        }
+                        stock.stockNameArabic?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
                 if (point != null) {
                     Spacer(Modifier.height(Space.xs))
@@ -481,9 +614,12 @@ private fun LevelPair(
     left: @Composable (Modifier) -> Unit,
     right: @Composable (Modifier) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-        left(Modifier.weight(1f))
-        right(Modifier.weight(1f))
+    // IntrinsicSize.Min on the row plus fillMaxHeight on each side is what makes the shorter tile's
+    // bar stretch to match the taller one - without it, a value that wraps to two lines (more
+    // likely at the folded, narrower width) leaves its neighbour's bar shorter than it should be.
+    Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+        left(Modifier.weight(1f).fillMaxHeight())
+        right(Modifier.weight(1f).fillMaxHeight())
     }
 }
 
@@ -496,9 +632,10 @@ private fun Level(
 ) {
     // A key rather than a plain label: six of these are read down the card in a fixed order, and
     // the colour is what lets that order be skipped - the reader's eye can go straight to the
-    // green targets or the red stop. IntrinsicSize.Min is what lets the line match the label+value
-    // pair's own height rather than asking for an unbounded one, which this Row does not have.
-    Row(modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+    // green targets or the red stop. The height comes entirely from the caller now: LevelPair
+    // shares one height across both its tiles via IntrinsicSize.Min, and the caller drawing this
+    // alone (the risk/reward row) supplies its own IntrinsicSize.Min instead.
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
         Box(
             Modifier
                 .fillMaxHeight()

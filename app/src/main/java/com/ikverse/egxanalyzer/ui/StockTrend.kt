@@ -11,9 +11,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -37,6 +40,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.Scoring
 import java.time.LocalDate
 import java.time.Period
 import kotlin.math.roundToInt
@@ -125,6 +129,30 @@ internal fun List<DailySession>.moveTo(session: DailySession): Double? {
     val close = session.close ?: return null
     if (first <= 0.0) return null
     return (close - first) / first * 100
+}
+
+/**
+ * Six months of closes for one ticker, fetched once per card rather than held on the record it is
+ * about.
+ *
+ * Off the disk exactly as [StockSheet] reads it - a local read through [AppState.priceHistory], no
+ * network - and only for a card that actually needs it: every other card on a tab keeps whatever it
+ * already had, rather than every one paying for a query at once. The widest range rather than the
+ * default one, for the same reason [StockSheet] fetches it once: a chart's own range chips slice
+ * this in the composition, so no press ever waits on a second query.
+ *
+ * Shared between the position card and the Insights call card's own chart, which is what it is
+ * named for rather than for either caller - a ticker's price history is the same six months
+ * whichever card is asking.
+ */
+@Composable
+internal fun rememberPriceHistory(appState: AppState, ticker: String): List<DailySession> {
+    val key = remember(ticker) { Scoring.normalizeTicker(ticker) }
+    var history by remember(key) { mutableStateOf(emptyList<DailySession>()) }
+    LaunchedEffect(key) {
+        history = appState.priceHistory(key, ChartRange.Widest.since(LocalDate.now()))
+    }
+    return history
 }
 
 /**
