@@ -1,10 +1,19 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.CloudProvider
@@ -13,6 +22,7 @@ import com.ikverse.egxanalyzer.ui.theme.EgxAnalyzerTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -133,5 +143,72 @@ class SavedRunStackTest {
         stack(listOf(run(1), run(2), run(3)), openRunId = 1L)
 
         assertEquals(setOf(1L), presses.keys)
+    }
+
+    /** Records what a drag over the stack leaves for whatever sits outside it. */
+    private fun stackWithEscapeCapture(runs: List<SavedAnalysis>): FloatArray {
+        val escaped = floatArrayOf(0f)
+        val outer = object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                escaped[0] += available.x
+                return Offset.Zero
+            }
+        }
+        compose.setContent {
+            EgxAnalyzerTheme {
+                Box(Modifier.nestedScroll(outer)) {
+                    SavedRunStack(runs = runs, openRunId = null) { saved, _, _, bringForward, mod ->
+                        presses[saved.id] = bringForward
+                        Text("run ${saved.id}", mod.fillMaxWidth().height(120.dp))
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        return escaped
+    }
+
+    /**
+     * The front card is the deck's own leading edge - `canScrollBackward` is false there, same as
+     * page 0 of any pager - so a drag trying to go further back than it has nowhere left to spend
+     * inside the deck. This is the fix of 2026-09-19: before it, `sidewaysGesturesStayOnThePage`
+     * swallowed this whether the deck had anywhere left to go or not, which is what made a swipe
+     * across a multi-run day's deck turn no tab at all.
+     */
+    @Test
+    fun `a drag past the deck's leading edge is handed to whatever sits outside it`() {
+        val escaped = stackWithEscapeCapture(listOf(run(1), run(2), run(3)))
+
+        compose.onNodeWithText("run 1").performTouchInput { swipeRight() }
+        compose.waitForIdle()
+
+        assertTrue(
+            "a drag past the front card's own edge should reach outside the deck",
+            escaped[0] > 0f,
+        )
+    }
+
+    /**
+     * The regression the 2026-09-12 fix exists for: a drag that still has somewhere to go inside
+     * the deck must stay there, or a swipe meant to turn a card three deep would carry an outer
+     * tab along with it.
+     */
+    @Test
+    fun `a drag the deck can still answer itself never escapes it`() {
+        val escaped = stackWithEscapeCapture(listOf(run(1), run(2), run(3)))
+
+        compose.onNodeWithText("run 1").performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+
+        assertEquals(
+            "the deck had a next card to turn to, so nothing was left over to hand off",
+            0f,
+            escaped[0],
+            0f,
+        )
     }
 }

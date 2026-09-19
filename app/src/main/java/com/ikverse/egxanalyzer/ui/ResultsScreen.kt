@@ -28,6 +28,11 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -640,7 +645,48 @@ internal fun SavedRunStack(
     // page rather than over the reading behind it. See this function's note on why a deck is opaque.
     val backing = MaterialTheme.colorScheme.background
     val cardShape = MaterialTheme.shapes.large
-    Box(modifier.fillMaxWidth()) {
+    // This page's own width, so a drag that runs past the deck's last card can be handed to the
+    // destination pager but never by more than the one page this deck fills - the same overshoot
+    // `sidewaysGesturesStayOnThePage` exists to prevent, measured locally because this connection
+    // sits closer to the gesture than that one does. -1 until laid out once; nothing is passed on
+    // before then.
+    var pageWidthPx by remember { mutableIntStateOf(-1) }
+    // **Only past the deck's own edge, and only the drag, never the fling.** Every other sideways
+    // gesture inside a page is eaten whole by `sidewaysGesturesStayOnThePage` because there is
+    // always page margin to start a tab-turn from instead - this deck is the page, on a multi-run
+    // day, so the same blanket swallow left nothing to swipe from at all. `canScrollForward` /
+    // `canScrollBackward` say whether the deck itself has anywhere left to go in the drag's
+    // direction; only once it does not is anything let through, and only up to one page width, so
+    // a fast swipe that clears the deck in one motion can turn the tab it was headed for and no
+    // further. Fling is swallowed outright rather than passed on capped: its velocity alone can
+    // clear more than a page, and it is `DestinationPager`'s own fling that should decide how far
+    // a hand-off travels. That leaves one gap - a flick thrown right at the deck's last card, with
+    // too little drag distance for the clamp above to carry, does not turn the page - accepted
+    // because it fails by doing nothing rather than by overshooting.
+    val edgeAware = remember(pager) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                val exhausted = (available.x < 0f && !pager.canScrollForward) ||
+                    (available.x > 0f && !pager.canScrollBackward)
+                if (!exhausted || pageWidthPx < 0) return Offset(available.x, 0f)
+                val freed = available.x.coerceIn(-pageWidthPx.toFloat(), pageWidthPx.toFloat())
+                return Offset(available.x - freed, 0f)
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity) =
+                Velocity(available.x, 0f)
+        }
+    }
+    Box(
+        modifier
+            .fillMaxWidth()
+            .onSizeChanged { pageWidthPx = it.width }
+            .then(if (open) Modifier else Modifier.nestedScroll(edgeAware)),
+    ) {
         HorizontalPager(
             state = pager,
             flingBehavior = fling,
