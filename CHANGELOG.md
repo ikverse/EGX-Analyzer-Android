@@ -4,6 +4,11 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.14] — 2026-09-19
+
+- Position card and Insights call card: header drops the English company name, Arabic only
+- Position card and Insights call card: meta line's middot separators ("channel · called …") now carry real dp padding (Space.s) instead of riding on the string's own spacing; the Insights card's line (up to four segments: channel, called, settled, repeat of) wraps in a FlowRow instead of running off the card
+
 ## [3.7.13] — 2026-09-19
 
 - Position card: PriceLadder now hides while the chart is open, and returns the moment it's collapsed, instead of the two ever stacking

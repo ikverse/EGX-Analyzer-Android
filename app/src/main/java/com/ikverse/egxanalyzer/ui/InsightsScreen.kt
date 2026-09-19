@@ -1262,19 +1262,17 @@ private fun ScoredCallRow(
                         Text(call.ticker, style = MaterialTheme.typography.titleSmall)
                         Egx33Badge(call.ticker, Modifier.padding(start = Space.s))
                     }
-                    listOfNotNull(call.companyArabic, call.companyEnglish)
-                        .filter(String::isNotBlank)
-                        .distinct()
-                        .takeIf(List<String>::isNotEmpty)
-                        ?.let {
-                            Text(
-                                it.joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                    // Arabic only - the English name read as a second, redundant label beside a
+                    // ticker that already says the stock in Latin letters.
+                    call.companyArabic?.takeIf(String::isNotBlank)?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 // Stacked rather than set loose on the card: both chips are about how this one
                 // call was judged - what the market did with it, and how long it was ever given -
@@ -1288,15 +1286,36 @@ private fun ScoredCallRow(
                     TimingLabel(call)
                 }
             }
-            Text(
-                "${call.channel} · called ${call.openedOn.format(AppDates.DayMonthYear)}" +
-                    (call.settledOn?.let { " · settled ${it.format(AppDates.DayMonthYear)}" } ?: "") +
+            // Pieces rather than one joined string, so the middot between them can carry real dp
+            // padding - Space.s each side - instead of riding on a couple of characters of the
+            // string's own spacing. A FlowRow rather than a Row: up to four segments can be
+            // present at once, and the single Text this replaced used to wrap onto a second line
+            // rather than run off the card.
+            FlowRow(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                val segments = listOfNotNull(
+                    call.channel,
+                    "called ${call.openedOn.format(AppDates.DayMonthYear)}",
+                    call.settledOn?.let { "settled ${it.format(AppDates.DayMonthYear)}" },
                     // The channel did post it that day, so the card stays; it is the same bet as
                     // the call it repeats, so no rate counts it twice.
-                    (call.repeatOf?.let { " · repeat of ${it.format(AppDates.DayMonthYear)}, counted once" } ?: ""),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+                    call.repeatOf?.let { "repeat of ${it.format(AppDates.DayMonthYear)}, counted once" },
+                )
+                segments.forEachIndexed { index, segment ->
+                    Text(
+                        segment,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (index != segments.lastIndex) {
+                        Text(
+                            "·",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = Space.s),
+                        )
+                    }
+                }
+            }
             SourceRecord(channelScore)
             CallContext(call)
             ExtractionWarning(call)

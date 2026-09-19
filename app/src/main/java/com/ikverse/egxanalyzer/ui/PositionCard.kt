@@ -149,19 +149,17 @@ internal fun PositionCard(
                         Text(position.ticker, style = MaterialTheme.typography.titleSmall)
                         Egx33Badge(position.ticker, Modifier.padding(start = Space.s))
                     }
-                    listOfNotNull(position.companyArabic, position.companyEnglish)
-                        .filter(String::isNotBlank)
-                        .distinct()
-                        .takeIf(List<String>::isNotEmpty)
-                        ?.let {
-                            Text(
-                                it.joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                    // Arabic only - the English name read as a second, redundant label beside a
+                    // ticker that already says the stock in Latin letters.
+                    position.companyArabic?.takeIf(String::isNotBlank)?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     // Every pill on this card, still in the one row the card says them all in -
                     // moved up into the header itself, so identity and status read as one block
                     // above the rule that now separates them from the trade's own facts below it.
@@ -269,17 +267,38 @@ internal fun PositionCard(
                 horizontalArrangement = Arrangement.spacedBy(Space.xs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    listOfNotNull(
-                        position.channel?.takeIf(String::isNotBlank),
-                        "called ${shortDate(position.recommendationDate)}",
-                    ).joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // Three pieces rather than one joined string, so the middot between them can carry
+                // real dp padding - Space.s each side - instead of riding on a couple of characters
+                // of the string's own spacing.
+                Row(
                     // fill = false so the arrow sits against the end of the line rather than out at
                     // the card's edge, where it would read as unrelated to it.
                     modifier = Modifier.weight(1f, fill = false),
-                )
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    position.channel?.takeIf(String::isNotBlank)?.let { channel ->
+                        Text(
+                            channel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "·",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = Space.s),
+                        )
+                    }
+                    Text(
+                        "called ${shortDate(position.recommendationDate)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 // The one hint that the card leads somewhere: a whole card being pressable is
                 // invisible otherwise.
                 if (onOpenCall != null) {
