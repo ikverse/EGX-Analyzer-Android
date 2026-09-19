@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.8] — 2026-09-19
+
+- Saved-run deck: a swipe on a multi-run day now turns the report tab it was headed for instead of turning nothing, once the deck itself has nowhere left to go in that direction
+
 ## [3.7.7] — 2026-09-19
 
 - Analyze: a run now says which batch it is reading and how many images are read, as a determinate bar while it reads and an indeterminate one while it writes; a correction says which attempt it is
