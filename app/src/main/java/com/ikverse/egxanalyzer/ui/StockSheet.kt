@@ -267,7 +267,10 @@ private fun StockSheetHeading(
                 .padding(horizontal = Space.l)
                 .padding(bottom = Space.s),
             horizontalArrangement = Arrangement.spacedBy(Space.s),
-            verticalAlignment = Alignment.Top,
+            // Centered against the ticker and the name together, not just top-aligned against
+            // whichever is first - the name already sits in the same Column as the ticker, so
+            // this is what centers the logo beside both lines rather than only the first.
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             StockLogo(ticker, LogoSize.Row)
             Column(Modifier.weight(1f)) {

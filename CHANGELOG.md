@@ -4,6 +4,14 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.21] — 2026-09-20
+
+- Portfolio: a position card's chart can now be pressed open or shut on any width, not just on a phone - it defaults open once the card is wide enough to draw it in the ladder's place and closed otherwise, and the choice is remembered per trade rather than per width so folding the phone doesn't reopen or close it
+- Portfolio: the wide and narrow chart paths are unified, so a phone-width card's expanded chart now falls back to the price ladder when there isn't enough history too, matching what wide already did
+- Insights call card: logo centered against the ticker and Arabic name together, and the ladder/chart now sit in the same neutral tinted panel "The call" already uses, instead of loose on the card
+- Insights call card: a divider now separates the figure panels from the footer (Ask AI / price feed), matching the recommendation card's own footer divider
+- Stock sheet: logo centered against the ticker and name together, same treatment as the recommendation and Insights cards
+
 ## [3.7.20] — 2026-09-19
 
 - Results: the recommendation card's ⋮ menu is gone - Copy call went unused and Edit call is reached by holding the card; the corner it sat in now holds the Watching/T+1 pill (and Edited, when a call has been corrected), grouped and left-aligned, top-aligned with the ticker

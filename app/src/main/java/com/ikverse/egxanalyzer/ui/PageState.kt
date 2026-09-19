@@ -160,14 +160,19 @@ class PageState {
     val portfolioFiltersOpen: MutableState<Boolean> = mutableStateOf(false)
 
     /**
-     * Which position cards have their chart open, by position id.
+     * Whether a position card's chart has been pressed open or shut, by position id, where the
+     * reader has actually pressed it.
      *
-     * The same shape [openReportMarkdown] already has, for the same reason: a bare `remember` in
-     * `PositionCard` died on every fold, which on the Fold 7 is not a rare event but the ordinary
-     * way the phone is used - expand a chart on the cover screen, open the phone the rest of the
-     * way, and the card that greeted the reader had quietly closed it again.
+     * A card defaults to expanded once it is wide enough to draw the chart in the ladder's place
+     * and collapsed on a phone - see `PositionCard`'s own `chartExpanded` - so this holds only the
+     * override, not the shown/hidden state itself: an id absent from the map means "use whichever
+     * the current width defaults to", not "collapsed". Survives a fold for the same reason
+     * [openReportMarkdown] does: a bare `remember` in `PositionCard` died on every fold, which on
+     * the Fold 7 is not a rare event but the ordinary way the phone is used - expand a chart on the
+     * cover screen, open the phone the rest of the way, and the card that greeted the reader had
+     * quietly closed it again.
      */
-    val expandedPositionCharts: MutableState<Set<String>> = mutableStateOf(emptySet())
+    val expandedPositionCharts: MutableState<Map<String, Boolean>> = mutableStateOf(emptyMap())
 
     // ── Analyze ──────────────────────────────────────────────────────────────────────────────
 

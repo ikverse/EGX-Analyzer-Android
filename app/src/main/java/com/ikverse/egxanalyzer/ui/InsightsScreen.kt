@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -1255,32 +1256,39 @@ private fun ScoredCallRow(
                 // The stock and the verdict on it - logo, ticker, badge, the Arabic name, the
                 // outcome/timing pills.
                 val identityBlock: @Composable ColumnScope.() -> Unit = {
-                    Column {
-                        // The logo and the ticker press together as one target rather than the
-                        // text alone, exactly as they do on the recommendation card: a 12sp glyph
-                        // beside a title is two touch targets where the reader sees one thing. The
-                        // card's own press, where it has one, opens the trade taken on this call -
-                        // so this is a second target on a card that already had one, and the
-                        // smaller of the two is the one that leads to the stock. See LocalOpenStock.
-                        val openStock = LocalOpenStock.current
-                        Row(
-                            Modifier.clickable { openStock(call.ticker) },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
-                            Text(call.ticker, style = MaterialTheme.typography.titleSmall)
-                            Egx33Badge(call.ticker, Modifier.padding(start = Space.s))
-                        }
-                        // Arabic only - the English name read as a second, redundant label beside
-                        // a ticker that already says the stock in Latin letters.
-                        call.companyArabic?.takeIf(String::isNotBlank)?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                    // The logo and the ticker press together as one target rather than the text
+                    // alone, exactly as they do on the recommendation card: a 12sp glyph beside a
+                    // title is two touch targets where the reader sees one thing. The card's own
+                    // press, where it has one, opens the trade taken on this call - so this is a
+                    // second target on a card that already had one, and the smaller of the two is
+                    // the one that leads to the stock. See LocalOpenStock.
+                    //
+                    // The logo sits beside the ticker-and-name pair rather than the ticker alone,
+                    // and CenterVertically is what centers it against both lines rather than just
+                    // the first - which is also what puts the name flush under the ticker with no
+                    // padding hack: it is simply the next line in the same column.
+                    val openStock = LocalOpenStock.current
+                    Row(
+                        Modifier.clickable { openStock(call.ticker) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(call.ticker, style = MaterialTheme.typography.titleSmall)
+                                Egx33Badge(call.ticker, Modifier.padding(start = Space.s))
+                            }
+                            // Arabic only - the English name read as a second, redundant label
+                            // beside a ticker that already says the stock in Latin letters.
+                            call.companyArabic?.takeIf(String::isNotBlank)?.let {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                     // Wrapped rather than stacked in the top-right corner: a fixed vertical stack
@@ -1404,17 +1412,27 @@ private fun ScoredCallRow(
                 // risked a little for a lot or the reverse, and how far up that scale the stock
                 // actually got. The same drawing the Results tab has always used for the same five
                 // levels, so a call read on one tab and again on the other is the same picture in
-                // both places. Named once so the wide fallback below can draw it too.
+                // both places. Named once so the wide fallback below can draw it too, and wrapped
+                // in the same neutral tile "The call" is tinted with - neither the ladder nor the
+                // chart is a verdict the app is drawing attention to, unlike "What happened"'s own
+                // rose wash.
                 val ladder: @Composable () -> Unit = {
-                    PriceLadder(
-                        stopLoss = call.stopLoss,
-                        entryLow = call.entryLow,
-                        entryHigh = call.entryHigh,
-                        target1 = call.target1,
-                        target2 = call.target2,
-                        // The extreme inside the judged window, which the figure below it says too.
-                        reached = call.peakHigh,
-                    )
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
+                            .padding(Space.m),
+                    ) {
+                        PriceLadder(
+                            stopLoss = call.stopLoss,
+                            entryLow = call.entryLow,
+                            entryHigh = call.entryHigh,
+                            target1 = call.target1,
+                            target2 = call.target2,
+                            // The extreme inside the judged window, which the figure below it says too.
+                            reached = call.peakHigh,
+                        )
+                    }
                 }
                 if (wide) {
                     // Fetched eagerly, because whether to fall back to the ladder is a decision
@@ -1422,10 +1440,17 @@ private fun ScoredCallRow(
                     // wide card shows one or the other, never an empty chart.
                     val history = rememberPriceHistory(appState, call.ticker)
                     if (history.count { it.close != null } > 1) {
-                        // The full chart in the ladder's place: there's finally width to spend on
-                        // how the stock actually got from the entry to wherever it settled, not
-                        // only where the five levels sit.
-                        CallChartSection(call, history)
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
+                                .padding(Space.m),
+                        ) {
+                            // The full chart in the ladder's place: there's finally width to spend
+                            // on how the stock actually got from the entry to wherever it settled,
+                            // not only where the five levels sit.
+                            CallChartSection(call, history)
+                        }
                     } else {
                         ladder()
                     }
@@ -1611,9 +1636,17 @@ private fun ScoredCallRow(
                     minWidth = WideCardMinWidth,
                     mainWeight = 1f,
                     alignHeights = true,
-                    main = { theCallPanel(Modifier.fillMaxWidth()) },
-                    side = { whatHappenedPanel(Modifier.fillMaxWidth()) },
+                    // fillMaxHeight, because alignHeights stretches the two *columns* and the
+                    // tinted Box inside each panel keeps its own height regardless - so the
+                    // shorter panel's stretch was invisible empty space under it, which is the
+                    // exact mismatch alignHeights exists to remove. See AnalyzeScreen's own pair
+                    // for the same fix, hit first.
+                    main = { theCallPanel(Modifier.fillMaxWidth().fillMaxHeight()) },
+                    side = { whatHappenedPanel(Modifier.fillMaxWidth().fillMaxHeight()) },
                 )
+                // Separates the figures, read together above it, from what this footer answers -
+                // the same rule the recommendation card's own footer divider already follows.
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 // Wrapped rather than laid in a row: at 280dp the two labels together are wider than
                 // the card, and a button pushed off the edge is a button nobody can press.
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
@@ -1930,7 +1963,10 @@ private fun CallChartSection(call: ScoredCall, history: List<DailySession>) {
                 // The one date this section is about is the call itself, ringed the same way the
                 // stock sheet rings every call on a stock.
                 calls = setOf(call.openedOn),
-                on = MaterialTheme.colorScheme.surfaceContainerHigh,
+                // The panel's own tint, not the card's - the ring and the touch dot are punched
+                // through whatever surface the chart is actually sitting on, which since the
+                // neutral tile wrap is one shade lighter than the card underneath it.
+                on = MaterialTheme.colorScheme.surfaceContainerHighest,
                 selected = touched,
                 onSelect = { touched = it },
                 height = CallChartHeight,

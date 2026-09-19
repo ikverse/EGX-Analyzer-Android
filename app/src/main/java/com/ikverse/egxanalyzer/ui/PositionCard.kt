@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -98,19 +99,6 @@ internal fun PositionCard(
     var menuOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
-    // Hidden by default: the chart is the deeper "how did it get here", worth a press rather than
-    // height every card on the tab spends whether or not it is read. Closed for a trade with
-    // nothing left to run - see the chart section below.
-    //
-    // Held on `PageState` rather than a bare `remember`, because a bare one does not survive a
-    // fold: `EgxAnalyzerApp` disposes the compact shell's whole subtree and composes the rail
-    // shell from nothing (or back), which on the Fold 7 happens on the ordinary act of opening the
-    // phone. `expandedPositionCharts` is a set of ids for exactly the reason `openReportMarkdown`
-    // is - several cards can have their chart open at once, and re-sorting the list must not move
-    // which card that is.
-    var expandedCharts by appState.pages.expandedPositionCharts
-    val chartExpanded = position.id in expandedCharts
-    val chevronRotation by animateFloatAsState(if (chartExpanded) 180f else 0f, label = "chartChevron")
 
     // A **second-level** surface: it sits inside the session card, so it takes the container role's
     // own alpha - see GlassSection - and none of the lighting a card standing on the page gets.
@@ -122,55 +110,71 @@ internal fun PositionCard(
     val body: @Composable ColumnScope.() -> Unit = {
         // Measured once, at the top: a two-column grid never splits this card any more (see the
         // Portfolio grid), so a card's own width is the container's. `wide` decides whether the
-        // chart expands on its own below, in the ladder's place, and whether the two figure panels
-        // stack or sit side by side - the same three-way switch the Insights call card already
-        // makes off its own width.
+        // chart defaults open, in the ladder's place, and whether the two figure panels stack or
+        // sit side by side - the same three-way switch the Insights call card already makes off
+        // its own width.
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val wide = maxWidth >= WideCardMinWidth
+            // Defaults to expanded once the card is wide enough that the chart draws in the
+            // ladder's place - the same width switch Insights' call card makes - and collapsed on
+            // a phone, where it used to cost nothing until pressed. A press flips either default
+            // the other way now, and what the reader chose is remembered per trade rather than per
+            // width, so folding the phone does not silently reopen or close it. Held on
+            // `PageState` rather than a bare `remember`, because a bare one does not survive a
+            // fold: `EgxAnalyzerApp` disposes the compact shell's whole subtree and composes the
+            // rail shell from nothing (or back), which on the Fold 7 is the ordinary way the phone
+            // is used.
+            var chartOverrides by appState.pages.expandedPositionCharts
+            val chartExpanded = chartOverrides[position.id] ?: wide
+            val chevronRotation by animateFloatAsState(if (chartExpanded) 180f else 0f, label = "chartChevron")
             Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                // A fixed two lines for the name, so a company whose name wraps does not make its card
-                // taller than the one beside it. Clickable on a running trade - anywhere outside the
-                // ticker row's own press, which still opens the stock sheet - to slide the chart open
-                // beneath it; a settled trade has no chart to open, so the header stays inert. Inert too
-                // once the card is wide enough to show the chart on its own - see below - so a press
-                // there is not toggling a state the card is no longer reading.
+                // A fixed two lines for the name, so a company whose name wraps does not make its
+                // card taller than the one beside it. Clickable on a running trade - anywhere
+                // outside the ticker row's own press, which still opens the stock sheet - to slide
+                // the chart open or shut beneath it, on any width; a settled trade has no chart to
+                // open, so the header stays inert.
                 Row(
                     Modifier
                         .heightIn(min = PositionHeaderHeight)
                         .clickable(
-                            enabled = view.open && !wide,
+                            enabled = view.open,
                             onClickLabel = if (chartExpanded) "Hide price chart" else "Show price chart",
                         ) {
-                            expandedCharts = if (chartExpanded) {
-                                expandedCharts - position.id
-                            } else {
-                                expandedCharts + position.id
-                            }
+                            chartOverrides = chartOverrides + (position.id to !chartExpanded)
                         },
                     verticalAlignment = Alignment.Top,
                 ) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                         // One target for the logo and the ticker, as on the call card. The card
                         // itself carries no press, so this takes none away. See LocalOpenStock.
+                        //
+                        // The logo sits beside the ticker-and-name pair rather than the ticker
+                        // alone, and CenterVertically is what centers it against both lines rather
+                        // than just the first - which is also what puts the name flush under the
+                        // ticker with no padding hack: it is simply the next line in the same column.
                         val openStock = LocalOpenStock.current
                         Row(
                             Modifier.clickable { openStock(position.ticker) },
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             StockLogo(position.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
-                            Text(position.ticker, style = MaterialTheme.typography.titleSmall)
-                            Egx33Badge(position.ticker, Modifier.padding(start = Space.s))
-                        }
-                        // Arabic only - the English name read as a second, redundant label beside a
-                        // ticker that already says the stock in Latin letters.
-                        position.companyArabic?.takeIf(String::isNotBlank)?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(position.ticker, style = MaterialTheme.typography.titleSmall)
+                                    Egx33Badge(position.ticker, Modifier.padding(start = Space.s))
+                                }
+                                // Arabic only - the English name read as a second, redundant label
+                                // beside a ticker that already says the stock in Latin letters.
+                                position.companyArabic?.takeIf(String::isNotBlank)?.let {
+                                    Text(
+                                        it,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                         }
                         // Every pill on this card, still in the one row the card says them all in -
                         // moved up into the header itself, so identity and status read as one block
@@ -255,57 +259,71 @@ internal fun PositionCard(
                 // below - the same rule the two figure groups further down are already ruled apart by.
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+                // The neutral tile "Your trade" is tinted with, wrapped around whichever of the
+                // ladder or the chart is showing: neither is a verdict the app is drawing
+                // attention to, unlike "Where it stands"' own indigo wash.
+                val panel: @Composable (@Composable () -> Unit) -> Unit = { content ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
+                            .padding(Space.m),
+                    ) {
+                        content()
+                    }
+                }
                 // The ladder, named once so both the wide fallback below and the narrow gate
                 // further down can draw it without stating the same six lines twice.
                 val ladder: @Composable () -> Unit = {
-                    PriceLadder(
-                        stopLoss = position.stopLoss,
-                        // One price, not a band. The trade opened where it opened, and the drawing
-                        // keeps a zero-width band visible rather than losing the mark; the levels
-                        // either side of it are still the call's, which is what makes the picture
-                        // worth reading at all.
-                        entryLow = position.entryPrice,
-                        entryHigh = position.entryPrice,
-                        target1 = position.target1,
-                        target2 = position.target2,
-                        // The arrow is where this trade stands: today's close while it runs, and
-                        // where it ended once it has. Nothing is plotted across a change of scale -
-                        // the levels are quoted in the old money and the price in the new, so the
-                        // arrow would point at a place on the axis that does not exist.
-                        reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
-                    )
+                    panel {
+                        PriceLadder(
+                            stopLoss = position.stopLoss,
+                            // One price, not a band. The trade opened where it opened, and the
+                            // drawing keeps a zero-width band visible rather than losing the mark;
+                            // the levels either side of it are still the call's, which is what
+                            // makes the picture worth reading at all.
+                            entryLow = position.entryPrice,
+                            entryHigh = position.entryPrice,
+                            target1 = position.target1,
+                            target2 = position.target2,
+                            // The arrow is where this trade stands: today's close while it runs,
+                            // and where it ended once it has. Nothing is plotted across a change
+                            // of scale - the levels are quoted in the old money and the price in
+                            // the new, so the arrow would point at a place on the axis that does
+                            // not exist.
+                            reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
+                        )
+                    }
                 }
-                // Slides open under the header on a running trade - see the header's own `clickable` -
-                // or draws directly once the card is wide, the same width switch the Insights call card
-                // already makes. Hidden by default on a phone, because the ladder below already answers
-                // "where do the levels sit" for every trade on the tab at no cost in height; this is the
-                // deeper "how did it get here" a reader presses for there. A settled trade never gets
-                // one: `chartExpanded` can only be true on a trade that was open when it was pressed,
-                // and `view.open` is checked again here rather than trusted, since a trade can settle
-                // while its card is expanded.
+                // Slides open under the header on a running trade - see the header's own
+                // `clickable`, togglable and defaulted the same way on any width now. A settled
+                // trade never gets one: `chartExpanded` can only be true on a trade that was open
+                // when it was pressed, and `view.open` is checked again here rather than trusted,
+                // since a trade can settle while its card is expanded.
                 if (view.open) {
-                    if (wide) {
-                        // Fetched eagerly here, unlike the narrow branch below, because whether to
-                        // fall back to the ladder is a decision this card has to make before it
-                        // knows whether there is a line to draw - a wide card shows one or the
-                        // other, never an empty chart.
+                    AnimatedVisibility(
+                        visible = chartExpanded,
+                        enter = expandVertically(clip = false) + fadeIn(),
+                        exit = shrinkVertically(clip = false) + fadeOut(),
+                    ) {
+                        // Fetched only once this content is actually composing, so a card left
+                        // collapsed never pays for the query - and whether to fall back to the
+                        // ladder is a decision made before there is a line to draw either way, on
+                        // any width now: showing a chart with too little history to plot said less
+                        // than the ladder already does for free.
                         val history = rememberPriceHistory(appState, position.ticker)
                         if (history.count { it.close != null } > 1) {
-                            PositionChartSection(position, colors.containerColor, history)
+                            // The panel's own tint, not the card's - see the same note on
+                            // Insights' CallChartSection for why.
+                            panel {
+                                PositionChartSection(
+                                    position,
+                                    MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    history,
+                                )
+                            }
                         } else {
                             ladder()
-                        }
-                    } else {
-                        AnimatedVisibility(
-                            visible = chartExpanded,
-                            enter = expandVertically(clip = false) + fadeIn(),
-                            exit = shrinkVertically(clip = false) + fadeOut(),
-                        ) {
-                            PositionChartSection(
-                                position,
-                                colors.containerColor,
-                                rememberPriceHistory(appState, position.ticker),
-                            )
                         }
                     }
                 }
@@ -374,11 +392,11 @@ internal fun PositionCard(
                     )
                 }
 
-                // Hidden while the chart is open, on a press or because the card is wide: the chart
-                // already draws these same levels against the close, so the two would only ever say
-                // the same thing twice, one above the other. Returns the moment a narrow card's chart
-                // closes, in the space it just gave up.
-                if (!chartExpanded && !wide) {
+                // Hidden while the chart is open: the chart already draws these same levels
+                // against the close, so the two would only ever say the same thing twice, one
+                // above the other. Returns the moment the chart above is collapsed, in the space
+                // it just gave up - on any width now.
+                if (!chartExpanded) {
                     ladder()
                 }
 
@@ -547,8 +565,13 @@ internal fun PositionCard(
                     minWidth = WideCardMinWidth,
                     mainWeight = 1f,
                     alignHeights = true,
-                    main = { yourTradePanel(Modifier.fillMaxWidth()) },
-                    side = { whereItStandsPanel(Modifier.fillMaxWidth()) },
+                    // fillMaxHeight, because alignHeights stretches the two *columns* and the
+                    // tinted Box inside each panel keeps its own height regardless - so the
+                    // shorter panel's stretch was invisible empty space under it, which is the
+                    // exact mismatch alignHeights exists to remove. See AnalyzeScreen's own pair
+                    // for the same fix, hit first.
+                    main = { yourTradePanel(Modifier.fillMaxWidth().fillMaxHeight()) },
+                    side = { whereItStandsPanel(Modifier.fillMaxWidth().fillMaxHeight()) },
                 )
 
                 Text(
