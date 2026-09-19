@@ -1542,12 +1542,17 @@ internal fun EmptyState(icon: ImageVector, title: String, detail: String) {
  * screen that happens to be asking.
  */
 @Composable
-internal fun FigureGroup(title: String, figures: List<@Composable RowScope.() -> Unit>) {
+internal fun FigureGroup(
+    title: String,
+    figures: List<@Composable RowScope.() -> Unit>,
+    /** The page's own accent where a group wants to say it is the card's structure, not a caption. */
+    titleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Text(
             title.uppercase(),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = titleColor,
         )
         BoxWithConstraints {
             // Taken as a list rather than a row of slots, because wrapping means splitting them -

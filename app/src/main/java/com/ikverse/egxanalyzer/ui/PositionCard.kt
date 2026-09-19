@@ -137,7 +137,7 @@ internal fun PositionCard(
                     },
                 verticalAlignment = Alignment.Top,
             ) {
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                     // One target for the logo and the ticker, as on the call card. The card
                     // itself carries no press, so this takes none away. See LocalOpenStock.
                     val openStock = LocalOpenStock.current
@@ -855,7 +855,7 @@ private fun Position.partsLine(): String {
 private fun LocalDate?.dated(): String = this?.let { " on ${shortDate(it)}" }.orEmpty()
 
 /** Ticker plus two lines of company name, so every position card starts the same height. */
-private val PositionHeaderHeight = 52.dp
+private val PositionHeaderHeight = 60.dp
 
 /**
  * Shorter than [StockSheet]'s 220dp - that height was tuned for a sheet with nothing else on the

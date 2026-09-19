@@ -593,7 +593,7 @@ internal fun ChartControls(
 ) {
     Row(
         Modifier.fillMaxWidth().scrollableRow(),
-        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ChartRange.entries.forEach { option ->

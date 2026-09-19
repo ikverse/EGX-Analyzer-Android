@@ -4,6 +4,14 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.15] — 2026-09-19
+
+- Insights call card: channel name and the called/settled/repeat line moved into the header, closed by a divider, instead of running the source into the tight meta line below the name block
+- Insights call card: "The call" and "What happened" headings take the page's own rose accent and sit in their own tinted panel (a neutral tile and the page's own soft accent) instead of a plain muted caption ruled apart by a hairline
+- Insights call card: overall spacing widened from Space.s to Space.m between sections
+- Position card: header column now carries Space.xs between the ticker row and the name below it; header height grew 52dp → 60dp to hold it
+- Stock sheet: chart range chips packed tighter, 2dp between them instead of Space.xs
+
 ## [3.7.14] — 2026-09-19
 
 - Position card and Insights call card: header drops the English company name, Arabic only
