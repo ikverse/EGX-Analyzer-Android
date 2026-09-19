@@ -3,18 +3,22 @@ package com.ikverse.egxanalyzer.ui
 import com.ikverse.egxanalyzer.model.timing
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Card
@@ -156,6 +160,9 @@ private fun RecommendationCard(
                 onEdit = { editing = true },
             )
 
+            // What the channel printed, set off from what it printed it about.
+            HorizontalDivider()
+
             // No ladder here, deliberately. This card is a row of the report that would not fit as
             // a row: what it owes the reader is the call's figures, and a drawing of the same five
             // numbers doubled the card's height to say what LevelGrid says underneath it. The
@@ -278,11 +285,22 @@ private fun StockHeader(
                 }
                 channel?.takeIf(String::isNotBlank)?.let {
                     Spacer(Modifier.height(Space.xs))
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "SOURCE",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
             if (point != null) {
@@ -455,23 +473,37 @@ private fun Level(
     tone: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier) {
-        Text(
-            label.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    // A key rather than a plain label: six of these are read down the card in a fixed order, and
+    // the colour is what lets that order be skipped - the reader's eye can go straight to the
+    // green targets or the red stop. IntrinsicSize.Min is what lets the line match the label+value
+    // pair's own height rather than asking for an unbounded one, which this Row does not have.
+    Row(modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .width(LevelKeyWidth)
+                .background(tone, RoundedCornerShape(percent = 50)),
         )
-        Text(
-            value,
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontSize = LevelFigure,
-                lineHeight = LevelFigureLine,
-            ),
-            fontWeight = FontWeight.SemiBold,
-            color = tone,
-        )
+        Column {
+            Text(
+                label.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = LevelFigure,
+                    lineHeight = LevelFigureLine,
+                ),
+                fontWeight = FontWeight.SemiBold,
+                color = tone,
+            )
+        }
     }
 }
+
+private val LevelKeyWidth = 3.dp
 
 /**
  * A step under `titleMedium`, on a line tighter than the scale gives it.

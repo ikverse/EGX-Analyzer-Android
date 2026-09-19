@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.9] — 2026-09-19
+
+- Recommendation card: header separated from the figure grid by a divider
+- Recommendation card: "SOURCE" label added beside the channel name, same colour, name set larger
+- Recommendation card: each figure (entry, stop, targets, support/resistance) now carries a vertical colour key spanning its label and value
+
 ## [3.7.8] — 2026-09-19
 
 - Saved-run deck: a swipe on a multi-run day now turns the report tab it was headed for instead of turning nothing, once the deck itself has nowhere left to go in that direction
