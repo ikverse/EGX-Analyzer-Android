@@ -61,6 +61,7 @@ class FakeAppState(
     override val analysisStatus: AnalysisStatus = AnalysisStatus.IDLE,
     override val analysisStartedAt: Instant? = null,
     override val analysisMessage: String? = null,
+    override val analysisProgress: AnalysisProgress? = null,
     override val pendingResultId: Long? = null,
     override val pendingPositionId: String? = null,
     override val pendingCallId: String? = null,

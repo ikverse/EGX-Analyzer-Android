@@ -18,6 +18,7 @@ import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisMode
+import com.ikverse.egxanalyzer.model.AnalysisProgress
 import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.CallOrder
@@ -158,6 +159,15 @@ interface AppState : AppUpdates {
     val analysisStatus: AnalysisStatus
     val analysisStartedAt: Instant?
     val analysisMessage: String?
+
+    /**
+     * How far along the running analysis is, or null where none is running.
+     *
+     * Null is also what a run reports before its first batch goes out, which is why the screen
+     * still keeps the elapsed clock: this says how much is left to do and that says how long it has
+     * been doing it, and on a run that has stalled the second is the only one that moves.
+     */
+    val analysisProgress: AnalysisProgress?
     val pendingResultId: Long?
     val pendingPositionId: String?
     val pendingCallId: String?

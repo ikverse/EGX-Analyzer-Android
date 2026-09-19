@@ -88,6 +88,7 @@ import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.AnalysisMode
+import com.ikverse.egxanalyzer.model.AnalysisProgress
 import com.ikverse.egxanalyzer.model.AnalysisPlan
 import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.AnalysisRequest
@@ -872,6 +873,20 @@ class LiveAppState(
     override var analysisStartedAt by mutableStateOf<Instant?>(null)
         private set
     override var analysisMessage by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * How far the running analysis has got, as the repository reports it.
+     *
+     * Written from the repository's own thread, which is not the main one - see the `onProgress`
+     * contract on [AnalysisRepository.analyze]. A `mutableStateOf` is safe to write from anywhere,
+     * so what this needs is not a switch to the main thread but simply not to be read as though it
+     * were ordered against anything else; nothing here depends on it being.
+     *
+     * Cleared in the same `finally` that clears the rest of a run's live state, so a progress line
+     * cannot outlive the run it describes and be read as a second one starting.
+     */
+    override var analysisProgress by mutableStateOf<AnalysisProgress?>(null)
         private set
     private var activeRequestId: String? = null
     private var analysisJob: Job? = null
@@ -3804,7 +3819,7 @@ class LiveAppState(
         analysisMessage = "Sending ${selectedInputs.size} sources to ${cloudConfiguration.provider.displayName}…"
         analysisRunning(selectedInputs.size, cloudConfiguration.model)
         try {
-            val result = analysisRepository.analyze(request)
+            val result = analysisRepository.analyze(request) { analysisProgress = it }
             // The run has just spent; the tally on disk has moved and the screen's copy has not.
             refreshModelUsage()
             localDataStore.saveResult(
@@ -3855,6 +3870,7 @@ class LiveAppState(
         } finally {
             activeRequestId = null
             analysisStartedAt = null
+            analysisProgress = null
         }
     }
 

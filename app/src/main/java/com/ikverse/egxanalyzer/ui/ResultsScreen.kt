@@ -11,7 +11,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -48,10 +47,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -1133,50 +1130,24 @@ private fun SavedAnalysisCard(
 /**
  * What the run amounts to, as one instrument rather than four loose numbers.
  *
- * Bounded and divided because these figures are read against each other - twelve stocks from
- * twenty-eight readings is a different report from twelve out of twelve - and numbers floating in
- * open space with 28dp between them read as three unrelated facts.
+ * The instrument itself is [StatStrip], which this used to be: it was lifted into `CommonUi` when
+ * the token usage section wanted the same shape, so what is left here is only which four figures a
+ * report puts in it. The stock count leads and so takes the page's hue - it is the figure that says
+ * how much report there is.
  *
  * [traded] is dropped entirely when the user is in none of the run's calls, rather than shown as a
  * zero: a nought under a label is a figure to work out, where an absent cell is nothing to read.
  */
 @Composable
 private fun ReportFigures(stocks: Int, calls: Int, sources: Int, traded: Int) {
-    val figures = buildList {
-        add(stocks.toString() to "stocks")
-        add(calls.toString() to "calls")
-        add(sources.toString() to "sources")
-        if (traded > 0) add(traded.toString() to "traded")
-    }
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.small,
-        border = cardOutline,
-    ) {
-        // Intrinsic height so the dividers run the full depth of the row rather than the height
-        // Material would otherwise give a divider with nothing to measure against.
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            figures.forEachIndexed { index, (value, label) ->
-                if (index > 0) VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                StatTile(
-                    value = value,
-                    label = label,
-                    modifier = Modifier.weight(1f).padding(vertical = Space.xs, horizontal = Space.xs),
-                    // The stock count leads, as it did before: it is the figure that says how much
-                    // report there is.
-                    tone = if (index == 0) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                    alignment = Alignment.CenterHorizontally,
-                    // A strip that says how much report there is, over a card being scanned in a
-                    // grid of them - not the record itself, which is what the Portfolio's tiles are.
-                    dense = true,
-                )
-            }
-        }
-    }
+    StatStrip(
+        buildList {
+            add(stocks.toString() to "stocks")
+            add(calls.toString() to "calls")
+            add(sources.toString() to "sources")
+            if (traded > 0) add(traded.toString() to "traded")
+        },
+    )
 }
 
 /**

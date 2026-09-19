@@ -135,6 +135,13 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `model/ExtractionPlan.kt` — which images a run sends and under which of its own numbers, stated
   apart from the chunking because a source read by an earlier run keeps its number and is not sent.
   See **What a run sends, and what it does not send twice** below.
+- `model/AnalysisProgress.kt` — how far along a run is, reported by `AnalysisRepository.analyze`'s
+  `onProgress` and drawn by `RunProgress` on Analyze and by the action's own label. **Determinate
+  while it reads and indeterminate while it writes**: `ExtractionPlan.chunks()` hands back the whole
+  list of batches before the first one is sent, so the reading is countable, and the consolidation
+  is one answer of unknown length that becomes two or three if it needs correcting. A bar covering
+  both would walk backwards on a correction, and `RunningLabel`'s comment used to say — correctly,
+  at the time — that any figure claiming to know how far along a run was would be invented.
 - `data/ConsolidatedParser.kt` — the model's JSON into `ConsolidatedRecommendation`.
 - `model/RecommendationEdit.kt` + `ui/EditCallSheet.kt` — correcting what the model misread off a
   screenshot, as an overlay on the report rather than a rewrite of its answer. See **Correcting a
@@ -185,7 +192,10 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   the one figure layout and the one set of date patterns, for every screen that draws either.
   `CommonUi.kt` also holds `ActionPill` and `DisclosureButton`, the two kinds of button a card is
   allowed to carry, and `SettingsButton`, the one a settings page carries. See **A button on a card
-  is one of two things** under Gotchas.
+  is one of two things** under Gotchas. It holds two instruments as well: `StatStrip`, a handful of
+  counts bounded and divided so they are read against each other (a report card's figures and the
+  token tally's), and `ShareBar`, how one quantity divides in two — deliberately not `OutcomeBar`,
+  which is four fixed verdicts in four fixed colours with a legend drawn above the cards using it.
 - `ui/PageHeader.kt` — the page's own name and icon at the top of every screen, shrinking as the
   page is read, and the two controls that arrive with the collapsed bar: the page's stock filter,
   and the icon that opens the rest of its filters. It replaced the `EGX Analyzer` band on
@@ -232,6 +242,11 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `ui/CallText.kt` — one call as plain text, for the ⋮ on a call card.
 - `ui/InfoSheet.kt` — `InfoNote`, the question mark that opens one, and the `SettingToggle` /
   `SettingLabel` rows every explained control is built from. See **Where an explanation lives**.
+- `ui/StockLogo.kt` — the mark beside a name. `StockLogo` is the company's own, bundled for 222 of
+  223; `ChannelAvatar` is Telegram's picture of a source, drawn on the Insights ranking out of the
+  same cache `ChannelsSection` reads. Both fall back to one `Monogram`, and for the channel that
+  fallback is the ordinary case rather than a failure: a pruned cache, a report synced from the
+  other phone, and an on-device import all arrive with no path.
 - `data/EgxCatalog.kt` + `data/EgxSeedStocks.kt` — what a stock is called, and the table it is
   called from. See **What a stock is called** below.
 - `ui/` — one file per screen, plus `CommonUi.kt` and `DesignSystem.kt` for shared pieces.
