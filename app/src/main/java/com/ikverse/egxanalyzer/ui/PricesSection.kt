@@ -123,18 +123,28 @@ internal fun PricesSubSection(appState: AppState) {
         }
         // Offered whatever the state, because it is also how a reader confirms nothing has changed.
         // A price fetch costs nothing: it reads a free public feed and sends nothing to the model.
+        //
+        // The whole catalog rather than only the recommended/held tickers the checkbox above keeps
+        // fresh - the same widening the once-a-day close sweep got, so a stock with no call and no
+        // trade still ends up with a year of history behind it, which is what a chart on it needs.
+        // Every other stock in the catalog is fetched in full the first time this reaches it, so
+        // the first press after this shipped takes noticeably longer than the ones before it.
         SettingRow(
             about = infoNote(
                 "Fetch prices now",
                 "Prices come from a free public feed and nothing is sent to the AI provider, " +
                     "so fetching them costs nothing.",
+                "Fetches the whole catalog now, not only the stocks a report or a trade names - " +
+                    "so a stock nobody has called or traded yet still gets priced, which is what " +
+                    "its chart needs. A stock fetched for the first time comes back with a year " +
+                    "of history; one already stored is topped up from where it stopped.",
                 "It is the one thing that can help a stock the feed has never priced. A stock " +
                     "that keeps answering with the same day is trading under a new code, and " +
                     "fetching again cannot bring the old one back.",
             ),
         ) {
             SettingsButton(
-                onClick = { scope.launch { appState.refreshPrices() } },
+                onClick = { scope.launch { appState.refreshCatalogPrices() } },
                 enabled = !appState.pricesRefreshing,
             ) {
                 Text(if (appState.pricesRefreshing) "Fetching…" else "Fetch prices now")

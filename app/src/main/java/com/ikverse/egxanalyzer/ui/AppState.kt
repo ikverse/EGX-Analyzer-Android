@@ -523,6 +523,15 @@ interface AppState : AppUpdates {
 
     suspend fun refreshPrices(announce: Boolean = true): PriceRefreshOutcome
 
+    /**
+     * The same fetch, over every stock in the catalog rather than only the ones a report or a
+     * trade names. What the "Fetch prices now" button calls, and what the once-a-day close sweep
+     * runs after the market shuts - narrower fetches elsewhere are about keeping an active record
+     * current, and this one is about a stock nobody has called or traded yet still having a year
+     * of history behind it the first time somebody looks at its chart.
+     */
+    suspend fun refreshCatalogPrices(announce: Boolean = true): PriceRefreshOutcome
+
     fun addChannel(idText: String, name: String): Boolean
 
     suspend fun saveTelegramApiConfiguration(apiId: String, apiHash: String)

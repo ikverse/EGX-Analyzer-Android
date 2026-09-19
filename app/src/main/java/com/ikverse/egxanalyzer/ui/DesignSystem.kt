@@ -321,6 +321,24 @@ val PillCorner: Dp = 6.dp
 val PillShape: Shape = RoundedCornerShape(PillCorner)
 
 /**
+ * The corner a tinted panel inside a card is cut at - "The call"/"What happened" on the Insights
+ * call card, "Your trade"/"Where it stands" on a position card. Shared rather than declared twice,
+ * so the two families of card cannot drift apart on a number neither of them has a reason to own.
+ */
+val SectionPanelShape: Shape = RoundedCornerShape(10.dp)
+
+/**
+ * How wide a card has to measure before it draws its wide layout instead of its phone one.
+ *
+ * Clear of both real widths a full-width card is drawn at now that neither the Insights nor the
+ * Portfolio grid ever splits a row in two - the ~380-411dp a phone gives one, and the 614-682dp a
+ * Fold unfolded or a tablet gives one. Nothing between the two, so the exact value only has to sit
+ * in the gap. Shared for the same reason [SectionPanelShape] is: two cards asking the same question
+ * ("is there room for the wide layout") should never answer it differently.
+ */
+val WideCardMinWidth: Dp = 480.dp
+
+/**
  * The air between a pill's text and its own edge.
  *
  * Six, and not [Space.s]: a ring is drawn around one or two words and reads as a label only while

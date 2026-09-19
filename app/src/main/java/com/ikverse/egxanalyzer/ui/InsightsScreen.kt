@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Assessment
@@ -1428,54 +1427,54 @@ private fun ScoredCallRow(
                             .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
                             .padding(Space.m),
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                            FigureGroup(
-                                "The call",
-                                listOf(
-                                    // Paid and risked first, aimed at second: wrapped two-up this keeps the targets
-                                    // side by side in reading order rather than splitting them across rows.
+                        FigureGroup(
+                            "The call",
+                            listOfNotNull(
+                                // Paid and risked first, aimed at second: wrapped two-up this keeps the targets
+                                // side by side in reading order rather than splitting them across rows.
+                                {
+                                    Figure(
+                                        "Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry,
+                                        // The base the three percentages below are measured from, said once
+                                        // where they can all be read against it.
+                                        caption = call.entryMidCaption(),
+                                    )
+                                },
+                                // A price on its own says nothing across stocks: 59.80 is a wide stop on one
+                                // share and a tight one on another, and the distance is the half that compares.
+                                {
+                                    Figure(
+                                        "Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f),
+                                        tone = PriceRole.stop, caption = call.fromEntry(call.stopLoss).distance(),
+                                    )
+                                },
+                                {
+                                    Figure(
+                                        "Target 1", formatPrice(call.target1), Modifier.weight(1f),
+                                        tone = PriceRole.target, caption = call.fromEntry(call.target1).distance(),
+                                    )
+                                },
+                                {
+                                    Figure(
+                                        "Target 2", formatPrice(call.target2), Modifier.weight(1f),
+                                        tone = PriceRole.target, caption = call.fromEntry(call.target2).distance(),
+                                    )
+                                },
+                                // What the four figures above come to, as a figure of its own rather than a
+                                // caption underneath - absent rather than blank for a call missing a level it
+                                // needs. The market's own blue: it is read off the four prices above it, not
+                                // printed by the channel, the same reason Peak/Trough/Latest close wear it.
+                                call.riskReward?.let { ratio ->
                                     {
                                         Figure(
-                                            "Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry,
-                                            // The base the three percentages below are measured from, said once
-                                            // where they can all be read against it.
-                                            caption = call.entryMidCaption(),
+                                            "Risk : reward", ratio.asRatio(), Modifier.weight(1f),
+                                            tone = PriceRole.market,
                                         )
-                                    },
-                                    // A price on its own says nothing across stocks: 59.80 is a wide stop on one
-                                    // share and a tight one on another, and the distance is the half that compares.
-                                    {
-                                        Figure(
-                                            "Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f),
-                                            tone = PriceRole.stop, caption = call.fromEntry(call.stopLoss).distance(),
-                                        )
-                                    },
-                                    {
-                                        Figure(
-                                            "Target 1", formatPrice(call.target1), Modifier.weight(1f),
-                                            tone = PriceRole.target, caption = call.fromEntry(call.target1).distance(),
-                                        )
-                                    },
-                                    {
-                                        Figure(
-                                            "Target 2", formatPrice(call.target2), Modifier.weight(1f),
-                                            tone = PriceRole.target, caption = call.fromEntry(call.target2).distance(),
-                                        )
-                                    },
-                                ),
-                                titleColor = pageAccent.ink,
-                            )
-                            // What the four figures above come to, said once rather than dividing them by eye.
-                            // Grey rather than the panel's own accent: it is arithmetic on the channel's own
-                            // numbers, not a verdict the app is drawing attention to.
-                            call.riskReward?.let {
-                                Text(
-                                    "risk : reward ${it.asRatio()}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
+                                    }
+                                },
+                            ),
+                            titleColor = pageAccent.ink,
+                        )
                     }
                 }
                 // The market's own hue, not the neutral tile above: it is the one group on this
@@ -1584,19 +1583,19 @@ private fun ScoredCallRow(
                         )
                     }
                 }
-                if (wide) {
-                    // Side by side rather than stacked: a single wide card has the room a two-up
-                    // grid of cards never did, and two panels of equal standing ending at two
-                    // heights reads as one of them having failed to load - the same reasoning
-                    // `AdaptivePanes.alignHeights` states for its own pair.
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                        theCallPanel(Modifier.weight(1f))
-                        whatHappenedPanel(Modifier.weight(1f))
-                    }
-                } else {
-                    theCallPanel(Modifier.fillMaxWidth())
-                    whatHappenedPanel(Modifier.fillMaxWidth())
-                }
+                // A pair of equals - AdaptivePanes with mainWeight 1f, its own house rule for
+                // exactly this - rather than a bespoke Row: two panels of equal standing ending at
+                // two different heights reads as one of them having failed to load, and a second
+                // hand-rolled height tracker would be a second thing this app measures panes with.
+                // `minWidth` matches `wide` exactly, so the panels never disagree with the header
+                // and the chart about when there is room to stand side by side.
+                AdaptivePanes(
+                    minWidth = WideCardMinWidth,
+                    mainWeight = 1f,
+                    alignHeights = true,
+                    main = { theCallPanel(Modifier.fillMaxWidth()) },
+                    side = { whatHappenedPanel(Modifier.fillMaxWidth()) },
+                )
                 // Wrapped rather than laid in a row: at 280dp the two labels together are wider than
                 // the card, and a button pushed off the edge is a button nobody can press.
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
@@ -2166,19 +2165,6 @@ private fun Double?.signedPercent(): String = formatPercent(this)
 
 private fun Double?.orDash(): String = formatPrice(this)
 
-
-/** The corner "The call" and "What happened" are tinted at, on the call card. */
-private val SectionPanelShape = RoundedCornerShape(10.dp)
-
-/**
- * How wide a call card has to measure before it draws as the unfolded layout: a two-pane header,
- * [CallChartSection] in place of [PriceLadder], and the figure panels running side by side.
- *
- * Clear of both real widths this app draws a call card at - the ~380-411dp a phone gives one full
- * card, and the 614-682dp a Fold unfolded or a tablet gives one now that the grid never splits a
- * row into two. Nothing between the two, so the exact value only has to sit in the gap.
- */
-private val WideCardMinWidth = 480.dp
 
 /** [PriceChart]'s height inside [CallChartSection] - shorter than the stock sheet's own 220dp, since
  *  this card still has the two figure panels to show underneath it. */

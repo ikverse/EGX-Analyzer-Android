@@ -4,6 +4,15 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.18] — 2026-09-19
+
+- Portfolio: the position card grid drops from two columns to one, the same move Insights' call card grid got
+- Position card: "Your trade" and "Where it stands" are now tinted panels (neutral tile / Portfolio's own indigo wash) with indigo headings, matching the call card's "The call"/"What happened" treatment; risk:reward is now a figure of its own, in blue, instead of text in the heading; the two panels stretch to match the taller one, per card
+- Position card: above ~480dp of container the price chart expands on its own, in the ladder's place - press-to-reveal is unchanged on a phone
+- Every tab now remembers how far it was scrolled and restores that position after a fold, instead of resetting to the top - `PageState.scrollOffset`, read by `Screen`
+- `SectionPanelShape` and `WideCardMinWidth` moved into `DesignSystem.kt`, shared between the call card and the position card rather than declared twice
+- Results: the occurrence sheet's level grid sits in a tinted panel and its header matches the call card's identity block; the recommendation card's header pills moved to their own row under the name
+
 ## [3.7.17] — 2026-09-19
 
 - Insights: the call card grid drops from two columns to one — a call card always spans the full container width now, on a phone and once the Fold opens alike

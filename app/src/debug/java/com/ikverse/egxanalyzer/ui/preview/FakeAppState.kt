@@ -381,6 +381,8 @@ class FakeAppState(
 
     override suspend fun refreshPrices(announce: Boolean): PriceRefreshOutcome = PriceRefreshOutcome(summary = "", succeeded = true)
 
+    override suspend fun refreshCatalogPrices(announce: Boolean): PriceRefreshOutcome = PriceRefreshOutcome(summary = "", succeeded = true)
+
     override fun addChannel(idText: String, name: String): Boolean = false
 
     override suspend fun saveTelegramApiConfiguration(apiId: String, apiHash: String) = Unit

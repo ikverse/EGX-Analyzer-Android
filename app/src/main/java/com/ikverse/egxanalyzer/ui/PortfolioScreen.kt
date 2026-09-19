@@ -837,59 +837,50 @@ private fun ColumnScope.PositionGrid(
     appState: AppState,
     jump: PositionJump,
 ) {
-    BoxWithConstraints {
-        val columns = responsiveColumns(minColumnWidth = PositionCardMinWidth, maxColumns = 2)
-        Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-            ResponsiveRows(views, columns) { view, cardModifier ->
-                val revealed = view.position.id == jump.revealPosition
-                PositionCard(
-                    view = view,
-                    appState = appState,
-                    // A trade whose analysis has since been deleted leads nowhere, so it does not
-                    // answer a press: the call it was taken on is no longer in the record.
-                    onOpenCall = if (view.position.id in jump.scoredCalls) {
-                        { jump.onOpenCall(view.position.id) }
-                    } else {
-                        null
-                    },
-                    highlighted = revealed,
-                    onHighlightShown = jump.onRevealShown,
-                    startSelling = view.position.id == jump.sellPosition,
-                    onSellingShown = jump.onSellShown,
-                    onSell = { sale -> appState.recordSale(view.position, sale) },
-                    onEditTrade = { price, date, window ->
-                        // The dialog cannot confirm with an unparsable window while it is showing
-                        // the field, so the fallback is only ever reached if it stops showing one.
-                        appState.reprice(
-                            view.position,
-                            price,
-                            date,
-                            window ?: view.position.windowSessions,
-                        )
-                    },
-                    onKeepOpen = { keep, note ->
-                        appState.setKeepOpen(view.position, keep, note)
-                    },
-                    onRemove = { appState.deletePosition(view.position) },
-                    modifier = if (revealed) {
-                        cardModifier.bringIntoViewRequester(jump.reveal)
-                    } else {
-                        cardModifier
-                    },
-                )
-            }
+    // One position card per row, on every width - a two-column grid here used to leave a card,
+    // its two figure panels included, about 300dp to draw itself in once the Fold opened; a
+    // single full-width card spends that width instead, inside PositionCard's own width check.
+    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+        views.forEach { view ->
+            val revealed = view.position.id == jump.revealPosition
+            PositionCard(
+                view = view,
+                appState = appState,
+                // A trade whose analysis has since been deleted leads nowhere, so it does not
+                // answer a press: the call it was taken on is no longer in the record.
+                onOpenCall = if (view.position.id in jump.scoredCalls) {
+                    { jump.onOpenCall(view.position.id) }
+                } else {
+                    null
+                },
+                highlighted = revealed,
+                onHighlightShown = jump.onRevealShown,
+                startSelling = view.position.id == jump.sellPosition,
+                onSellingShown = jump.onSellShown,
+                onSell = { sale -> appState.recordSale(view.position, sale) },
+                onEditTrade = { price, date, window ->
+                    // The dialog cannot confirm with an unparsable window while it is showing
+                    // the field, so the fallback is only ever reached if it stops showing one.
+                    appState.reprice(
+                        view.position,
+                        price,
+                        date,
+                        window ?: view.position.windowSessions,
+                    )
+                },
+                onKeepOpen = { keep, note ->
+                    appState.setKeepOpen(view.position, keep, note)
+                },
+                onRemove = { appState.deletePosition(view.position) },
+                modifier = if (revealed) {
+                    Modifier.fillMaxWidth().bringIntoViewRequester(jump.reveal)
+                } else {
+                    Modifier.fillMaxWidth()
+                },
+            )
         }
     }
 }
-
-/**
- * What a position needs before two share a row.
- *
- * Set against the 750dp an unfolded Fold actually reports, not the 851dp an emulator claims: after
- * the rail and the page padding a generous-looking minimum quietly gives one column on the device
- * this was written for.
- */
-private val PositionCardMinWidth = 300.dp
 
 /**
  * Narrow enough for two tiles on the 411dp cover screen, which is the tightest this app is read on.

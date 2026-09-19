@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
@@ -168,7 +169,20 @@ private fun RecommendationCard(
             // numbers doubled the card's height to say what LevelGrid says underneath it. The
             // occurrence sheet and the Portfolio card still draw it, where a single call is the
             // whole subject rather than one of a dozen being scanned.
-            LevelGrid(point)
+            //
+            // Tinted, in the same recipe Insights' own call card tints "The call" and "The market"
+            // panels with (see SectionPanelShape in InsightsScreen.kt) - a card's six busiest
+            // figures earn the same grouping those panels give a call's figures there. Only at this
+            // call site: the occurrence sheet's copy of LevelGrid is a single call read in full and
+            // was not asked to change.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(10.dp))
+                    .padding(Space.m),
+            ) {
+                LevelGrid(point)
+            }
             point.riskRewardRatio()?.let { ratio ->
                 Text(
                     "Risk / reward  1 : ${"%.1f".format(ratio)}",
@@ -258,30 +272,38 @@ private fun StockHeader(
     // A column, because the header is two things now: the identity row, and the card's own pills
     // on a line under it. Space.s between them is what the card's own Column already puts between
     // every other pair of blocks on it.
+    // Ticker style, name style and pill placement match the identity block Insights draws on its
+    // own call card (InsightsScreen.kt's ScoredCallRow) - same stock, two screens, one look.
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         Row(verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
                 val openStock = LocalOpenStock.current
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Row(
-                        Modifier.clickable { openStock(stock.stockCode) },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
-                        Text(
-                            stock.stockCode,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
-                    }
-                    if (point != null) {
-                        Spacer(Modifier.weight(1f))
+                Row(
+                    Modifier.clickable { openStock(stock.stockCode) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
+                    Text(stock.stockCode, style = MaterialTheme.typography.titleSmall)
+                    Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
+                }
+                // Indented to start under the ticker rather than the logo, on request - this is
+                // the one place on the card that does not start at the card's own left edge; see
+                // LogoSize's note on why every other line here does.
+                stock.stockNameArabic?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = LogoSize.Row + Space.s),
+                    )
+                }
+                if (point != null) {
+                    Spacer(Modifier.height(Space.xs))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                         TimingChip(point)
                     }
-                }
-                stock.stockNameArabic?.let {
-                    Text(it, style = MaterialTheme.typography.bodyMedium)
                 }
                 channel?.takeIf(String::isNotBlank)?.let {
                     Spacer(Modifier.height(Space.xs))

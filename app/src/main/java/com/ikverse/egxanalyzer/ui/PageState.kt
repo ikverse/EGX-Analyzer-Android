@@ -181,6 +181,31 @@ class PageState {
      */
     val analyzeSetupDismissed: MutableState<Boolean> = mutableStateOf(false)
 
+    // ── Scroll position, every page ──────────────────────────────────────────────────────────
+
+    /**
+     * How far each page was scrolled, so a fold restores it instead of resetting to the top.
+     *
+     * One field per destination rather than one shared value, the same shape [stockBox] and
+     * [filtersOpen] are in for the same reason: five screens, each reading only its own. `Screen`
+     * seeds `rememberScrollState` from [scrollOffset] and writes back on every change - a bare
+     * `remember` there is exactly the state this class exists to rescue, and until now it was one
+     * of the few things on a page still held that way.
+     */
+    private val resultsScroll: MutableState<Int> = mutableStateOf(0)
+    private val insightsScroll: MutableState<Int> = mutableStateOf(0)
+    private val portfolioScroll: MutableState<Int> = mutableStateOf(0)
+    private val analyzeScroll: MutableState<Int> = mutableStateOf(0)
+    private val settingsScroll: MutableState<Int> = mutableStateOf(0)
+
+    fun scrollOffset(destination: AppDestination): MutableState<Int> = when (destination) {
+        AppDestination.RESULTS -> resultsScroll
+        AppDestination.INSIGHTS -> insightsScroll
+        AppDestination.PORTFOLIO -> portfolioScroll
+        AppDestination.ANALYZE -> analyzeScroll
+        AppDestination.SETTINGS -> settingsScroll
+    }
+
     // ── What is narrowing a tab ──────────────────────────────────────────────────────────────
 
     /**

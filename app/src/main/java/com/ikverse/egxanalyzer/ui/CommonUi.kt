@@ -156,7 +156,16 @@ internal fun Screen(
     refreshing: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val scroll = rememberScrollState()
+    // Seeded from PageState rather than starting at 0, so a fold restores exactly where the
+    // reader left off instead of resetting to the top - see PageState.scrollOffset for why this
+    // was one of the few things on a page still held in a bare `remember`. Read once, since
+    // `remember` only evaluates its lambda on this composable's first composition; the effect
+    // below is what keeps it current for the fold after this one.
+    val savedScroll = appState.pages.scrollOffset(destination)
+    val scroll = rememberScrollState(initial = savedScroll.value)
+    LaunchedEffect(scroll) {
+        snapshotFlow { scroll.value }.collect { savedScroll.value = it }
+    }
     // Where the scrolling area begins on screen, so anything inside it can pin itself there. A
     // table header has no other way to know how far it has been scrolled past.
     var viewportTop by remember { mutableFloatStateOf(0f) }

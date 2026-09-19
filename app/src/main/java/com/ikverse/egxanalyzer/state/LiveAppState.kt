@@ -2703,10 +2703,12 @@ class LiveAppState(
      * user pressing the button at four o'clock - has already done this fire's work, and it stands
      * down. Ordered after [runDueMarketRefresh] for exactly that reason.
      *
-     * [refreshPrices] does the rest: it re-scores the record and announces what moved, which is the
-     * same path the button on screen takes. A failure is left alone - the fetch was not recorded,
-     * so the next wake still owes it, and there is nothing here worth stopping the analyses behind
-     * it for.
+     * [refreshCatalogPrices] does the rest: it re-scores the record and announces what moved, over
+     * the whole catalog rather than only the tickers a report or a trade names - the same path the
+     * "Fetch prices now" button on screen takes, and what puts a year of history behind a stock
+     * nobody has called or traded after one pass. A failure is left alone - the fetch was not
+     * recorded, so the next wake still owes it, and there is nothing here worth stopping the
+     * analyses behind it for.
      */
     private suspend fun runDueCloseSweep() {
         if (!tradeWatchWanted) return
@@ -2714,7 +2716,7 @@ class LiveAppState(
             .takeIf { it > 0L }
             ?.let(Instant::ofEpochMilli)
         CloseSweep.dueFire(Instant.now(), last) ?: return
-        runCatching { refreshPrices(announce = false) }
+        runCatching { refreshCatalogPrices(announce = false) }
     }
 
     /**
@@ -2922,7 +2924,42 @@ class LiveAppState(
         recomputePortfolio(announceChanges = true)
     }
 
-    override suspend fun refreshPrices(announce: Boolean): PriceRefreshOutcome {
+    /**
+     * Every stock in the catalog, not only the ones a report or a trade names.
+     *
+     * What ["Fetch prices now"][refreshCatalogPrices] and the once-a-day close sweep fetch, so a
+     * stock with no call and no trade - exactly the case a chart like Insights' own had nothing to
+     * draw for - gets priced too. [EgxCatalog.entries] rather than the seed list directly, so a
+     * catalog that has been enriched from the remote list is what gets priced.
+     */
+    private fun catalogStocks(): Set<String> = EgxCatalog.entries().map { it.ticker }.toSet()
+
+    override suspend fun refreshPrices(announce: Boolean): PriceRefreshOutcome =
+        performPriceRefresh(pricedStocks(), announce)
+
+    /**
+     * The same fetch, over the whole catalog rather than only the tickers a report or a trade
+     * names - what the "Fetch prices now" button in Settings calls, and what the once-a-day close
+     * sweep switched to so a stock nobody has called or traded still ends up with a year of
+     * history behind it after one pass. Left narrow everywhere else - the fifteen-minute
+     * market-hours refresh, the once-a-day fetch on first open, and the fetch a ticker correction
+     * triggers - because those are about keeping an active record current, not backfilling a
+     * catalog nobody is watching yet.
+     */
+    override suspend fun refreshCatalogPrices(announce: Boolean): PriceRefreshOutcome =
+        performPriceRefresh(catalogStocks(), announce)
+
+    /**
+     * The shared body of a price refresh, over whichever tickers the caller names.
+     *
+     * Split out so [refreshPrices] (the ordinary, narrow fetch) and [refreshCatalogPrices] (the
+     * whole catalog) can ask for two different sets of stocks without two copies of the
+     * bookkeeping around the fetch - the busy guard, the recomputes, the outcome it reports.
+     */
+    private suspend fun performPriceRefresh(
+        tickers: Collection<String>,
+        announce: Boolean,
+    ): PriceRefreshOutcome {
         if (pricesRefreshing) {
             return PriceRefreshOutcome(
                 "A price refresh was already running",
@@ -2930,9 +2967,6 @@ class LiveAppState(
                 busy = true,
             )
         }
-        // A held stock is priced whether or not a report still names it: deleting the analysis a
-        // trade came from must not freeze that trade's current price.
-        val tickers = pricedStocks()
         if (tickers.isEmpty()) {
             val outcome = PriceRefreshOutcome("No stocks to price", succeeded = false)
             if (announce) statusMessage = StatusMessage(outcome.summary, false)
