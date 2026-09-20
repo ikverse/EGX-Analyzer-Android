@@ -32,6 +32,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Assessment
@@ -625,8 +626,8 @@ internal fun SavedRunStack(
     // line of type beside it all read this, so nothing on screen can report a different swipe from
     // anything else. Built once per stack rather than per card - three cards each holding their own
     // reader of one pager is three things to keep in step.
-    val stackPosition = remember(pager, runs.size) {
-        StackPosition(runs.size) { pager.currentPage + pager.currentPageOffsetFraction }
+    val stackPosition = remember(pager, runs.size, floor) {
+        StackPosition(runs.size, { pager.currentPage + pager.currentPageOffsetFraction }, floor)
     }
     val fling = PagerDefaults.flingBehavior(
         state = pager,
@@ -835,7 +836,6 @@ internal fun SavedRunStack(
                         // behind it.
                         .background(backing, cardShape)
                         .onSizeChanged { if (it.height > tallest) tallest = it.height }
-                        .heightIn(min = floor)
                 },
             )
         }
@@ -849,8 +849,12 @@ internal fun SavedRunStack(
  * marker travels with the cards on the same fraction they move on, and the words turn over as it
  * crosses the halfway mark. A lambda for the reason the cards' transforms are read in their layer -
  * read as a value, every card of every stack would recompose for each frame of a drag.
+ *
+ * [floor] rides along for a second reason entirely: it is the one figure a shut card needs to pin
+ * its own footer to its own bottom edge, and it lives here because this is the value that already
+ * travels from [SavedRunStack] to every card in it. See [SavedAnalysisCard]'s use of it.
  */
-internal class StackPosition(val count: Int, val position: () -> Float)
+internal class StackPosition(val count: Int, val position: () -> Float, val floor: Dp)
 
 @Composable
 private fun SavedAnalysisCard(
@@ -932,10 +936,11 @@ private fun SavedAnalysisCard(
         border = arrivalFlash(highlighted, onHighlightShown) ?: Glass.outline,
         shape = MaterialTheme.shapes.large,
     ) {
-        Column(
-            Modifier.padding(Space.m),
-            verticalArrangement = Arrangement.spacedBy(Space.s),
-        ) {
+        // Local rather than shared, so the shut layout (a Box pinning a footer to the card's own
+        // bottom edge) and the open one (a plain top-to-bottom flow) can each call the same content
+        // without restating it. See the branch on `expanded` below.
+        @Composable
+        fun header() {
             // Top-aligned: the heading below runs to two lines and a menu centred against both sits
             // level with neither. The floor is what keeps two cards in a grid row level: a report
             // older than a week gets no relative word, and would otherwise stand a line shorter
@@ -1025,22 +1030,15 @@ private fun SavedAnalysisCard(
                     }
                 }
             }
+        }
 
-            // The first of three equal shares of whatever height this card has spare, and it has
-            // spare height whenever it is not the tallest shut card of its session's stack: every
-            // card in a stack is held to that one so the pile does not change depth under the
-            // thumb. Left to the column the whole surplus fell below the last row, and a card
-            // carrying one line less than the one behind it ended in a band of nothing under the
-            // button. Divided between the gaps it reads as a roomier card rather than an
-            // unfinished one. All three collapse to zero on the card that set the floor, and an
-            // open report is measured by its own contents rather than held to anything.
-            if (!expanded) Spacer(Modifier.weight(1f))
-
-            // What the run actually read, above the figures rather than under them. Set in the
-            // same small grey as the provider line and placed below the counts, it read as a
-            // caption on them - and which chats a report came out of is the one thing that
-            // decides whether its calls are worth anything. Same size and ink as body copy now,
-            // and the icon is what stops a line of chat names reading as another date.
+        // What the run actually read, above the figures rather than under them. Set in the same
+        // small grey as the provider line and placed below the counts, it read as a caption on
+        // them - and which chats a report came out of is the one thing that decides whether its
+        // calls are worth anything. Same size and ink as body copy now, and the icon is what stops
+        // a line of chat names reading as another date.
+        @Composable
+        fun channelRow() {
             saved.channelNames().takeIf(List<String>::isNotEmpty)?.let { names ->
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(Space.xs),
@@ -1066,22 +1064,24 @@ private fun SavedAnalysisCard(
                     )
                 }
             }
+        }
 
-            if (!expanded) Spacer(Modifier.weight(1f))
-
+        @Composable
+        fun figures() {
             ReportFigures(
                 stocks = stockCount,
                 calls = callCount,
                 sources = saved.result.sources.size,
                 traded = tradedCount,
             )
+        }
 
-            if (!expanded) Spacer(Modifier.weight(1f))
-
-            // A plain hint rather than a button, now that the whole card is the one thing that
-            // opens and closes it: a second tappable control doing the same job as the card under
-            // it was a control that only sometimes mattered. This is a label, not a control - no
-            // clickable of its own - so the tap it names is answered by the card.
+        // A plain hint rather than a button, now that the whole card is the one thing that opens
+        // and closes it: a second tappable control doing the same job as the card under it was a
+        // control that only sometimes mattered. This is a label, not a control - no clickable of
+        // its own - so the tap it names is answered by the card.
+        @Composable
+        fun tapHint() {
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
@@ -1101,10 +1101,12 @@ private fun SavedAnalysisCard(
                     modifier = Modifier.padding(start = Space.xs).size(IconSize.Hint),
                 )
             }
+        }
 
-            // Which reading of the session this card is, at the foot of the card rather than
-            // beside the menu: text under dots reads as one object, where dots beside text read
-            // as two things sharing a line.
+        // Which reading of the session this card is. Text under dots reads as one object, where
+        // dots beside text read as two things sharing a line.
+        @Composable
+        fun dots() {
             stack?.let {
                 // Which run the words name, which is the one more than half in front. Derived
                 // rather than read: the position moves every frame of a drag and this changes
@@ -1124,6 +1126,55 @@ private fun SavedAnalysisCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                     )
+                }
+            }
+        }
+
+        Column(
+            Modifier.padding(Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            if (expanded) {
+                // Open, this card answers to nothing else - only shut cards in a stack are held
+                // to a shared floor (see SavedRunStack.tallest) - so it is a plain top-to-bottom
+                // flow with nothing to pin.
+                header()
+                channelRow()
+                figures()
+                tapHint()
+                dots()
+            } else {
+                // Shut, this card may be stretched taller than its own content to match the
+                // tallest shut card in its stack. A Box, not a Column, is what puts the surplus
+                // above the footer instead of below it: a Column only ever satisfies a forced
+                // minimum height by reporting a taller size than its children need, and leaves the
+                // unused space after the last one - which was exactly the dead gap this replaced.
+                // A Box instead stretches itself to the height it is given, and only then places
+                // its two children by alignment inside that full height, so the footer always ends
+                // up flush with the card's true bottom edge whatever the surplus is.
+                // `stack?.floor` is unset only when this card is not part of a multi-run stack,
+                // where there is no shared floor to hold it to in the first place.
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = stack?.floor ?: 0.dp),
+                ) {
+                    Column(
+                        Modifier.align(Alignment.TopStart).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(Space.s),
+                    ) {
+                        header()
+                        channelRow()
+                        figures()
+                    }
+                    Column(
+                        Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(Space.xs),
+                    ) {
+                        tapHint()
+                        dots()
+                    }
                 }
             }
 

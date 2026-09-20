@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.8.6] — 2026-09-20
+
+- Results: fixed a layout bug where a saved run's card, when stretched to match a taller reading in the same multi-run stack, left the extra height as dead space below the "Tap to open report" hint and run dots instead of above them - the footer now stays flush with the card's true bottom edge whatever the surplus is
+
 ## [3.8.5] — 2026-09-20
 
 - Main-card accent edge (the coloured hairline down the left side of a section card) narrowed from 3dp to 2dp
