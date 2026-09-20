@@ -98,7 +98,6 @@ internal fun RecommendationCards(
                 StockHeader(
                     stock,
                     point = null,
-                    channel = null,
                     page = 0,
                     pageCount = 0,
                     session = null,
@@ -181,16 +180,28 @@ private fun RecommendationCard(
         // the hairline every other card on the page is drawn with.
         border = heldBorder(held) ?: cardOutline,
     ) {
-        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.m)) {
+        Column(Modifier.padding(Space.m)) {
             // The session the call was made for, from the same source the Bought button
             // reads it from, so the copied text and the trade agree about which day.
             StockHeader(
-                stock, point, channel, page, pageCount, trades?.dateOf(point), editor,
+                stock, point, page, pageCount, trades?.dateOf(point), editor,
                 onEdit = { editing = true },
             )
+            Spacer(Modifier.height(Space.m))
 
             // What the channel printed, set off from what it printed it about.
             HorizontalDivider()
+            Spacer(Modifier.height(Space.m))
+
+            // Full width rather than sharing the header's own left column: it answers a
+            // different question from the identity block above it and reads cramped squeezed
+            // under the ticker's own width. Below the header's rule rather than above it, so
+            // it reads as an answer to what the header just named rather than a third line
+            // inside the header itself.
+            channel?.takeIf(String::isNotBlank)?.let {
+                SourceLine(it)
+                Spacer(Modifier.height(Space.m))
+            }
 
             // No ladder here, deliberately. This card is a row of the report that would not fit as
             // a row: what it owes the reader is the call's figures, and a drawing of the same five
@@ -224,10 +235,12 @@ private fun RecommendationCard(
                     }
                 }
             }
+            Spacer(Modifier.height(Space.m))
 
             // A line under the figures, because the two things below it are the only parts of this
             // card that answer a press. Everything above is the call as the channel printed it.
             HorizontalDivider()
+            Spacer(Modifier.height(Space.m))
 
             // One row, and the two ends of it are the two kinds of press this card offers: what it
             // records, and what it opens. They sat on separate lines and read as two afterthoughts.
@@ -270,12 +283,20 @@ private fun RecommendationCard(
             }
 
             AnimatedVisibility(expanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                Column(
+                    Modifier.padding(top = Space.m),
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
+                ) {
                     HorizontalDivider()
                     OccurrenceDetail(point, imagePath) { viewingImage = true }
                 }
             }
+            // A dedicated Space.s here rather than a shared spacedBy on the outer column: the
+            // collapsed AnimatedVisibility above is still a layout node even at zero height, and
+            // a uniform arrangement charged a gap on both sides of it - 24dp of dead air between
+            // this row and the dots for a card showing nothing in between. Asked for on 2026-09-20.
             if (pageCount > 1) {
+                Spacer(Modifier.height(Space.s))
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     PageDots(page, pageCount)
                 }
@@ -391,7 +412,6 @@ private const val QuickEditBlurRadius = 48
 private fun StockHeader(
     stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint?,
-    channel: String?,
     page: Int,
     pageCount: Int,
     /** The session this occurrence was made for, which the copied text names. */
@@ -419,7 +439,12 @@ private fun StockHeader(
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(stock.stockCode, style = MaterialTheme.typography.titleSmall)
-                        Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
+                        Egx33Badge(
+                            stock.stockCode,
+                            Modifier.padding(start = Space.s),
+                            outlined = false,
+                            glyphSize = Egx33GlyphSizeOnCard,
+                        )
                     }
                     stock.stockNameArabic?.let {
                         Text(
@@ -432,38 +457,56 @@ private fun StockHeader(
                     }
                 }
             }
-            channel?.takeIf(String::isNotBlank)?.let {
-                Spacer(Modifier.height(Space.xs))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Source:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
         }
         if (point != null) {
             Spacer(Modifier.width(Space.s))
             // Grouped and left-aligned to each other rather than centred, so Edited (narrower)
             // starts at the same edge as Watching/T+1 instead of wandering to the middle under it.
             // Top-aligned with the ticker: the outer Row's own Alignment.Top is what puts this
-            // group where the ⋮ menu used to sit.
-            Column(horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            // group where the ⋮ menu used to sit. The trailing padding is its own: with nothing
+            // else on this side of the card, the pills sat flush against the card's own edge.
+            Column(
+                Modifier.padding(end = Space.s),
+                horizontalAlignment = Alignment.Start,
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
                 TimingChip(point)
                 if (editor?.editFor(stock, point) != null) {
                     EditedChip(onEdit)
                 }
             }
         }
+    }
+}
+
+/** [Egx33Badge]'s ring dropped and its glyph enlarged, on this card alone. Asked for on 2026-09-20. */
+private val Egx33GlyphSizeOnCard = 16.dp
+
+/**
+ * The channel this occurrence came from, on its own line below the header and its rule.
+ *
+ * Left inside [StockHeader] until 2026-09-20, squeezed under the ticker's own column width and
+ * sharing it with the timing pills on the other side of the row. It answers a different question
+ * from the identity block above it, so it gets the card's full width instead of the narrower one.
+ */
+@Composable
+private fun SourceLine(channel: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "Source:",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            channel,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

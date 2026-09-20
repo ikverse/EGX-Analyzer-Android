@@ -1487,12 +1487,24 @@ private val PillOutline = 1.dp
  * different object from a word in one however the two are cut.
  */
 @Composable
-internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
+internal fun Egx33Badge(
+    ticker: String,
+    modifier: Modifier = Modifier,
+    /** False on the Results call card, the one place asked to drop the ring around the glyph. */
+    outlined: Boolean = true,
+    glyphSize: Dp = Egx33GlyphSize,
+) {
     if (!isEgx33(ticker)) return
     Box(
         modifier
             .size(Egx33BadgeSize)
-            .border(PillOutline, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.extraSmall),
+            .then(
+                if (outlined) {
+                    Modifier.border(PillOutline, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.extraSmall)
+                } else {
+                    Modifier
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -1501,7 +1513,7 @@ internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
             // fact appears, so a reader who cannot see it would otherwise not be told at all.
             contentDescription = "EGX 33 Shariah index",
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(Egx33GlyphSize),
+            modifier = Modifier.size(glyphSize),
         )
     }
 }
