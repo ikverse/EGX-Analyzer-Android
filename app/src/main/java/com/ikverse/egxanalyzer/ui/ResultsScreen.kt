@@ -1078,18 +1078,28 @@ private fun SavedAnalysisCard(
 
             if (!expanded) Spacer(Modifier.weight(1f))
 
-            // A row rather than a button, now that the card itself opens the run: a filled button
-            // across the whole width was a second control doing the same job, and the loudest thing
-            // on a card whose subject is the figures above it. The arrow is what says the card
-            // presses at all, and it is still the way back out of an open report.
+            // A plain hint rather than a button, now that the whole card is the one thing that
+            // opens and closes it: a second tappable control doing the same job as the card under
+            // it was a control that only sometimes mattered. This is a label, not a control - no
+            // clickable of its own - so the tap it names is answered by the card.
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                DisclosureButton(
-                    if (expanded) "Hide recommendations" else "View recommendations",
-                    expanded = expanded,
-                ) { onExpandedChange(!expanded) }
+                val ink = MaterialTheme.colorScheme.primary
+                Text(
+                    if (expanded) "Tap to hide report" else "Tap to open report",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = ink,
+                    maxLines = 1,
+                )
+                Icon(
+                    if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                    tint = ink,
+                    modifier = Modifier.padding(start = Space.xs).size(IconSize.Hint),
+                )
             }
 
             // Which reading of the session this card is, at the foot of the card rather than

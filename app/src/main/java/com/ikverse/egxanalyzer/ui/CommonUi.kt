@@ -726,7 +726,7 @@ private fun PageWash(strength: () -> Float) {
 internal val PageWashHeight = 280.dp
 
 /** A hairline of the card's own hue. Wider and it is a stripe the content has to sit clear of. */
-private val AccentEdgeWidth = 3.dp
+private val AccentEdgeWidth = 2.dp
 
 /** Room for [IconSize.Inline] with a margin, on the tile behind a section card's icon. */
 private val AccentTileSize = 26.dp

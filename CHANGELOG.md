@@ -4,6 +4,11 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.8.5] — 2026-09-20
+
+- Main-card accent edge (the coloured hairline down the left side of a section card) narrowed from 3dp to 2dp
+- Results: a saved run's card foot now reads "Tap to open/close report" with a chevron instead of the "View/Hide recommendations" button - a label rather than a second control, since the whole card already answers the tap
+
 ## [3.8.4] — 2026-09-20
 
 - Results: a saved run's card now closes its recommendations on a press too, not just opens them - the whole card toggles either way, matching the "View/Hide recommendations" button at its foot
