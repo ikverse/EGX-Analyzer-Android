@@ -854,15 +854,14 @@ internal fun SavedRunStack(
  * read as a value, every card of every stack would recompose for each frame of a drag.
  *
  * [floor] and [reportHeight] ride along for a second reason entirely: they are what a shut card
- * needs to pin its own footer to its own bottom edge while staying in step with its siblings. Both
- * must be read and written at the exact same element - see [SavedAnalysisCard]'s use of them - or
- * the height they agree on drifts a little further every recomposition. That drift is exactly what
- * shipped once already: the constraint applied to a `Box` nested inside this card's own padding
- * while the height feeding it back was measured one level further out, above that padding, so
- * every pass fed the previous pass's padding back in as if it were content and the card grew
- * without bound. Measuring and constraining the same node is what a single field, [floor], used to
- * guarantee for free when both lived on the card itself; splitting the footer into its own `Box`
- * broke that guarantee, and [reportHeight] is what restores it.
+ * needs to pin its own footer under its own header rather than under whatever a taller sibling
+ * reading needed, while staying in step with those siblings. [reportHeight] must be fed this
+ * card's own *natural* height - the sum of its header-group and footer-group, measured, never the
+ * gap [SavedAnalysisCard] inserts between them - because that gap is derived from [floor] itself,
+ * and a card already sitting at the floor would otherwise report the floor straight back as if it
+ * were new content, growing without bound one recomposition at a time. A card genuinely taller
+ * than every other reading still pushes the floor up to meet it; a card already covered by it
+ * reports a number [floor] already accounts for and changes nothing.
  */
 internal class StackPosition(
     val count: Int,
@@ -1159,47 +1158,55 @@ private fun SavedAnalysisCard(
                 tapHint()
                 dots()
             } else {
-                // Shut, this card may be stretched taller than its own content to match the
-                // tallest shut card in its stack. A Box, not a Column, is what puts the surplus
-                // above the footer instead of below it: a Column only ever satisfies a forced
-                // minimum height by reporting a taller size than its children need, and leaves the
-                // unused space after the last one - which was exactly the dead gap this replaced.
-                // A Box instead stretches itself to the height it is given, and only then places
-                // its two children by alignment inside that full height, so the footer always ends
-                // up flush with the card's true bottom edge whatever the surplus is.
-                // `stack` is unset only when this card is not part of a multi-run stack, where
-                // there is no shared floor to hold it to in the first place.
+                // Shut, this card may need to be stretched taller than its own content to match
+                // the tallest shut card in its stack, with the surplus landing above the footer
+                // rather than below it. A `Box` aligning a top group and a bottom group was tried
+                // first and overlapped them: a `Box`'s own height is the *taller* of its children,
+                // not their sum, so whenever the floor fell short of this card's own header-plus-
+                // footer height the footer landed on top of the header instead of below it - which
+                // is exactly what shipped in 3.8.7. A plain sequential `Column` can only ever place
+                // the footer after the header, so it cannot overlap; the one thing left to get
+                // right is how tall the gap between them is, and that is measured rather than
+                // asked for, for the same reason `tallest` above is: intrinsic measurement of a
+                // `SubcomposeLayout` is unsupported, and these cards contain one.
                 //
-                // Measured and constrained on this exact node, in that order, and nowhere else.
-                // Reporting the height from any other element - the card above this Box, say -
-                // feeds back a figure that already includes space this Box knows nothing about
-                // (the card's own padding, the gap to the footer below), so the next pass asks
-                // this Box to be that much taller than it needs to be, and the one after that
-                // taller again. Reading it back from the same node `heightIn` constrains is what
-                // keeps the two in agreement: this Box can only ever be told to match a height it
-                // was itself capable of reaching unpadded, so the loop has nowhere to grow into.
-                Box(
+                // Each half reports its own natural height - never the gap, which would feed a
+                // figure back into itself - so a card already at or past the floor reports a
+                // number `tallest` already covers and changes nothing, and only a card that turns
+                // out taller than every other reading pushes the floor up to meet it.
+                var topHeightPx by remember { mutableIntStateOf(0) }
+                var footerHeightPx by remember { mutableIntStateOf(0) }
+                val gap = with(LocalDensity.current) {
+                    ((stack?.floor?.roundToPx() ?: 0) - topHeightPx - footerHeightPx)
+                        .coerceAtLeast(0)
+                        .toDp()
+                }
+                Column(
                     Modifier
                         .fillMaxWidth()
-                        .onSizeChanged { stack?.reportHeight?.invoke(it.height) }
-                        .heightIn(min = stack?.floor ?: 0.dp),
+                        .onSizeChanged {
+                            topHeightPx = it.height
+                            stack?.reportHeight?.invoke(topHeightPx + footerHeightPx)
+                        },
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
-                    Column(
-                        Modifier.align(Alignment.TopStart).fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(Space.s),
-                    ) {
-                        header()
-                        channelRow()
-                        figures()
-                    }
-                    Column(
-                        Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(Space.xs),
-                    ) {
-                        tapHint()
-                        dots()
-                    }
+                    header()
+                    channelRow()
+                    figures()
+                }
+                Spacer(Modifier.height(gap))
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged {
+                            footerHeightPx = it.height
+                            stack?.reportHeight?.invoke(topHeightPx + footerHeightPx)
+                        },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(Space.xs),
+                ) {
+                    tapHint()
+                    dots()
                 }
             }
 

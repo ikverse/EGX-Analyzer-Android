@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.8.8] — 2026-09-20
+
+- Results: fixed the "Tap to open report" hint and run dots overlapping the stat strip on a shut card held to a taller sibling's height - the `Box` used to pin the footer to the bottom sized itself to the taller of its two overlaid children rather than their sum, so it fell short whenever the floor was less than this card's own header-plus-footer height. The gap between them is now measured and inserted explicitly in a plain top-to-bottom layout, which cannot overlap.
+
 ## [3.8.7] — 2026-09-20
 
 - Results: fixed a regression from 3.8.6 where a shut card in a multi-run stack grew taller every recomposition without bound, making cards balloon in height and scrolling stutter badly - the footer-pinning `Box` was constrained to a height measured one level further out (outside its own padding), so every pass fed the previous pass's padding back in as more height to match. It now measures and constrains itself on the same node, so it can only ever match real content.
