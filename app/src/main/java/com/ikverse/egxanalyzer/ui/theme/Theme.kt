@@ -196,10 +196,10 @@ private val LightColors = lightColorScheme(
 /**
  * The signals Material's roles have no slot left for.
  *
- * Every scheme colour above is already spoken for: green is a target, red is a stop, the greys are
- * context, and `primary` is now the page speaking rather than the app. A position that ran out of
- * time is none of those - it is waiting on the user, and it can perfectly well be up 5%, so
- * borrowing red would report a loss the trade never made.
+ * Every scheme colour above is already spoken for: green is a target, `error` is an ordinary fault,
+ * the greys are context, and `primary` is now the page speaking rather than the app. A position
+ * that ran out of time is none of those - it is waiting on the user, and it can perfectly well be
+ * up 5%, so borrowing red would report a loss the trade never made.
  *
  * Amber is added rather than reassigned for the reason the palette is fixed in the first place: a
  * role that already means something must go on meaning it.
@@ -213,6 +213,18 @@ data class ExtraColors(
     val expired: Color,
     val expiredContainer: Color,
     val onExpiredContainer: Color,
+
+    /**
+     * A deeper red than Material's `error`, reserved for a trade or a price actually losing:
+     * stop-loss, stopped out, a negative return, the AI opinion sheet's bearish verdicts.
+     *
+     * `error` stays the app's ordinary red for everything that is a fault rather than a loss - a
+     * rejected key, a failed run, a stale feed - so the one colour a reader could mistake for money
+     * lost is spent on nothing else.
+     */
+    val loss: Color,
+    val lossContainer: Color,
+    val onLossContainer: Color,
 
     /**
      * A price the market actually reached, rather than one a channel chose.
@@ -272,6 +284,9 @@ internal val DarkExtras = ExtraColors(
     expired = Color(0xFFFFB74D),
     expiredContainer = Color(0xFF5A4318),
     onExpiredContainer = Color(0xFFFFE0A3),
+    loss = Color(0xFFE53935),
+    lossContainer = Color(0xFF4A0E0E),
+    onLossContainer = Color(0xFFFFD9D6),
     market = Color(0xFF5AA9FF),
     aiOnFill = Color.White,
     aiStop = Color(0xFFFF6B7A),
@@ -286,6 +301,9 @@ internal val LightExtras = ExtraColors(
     expired = Color(0xFF9A6206),
     expiredContainer = Color(0xFFFFDFA6),
     onExpiredContainer = Color(0xFF2A1A00),
+    loss = Color(0xFFB71C1C),
+    lossContainer = Color(0xFFF6D9D6),
+    onLossContainer = Color(0xFF350404),
     // Darkened rather than reused. The dark theme's blue comes out at 2.4:1 on a light card, where
     // these figures are actually drawn, against the 4.5:1 body text needs - and every one of them
     // is a price.
@@ -635,9 +653,9 @@ internal fun accentFor(key: AccentKey, dark: Boolean): PageAccent =
  * `FilterChip`, `Checkbox`, `RadioButton`, the navigation indicator and `SectionCard`'s icon all
  * read these roles already, so swapping them here is the same change in twenty places at once.
  *
- * **Only these roles move.** `tertiary` is a target, `error` is a stop, `ExtraColors.market` is a
- * price the market reached and `onSurface` is an entry - none of them are touched, which is why a
- * page can have a hue at all without a figure changing meaning between two screens.
+ * **Only these roles move.** `tertiary` is a target, `ExtraColors.loss` is a stop, `ExtraColors.market`
+ * is a price the market reached and `onSurface` is an entry - none of them are touched, which is why
+ * a page can have a hue at all without a figure changing meaning between two screens.
  */
 internal fun ColorScheme.withAccent(accent: PageAccent): ColorScheme = copy(
     primary = accent.ink,

@@ -4,6 +4,14 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.22] — 2026-09-20
+
+- Unfolded layout: the rail's wash and the page's own ground light now animate off one shared clock instead of two independent ones, so backgrounding the app mid-transition can no longer leave them out of step; the ground light also reaches further down every page, and the page's top wash eases back in on the way up rather than tracking the scroll pixel-for-pixel
+- New `ExtraColors.loss` red, separate from Material's `error`: a trade or a price that actually lost money (stop-loss, stopped out, a negative return, the Ask AI opinion sheet's bearish verdicts) now reads in its own colour, leaving `error` for an ordinary fault - a rejected key, a failed run, a stale feed. Applied to the overdue chip, a position's status colour, the price ladder's stop line, and Insights' outcome rings
+- Trade controls: a held card's coloured edge now matches the plain card hairline's weight instead of standing a half-step heavier
+- Analyze: "Current/next EGX session" and "Specific date" are one row now, showing whichever date live mode resolves to; picking that same date from the calendar returns to live mode instead of needing a second control for it
+- Analyze: the content-type checkboxes (Text/Images) are full-width stacked rows instead of a wrapping row that sized itself to its own content and sat bunched at the card's left edge
+
 ## [3.7.21] — 2026-09-20
 
 - Portfolio: a position card's chart can now be pressed open or shut on any width, not just on a phone - it defaults open once the card is wide enough to draw it in the ladder's place and closed otherwise, and the choice is remembered per trade rather than per width so folding the phone doesn't reopen or close it

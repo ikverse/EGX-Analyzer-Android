@@ -8,6 +8,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
@@ -18,14 +19,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoGraph
@@ -44,7 +43,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -80,6 +78,7 @@ import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.AnalysisProgress
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.SourceTrace
+import com.ikverse.egxanalyzer.model.egxTargetSession
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import com.ikverse.egxanalyzer.ui.theme.extraColors
 import com.ikverse.egxanalyzer.ui.theme.pageAccent
@@ -327,23 +326,12 @@ internal fun AnalyzeScreen(appState: AppState) {
                     icon = Icons.Outlined.TextFields,
                     modifier = Modifier.fillMaxHeight(),
                 ) {
-                    // Wraps rather than switching, because the threshold it replaces had the fold
-                    // exactly backwards. It was measured against the card's own content width, and
-                    // the card is only narrow when there is room to put it *beside* the date card:
-                    // the cover screen gets the full 379 and so 347 of content, clears 340 and lays
-                    // three across, while the unfolded Fold splits 638 into two 313 columns, leaves
-                    // 281 of content, misses the threshold and stacks three long labels down a
-                    // column. The larger screen was getting the taller layout.
-                    //
-                    // A FlowRow asks the labels how wide they are instead of guessing from a number
-                    // written here, so one row survives the cover screen, the unfolded Fold and the
-                    // tablet alike, and a large font scale wraps rather than clips. It also takes a
-                    // BoxWithConstraints back out of a pane that `alignHeights` has to measure,
-                    // which is the nesting AdaptivePanes carries a warning about.
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(Space.l),
-                        verticalArrangement = Arrangement.spacedBy(Space.xs),
-                    ) {
+                    // Stacked full-width rows rather than a FlowRow that wraps by fit: the wrapping
+                    // row only ever sized itself to its own content, which left it bunched at the
+                    // left edge with empty space to the right of it - unlike the date card beside it,
+                    // whose rows are full width. Each toggle now runs the card's own width, in the
+                    // order OFFERED gives: Text above Images.
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                         // Drawn from OFFERED rather than from three calls written out here, so
                         // a type the app has stopped offering leaves this row by leaving that
                         // list. Voice went that way on 2026-09-03.
@@ -371,30 +359,16 @@ internal fun AnalyzeScreen(appState: AppState) {
                     icon = Icons.Outlined.CalendarMonth,
                     modifier = Modifier.fillMaxHeight(),
                 ) {
-                    RecommendationDateOption(
-                        selected = appState.analysisMode == AnalysisMode.NEXT_DAY,
-                        title = "Current / next EGX session",
-                        detail = appState.recommendationTargetDate.toString(),
-                        onClick = { appState.selectAnalysisMode(AnalysisMode.NEXT_DAY) },
-                    )
-                    RecommendationDateOption(
-                        selected = appState.analysisMode == AnalysisMode.SPECIFIC_DATE,
-                        title = "Specific date",
-                        // No "Change date" button under this any more. The row itself has always
-                        // opened the picker, so the button was a second control doing one job - and
-                        // it was the reason this card changed height the moment the mode changed,
-                        // which is the one thing a card sitting beside another must not do. The
-                        // affordance moves into the line that was already there: the date, and what
-                        // pressing gets you.
-                        detail = if (appState.analysisMode == AnalysisMode.SPECIFIC_DATE) {
-                            "${appState.recommendationTargetDate} · tap to change"
-                        } else {
-                            "Choose today or an earlier date"
-                        },
-                        onClick = {
-                            appState.selectAnalysisMode(AnalysisMode.SPECIFIC_DATE)
-                            showRecommendationDatePicker(context, appState)
-                        },
+                    // One row rather than two radio options that both ended up doing the same
+                    // job - picking a date. It reads live (NEXT_DAY) by default and the row shows
+                    // whichever date that resolves to; tapping it opens the same picker either way.
+                    // Picking the same date the app would have resolved on its own puts it straight
+                    // back into live mode, so there is still a way back to "just watch the next
+                    // session" without a second control to hold it.
+                    RecommendationDateRow(
+                        mode = appState.analysisMode,
+                        date = appState.recommendationTargetDate,
+                        onClick = { showRecommendationDatePicker(context, appState) },
                     )
                 }
             },
@@ -493,49 +467,40 @@ private fun RunProgress(progress: AnalysisProgress) {
 }
 
 @Composable
-private fun RecommendationDateOption(
-    selected: Boolean,
-    title: String,
-    detail: String,
+private fun RecommendationDateRow(
+    mode: AnalysisMode,
+    date: LocalDate,
     onClick: () -> Unit,
 ) {
-    // The whole row selects, not just the button. The title and the date are the part being read,
-    // and on the specific-date option the detail line says "tap to change" - a label that names the
-    // gesture and then ignores it is worse than no label. One `selectable` rather than a click on
-    // each child, so a screen reader announces one option instead of a button and two loose texts.
+    // A plain click rather than `selectable`: there is nothing to choose between any more, only a
+    // date to open and change, so this is the same shape ContentTypeToggle's row is - the row is
+    // the whole target, not the icon inside it.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                onClick = onClick,
-            )
-            // Spelled out because the null `onClick` below gives it up. Material reserves the 48dp
-            // target inside the control only on the interactive path, so this row was as tall as
-            // whatever text happened to be in it. Two lines gets close enough to 48 on its own to
-            // have hidden that, which is exactly why it is worth stating: the height was a property
-            // of the copy rather than a decision, and a one-line detail would have lost it.
+            .clickable(onClick = onClick)
             .heightIn(min = 48.dp)
             .padding(vertical = Space.xs),
-        // The same gap the checkbox card uses, and for the same reason it has to be stated at all:
-        // a RadioButton drawn on the null path is 20dp of ring in 2dp of padding, so without this
-        // the title started 2dp from the ring. Everywhere else in the app the control keeps its
-        // callback, Material centres those 24dp in 48, and the label inherits 14dp of air for free.
         horizontalArrangement = Arrangement.spacedBy(Space.m),
-        // Against the title rather than the middle of both lines. Centring put the ring halfway
-        // down a two-line column, which is the seam between the title and the date under it - so it
-        // pointed at neither. Topped, it sits on the title's line, which is the line it is about.
         verticalAlignment = Alignment.Top,
     ) {
-        // Null: the row owns the click now, and a button with its own would be a second target
-        // sitting inside the first.
-        RadioButton(selected = selected, onClick = null)
+        Icon(
+            Icons.Outlined.CalendarMonth,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Column {
-            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(date.toString(), fontWeight = FontWeight.SemiBold)
             Text(
-                detail,
+                // Live mode is the default and reads as what it is; a specific date says "tap to
+                // change" for the same reason the button it replaces did - the affordance lives in
+                // the line that is already there rather than in a second control.
+                if (mode == AnalysisMode.SPECIFIC_DATE) {
+                    "Historical date · tap to change"
+                } else {
+                    "Current / next EGX session · tap to change"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -553,7 +518,14 @@ private fun showRecommendationDatePicker(context: Context, appState: AppState) {
     DatePickerDialog(
         context,
         { _, year, month, day ->
-            appState.updateRecommendationTargetDate(LocalDate.of(year, month + 1, day))
+            val picked = LocalDate.of(year, month + 1, day)
+            // Picking the date the app would have resolved on its own is how you get back to live
+            // mode now that there is no separate row for it - anything else is a historical pick.
+            if (picked == egxTargetSession()) {
+                appState.selectAnalysisMode(AnalysisMode.NEXT_DAY)
+            } else {
+                appState.updateRecommendationTargetDate(picked)
+            }
         },
         opensOn.year,
         opensOn.monthValue - 1,
@@ -586,6 +558,9 @@ private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState
     // puts them back on the same measure as everything around them.
     Row(
         modifier = Modifier
+            // Full width, like the row this sits beside on the date card: a row sized to its own
+            // content left this one bunched at the card's left edge.
+            .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
             .toggleable(
                 value = type in appState.selectedContentTypes,

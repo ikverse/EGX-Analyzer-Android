@@ -633,7 +633,7 @@ private fun Level(
     // green targets or the red stop. The height comes entirely from the caller now: LevelPair
     // shares one height across both its tiles via IntrinsicSize.Min, and the caller drawing this
     // alone (the risk/reward row) supplies its own IntrinsicSize.Min instead.
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
         Box(
             Modifier
                 .fillMaxHeight()

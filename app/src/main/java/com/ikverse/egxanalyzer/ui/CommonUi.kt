@@ -1,12 +1,15 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -113,6 +116,7 @@ import java.time.LocalDate
 import kotlin.math.max
 import kotlin.math.min
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -235,21 +239,40 @@ internal fun Screen(
             mark = offset
         }
     }
+    // How much of the wash is left, eased rather than tracking the raw scroll fraction 1:1.
+    // Scrolling down still snaps straight to the target - the wash is meant to get out of the way
+    // quickly - but scrolling back up used to reveal it exactly as fast as the finger moved, which
+    // read as the wash being dragged into view rather than appearing. Only the direction that grows
+    // it is eased. [PageWash] draws this directly; the rail reads the same value below, so the two
+    // can never show two different amounts of it.
+    val washHeight = with(LocalDensity.current) { PageWashHeight.toPx() }
+    val wash = remember { Animatable(1f) }
+    LaunchedEffect(scroll, washHeight) {
+        var last = wash.value
+        snapshotFlow { (1f - (scroll.value + taken.floatValue) / washHeight).coerceIn(0f, 1f) }
+            .collectLatest { target ->
+                val from = last
+                last = target
+                if (target > from) {
+                    wash.animateTo(target, spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow))
+                } else {
+                    wash.snapTo(target)
+                }
+            }
+    }
     // The rail beside the page wears this page's wash and has no way to work out how much of it is
-    // left. Written from the same two numbers [PageWash] is drawn from, in a flow rather than in
-    // composition, for the reason `taken` is never read here: a page that read a scroll position in
-    // its own composition would recompose whole on every frame of one.
+    // left. Written from the same eased value in a flow rather than in composition, for the reason
+    // `wash.value` is never read here directly: a page that read it in its own composition would
+    // recompose whole on every frame it changes.
     //
     // **Only the page actually on screen writes.** Beside a rail two of them are composed at once
     // while the destinations cross-fade, and the one being left would otherwise report its own
     // scroll as the arriving page's.
     val railWash = LocalPageWash.current
-    val washHeight = with(LocalDensity.current) { PageWashHeight.toPx() }
     val onScreen = appState.destination == destination
-    LaunchedEffect(railWash, washHeight, onScreen) {
+    LaunchedEffect(railWash, onScreen) {
         if (!onScreen) return@LaunchedEffect
-        snapshotFlow { (1f - (scroll.value + taken.floatValue) / washHeight).coerceIn(0f, 1f) }
-            .collect { railWash.floatValue = it }
+        snapshotFlow { wash.value }.collect { railWash.floatValue = it }
     }
 
     // Pressing the destination already showing means "take me back to the top". Animated rather
@@ -300,7 +323,7 @@ internal fun Screen(
     CompositionLocalProvider(LocalViewportTop provides viewportTop) {
     Box(Modifier.fillMaxSize().nestedScroll(headerScroll)) {
       Box(Modifier.fillMaxSize().recordBackdrop(backdrop)) {
-        PageWash(scroll) { taken.floatValue }
+        PageWash { wash.value }
         Column(Modifier.fillMaxSize()) {
             PageHeader(
                 destination = destination,
@@ -664,21 +687,21 @@ internal fun SectionCard(
  * is actually sitting over rather than against a page that does not have it - see [recordBackdrop].
  * The lights behind it are the window's and not the page's: see `appGround`.
  *
- * **Faded on the scroll rather than pinned**, and the scroll is read inside the draw lambda for the
- * reason [PageHeader]'s collapse is passed as a lambda: read at composition, every frame of a
- * scroll would recompose the whole page, where here a frame costs one rectangle repainted.
+ * **Faded on the scroll rather than pinned**, and read inside the draw lambda for the reason
+ * [PageHeader]'s collapse is passed as a lambda: read at composition, every frame of a scroll would
+ * recompose the whole page, where here a frame costs one rectangle repainted. The fraction itself -
+ * eased on the way back up, snapped on the way down - is computed once in [Screen] and handed down
+ * as [strength], because the rail reads that same value and the two must never disagree about it.
  */
 @Composable
-private fun PageWash(scroll: ScrollState, taken: () -> Float) {
+private fun PageWash(strength: () -> Float) {
     val wash = pageAccent.wash
     Box(
         Modifier
             .fillMaxWidth()
             .height(PageWashHeight)
             .drawBehind {
-                // What the header ate counts as scroll here, or the wash would sit at full strength
-                // through the whole collapse and only begin to fade once the page itself moved.
-                val left = (1f - (scroll.value + taken()) / size.height).coerceIn(0f, 1f)
+                val left = strength().coerceIn(0f, 1f)
                 if (left <= 0f) return@drawBehind
                 drawRect(
                     Brush.verticalGradient(

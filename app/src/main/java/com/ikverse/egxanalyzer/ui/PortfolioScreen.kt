@@ -287,7 +287,7 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
     // Built as its three parts rather than one string: the line below joins them or breaks them
     // depending on what fits, and a joined string cannot be taken apart again without parsing it.
     val days = buildAnnotatedString {
-        withStyle(SpanStyle(color = MaterialTheme.colorScheme.error)) {
+        withStyle(SpanStyle(color = extraColors.loss)) {
             append("${view.overdueDays}d")
         }
     }

@@ -2120,7 +2120,7 @@ private val SessionCardMinWidth = 290.dp
 @Composable
 private fun Outcome.outlineTone(): Color = when (this) {
     Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> MaterialTheme.colorScheme.tertiary
-    Outcome.STOPPED -> MaterialTheme.colorScheme.error
+    Outcome.STOPPED -> extraColors.loss
     Outcome.EXPIRED -> extraColors.expired
     // The unjudged outcomes say nothing about the channel, so their ring says nothing either.
     else -> MaterialTheme.colorScheme.outline
@@ -2129,7 +2129,7 @@ private fun Outcome.outlineTone(): Color = when (this) {
 @Composable
 private fun Outcome.onContainer(): Color = when (this) {
     Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> MaterialTheme.colorScheme.onTertiaryContainer
-    Outcome.STOPPED -> MaterialTheme.colorScheme.onErrorContainer
+    Outcome.STOPPED -> extraColors.onLossContainer
     Outcome.EXPIRED -> extraColors.onExpiredContainer
     else -> MaterialTheme.colorScheme.onSurfaceVariant
 }

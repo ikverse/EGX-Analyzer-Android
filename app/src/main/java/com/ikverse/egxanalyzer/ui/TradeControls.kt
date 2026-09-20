@@ -217,15 +217,15 @@ internal fun TradeAction(
 /**
  * How far past its deadline a trade has run with nothing recorded about how it ended.
  *
- * The error colour rather than a neutral one, and next to the status rather than buried in the
+ * The loss colour rather than a neutral one, and next to the status rather than buried in the
  * figures: it is the one thing on a card that is asking the user to do something.
  */
 @Composable
 internal fun OverdueChip(days: Long) {
     OutlinePill(
         "Overdue $days ${days.dayWord()}",
-        outline = MaterialTheme.colorScheme.error,
-        textColor = MaterialTheme.colorScheme.onErrorContainer,
+        outline = extraColors.loss,
+        textColor = extraColors.onLossContainer,
     )
 }
 
@@ -677,10 +677,10 @@ internal fun heldBorder(view: PositionView?): BorderStroke? =
     view?.let { BorderStroke(HeldOutline, it.status.tone()) }
 
 /**
- * Half a step above the plain card hairline: heavy enough that the coloured edge reads as
- * deliberate, light enough that a page of held cards does not look boxed in.
+ * The same weight as the plain card hairline, so a held card's coloured edge reads as the card's
+ * own outline saying something rather than as a heavier ring boxing it in.
  */
-private val HeldOutline = 1.5.dp
+private val HeldOutline = 1.dp
 
 /**
  * Status colour, borrowed from the roles prices already use.
@@ -694,10 +694,10 @@ internal fun PositionStatus.tone(): Color = when (this) {
     PositionStatus.OPEN -> MaterialTheme.colorScheme.primary
     PositionStatus.PARTIAL_TARGET_HIT, PositionStatus.FULL_TARGET_HIT ->
         MaterialTheme.colorScheme.tertiary
-    PositionStatus.STOPPED_OUT -> MaterialTheme.colorScheme.error
-    // Amber, and deliberately not the error red. A trade that ran out of time can easily be up 5%,
+    PositionStatus.STOPPED_OUT -> extraColors.loss
+    // Amber, and deliberately not the loss red. A trade that ran out of time can easily be up 5%,
     // so red would report a loss the position never made and would read as the same thing as the
-    // stop-out beside it. The overdue pill keeps the error colour: amber says out of time, red says
+    // stop-out beside it. The overdue pill keeps the loss colour: amber says out of time, red says
     // and you are late, which is one story in two steps rather than two alarms.
     PositionStatus.EXPIRED -> extraColors.expired
     PositionStatus.CLOSED_MANUALLY -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -720,7 +720,7 @@ internal fun PositionStatus.onContainer(): Color = when (this) {
     PositionStatus.OPEN -> MaterialTheme.colorScheme.onPrimaryContainer
     PositionStatus.PARTIAL_TARGET_HIT, PositionStatus.FULL_TARGET_HIT ->
         MaterialTheme.colorScheme.onTertiaryContainer
-    PositionStatus.STOPPED_OUT -> MaterialTheme.colorScheme.onErrorContainer
+    PositionStatus.STOPPED_OUT -> extraColors.onLossContainer
     PositionStatus.EXPIRED -> extraColors.onExpiredContainer
     PositionStatus.CLOSED_MANUALLY -> MaterialTheme.colorScheme.onSurfaceVariant
 }

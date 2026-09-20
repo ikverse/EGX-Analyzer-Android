@@ -419,12 +419,12 @@ private fun VerdictChip(verdict: StockOpinion.Verdict) {
     val outline = when (verdict) {
         StockOpinion.Verdict.BUY_NOW -> MaterialTheme.colorScheme.tertiary
         StockOpinion.Verdict.WAIT -> extraColors.expired
-        StockOpinion.Verdict.AVOID -> MaterialTheme.colorScheme.error
+        StockOpinion.Verdict.AVOID -> extraColors.loss
     }
     val ink = when (verdict) {
         StockOpinion.Verdict.BUY_NOW -> MaterialTheme.colorScheme.onTertiaryContainer
         StockOpinion.Verdict.WAIT -> extraColors.onExpiredContainer
-        StockOpinion.Verdict.AVOID -> MaterialTheme.colorScheme.onErrorContainer
+        StockOpinion.Verdict.AVOID -> extraColors.onLossContainer
     }
     OutlinePill(verdict.arabic, outline = outline, textColor = ink)
 }
@@ -434,12 +434,12 @@ private fun StanceChip(stance: StockOpinion.Stance) {
     val outline = when (stance) {
         StockOpinion.Stance.SOUND -> MaterialTheme.colorScheme.tertiary
         StockOpinion.Stance.RISKY, StockOpinion.Stance.OVERTAKEN -> extraColors.expired
-        StockOpinion.Stance.UNSOUND -> MaterialTheme.colorScheme.error
+        StockOpinion.Stance.UNSOUND -> extraColors.loss
     }
     val ink = when (stance) {
         StockOpinion.Stance.SOUND -> MaterialTheme.colorScheme.onTertiaryContainer
         StockOpinion.Stance.RISKY, StockOpinion.Stance.OVERTAKEN -> extraColors.onExpiredContainer
-        StockOpinion.Stance.UNSOUND -> MaterialTheme.colorScheme.onErrorContainer
+        StockOpinion.Stance.UNSOUND -> extraColors.onLossContainer
     }
     OutlinePill(stance.arabic, outline = outline, textColor = ink)
 }
@@ -456,12 +456,12 @@ private fun StanceChip(stance: StockOpinion.Stance) {
 private fun DirectionChip(direction: StockOpinion.Direction) {
     val outline = when (direction) {
         StockOpinion.Direction.UP -> MaterialTheme.colorScheme.tertiary
-        StockOpinion.Direction.DOWN -> MaterialTheme.colorScheme.error
+        StockOpinion.Direction.DOWN -> extraColors.loss
         StockOpinion.Direction.SIDEWAYS -> MaterialTheme.colorScheme.outline
     }
     val ink = when (direction) {
         StockOpinion.Direction.UP -> MaterialTheme.colorScheme.onTertiaryContainer
-        StockOpinion.Direction.DOWN -> MaterialTheme.colorScheme.onErrorContainer
+        StockOpinion.Direction.DOWN -> extraColors.onLossContainer
         StockOpinion.Direction.SIDEWAYS -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     OutlinePill(direction.arabic, outline = outline, textColor = ink)
@@ -479,12 +479,12 @@ private fun RatingChip(rating: StockOpinion.Rating) {
     val outline = when (rating) {
         StockOpinion.Rating.GOOD -> MaterialTheme.colorScheme.tertiary
         StockOpinion.Rating.FAIR -> extraColors.expired
-        StockOpinion.Rating.POOR -> MaterialTheme.colorScheme.error
+        StockOpinion.Rating.POOR -> extraColors.loss
     }
     val ink = when (rating) {
         StockOpinion.Rating.GOOD -> MaterialTheme.colorScheme.onTertiaryContainer
         StockOpinion.Rating.FAIR -> extraColors.onExpiredContainer
-        StockOpinion.Rating.POOR -> MaterialTheme.colorScheme.onErrorContainer
+        StockOpinion.Rating.POOR -> extraColors.onLossContainer
     }
     OutlinePill(rating.arabic, outline = outline, textColor = ink)
 }
@@ -494,12 +494,12 @@ private fun RatingChip(rating: StockOpinion.Rating) {
 private fun ToneChip(tone: StockOpinion.Tone) {
     val outline = when (tone) {
         StockOpinion.Tone.BULLISH -> MaterialTheme.colorScheme.tertiary
-        StockOpinion.Tone.BEARISH -> MaterialTheme.colorScheme.error
+        StockOpinion.Tone.BEARISH -> extraColors.loss
         StockOpinion.Tone.NEUTRAL -> MaterialTheme.colorScheme.outline
     }
     val ink = when (tone) {
         StockOpinion.Tone.BULLISH -> MaterialTheme.colorScheme.onTertiaryContainer
-        StockOpinion.Tone.BEARISH -> MaterialTheme.colorScheme.onErrorContainer
+        StockOpinion.Tone.BEARISH -> extraColors.onLossContainer
         StockOpinion.Tone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     OutlinePill(tone.arabic, outline = outline, textColor = ink)

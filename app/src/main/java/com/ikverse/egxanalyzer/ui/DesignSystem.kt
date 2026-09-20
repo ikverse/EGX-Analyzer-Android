@@ -452,7 +452,7 @@ object PriceRole {
     val target: Color @Composable get() = androidx.compose.material3.MaterialTheme.colorScheme.tertiary
 
     /** Where the call says to give up. */
-    val stop: Color @Composable get() = androidx.compose.material3.MaterialTheme.colorScheme.error
+    val stop: Color @Composable get() = com.ikverse.egxanalyzer.ui.theme.extraColors.loss
 
     /**
      * A price the market reached, rather than one a channel chose.

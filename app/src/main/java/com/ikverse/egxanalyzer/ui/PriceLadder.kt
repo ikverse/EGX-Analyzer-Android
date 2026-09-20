@@ -77,7 +77,7 @@ internal fun PriceLadder(
     val span = high - low
     if (span <= 0.0) return
 
-    val stopColor = MaterialTheme.colorScheme.error
+    val stopColor = PriceRole.stop
     // Entry is the reference the other bands are read against, so it stays neutral.
     val entryColor = MaterialTheme.colorScheme.onSurface
     val targetColor = MaterialTheme.colorScheme.tertiary
