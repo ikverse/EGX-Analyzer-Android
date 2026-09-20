@@ -627,7 +627,11 @@ internal fun SavedRunStack(
     // anything else. Built once per stack rather than per card - three cards each holding their own
     // reader of one pager is three things to keep in step.
     val stackPosition = remember(pager, runs.size, floor) {
-        StackPosition(runs.size, { pager.currentPage + pager.currentPageOffsetFraction }, floor)
+        StackPosition(
+            runs.size,
+            { pager.currentPage + pager.currentPageOffsetFraction },
+            floor,
+        ) { height -> if (height > tallest) tallest = height }
     }
     val fling = PagerDefaults.flingBehavior(
         state = pager,
@@ -835,7 +839,6 @@ internal fun SavedRunStack(
                         // glass then resolves over the page's colour rather than over the reading
                         // behind it.
                         .background(backing, cardShape)
-                        .onSizeChanged { if (it.height > tallest) tallest = it.height }
                 },
             )
         }
@@ -850,11 +853,23 @@ internal fun SavedRunStack(
  * crosses the halfway mark. A lambda for the reason the cards' transforms are read in their layer -
  * read as a value, every card of every stack would recompose for each frame of a drag.
  *
- * [floor] rides along for a second reason entirely: it is the one figure a shut card needs to pin
- * its own footer to its own bottom edge, and it lives here because this is the value that already
- * travels from [SavedRunStack] to every card in it. See [SavedAnalysisCard]'s use of it.
+ * [floor] and [reportHeight] ride along for a second reason entirely: they are what a shut card
+ * needs to pin its own footer to its own bottom edge while staying in step with its siblings. Both
+ * must be read and written at the exact same element - see [SavedAnalysisCard]'s use of them - or
+ * the height they agree on drifts a little further every recomposition. That drift is exactly what
+ * shipped once already: the constraint applied to a `Box` nested inside this card's own padding
+ * while the height feeding it back was measured one level further out, above that padding, so
+ * every pass fed the previous pass's padding back in as if it were content and the card grew
+ * without bound. Measuring and constraining the same node is what a single field, [floor], used to
+ * guarantee for free when both lived on the card itself; splitting the footer into its own `Box`
+ * broke that guarantee, and [reportHeight] is what restores it.
  */
-internal class StackPosition(val count: Int, val position: () -> Float, val floor: Dp)
+internal class StackPosition(
+    val count: Int,
+    val position: () -> Float,
+    val floor: Dp,
+    val reportHeight: (Int) -> Unit,
+)
 
 @Composable
 private fun SavedAnalysisCard(
@@ -1152,11 +1167,21 @@ private fun SavedAnalysisCard(
                 // A Box instead stretches itself to the height it is given, and only then places
                 // its two children by alignment inside that full height, so the footer always ends
                 // up flush with the card's true bottom edge whatever the surplus is.
-                // `stack?.floor` is unset only when this card is not part of a multi-run stack,
-                // where there is no shared floor to hold it to in the first place.
+                // `stack` is unset only when this card is not part of a multi-run stack, where
+                // there is no shared floor to hold it to in the first place.
+                //
+                // Measured and constrained on this exact node, in that order, and nowhere else.
+                // Reporting the height from any other element - the card above this Box, say -
+                // feeds back a figure that already includes space this Box knows nothing about
+                // (the card's own padding, the gap to the footer below), so the next pass asks
+                // this Box to be that much taller than it needs to be, and the one after that
+                // taller again. Reading it back from the same node `heightIn` constrains is what
+                // keeps the two in agreement: this Box can only ever be told to match a height it
+                // was itself capable of reaching unpadded, so the loop has nowhere to grow into.
                 Box(
                     Modifier
                         .fillMaxWidth()
+                        .onSizeChanged { stack?.reportHeight?.invoke(it.height) }
                         .heightIn(min = stack?.floor ?: 0.dp),
                 ) {
                     Column(

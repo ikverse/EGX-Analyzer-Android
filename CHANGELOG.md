@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.8.7] — 2026-09-20
+
+- Results: fixed a regression from 3.8.6 where a shut card in a multi-run stack grew taller every recomposition without bound, making cards balloon in height and scrolling stutter badly - the footer-pinning `Box` was constrained to a height measured one level further out (outside its own padding), so every pass fed the previous pass's padding back in as more height to match. It now measures and constrains itself on the same node, so it can only ever match real content.
+
 ## [3.8.6] — 2026-09-20
 
 - Results: fixed a layout bug where a saved run's card, when stretched to match a taller reading in the same multi-run stack, left the extra height as dead space below the "Tap to open report" hint and run dots instead of above them - the footer now stays flush with the card's true bottom edge whatever the surplus is
