@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.7.25] — 2026-09-20
+
+- Arrival flash (the edge a card wears when the app scrolls to it): now flashes in the card's own status colour when it has a held outline (stopped out, partial/full target hit, open) instead of always the page accent; draws at 0.5dp instead of 2dp, matching the hairline weight; and blinks twice fast (about half a second total) instead of pulsing continuously for 2.4 seconds
+- `ExtraColors.loss` darkened further: `#D32F2F` in the dark theme, `#9E1B1B` in light, for a more serious red than the coral `error` it was first split from
+- The held outline's own weight dropped again, from 1dp to 0.5dp, thinner than the plain card hairline
+
 ## [3.7.22] — 2026-09-20
 
 - Unfolded layout: the rail's wash and the page's own ground light now animate off one shared clock instead of two independent ones, so backgrounding the app mid-transition can no longer leave them out of step; the ground light also reaches further down every page, and the page's top wash eases back in on the way up rather than tracking the scroll pixel-for-pixel

@@ -106,7 +106,7 @@ internal fun PositionCard(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     )
     // The arrival flash takes the edge for as long as it runs, then the status outline has it back.
-    val border = arrivalFlash(highlighted, onHighlightShown) ?: heldBorder(view)
+    val border = arrivalFlash(highlighted, onHighlightShown, view.status.tone()) ?: heldBorder(view)
     val body: @Composable ColumnScope.() -> Unit = {
         // Measured once, at the top: a two-column grid never splits this card any more (see the
         // Portfolio grid), so a card's own width is the container's. `wide` decides whether the

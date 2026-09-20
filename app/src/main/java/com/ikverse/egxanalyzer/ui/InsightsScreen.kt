@@ -1244,7 +1244,7 @@ private fun ScoredCallRow(
     // The arrival flash takes the edge for as long as it runs, then the held outline has it back.
     // Outlined where the user is actually in the trade, in the colour of where that stands: the
     // figures on this card judge the channel, and the outline says what it cost or made you.
-    val border = arrivalFlash(highlighted, onHighlightShown) ?: heldBorder(held)
+    val border = arrivalFlash(highlighted, onHighlightShown, held?.status?.tone()) ?: heldBorder(held)
     val body: @Composable ColumnScope.() -> Unit = {
         // Measured once, at the top: a two-column grid never splits this card any more (see
         // SessionCard), so a card's own width is the container's - ~380-411dp on a phone, 614dp

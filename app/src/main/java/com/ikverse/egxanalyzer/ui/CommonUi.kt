@@ -6,9 +6,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.repeatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -115,7 +113,6 @@ import com.ikverse.egxanalyzer.ui.theme.pageAccent
 import java.time.LocalDate
 import kotlin.math.max
 import kotlin.math.min
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -909,32 +906,38 @@ internal fun ExpandableSection(
  * The animation is composed only while it is wanted. Left running behind every card it would be a
  * frame callback each, on screens that draw dozens of them, to animate nothing.
  *
+ * @param statusColor the card's own held-outline colour, when it has one, so the flash reads as
+ *   that outline announcing itself rather than as a second, unrelated colour landing on top of it.
+ *   Null falls back to the page accent, for a card with no status of its own.
  * @param onShown fires once the flash has run, so the caller can forget the arrival.
  */
 @Composable
-internal fun arrivalFlash(highlighted: Boolean, onShown: () -> Unit): BorderStroke? {
+internal fun arrivalFlash(
+    highlighted: Boolean,
+    onShown: () -> Unit,
+    statusColor: Color? = null,
+): BorderStroke? {
     if (!highlighted) return null
-    val flash = rememberInfiniteTransition(label = "arrival")
-    val edge by flash.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(FlashHalfCycleMs), RepeatMode.Reverse),
-        label = "edge",
-    )
+    val edge = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
-        delay(FlashDurationMs)
+        edge.animateTo(
+            1f,
+            animationSpec = repeatable(FlashBlinks * 2, tween(FlashHalfCycleMs), RepeatMode.Reverse),
+        )
         onShown()
     }
-    return BorderStroke(FlashOutline, MaterialTheme.colorScheme.primary.copy(alpha = edge))
+    val color = statusColor ?: MaterialTheme.colorScheme.primary
+    return BorderStroke(FlashOutline, color.copy(alpha = edge.value))
 }
 
 /** The same weight as the held outline, so a flash does not resize the card it lands on. */
-private val FlashOutline = 2.dp
+private val FlashOutline = 0.5.dp
 
-private const val FlashHalfCycleMs = 420
+/** Fast enough that two of them read as a blink rather than a fade. */
+private const val FlashHalfCycleMs = 120
 
-/** Long enough to be caught by someone whose eyes are still moving, short enough not to nag. */
-private const val FlashDurationMs = 2_400L
+/** Two blinks, not a pulse held open: enough to catch the eye without nagging at it. */
+private const val FlashBlinks = 2
 
 /**
  * How long to let a card's own reveal finish before scrolling to it.
