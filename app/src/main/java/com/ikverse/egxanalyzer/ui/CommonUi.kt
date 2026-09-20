@@ -934,7 +934,7 @@ internal fun arrivalFlash(
 private val FlashOutline = 0.5.dp
 
 /** Fast enough that two of them read as a blink rather than a fade. */
-private const val FlashHalfCycleMs = 120
+private const val FlashHalfCycleMs = 250
 
 /** Two blinks, not a pulse held open: enough to catch the eye without nagging at it. */
 private const val FlashBlinks = 2

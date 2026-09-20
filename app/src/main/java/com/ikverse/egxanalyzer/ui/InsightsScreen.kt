@@ -1398,12 +1398,17 @@ private fun ScoredCallRow(
                         )
                     }
                 } else {
-                    // Space.m rather than the .xs every other gap in these two blocks uses: the
-                    // Arabic name and the channel name below it read as one run-on block at .xs,
-                    // where the wide layout already keeps them apart in separate panes. Asked for
-                    // on 2026-09-20.
-                    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                    // sourceBlock is a flat ColumnScope lambda - its four lines land as direct
+                    // siblings of identityBlock in this one Column, so a wider arrangement here
+                    // would space every line of the source info apart, not just the one gap that
+                    // was asked to widen. The arrangement stays .xs, matching every other gap in
+                    // both blocks, and the one extra step - Space.xs + Space.s = Space.m - is a
+                    // spacer standing only between the two blocks: the Arabic name and the channel
+                    // name below it read as one run-on block at .xs alone, where the wide layout
+                    // already keeps them apart in separate panes. Asked for on 2026-09-20.
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                         identityBlock()
+                        Spacer(Modifier.height(Space.s))
                         sourceBlock()
                     }
                 }

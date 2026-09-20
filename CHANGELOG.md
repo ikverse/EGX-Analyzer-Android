@@ -4,6 +4,11 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.8.1] — 2026-09-20
+
+- Arrival flash slowed down: 250ms per half-cycle instead of 120ms, so the two blinks read at a comfortable pace instead of a stutter
+- Insights call card (narrow layout): fixed a spacing bug where the wider gap asked for between the Arabic name and the channel name had been widening every line of the source info under it too (channel name, called/settled dates, source record, call context). That gap is now a dedicated spacer between the two blocks; every line within the source info is back to its original tight spacing
+
 ## [3.8.0] — 2026-09-20
 
 - Version-number milestone. No functional changes since 3.7.25.
