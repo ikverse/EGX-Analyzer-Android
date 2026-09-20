@@ -1497,35 +1497,23 @@ private val PillOutline = 1.dp
  * whole history is that it must not be round. It read as a gear on the device inside the hour. The
  * rule the pills follow is about labels; this carries no wording, and a glyph in a ring is a
  * different object from a word in one however the two are cut.
+ *
+ * **No ring at all now, and the glyph is bigger inside the same box.** The recommendation card
+ * dropped the ring and grew the glyph to 16dp on its own on 2026-09-20; asked for everywhere two
+ * days later, since a mark that changes shape depending on which screen names the stock is the same
+ * fault the pill pass fixed for wording, just for this one glyph instead.
  */
 @Composable
-internal fun Egx33Badge(
-    ticker: String,
-    modifier: Modifier = Modifier,
-    /** False on the Results call card, the one place asked to drop the ring around the glyph. */
-    outlined: Boolean = true,
-    glyphSize: Dp = Egx33GlyphSize,
-) {
+internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
     if (!isEgx33(ticker)) return
-    Box(
-        modifier
-            .size(Egx33BadgeSize)
-            .then(
-                if (outlined) {
-                    Modifier.border(PillOutline, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.extraSmall)
-                } else {
-                    Modifier
-                },
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
+    Box(modifier.size(Egx33BadgeSize), contentAlignment = Alignment.Center) {
         Icon(
             painterResource(R.drawable.ic_egx33),
             // Said in full, because nothing on screen says it. The glyph is the only place this
             // fact appears, so a reader who cannot see it would otherwise not be told at all.
             contentDescription = "EGX 33 Shariah index",
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(glyphSize),
+            modifier = Modifier.size(Egx33GlyphSize),
         )
     }
 }
@@ -1544,8 +1532,8 @@ internal fun Egx33Badge(
  */
 private val Egx33BadgeSize: Dp = LabelPillHeight
 
-/** 12dp of glyph, which leaves 4dp of air on every side of it inside the hairline. */
-private val Egx33GlyphSize: Dp = 12.dp
+/** 16dp of glyph in the 20dp box, the size the recommendation card grew it to. */
+private val Egx33GlyphSize: Dp = 16.dp
 
 
 /** Placeholder for a screen with nothing to show yet, so empty states explain themselves. */

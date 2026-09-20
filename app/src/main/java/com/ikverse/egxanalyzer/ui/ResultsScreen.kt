@@ -1004,36 +1004,6 @@ private fun SavedAnalysisCard(
                         Box(Modifier.padding(top = Space.s)) { StatusPill("Newer run exists") }
                     }
                 }
-                // Which reading of the session this card is, kept up here beside the menu rather
-                // than under the dates. At the top right it reads as the card's place in the stack
-                // it sits in, and it stays at one height whatever the heading below it does, so two
-                // cards in a grid row line up. Centred against the menu button, not top-aligned
-                // with it, because the dots are shorter than the icon and would otherwise ride high
-                // of it. One line always: the heading column has the weight, so a narrow card takes
-                // room from the dates rather than wrapping this.
-                stack?.let {
-                    // Which run the words name, which is the one more than half in front. Derived
-                    // rather than read: the position moves every frame of a drag and this changes
-                    // once, so the line recomposes when it has something new to say and not before.
-                    val showing by remember(it) {
-                        derivedStateOf { it.position().roundToInt() + 1 }
-                    }
-                    Row(
-                        Modifier.height(MenuButtonHeight),
-                        horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        PageDots(it.count, it.position)
-                        Text(
-                            // "Run 1 of 3" spelled out took sixty units off the heading column
-                            // beside it, which is what forced the run line under the date to wrap.
-                            "Run $showing/${it.count}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                    }
-                }
                 Box {
                     MoreButton(onClick = { menuOpen = true })
                     AppMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -1133,6 +1103,31 @@ private fun SavedAnalysisCard(
                     if (expanded) "Hide recommendations" else "View recommendations",
                     expanded = expanded,
                 ) { onExpandedChange(!expanded) }
+            }
+
+            // Which reading of the session this card is, at the foot of the card rather than
+            // beside the menu: text under dots reads as one object, where dots beside text read
+            // as two things sharing a line.
+            stack?.let {
+                // Which run the words name, which is the one more than half in front. Derived
+                // rather than read: the position moves every frame of a drag and this changes
+                // once, so the line recomposes when it has something new to say and not before.
+                val showing by remember(it) {
+                    derivedStateOf { it.position().roundToInt() + 1 }
+                }
+                Column(
+                    Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(Space.xs),
+                ) {
+                    PageDots(it.count, it.position)
+                    Text(
+                        "Run $showing/${it.count}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
             }
 
             AnimatedVisibility(showReport) {
@@ -1634,9 +1629,6 @@ private fun LegacyDetail(recommendation: RecommendationResult) {
  * 16dp relative word under it, and 32dp for the provider line where it wraps to its second.
  */
 private val RunHeaderHeight = 76.dp
-
-/** An `IconButton`'s own size, so the run index beside the menu centres on the icon, not above it. */
-private val MenuButtonHeight = 48.dp
 
 /** Weekday first: which session a report is about is read as a day before it is read as a date. */
 private val TARGET_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM yyyy")

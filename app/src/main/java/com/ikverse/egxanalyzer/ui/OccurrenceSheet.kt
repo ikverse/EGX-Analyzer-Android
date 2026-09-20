@@ -117,11 +117,12 @@ internal fun OccurrenceSheet(
                 point.riskRewardRatio()?.let { RiskRewardRow(it) }
             }
             OccurrenceSource(stock, point, imagePath) { viewingImage = true }
-        }
-        // Only where the call has a session to belong to: an occurrence the model left undated
-        // cannot be scored, so a trade filed against it would have no deadline to run to.
-        if (trades != null && session != null) {
-            OccurrenceActions(stock, point, channel, trades, held)
+            // One more object in the same list rather than a bar pinned below it - only where the
+            // call has a session to belong to, since an occurrence the model left undated cannot be
+            // scored, so a trade filed against it would have no deadline to run to.
+            if (trades != null && session != null) {
+                OccurrenceActions(stock, point, channel, trades, held)
+            }
         }
     }
     if (editing && editor != null) {
@@ -344,7 +345,18 @@ private fun OccurrenceSource(
 ) {
     SheetSection {
         SheetSectionLabel("What it was read off")
+        // The quote first and right-aligned, the thumbnail last - the quote is Arabic, and reads
+        // toward the photo beside it the same way the notes paragraph below reads toward its own
+        // trailing edge. Asked for on 2026-09-20.
         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+            point.recommendationEvidence?.let {
+                Text(
+                    "“$it”",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             // The thumbnail draws `#13` where the photo has gone from Telegram's cache; absent
             // altogether, the trace line below still names the image the model cited.
             if (imagePath != null) {
@@ -353,13 +365,6 @@ private fun OccurrenceSource(
                     reference = point.sourceImageRef,
                     size = SourceShotSize,
                     onOpen = onOpenImage,
-                )
-            }
-            point.recommendationEvidence?.let {
-                Text(
-                    "“$it”",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
                 )
             }
         }
@@ -417,10 +422,10 @@ private fun OccurrenceSource(
  * The one thing a reader does about a call, on the edge their thumb is already on.
  *
  * [TradeAction] is the app's only way of recording a purchase and this is one more surface asking
- * it, not a second way of asking. It sat in the middle of the old column between the figures and
- * the evidence; here it is [StockSheet]'s own action bar, naming the call it is acting on
- * underneath itself - a trade is recorded against a call, and a bar that named none would read as
- * though it belonged to the stock in general.
+ * it, not a second way of asking. One more item in the sheet's own scrollable column now, alongside
+ * "The call" and "What it was read off" rather than a bar pinned below them - which means it scrolls
+ * with the rest of a long call instead of staying reachable, the trade a reader who wanted it
+ * pinned there made. Asked for on 2026-09-20.
  *
  * Selling is offered here and not on the recommendation card, which is the split that already
  * exists: a card being scanned for what to buy next is not where a position is closed, and this
@@ -434,15 +439,9 @@ private fun OccurrenceActions(
     trades: TradeBook,
     held: PositionView?,
 ) {
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    // No caption naming the channel and the session any more - the header says both now, and
-    // repeating them here was the same fact read twice on the way down the sheet.
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Space.l)
-            .padding(top = Space.s, bottom = Space.xl),
-    ) {
+    // No divider and no caption naming the channel and the session - the header says both of
+    // those now, and a rule above a lone button drew a boundary nothing else on this list has.
+    Row(Modifier.fillMaxWidth()) {
         TradeAction(
             held = held,
             suggestedEntry = point.entryMidpoint(),

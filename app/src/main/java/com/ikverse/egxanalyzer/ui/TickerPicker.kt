@@ -358,4 +358,4 @@ private val PickerElevation: Dp = 6.dp
 private val SheetTarget = 40.dp
 
 /** Enough that the page reads as out of reach, which while the list is open it is. */
-private const val ScrimAlpha = 0.32f
+private const val ScrimAlpha = 0.6f

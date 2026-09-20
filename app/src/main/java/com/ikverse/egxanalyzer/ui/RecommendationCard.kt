@@ -439,12 +439,7 @@ private fun StockHeader(
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(stock.stockCode, style = MaterialTheme.typography.titleSmall)
-                        Egx33Badge(
-                            stock.stockCode,
-                            Modifier.padding(start = Space.s),
-                            outlined = false,
-                            glyphSize = Egx33GlyphSizeOnCard,
-                        )
+                        Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
                     }
                     stock.stockNameArabic?.let {
                         Text(
@@ -478,9 +473,6 @@ private fun StockHeader(
         }
     }
 }
-
-/** [Egx33Badge]'s ring dropped and its glyph enlarged, on this card alone. Asked for on 2026-09-20. */
-private val Egx33GlyphSizeOnCard = 16.dp
 
 /**
  * The channel this occurrence came from, on its own line below the header and its rule.
