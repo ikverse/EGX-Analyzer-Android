@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.8.0] — 2026-09-20
+
+- Version-number milestone. No functional changes since 3.7.25.
+
 ## [3.7.25] — 2026-09-20
 
 - Arrival flash (the edge a card wears when the app scrolls to it): now flashes in the card's own status colour when it has a held outline (stopped out, partial/full target hit, open) instead of always the page accent; draws at 0.5dp instead of 2dp, matching the hairline weight; and blinks twice fast (about half a second total) instead of pulsing continuously for 2.4 seconds
