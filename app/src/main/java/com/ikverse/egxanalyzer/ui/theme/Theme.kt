@@ -284,7 +284,7 @@ internal val DarkExtras = ExtraColors(
     expired = Color(0xFFFFB74D),
     expiredContainer = Color(0xFF5A4318),
     onExpiredContainer = Color(0xFFFFE0A3),
-    loss = Color(0xFFE53935),
+    loss = Color(0xFFD32F2F),
     lossContainer = Color(0xFF4A0E0E),
     onLossContainer = Color(0xFFFFD9D6),
     market = Color(0xFF5AA9FF),
@@ -301,7 +301,7 @@ internal val LightExtras = ExtraColors(
     expired = Color(0xFF9A6206),
     expiredContainer = Color(0xFFFFDFA6),
     onExpiredContainer = Color(0xFF2A1A00),
-    loss = Color(0xFFB71C1C),
+    loss = Color(0xFF9E1B1B),
     lossContainer = Color(0xFFF6D9D6),
     onLossContainer = Color(0xFF350404),
     // Darkened rather than reused. The dark theme's blue comes out at 2.4:1 on a light card, where

@@ -94,6 +94,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -177,14 +178,17 @@ fun EgxAnalyzerApp(appState: AppState) {
     // Held here for the same reason again: the rail is drawn beside every page and wears the wash of
     // whichever one is on screen, so the page has to be able to hand it out. See LocalPageWash.
     val pageWash = remember { mutableFloatStateOf(1f) }
-    // Both hues are animated here, once, rather than separately inside appGround and AppRail.
-    // AppRail is composed inside NavigationSuiteScaffoldLayout's own subcomposed slot rather than
-    // directly in this tree, so two independently-triggered animateColorAsState calls - one here,
-    // one there - are not guaranteed to land in the same frame. They usually did, which is what
-    // let this ship, until the app was backgrounded mid-transition: the frame clock pausing and
-    // resuming is exactly the kind of large, uneven time jump that exposes a seam between two
-    // animations that only ever *happened* to agree. One clock, read by both, cannot drift from
-    // itself.
+    // Both hues are animated here, once, rather than separately inside appGround and AppRail -
+    // and the rail's own wash is painted here too, on the same ground `Box` below, rather than
+    // inside AppRail at all. AppRail is composed inside NavigationSuiteScaffoldLayout's own
+    // subcomposed slot, which exists to measure the rail before the page is given the width that
+    // is left - and content driven by a value that changes every animation frame is not
+    // guaranteed to recompose in step with the tree it is subcomposed into. It usually looked
+    // right, which is what let two independent `animateColorAsState` calls ship in the first
+    // place, until the app was backgrounded mid-transition and the seam became visible - and
+    // handing AppRail an already-animated `Color` closed that particular gap without closing this
+    // one: the rail could still recompose a frame behind the ground it sits beside. One draw call,
+    // in the one part of this tree that is never subcomposed, cannot fall behind itself.
     val dark = LocalDarkTheme.current
     val groundHue by animateColorAsState(
         accentFor(appState.destination.accent, dark).base,
@@ -194,6 +198,7 @@ fun EgxAnalyzerApp(appState: AppState) {
         accentFor(appState.destination.accent, dark).wash,
         label = "railWash",
     )
+    val washHeightPx = with(density) { PageWashHeight.toPx() }
     // Above the shells and not inside either of them: back means the same thing whichever one is
     // drawn, and a handler in each would be one rule written twice. Enabled only when there is
     // something to undo, so a reader with nothing outstanding gets the system's own behaviour -
@@ -237,7 +242,34 @@ fun EgxAnalyzerApp(appState: AppState) {
       // The ground every surface in the app is see-through *to*. Drawn once, here, across the whole
       // window - the rail included - because a ground that began at the page's edge would put a
       // seam down the side of every wide window, which is exactly what the first attempt did.
-      Box(Modifier.fillMaxSize().appGround(groundHue)) {
+      //
+      // The rail's own wash band is painted here too, in the same draw pass, rather than inside
+      // AppRail - see the comment above [railWashHue]. `RailWidth` stands in for the rail's real,
+      // measured width rather than reading it back from AppRail: Material floors a NavigationRail
+      // at 80dp and nothing here may make it wider (see AppRail's own note on that), so the figure
+      // is already fixed and used elsewhere in this app's own accounting of a wide window's width.
+      Box(
+          Modifier
+              .fillMaxSize()
+              .appGround(groundHue)
+              .then(
+                  if (rail) {
+                      Modifier.drawBehind {
+                          val left = pageWash.floatValue
+                          if (left <= 0f) return@drawBehind
+                          drawRect(
+                              Brush.verticalGradient(
+                                  listOf(railWashHue.copy(alpha = railWashHue.alpha * left), Color.Transparent),
+                                  endY = washHeightPx,
+                              ),
+                              size = Size(RailWidth.toPx(), washHeightPx),
+                          )
+                      }
+                  } else {
+                      Modifier
+                  },
+              ),
+      ) {
         if (rail) {
             // **The mark is not drawn in the chrome at all.** It used to be drawn in the header
             // beside the app's name and travel across into the rail's top gap as that header
@@ -251,7 +283,7 @@ fun EgxAnalyzerApp(appState: AppState) {
             // and icon are what the top of the window says. The launcher icon and the notification
             // glyph are unchanged, which is where the artwork still earns its keep.
             NavigationSuiteScaffoldLayout(
-                navigationSuite = { AppRail(appState, railWashHue) },
+                navigationSuite = { AppRail(appState) },
                 navigationSuiteType = NavigationSuiteType.NavigationRail,
             ) {
                 // The suite scaffold used to paint this; the layout does not. Without it the
@@ -538,8 +570,15 @@ private val StatusGlyphSize = 14.dp
 /** Room between rail items, where Material leaves 4dp and the four destinations read as one block. */
 private val RailItemGap = 16.dp
 
+/**
+ * Material's own floor for a `NavigationRail`'s width, and the one nothing here may push past it -
+ * see the note on the rail below. Stood in for the rail's real width where [EgxAnalyzerApp] paints
+ * its wash, because that draw happens outside the rail entirely; see [railWashHue] there.
+ */
+private val RailWidth = 80.dp
+
 @Composable
-private fun AppRail(appState: AppState, washHue: Color, modifier: Modifier = Modifier) {
+private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
     // **The page's own ground, not the chrome colour.** It was `surfaceContainer` so that it read
     // as the app-name band turning the corner down the side of the page - and that band was removed
     // on 2026-09-09, which left the rail a slab in the one colour every `SectionCard` is also drawn
@@ -550,49 +589,23 @@ private fun AppRail(appState: AppState, washHue: Color, modifier: Modifier = Mod
     // On `background` the rail is the page's own ground with the destinations standing on it, and
     // what separates the page is its cards' own inset rather than a change of colour.
     //
-    // **And on that ground, the page's own wash.** The accent band at the top of a page used to stop
-    // at the rail's edge, which on a wide window is a band ending a rail's width short of the
-    // corner - the one place the eye reads as the top of the *window* rather than the top of the
-    // page. Drawn here as well it is one band across the whole width, and the destinations stand in
-    // the colour their page opens in.
-    //
-    // It fades with the page rather than staying put: the strength comes from the page itself
-    // through [LocalPageWash] and the height from the same [PageWashHeight] the page measures, so
-    // the two halves go together. Both are read inside the draw lambda, which costs this rail one
-    // rectangle repainted per scrolled frame and no recomposition - the discipline `PageWash` is
-    // written to on the other side of the seam.
-    //
-    // The hue is animated because the page it belongs to cross-fades: `AppContent` fades one
-    // destination into the next, and a wash that snapped to the new colour on the press would arrive
-    // a whole transition before the page under it did. **Animated by [EgxAnalyzerApp] and handed in
-    // as [washHue] rather than animated here** - this composable is built inside
-    // `NavigationSuiteScaffoldLayout`'s own subcomposed slot, and a second, independently-triggered
-    // `animateColorAsState` there was the seam a backgrounded app could open between this wash and
-    // `appGround`'s light.
-    val wash = LocalPageWash.current
+    // **And the page's own wash, drawn above this rail rather than by it.** The accent band at the
+    // top of a page used to stop at the rail's edge, which on a wide window is a band ending a
+    // rail's width short of the corner - the one place the eye reads as the top of the *window*
+    // rather than the top of the page. It belongs to [EgxAnalyzerApp]'s own ground `Box` now, not
+    // to this composable: this rail is built inside `NavigationSuiteScaffoldLayout`'s own
+    // subcomposed slot, which exists to measure the rail before the page is given the width that is
+    // left - and a wash painted in here, driven by a colour that changes every animation frame, is
+    // not guaranteed to recompose in step with the ground light beside it. It usually looked right,
+    // which is what let it ship this way once already, until the app was backgrounded mid-transition
+    // and the seam showed. Nothing paints the rail's own background any more; the shared ground
+    // shows straight through it, wash included, the same way the two soft lights already do.
     // How tall the Settings item turned out to be, held so the column above it can hold back the
     // same amount and leave the group centred on the window. See the spacers in the rail below.
     var settingsHeight by remember { mutableStateOf(0.dp) }
     val density = LocalDensity.current
-    val washHeight = with(LocalDensity.current) { PageWashHeight.toPx() }
     NavigationRail(
-        // The ground is painted here rather than by the rail, because the wash has to go on top of
-        // it and under the destinations. A `containerColor` is drawn by the rail's own surface,
-        // which is below everything a modifier draws.
-        modifier = modifier
-            // No ground of its own any more: the window's is already under it, and a rail that
-            // painted its own would be the one part of the window the light stopped at.
-            .drawBehind {
-                val left = wash.floatValue
-                if (left <= 0f) return@drawBehind
-                drawRect(
-                    Brush.verticalGradient(
-                        listOf(washHue.copy(alpha = washHue.alpha * left), Color.Transparent),
-                        endY = washHeight,
-                    ),
-                    size = size.copy(height = washHeight),
-                )
-            },
+        modifier = modifier,
         containerColor = Color.Transparent,
         // Spelled out because `contentColorFor(Transparent)` is `Unspecified`, which would leave
         // anything in the rail that did not name its own colour taking whatever was in scope.

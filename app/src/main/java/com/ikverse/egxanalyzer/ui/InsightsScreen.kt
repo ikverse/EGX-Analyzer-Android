@@ -1257,58 +1257,77 @@ private fun ScoredCallRow(
                 // The stock and the verdict on it - logo, ticker, badge, the Arabic name, the
                 // outcome/timing pills.
                 val identityBlock: @Composable ColumnScope.() -> Unit = {
-                    // Top-aligned, and the pills sit in a column of their own on the right - the
-                    // same place and the same shape the recommendation card puts its own Timing
-                    // and Edited chips, so a call read on one tab and again on the other has its
-                    // verdict in the same corner both times. Asked for on 2026-09-20.
-                    Row(verticalAlignment = Alignment.Top) {
-                        // The logo and the ticker press together as one target rather than the
-                        // text alone, exactly as they do on the recommendation card: a 12sp glyph
-                        // beside a title is two touch targets where the reader sees one thing. The
-                        // card's own press, where it has one, opens the trade taken on this call -
-                        // so this is a second target on a card that already had one, and the
-                        // smaller of the two is the one that leads to the stock. See
-                        // LocalOpenStock.
-                        Column(Modifier.weight(1f)) {
-                            val openStock = LocalOpenStock.current
-                            // The logo sits beside the ticker-and-name pair rather than the ticker
-                            // alone, and CenterVertically is what centers it against both lines
-                            // rather than just the first - which is also what puts the name flush
-                            // under the ticker with no padding hack: it is simply the next line in
-                            // the same column.
-                            Row(
-                                Modifier.clickable { openStock(call.ticker) },
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
-                                Column {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(call.ticker, style = MaterialTheme.typography.titleSmall)
-                                        Egx33Badge(call.ticker, Modifier.padding(start = Space.s))
-                                    }
-                                    // Arabic only - the English name read as a second, redundant
-                                    // label beside a ticker that already says the stock in Latin
-                                    // letters.
-                                    call.companyArabic?.takeIf(String::isNotBlank)?.let {
-                                        Text(
-                                            it,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
+                    // The logo and the ticker press together as one target rather than the text
+                    // alone, exactly as they do on the recommendation card: a 12sp glyph beside a
+                    // title is two touch targets where the reader sees one thing. The card's own
+                    // press, where it has one, opens the trade taken on this call - so this is a
+                    // second target on a card that already had one, and the smaller of the two is
+                    // the one that leads to the stock. See LocalOpenStock.
+                    val nameBlock: @Composable () -> Unit = {
+                        val openStock = LocalOpenStock.current
+                        // The logo sits beside the ticker-and-name pair rather than the ticker
+                        // alone, and CenterVertically is what centers it against both lines
+                        // rather than just the first - which is also what puts the name flush
+                        // under the ticker with no padding hack: it is simply the next line in
+                        // the same column.
+                        Row(
+                            Modifier.clickable { openStock(call.ticker) },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(call.ticker, style = MaterialTheme.typography.titleSmall)
+                                    Egx33Badge(call.ticker, Modifier.padding(start = Space.s))
+                                }
+                                // Arabic only - the English name read as a second, redundant
+                                // label beside a ticker that already says the stock in Latin
+                                // letters.
+                                call.companyArabic?.takeIf(String::isNotBlank)?.let {
+                                    Text(
+                                        it,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
                             }
                         }
-                        Spacer(Modifier.width(Space.s))
-                        Column(
-                            Modifier.padding(end = Space.s),
-                            horizontalAlignment = Alignment.Start,
-                            verticalArrangement = Arrangement.spacedBy(Space.xs),
-                        ) {
+                    }
+                    if (wide) {
+                        // Wrapped rather than stacked in the top-right corner: a fixed vertical
+                        // stack there forced the header's height to the taller of the name block
+                        // and the two pills, which left empty air under whichever was shorter -
+                        // most often the name. Flowed here, left-aligned like everything else in
+                        // the header, the row costs only the height it actually needs and grows
+                        // sideways before it grows down. Kept on the unfolded/wide layout only -
+                        // the top-right column below is the narrow case's own. Asked for on
+                        // 2026-09-20.
+                        nameBlock()
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                             OutcomeLabel(call)
                             TimingLabel(call)
+                        }
+                    } else {
+                        // Top-aligned, and the pills sit in a column of their own on the right -
+                        // the same place and the same shape the recommendation card puts its own
+                        // Timing and Edited chips, so a call read on one tab and again on the
+                        // other has its verdict in the same corner both times. The cover screen's
+                        // own case: narrow enough that a name block and a pill column are already
+                        // reading as two separate things rather than one crowded header. Asked
+                        // for on 2026-09-20.
+                        Row(verticalAlignment = Alignment.Top) {
+                            Box(Modifier.weight(1f)) { nameBlock() }
+                            Spacer(Modifier.width(Space.s))
+                            Column(
+                                Modifier.padding(end = Space.s),
+                                horizontalAlignment = Alignment.Start,
+                                verticalArrangement = Arrangement.spacedBy(Space.xs),
+                            ) {
+                                OutcomeLabel(call)
+                                TimingLabel(call)
+                            }
                         }
                     }
                 }
@@ -1379,7 +1398,11 @@ private fun ScoredCallRow(
                         )
                     }
                 } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    // Space.m rather than the .xs every other gap in these two blocks uses: the
+                    // Arabic name and the channel name below it read as one run-on block at .xs,
+                    // where the wide layout already keeps them apart in separate panes. Asked for
+                    // on 2026-09-20.
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                         identityBlock()
                         sourceBlock()
                     }

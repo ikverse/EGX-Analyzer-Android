@@ -677,10 +677,10 @@ internal fun heldBorder(view: PositionView?): BorderStroke? =
     view?.let { BorderStroke(HeldOutline, it.status.tone()) }
 
 /**
- * The same weight as the plain card hairline, so a held card's coloured edge reads as the card's
- * own outline saying something rather than as a heavier ring boxing it in.
+ * Thinner than the plain card hairline, so a held card's coloured edge reads as the card's own
+ * outline saying something rather than as a heavier ring boxing it in.
  */
-private val HeldOutline = 1.dp
+private val HeldOutline = 0.5.dp
 
 /**
  * Status colour, borrowed from the roles prices already use.
