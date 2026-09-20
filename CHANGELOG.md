@@ -4,6 +4,11 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.8.4] — 2026-09-20
+
+- Results: a saved run's card now closes its recommendations on a press too, not just opens them - the whole card toggles either way, matching the "View/Hide recommendations" button at its foot
+- Results: a session read more than once shows its page dots and "Run X/Y" label stacked vertically (dots over text) at the foot of the card, instead of beside the ⋮ menu at the top
+
 ## [3.8.1] — 2026-09-20
 
 - Arrival flash slowed down: 250ms per half-cycle instead of 120ms, so the two blinks read at a comfortable pace instead of a stutter

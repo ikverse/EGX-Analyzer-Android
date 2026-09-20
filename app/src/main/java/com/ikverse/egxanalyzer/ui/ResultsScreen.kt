@@ -916,21 +916,18 @@ private fun SavedAnalysisCard(
         .size
 
     Card(
-        // The whole card opens the run, and only while it is shut. Open, it holds the report's own
-        // toolbar, its call cards and the source trace, so a card-wide toggle would close the whole
-        // report on a tap that landed in the gap between any two of them - and the reader would have
-        // no idea what they had pressed. The footer row below is what closes it again.
+        // The whole card opens the run, and the same whole card closes it again once it is open -
+        // one press path, whichever direction it means. A tap landing in a gap between the report's
+        // own content (its call cards, its table, the space around them) closes it same as pressing
+        // the footer button does; only the interactive pieces inside - buttons, the menu, table
+        // rows - capture their own tap first and never reach this one.
         //
-        // Behind another reading in its deck, the same press means come forward rather than open:
+        // Behind another reading in its deck, the same press means come forward rather than toggle:
         // one press path, so a card cannot be pressable in one place and dead in another.
-        onClick = onBringForward ?: { onExpandedChange(true) },
+        onClick = onBringForward ?: { onExpandedChange(!expanded) },
         modifier = modifier.fillMaxWidth(),
-        enabled = !expanded,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            // Pinned to the same fill: "disabled" here means the report is open, which is not a
-            // state a card should go grey for.
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
         border = arrivalFlash(highlighted, onHighlightShown) ?: Glass.outline,
         shape = MaterialTheme.shapes.large,
@@ -943,17 +940,7 @@ private fun SavedAnalysisCard(
             // level with neither. The floor is what keeps two cards in a grid row level: a report
             // older than a week gets no relative word, and would otherwise stand a line shorter
             // than the one beside it.
-            Row(
-                Modifier
-                    .heightIn(min = RunHeaderHeight)
-                    // Open, a press here closes the report again - the same header a shut card
-                    // opens from, so the one block a reader presses for either direction is
-                    // always the same block. Never active while shut: the card itself already
-                    // answers that press, and a second clickable over the same area would be two
-                    // things claiming one tap.
-                    .clickable(enabled = expanded, onClick = { onExpandedChange(false) }),
-                verticalAlignment = Alignment.Top,
-            ) {
+            Row(Modifier.heightIn(min = RunHeaderHeight), verticalAlignment = Alignment.Top) {
                 // Spaced rather than butted together. Three lines of type at three sizes with
                 // nothing between them read as one block to be picked apart, which is what made
                 // the head of the card feel packed while the foot sat empty.
