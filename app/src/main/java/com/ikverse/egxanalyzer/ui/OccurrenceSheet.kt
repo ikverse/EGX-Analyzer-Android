@@ -1,13 +1,13 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -100,12 +100,19 @@ internal fun OccurrenceSheet(
                 .padding(top = Space.s, bottom = Space.m),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
+            // On its own now, tinted the way Insights and the recommendation card tint a grouped
+            // panel - it used to open "The call" section, which buried the one drawing on this
+            // sheet inside a card whose label was really about the six figures under it.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
+                    .padding(Space.m),
+            ) {
+                PriceLadder(point, reached = peak)
+            }
             SheetSection {
                 SheetSectionLabel("The call")
-                PriceLadder(point, reached = peak)
-                // The ladder writes its labels under its own track, so the grid needs a gap the
-                // card's own `spacedBy` does not give it.
-                Spacer(Modifier.height(Space.xs))
                 LevelGrid(point)
                 point.riskRewardRatio()?.let { RiskRewardRow(it) }
             }
@@ -114,7 +121,7 @@ internal fun OccurrenceSheet(
         // Only where the call has a session to belong to: an occurrence the model left undated
         // cannot be scored, so a trade filed against it would have no deadline to run to.
         if (trades != null && session != null) {
-            OccurrenceActions(stock, point, channel, session, trades, held)
+            OccurrenceActions(stock, point, channel, trades, held)
         }
     }
     if (editing && editor != null) {
@@ -129,9 +136,11 @@ internal fun OccurrenceSheet(
  * Who the call is about, who made it, and how far the stock has been since - on one fixed band.
  *
  * The same shape [StockSheet] opens with and the recommendation card's header repeats: identity on
- * the left, the `⋮` on its right, every pill on one row beneath at the sheet's own inset. The two
- * names share a line rather than taking one each, because this band does not scroll and four
- * stacked lines put the first figure below the fold on a cover screen.
+ * the left, the `⋮` on its right, every pill on one row beneath at the sheet's own inset. The
+ * Arabic and English names each get their own line now, since 2026-09-20, and the logo centers
+ * against the three lines it stands beside - the ticker, then each name - rather than sitting
+ * top-aligned against the ticker alone. The channel and the date it was called for get one more
+ * line of their own, between the identity block and the pill row.
  */
 @Composable
 private fun OccurrenceHeading(
@@ -152,38 +161,67 @@ private fun OccurrenceHeading(
         horizontalArrangement = Arrangement.spacedBy(Space.s),
         verticalAlignment = Alignment.Top,
     ) {
-        Column(Modifier.weight(1f)) {
-            // The logo and the ticker press together as one target, as they do on the card: a 12sp
-            // glyph beside a headline is two touch targets where the reader sees one thing.
-            Row(
-                Modifier.clickable { openStock(stock.stockCode) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StockLogo(stock.stockCode, LogoSize.Header, Modifier.padding(end = Space.s))
-                Text(
-                    stock.stockCode,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
+        // The logo centers against the whole three-line block - ticker, Arabic name, English
+        // name - rather than sitting top-aligned against the ticker alone. Asked for on 2026-09-20.
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            StockLogo(stock.stockCode, LogoSize.Header, Modifier.padding(end = Space.s))
+            Column {
+                // The logo and the ticker press together as one target, as they do on the card: a
+                // 12sp glyph beside a headline is two touch targets where the reader sees one thing.
+                Row(
+                    Modifier.clickable { openStock(stock.stockCode) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stock.stockCode,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
+                }
+                // Arabic and English each on their own line rather than joined by a middot - the
+                // combined line was the widest thing under the ticker and the first to clip.
+                stock.stockNameArabic?.let {
+                    Text(
+                        "⁨$it⁩",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                stock.stockNameEnglish?.takeIf { it != stock.stockCode }?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-            // Both scripts on one line. The channels print Arabic and the catalog holds English,
-            // and a reader who knows one should not have to know the other.
-            listOfNotNull(
-                stock.stockNameArabic?.let { "⁨$it⁩" },
-                stock.stockNameEnglish?.takeIf { it != stock.stockCode },
-            ).takeIf(List<String>::isNotEmpty)?.let {
-                Text(
-                    it.joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            // Two occurrences of one stock in one report are identical apart from who said it, and
-            // until 2026-09-11 this sheet named neither of them.
+        }
+        if (peak != null) PeakSinceTheCall(point, peak)
+        CallMenu(stock, point, channel, session, editor, onEdit)
+    }
+    // The channel and the session it was called for, on one line under the identity block - what
+    // used to be said only in the caption under the buy button, which repeated it a screen away
+    // from the ticker it was about. Two occurrences of one stock in one report are identical apart
+    // from who said it and when, and until 2026-09-11 this sheet named neither of them at all.
+    if (channel?.isNotBlank() == true || session != null) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Space.l)
+                .padding(bottom = Space.s),
+            horizontalArrangement = Arrangement.spacedBy(Space.xs),
+        ) {
             channel?.takeIf(String::isNotBlank)?.let {
+                Text(
+                    "Source:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
                 Text(
                     "⁨$it⁩",
                     style = MaterialTheme.typography.labelMedium,
@@ -192,9 +230,21 @@ private fun OccurrenceHeading(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            session?.let {
+                if (channel?.isNotBlank() == true) {
+                    Text(
+                        "·",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    AppDates.DayMonth.format(it),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
-        if (peak != null) PeakSinceTheCall(point, peak)
-        CallMenu(stock, point, channel, session, editor, onEdit)
     }
     // Every pill on one line under the header and starting at the sheet's own inset - level with
     // the ticker above it and with ENTRY below it. The same row the two call cards carry.
@@ -305,26 +355,40 @@ private fun OccurrenceSource(
                     onOpen = onOpenImage,
                 )
             }
-            Column(
-                Modifier.weight(1f),
+            point.recommendationEvidence?.let {
+                Text(
+                    "“$it”",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        // Timing, when the card was printed and the session it targets - one middot-joined line,
+        // the pattern the recommendation card's own source facts already read in, rather than
+        // three stacked rows that ran together with nothing to tell one fact from the next.
+        val facts = listOfNotNull(
+            point.timingEvidence?.let { it to MaterialTheme.colorScheme.tertiary },
+            point.visibleSourceDate?.takeIf(String::isNotBlank)
+                ?.let { ("Printed $it") to MaterialTheme.colorScheme.onSurfaceVariant },
+            point.date?.let {
+                ("Target " + AppDates.DayMonth.format(it)) to MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+        if (facts.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(Space.xs),
                 verticalArrangement = Arrangement.spacedBy(Space.xs),
             ) {
-                point.recommendationEvidence?.let {
-                    Text("“$it”", style = MaterialTheme.typography.bodyMedium)
+                facts.forEachIndexed { index, (text, color) ->
+                    Text(text, style = MaterialTheme.typography.labelSmall, color = color)
+                    if (index != facts.lastIndex) {
+                        Text(
+                            "·",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-                point.timingEvidence?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                }
-                // The date the card itself printed, and the session the call is scored for. They
-                // are two different facts and were joined by a separator into one run-on line.
-                point.visibleSourceDate?.takeIf(String::isNotBlank)?.let {
-                    SourceFact("Card printed $it")
-                }
-                point.date?.let { SourceFact("Target date " + AppDates.DayMonth.format(it)) }
             }
         }
         (point.notesArabic ?: stock.notesSummary)?.let {
@@ -335,6 +399,9 @@ private fun OccurrenceSource(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+        // The ids are for checking the app against a report, not for reading a call - below a rule
+        // now so they read as a footnote rather than running straight on from the notes above them.
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Text(
             listOfNotNull(
                 point.sourceImageRef?.let { "image $it" },
@@ -342,18 +409,8 @@ private fun OccurrenceSource(
             ).joinToString(" · ").ifBlank { "source not recorded" },
             style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = Space.xs),
         )
     }
-}
-
-@Composable
-private fun SourceFact(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 }
 
 /**
@@ -374,17 +431,17 @@ private fun OccurrenceActions(
     stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     channel: String?,
-    session: LocalDate,
     trades: TradeBook,
     held: PositionView?,
 ) {
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    Column(
+    // No caption naming the channel and the session any more - the header says both now, and
+    // repeating them here was the same fact read twice on the way down the sheet.
+    Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = Space.l)
             .padding(top = Space.s, bottom = Space.xl),
-        verticalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
         TradeAction(
             held = held,
@@ -395,12 +452,6 @@ private fun OccurrenceActions(
                 trades.buy(stock, point, channel, price, date, window)
             },
             onSell = { sale -> held?.let { trades.sell(it, sale) } },
-        )
-        Text(
-            "on " + (channel?.takeIf(String::isNotBlank)?.let { "⁨$it⁩'s call" } ?: "the call") +
-                " of " + AppDates.DayMonth.format(session),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

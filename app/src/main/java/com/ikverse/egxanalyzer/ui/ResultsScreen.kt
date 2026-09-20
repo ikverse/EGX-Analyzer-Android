@@ -6,6 +6,7 @@ import com.ikverse.egxanalyzer.model.timing
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.background
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -942,7 +943,17 @@ private fun SavedAnalysisCard(
             // level with neither. The floor is what keeps two cards in a grid row level: a report
             // older than a week gets no relative word, and would otherwise stand a line shorter
             // than the one beside it.
-            Row(Modifier.heightIn(min = RunHeaderHeight), verticalAlignment = Alignment.Top) {
+            Row(
+                Modifier
+                    .heightIn(min = RunHeaderHeight)
+                    // Open, a press here closes the report again - the same header a shut card
+                    // opens from, so the one block a reader presses for either direction is
+                    // always the same block. Never active while shut: the card itself already
+                    // answers that press, and a second clickable over the same area would be two
+                    // things claiming one tap.
+                    .clickable(enabled = expanded, onClick = { onExpandedChange(false) }),
+                verticalAlignment = Alignment.Top,
+            ) {
                 // Spaced rather than butted together. Three lines of type at three sizes with
                 // nothing between them read as one block to be picked apart, which is what made
                 // the head of the card feel packed while the foot sat empty.
@@ -1422,6 +1433,7 @@ private fun ResultDetail(
                         onSelectPoint = { stock, point ->
                             detail = stock.originalStockCode to point.parseIndex
                         },
+                        imagePathFor = { ref -> saved.result.imagePathFor(ref) },
                         showContext = showContext,
                         toolbar = { Toolbar(compact = false) },
                     )

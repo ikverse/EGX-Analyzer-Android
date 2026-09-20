@@ -57,6 +57,7 @@ class RecommendationTableTest {
                     channelFor = { it },
                     latestFor = { null },
                     onSelectPoint = { _, _ -> },
+                    imagePathFor = { null },
                     showContext = showContext,
                 )
             }

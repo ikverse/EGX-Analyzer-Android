@@ -6,6 +6,7 @@ import com.ikverse.egxanalyzer.model.timing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -98,6 +100,9 @@ internal fun RecommendationTable(
      */
     latestFor: (String) -> LatestPrice?,
     onSelectPoint: (ConsolidatedRecommendation, RecommendationDataPoint) -> Unit,
+    /** The screenshot behind a call, looked up by the reference the model cited - for the row's
+     * own hold-to-view, the shortcut past opening the sheet just to reach its thumbnail. */
+    imagePathFor: (Int?) -> String?,
     modifier: Modifier = Modifier,
     /**
      * The two dates, under each row.
@@ -177,6 +182,7 @@ internal fun RecommendationTable(
                         latest = latestFor(stock.stockCode),
                         showContext = showContext,
                         onSelectPoint = onSelectPoint,
+                        imagePathFor = imagePathFor,
                     )
                 }
             }
@@ -223,6 +229,7 @@ private fun StockBlock(
     latest: LatestPrice?,
     showContext: Boolean,
     onSelectPoint: (ConsolidatedRecommendation, RecommendationDataPoint) -> Unit,
+    imagePathFor: (Int?) -> String?,
 ) {
     // A card within a card goes one step up, the rule the Portfolio's session cards already follow.
     // It was a full-bleed `surfaceContainerHighest` band under a 2dp rule - the heaviest divider in
@@ -248,6 +255,7 @@ private fun StockBlock(
                     // devices at once is what a table looks like when none of them is trusted.
                     striped = index % 2 == 1,
                     onClick = { onSelectPoint(stock, point) },
+                    imagePath = imagePathFor(point.sourceImageRef),
                 )
             }
         }
@@ -408,7 +416,12 @@ private fun CallRow(
     showContext: Boolean,
     striped: Boolean,
     onClick: () -> Unit,
+    /** The screenshot this row was read off - absent, a hold press opens nothing. */
+    imagePath: String?,
 ) {
+    // A hold press is the shortcut past opening the sheet just to reach its thumbnail: the same
+    // zoomable viewer, one press sooner, for a reader who already knows which card they want.
+    var viewingImage by remember { mutableStateOf(false) }
     Column(
         Modifier
             .fillMaxWidth()
@@ -426,7 +439,10 @@ private fun CallRow(
                     Color.Transparent
                 },
             )
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { viewingImage = true },
+            ),
     ) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = RowHeight).padding(horizontal = Space.m),
@@ -457,6 +473,9 @@ private fun CallRow(
             )
         }
         if (showContext) ContextLine(point)
+    }
+    if (viewingImage) {
+        SourceImageViewer(imagePath, point.sourceImageRef, onDismiss = { viewingImage = false })
     }
 }
 

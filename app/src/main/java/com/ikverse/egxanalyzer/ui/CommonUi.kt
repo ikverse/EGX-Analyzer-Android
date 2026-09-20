@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
@@ -922,7 +923,15 @@ internal fun arrivalFlash(
     LaunchedEffect(Unit) {
         edge.animateTo(
             1f,
-            animationSpec = repeatable(FlashBlinks * 2, tween(FlashHalfCycleMs), RepeatMode.Reverse),
+            // Linear, not the tween default: RepeatMode.Reverse chains this segment back to back
+            // with itself, and the default FastOutSlowIn easing is asymmetric - the gentle tail
+            // easing into the peak collided with the same curve's steep opening dropping away from
+            // it, which read as a snap at the top of each blink rather than a smooth reversal.
+            animationSpec = repeatable(
+                FlashBlinks * 2,
+                tween(FlashHalfCycleMs, easing = LinearEasing),
+                RepeatMode.Reverse,
+            ),
         )
         onShown()
     }
