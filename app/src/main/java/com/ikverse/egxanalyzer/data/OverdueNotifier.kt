@@ -36,7 +36,7 @@ class OverdueNotifier(private val context: Context) {
                     "Overdue trades",
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply {
-                    description = "Trades past their deadline with no sale recorded."
+                    description = "Trades you kept open past their deadline."
                 },
             )
         }
@@ -58,9 +58,9 @@ class OverdueNotifier(private val context: Context) {
     fun overdue(count: Int, longestDays: Long) {
         if (count <= 0 || !permitted()) return
         val what = if (count == 1) "1 trade is overdue" else "$count trades are overdue"
-        val detail = "Past the deadline with no sale recorded - the longest by " +
+        val detail = "Kept open past the deadline with no sale recorded yet - the longest by " +
             "$longestDays ${if (longestDays == 1L) "day" else "days"}. " +
-            "Record the sale, or press Keep Open to hold it deliberately."
+            "Record the sale when you've sold."
         manager.notify(
             NOTIFICATION_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)

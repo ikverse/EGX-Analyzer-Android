@@ -671,8 +671,9 @@ internal fun PositionCard(
             title = { Text("Remove this position?") },
             text = {
                 Text(
-                    "It stops being counted in your portfolio. The analysis it came from is not " +
-                        "touched, so the recommendation itself stays where it is.",
+                    "It stops being counted in your portfolio, here and on every device that " +
+                        "syncs with this one. The analysis it came from is not touched, so the " +
+                        "recommendation itself stays where it is.",
                 )
             },
             confirmButton = {

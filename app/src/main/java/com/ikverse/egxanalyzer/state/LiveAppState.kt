@@ -118,6 +118,7 @@ import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.PriceHealthReport
+import com.ikverse.egxanalyzer.model.StockHealth
 import com.ikverse.egxanalyzer.model.PriceSeriesSummary
 import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.PromptVersion
@@ -191,6 +192,9 @@ private const val SETTINGS_PUBLISH_DELAY_MILLISECONDS = 3_000L
  * on a stock that has been suspended for a stretch. Read once per press and never held.
  */
 private const val OPINION_HISTORY_DAYS = 400L
+
+/** How many stocks the feed-quiet notification names before falling back to "and N more". */
+private const val FEED_QUIET_NAMED_TICKERS = 3
 
 class LiveAppState(
     /**
@@ -279,11 +283,12 @@ class LiveAppState(
     /**
      * Says the feed has gone quiet about stocks the record names; supplied like the rest.
      *
-     * Takes the count and the calls it is costing rather than the report, because a notifier has no
-     * business reasoning about a `PriceHealthReport` - the figure that matters was already decided
-     * by the card that draws one.
+     * Takes the count, the calls it is costing, and up to a few of the tickers themselves, rather
+     * than the report, because a notifier has no business reasoning about a `PriceHealthReport` -
+     * the figures that matter were already decided by the card that draws one.
      */
-    private val feedQuiet: (stocks: Int, callsHeld: Int) -> Unit = { _, _ -> },
+    private val feedQuiet: (stocks: Int, callsHeld: Int, tickers: List<String>) -> Unit =
+        { _, _, _ -> },
     /**
      * How many trades are overdue, for the launcher shortcut that counts them.
      *
@@ -3148,7 +3153,11 @@ class LiveAppState(
         if (quiet == settingsRepository.feedReportedQuiet()) return
         settingsRepository.recordFeedReportedQuiet(quiet)
         if (quiet && appPreferences.feedAlertsEnabled) {
-            feedQuiet(health.faults.size, health.callsHeld)
+            feedQuiet(
+                health.faults.size,
+                health.callsHeld,
+                health.faults.map(StockHealth::ticker).take(FEED_QUIET_NAMED_TICKERS),
+            )
         }
     }
 

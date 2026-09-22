@@ -1242,7 +1242,9 @@ private fun SavedAnalysisCard(
             text = {
                 Text(
                     "It will be removed from this device and from your Telegram sync channel, so " +
-                        "every device drops it too. This cannot be undone.",
+                        "every device drops it too, along with any Ask AI answers saved on its " +
+                        "calls. Its calls also stop counting toward every rate on Insights. This " +
+                        "cannot be undone.",
                 )
             },
             confirmButton = {

@@ -118,7 +118,6 @@ internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = tru
             Button(onClick = {
                 scope.launch { appState.submitTelegramPhone(firstValue) }
             }) { Text("Send verification code") }
-            ApiCredentialsHelp()
         }
         TelegramAuthStep.VERIFICATION_CODE -> AuthCard("Verification code", boxed, appState) {
             AuthField(firstValue, { firstValue = it }, "Telegram code")
@@ -166,7 +165,6 @@ internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = tru
                 "On a device already signed in to Telegram, open Settings, then Devices, then " +
                     "Link Desktop Device, and scan this code.",
             )
-            ApiCredentialsHelp()
         }
         TelegramAuthStep.READY,
         TelegramAuthStep.INITIALIZING,

@@ -27,7 +27,6 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.DropdownMenuItem
@@ -100,7 +99,10 @@ internal fun SettingsScreen(appState: AppState) {
                 )
             },
             confirmButton = {
-                Button(
+                // A plain text button, like every other destructive confirm in the app - this was
+                // the one filled in the app's own colour, which read as the safer of the two
+                // choices rather than the irreversible one.
+                TextButton(
                     onClick = {
                         appState.deleteAllResults()
                         confirmDeleteAll = false
@@ -656,7 +658,7 @@ internal fun SettingsScreen(appState: AppState) {
             about = infoNote(
                 "Notifications",
                 "Each of these reports something that has already happened - a level reached, a " +
-                    "deadline passed, a run that did not fire. None of them says what to do about " +
+                    "deadline passed, the feed going quiet. None of them says what to do about " +
                     "it, and none of them can start a run or spend anything.",
                 "Android silences a whole channel at a time, so these arrive on several channels " +
                     "rather than one: muting news about your trades cannot quietly mute the app " +
@@ -675,13 +677,14 @@ internal fun SettingsScreen(appState: AppState) {
                 ),
             ) {
                 SettingToggle(
-                    label = "Tell me when a trade goes past its deadline",
+                    label = "Remind me about trades kept open past their deadline",
                     checked = appState.appPreferences.overdueRemindersEnabled,
                     onCheckedChange = appState::updateOverdueReminders,
                     about = infoNote(
-                        "Tell me when a trade goes past its deadline",
-                        "Once a day, and only when something is actually overdue - a trade whose " +
-                            "deadline has passed with no sale recorded.",
+                        "Remind me about trades kept open past their deadline",
+                        "Once a day, and only while a trade you chose to keep open is past its " +
+                            "deadline with no sale recorded. A trade whose window simply ran out " +
+                            "closes as expired on its own and is never chased.",
                         "Nothing is analyzed, so this never spends anything on the cloud. With either " +
                             "of these two switches on, the phone does fetch prices once after the " +
                             "exchange closes, so it knows what the session did before it says anything.",
@@ -889,8 +892,9 @@ internal fun SettingsScreen(appState: AppState) {
                             "from the session the call was made for. You can type over it there, " +
                             "or later from Edit trade.",
                         "It changes nothing already recorded, and it does not affect how the " +
-                            "sources are scored - a call is followed until it reaches a target or " +
-                            "the stop, which is what Insights reports the timings of.",
+                            "sources are scored - a call is followed for up to " +
+                            "${Scoring.JUDGING_HORIZON_SESSIONS} sessions whatever this is set to, " +
+                            "which is what Insights reports the timings of.",
                     ),
                 ) {
                     Text("Default trade window", modifier = Modifier.weight(1f))
@@ -934,8 +938,9 @@ internal fun SettingsScreen(appState: AppState) {
                     "Sync",
                     "Reports are kept in a private Telegram channel of your own, so every device " +
                         "signed in to your account sees the same history.",
-                    "A saved report never changes, so syncing only ever adds - nothing is overwritten " +
-                        "and nothing is deleted.",
+                    "Correcting a call updates the report everywhere it has synced, and deleting a " +
+                        "report removes it from every device too. Nothing else changes on its " +
+                        "own: a report neither of those has touched simply travels once.",
                 ),
             ) {
                 SettingsButton(
@@ -1017,9 +1022,9 @@ internal fun SettingsScreen(appState: AppState) {
                 summary = "${appState.savedResults.size} saved analyses",
                 about = infoNote(
                     "Delete",
-                    "This is the only thing in the app that removes saved analyses, and it " +
-                        "removes all of them - from this device, from your Telegram sync channel, " +
-                        "and from every other device that syncs with it.",
+                    "This removes every saved analysis at once - from this device, from your " +
+                        "Telegram sync channel, and from every other device that syncs with it. A " +
+                        "single report can be deleted on its own from its own card, on Results.",
                     "Take a backup first if there is any doubt: nothing here can be undone, and " +
                         "sync cannot bring back what it has been told to forget.",
                 ),
@@ -1122,16 +1127,10 @@ private fun DiagnosticsControl(appState: AppState) {
         }
     }
     // A row rather than a column, now that what sat under the button is behind the question mark
-    // beside it: one line where there were four.
-    SettingRow(
-        about = infoNote(
-            "Save diagnostics",
-            "Copies this device's saved record into Downloads, and the crash log with it where " +
-                "the app has closed unexpectedly.",
-            "No provider key and no Telegram key travels in it - those are encrypted " +
-                "separately by Android Keystore and have never been part of it.",
-        ),
-    ) {
+    // beside it: one line where there were four. No question mark of its own - the "Diagnostics"
+    // group heading already carries this exact explanation, and this row is the only thing inside
+    // it, so a second copy of the same words a few pixels below the first said nothing new.
+    SettingRow {
         SettingsButton(
             enabled = !saving,
             onClick = {

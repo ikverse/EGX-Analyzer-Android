@@ -82,6 +82,7 @@ import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
+import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.StockOpinion
 import com.ikverse.egxanalyzer.model.believableReturn
 import com.ikverse.egxanalyzer.model.opinionId
@@ -1898,10 +1899,11 @@ private fun TimingLabel(call: ScoredCall) {
                     "${call.channel} printed this as a T+1 call: buy on the session it was made " +
                         "for, and be out on the next one. So it is judged over those " +
                         "${call.windowSessions} sessions and no more, where every other call runs " +
-                        "until it reaches a target or breaks its stop. The buy zone counts on the " +
-                        "first session only - if the price never traded into it that day, there " +
-                        "was no trade to take, and the call is counted neither for nor against " +
-                        "the channel.",
+                        "up to ${Scoring.JUDGING_HORIZON_SESSIONS} sessions before it counts as " +
+                        "expired with neither a target nor the stop reached. The buy zone counts " +
+                        "on both sessions - if the price never traded into it in either one, " +
+                        "there was no trade to take, and the call is counted neither for nor " +
+                        "against the channel.",
                 )
             },
             confirmButton = {

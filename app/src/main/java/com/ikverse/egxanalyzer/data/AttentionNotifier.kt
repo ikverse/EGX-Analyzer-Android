@@ -58,21 +58,26 @@ class AttentionNotifier(private val context: Context) {
      * holding 11 calls out of every rate you are reading" is the sentence that changes what the
      * reader believes about the page.
      *
+     * Names [tickers] itself rather than pointing at Settings for them - Settings only ever showed
+     * the count, and a line promising an explanation the app does not draw anywhere read as a
+     * broken link. [tickers] is already capped by the caller; anything past it is summed into
+     * "and N more" rather than dropped silently.
+     *
      * Raised **once per spell** by the caller, which is what keeps it from becoming a daily line
      * about a symbol that retired in June.
      */
-    fun feedQuiet(stocks: Int, callsHeld: Int) {
+    fun feedQuiet(stocks: Int, callsHeld: Int, tickers: List<String>) {
         if (stocks <= 0 || !permitted()) return
         val what = if (stocks == 1) {
             "1 stock has no usable prices"
         } else {
             "$stocks stocks have no usable prices"
         }
-        val detail = "The feed has gone quiet about " +
-            (if (stocks == 1) "it" else "them") + ", so " +
+        val named = tickers.joinToString(", ") +
+            (stocks - tickers.size).let { rest -> if (rest > 0) " and $rest more" else "" }
+        val detail = "$named " + (if (stocks == 1) "has" else "have") + " gone quiet, so " +
             (if (callsHeld == 1) "1 call is" else "$callsHeld calls are") +
-            " sitting outside every rate the app shows. Settings explains what happened to each " +
-            "and whether fetching again can help."
+            " sitting outside every rate the app shows."
         manager.notify(
             FEED_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)

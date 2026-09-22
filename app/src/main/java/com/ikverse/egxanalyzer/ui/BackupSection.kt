@@ -118,13 +118,16 @@ fun BackupControls(appState: AppState) {
                         "Nothing written yet - " +
                         "the first copy goes there today."
                 // Not an error: the app works perfectly well like this, and a red warning about a
-                // folder nobody has chosen yet would be scolding someone for the default.
+                // folder nobody has chosen yet would be scolding someone for the default. Neither
+                // branch below claims a daily copy goes to Downloads on its own - only the button
+                // above falls back there, and only when pressed.
                 appState.backupFolder != null ->
-                    "The backup folder is no longer reachable, so backups go to Downloads. Choose " +
+                    "Automatic backups have stopped: the folder can no longer be reached. Choose " +
                         "it again to start writing there."
                 else ->
-                    "Backups go to Downloads. Choose a folder your cloud app syncs - OneDrive, " +
-                        "Dropbox, Nextcloud, an SD card - and a copy is written there once a day."
+                    "No automatic backup yet. Choose a folder your cloud app syncs - OneDrive, " +
+                        "Dropbox, Nextcloud, an SD card - and a copy is written there once a day. " +
+                        "Back up now saves to Downloads instead."
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

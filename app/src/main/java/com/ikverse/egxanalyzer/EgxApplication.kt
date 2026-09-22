@@ -172,8 +172,8 @@ class EgxApplication : Application() {
             sessionSummarised = { digest ->
                 runCatching { SessionDigestNotifier(this).announce(digest) }
             },
-            feedQuiet = { stocks, callsHeld ->
-                runCatching { AttentionNotifier(this).feedQuiet(stocks, callsHeld) }
+            feedQuiet = { stocks, callsHeld, tickers ->
+                runCatching { AttentionNotifier(this).feedQuiet(stocks, callsHeld, tickers) }
             },
             // Already swallows its own failures - a launcher that refuses a shortcut is not
             // something the reader asked about - so it needs no wrapper here.
