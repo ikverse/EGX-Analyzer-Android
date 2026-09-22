@@ -37,11 +37,13 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -1320,13 +1322,21 @@ private fun ScoredCallRow(
                         Row(verticalAlignment = Alignment.Top) {
                             Box(Modifier.weight(1f)) { nameBlock() }
                             Spacer(Modifier.width(Space.s))
-                            Column(
-                                Modifier.padding(end = Space.s),
-                                horizontalAlignment = Alignment.Start,
-                                verticalArrangement = Arrangement.spacedBy(Space.xs),
-                            ) {
-                                OutcomeLabel(call)
-                                TimingLabel(call)
+                            // Each pill is an OutlinePill Surface(onClick = ...), and Material3's
+                            // clickable Surface silently pads itself out to a 48dp touch target,
+                            // centering the small pill inside that invisible box. Stacked tightly
+                            // here, that padding - not the 4dp spacedBy below - was the real gap
+                            // between "Still open" and "T+1", and it was also what pushed the
+                            // narrower T+1 pill off the left edge the Column already asks for.
+                            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                                Column(
+                                    Modifier.padding(top = Space.s, end = Space.s),
+                                    horizontalAlignment = Alignment.Start,
+                                    verticalArrangement = Arrangement.spacedBy(Space.xs),
+                                ) {
+                                    OutcomeLabel(call)
+                                    TimingLabel(call)
+                                }
                             }
                         }
                     }
@@ -1336,40 +1346,60 @@ private fun ScoredCallRow(
                 // than falling in under the name block above it, and on a wide one it gets a pane
                 // of its own rather than sharing the identity's.
                 val sourceBlock: @Composable ColumnScope.() -> Unit = {
-                    Text(
-                        call.channel,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
+                    // "called <date>" rides on the channel's own line now rather than opening the
+                    // row below - it is the one fact about a call's dating that every card has, so
+                    // it reads as part of naming the source rather than as the first of a list.
+                    FlowRow(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                        Text(
+                            call.channel,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            "·",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = Space.xs),
+                        )
+                        Text(
+                            "called ${call.openedOn.format(AppDates.DayMonthYear)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     // Pieces rather than one joined string, so the middot between them can carry
                     // real dp padding - Space.s each side - instead of riding on a couple of
-                    // characters of the string's own spacing. A FlowRow rather than a Row: up to
-                    // three segments can be present at once, and the single Text this replaced
-                    // used to wrap onto a second line rather than run off the card.
-                    FlowRow(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                        val segments = listOfNotNull(
-                            "called ${call.openedOn.format(AppDates.DayMonthYear)}",
-                            call.settledOn?.let { "settled ${it.format(AppDates.DayMonthYear)}" },
-                            // The channel did post it that day, so the card stays; it is the same
-                            // bet as the call it repeats, so no rate counts it twice.
-                            call.repeatOf?.let {
-                                "repeat of ${it.format(AppDates.DayMonthYear)}, counted once"
-                            },
-                        )
-                        segments.forEachIndexed { index, segment ->
-                            Text(
-                                segment,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (index != segments.lastIndex) {
+                    // characters of the string's own spacing. A FlowRow rather than a Row: both
+                    // can be present at once, and the single Text this replaced used to wrap onto
+                    // a second line rather than run off the card. Guarded on there being anything
+                    // to say: "called" moved up onto the channel's line above, so most calls have
+                    // neither a settled date nor a repeat, and an empty FlowRow would still claim
+                    // the gap that used to be "called"'s.
+                    val segments = listOfNotNull(
+                        call.settledOn?.let { "settled ${it.format(AppDates.DayMonthYear)}" },
+                        // The channel did post it that day, so the card stays; it is the same
+                        // bet as the call it repeats, so no rate counts it twice.
+                        call.repeatOf?.let {
+                            "repeat of ${it.format(AppDates.DayMonthYear)}, counted once"
+                        },
+                    )
+                    if (segments.isNotEmpty()) {
+                        FlowRow(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                            segments.forEachIndexed { index, segment ->
                                 Text(
-                                    "·",
+                                    segment,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = Space.s),
                                 )
+                                if (index != segments.lastIndex) {
+                                    Text(
+                                        "·",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = Space.s),
+                                    )
+                                }
                             }
                         }
                     }
@@ -1402,13 +1432,14 @@ private fun ScoredCallRow(
                     // siblings of identityBlock in this one Column, so a wider arrangement here
                     // would space every line of the source info apart, not just the one gap that
                     // was asked to widen. The arrangement stays .xs, matching every other gap in
-                    // both blocks, and the one extra step - Space.xs + Space.s = Space.m - is a
-                    // spacer standing only between the two blocks: the Arabic name and the channel
+                    // both blocks, and the one extra step - a 2dp spacer standing only between
+                    // the two blocks, on top of the two Space.xs gaps arrangement already puts
+                    // around it - takes that one gap to 10dp: the Arabic name and the channel
                     // name below it read as one run-on block at .xs alone, where the wide layout
                     // already keeps them apart in separate panes. Asked for on 2026-09-20.
                     Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                         identityBlock()
-                        Spacer(Modifier.height(Space.s))
+                        Spacer(Modifier.height(2.dp))
                         sourceBlock()
                     }
                 }

@@ -4,6 +4,13 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [3.8.9] — 2026-09-22
+
+- Insights: fixed the T+1 pill on a call card reading as detached from the "Still open"/outcome pill above it - the gap between them wasn't the 4dp `spacedBy` the `Column` asked for but up to 48dp of invisible touch-target padding Material3's clickable `Surface` adds by default, which also centred the narrower T+1 pill instead of flushing it to the same left edge. Both pills now opt out of that minimum via `LocalMinimumInteractiveComponentSize`.
+- Insights: added 8dp of breathing room above that same pill stack, between it and the card's own top edge.
+- Insights: retuned the gap between a call's Arabic company name and the channel/source line below it from 16dp down to 10dp.
+- Insights: "called `<date>`" now sits on the channel/source name's own line, separated by a middot, instead of leading the row of settled/repeat facts below it - which is now only drawn when there is a settled date or a repeat to say.
+
 ## [3.8.8] — 2026-09-20
 
 - Results: fixed the "Tap to open report" hint and run dots overlapping the stat strip on a shut card held to a taller sibling's height - the `Box` used to pin the footer to the bottom sized itself to the taller of its two overlaid children rather than their sum, so it fell short whenever the floor was less than this card's own header-plus-footer height. The gap between them is now measured and inserted explicitly in a plain top-to-bottom layout, which cannot overlap.
