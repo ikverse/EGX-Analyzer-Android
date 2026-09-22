@@ -94,6 +94,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -743,12 +744,6 @@ internal fun SavedRunStack(
                     // would be measuring it against something it is not.
                     Modifier.fillMaxWidth()
                 } else {
-                    // Whether this card gets a step at all, read as a plain Int rather than the
-                    // fractional position below: it only changes on an actual page commit, not
-                    // once per frame of a drag, so reading it here costs a recomposition a swipe
-                    // and not a redraw. A page the reader is on, or has already swiped past, is
-                    // never a step - seeing what a finger is doing to it is the pager's own job.
-                    val isStep = page > pager.currentPage
                     Modifier.fillMaxWidth()
                         // The room the deck steps down into, held by the page itself rather than
                         // taken off the pager. A pager clips its pages, and the slack it leaves on
@@ -761,83 +756,89 @@ internal fun SavedRunStack(
                         // draws over page 1, and the card that is meant to be underneath swipes
                         // across the front of the one it is behind.
                         .zIndex(-page.toFloat())
-                        .then(
-                            if (!isStep) {
-                                if (page == pager.currentPage) {
-                                    // Front card sinks into the deck as it leaves. The scale and
-                                    // translate mirror the step-card formulas exactly, so the card
-                                    // reads as joining the stack it came from rather than just
-                                    // sliding off the edge. Only applied while swiping left (toward
-                                    // the stack); swiping right toward a card already passed carries
-                                    // no stack behind it, so the transform stays at identity then.
-                                    Modifier.graphicsLayer {
-                                        transformOrigin = TransformOrigin(0.5f, 0f)
-                                        val t = (-pager.currentPageOffsetFraction).coerceIn(0f, 1f)
-                                        val shrunk = 1f - StackShrink * t
-                                        scaleX = shrunk
-                                        scaleY = shrunk
-                                        translationY = size.height * (1f - shrunk) + StackStep.toPx() * t
-                                    }
-                                } else {
-                                    // Already swiped past: pager carries it off-screen to the left.
-                                    Modifier
-                                }
+                        // Applied unconditionally, every page, every frame - never branched on in
+                        // the composable body. Until 2026-09-22 a page was drawn one of three ways
+                        // - a step waiting behind, the page under the thumb, or a page already
+                        // passed - and which of the three applied was itself read from
+                        // `pager.currentPage`/`currentPageOffsetFraction` up here, outside the
+                        // layer. Two faults came of that, one in what it drew and one in what it
+                        // cost. What it drew: a page's drawing moved between three separate blocks
+                        // of maths as `currentPage` rolled over mid-drag, and two of those three
+                        // disagreed with each other at the seam - a step's shrink disagreed with
+                        // its own screen position and with the front card's own sink, so a page's
+                        // size and position both snapped at the exact instant it became the front
+                        // card, which is what read as the animation changing shape mid-swipe and a
+                        // further card popping into the deck rather than sliding into it. What it
+                        // cost: choosing *which* modifier applies is a composition-time decision,
+                        // and the discarded first attempt at fixing the drawing fault above picked
+                        // the branch from a `distance` computed from `currentPageOffsetFraction` -
+                        // a value that changes every frame of a drag - straight in the composable
+                        // body, which is exactly the trap this file's own comments warn about
+                        // elsewhere on this same pager: it recomposed every card of every stack on
+                        // every frame of any drag anywhere on the page, which is what made a drag
+                        // feel dead rather than merely wrong. One continuous `distance`, computed
+                        // fresh inside the layer below on every frame without recomposing anything,
+                        // and applied the same way whichever side of the front it lands on, has
+                        // neither fault: nothing about a page's own drawing changes shape at any
+                        // instant, and nothing above this layer ever reads a value that changes
+                        // faster than a page turning.
+                        .graphicsLayer {
+                            // How far this page sits from the front, in pages: 0 once it is the
+                            // page under the thumb, positive while it is still a step waiting
+                            // behind, negative once it has been swiped past.
+                            val distance =
+                                (page - pager.currentPage) - pager.currentPageOffsetFraction
+                            // Every card grows and shrinks about the middle of its own top edge.
+                            // About its centre the shrink would pull the foot up by half of what
+                            // it takes and eat the very step the deck is drawn to show; held at
+                            // the top, a card's head stays where its neighbour's is and the whole
+                            // of the shrink is spent below, which is where it can be seen.
+                            transformOrigin = TransformOrigin(0.5f, 0f)
+                            // Held at its own step regardless of how far a drag has gone - the
+                            // pager's own placement for this page is cancelled outright by this
+                            // same distance and replaced with a much smaller, constant-width step,
+                            // because a page still waiting is carried further along by a drag
+                            // *toward* it, not pulled back by one.
+                            //
+                            // **Only while still waiting.** A page already passed keeps the
+                            // pager's own placement instead - this cancellation is what pins a
+                            // step near the centre, and a passed page pinned there the same way
+                            // sits back at the centre it just left, on top of the very page that
+                            // replaced it (a lower run number always draws over a higher one,
+                            // steps included, and a passed page is a lower number than whichever
+                            // step or front card is now in front of it). That shipped for a few
+                            // hours on 2026-09-22 as "the next card doesn't show in front" - the
+                            // old front card, held to zero by this same cancellation, never left.
+                            translationX = if (distance >= 0f) {
+                                -distance * (size.width + StackPageSpacing.toPx())
                             } else {
-                                Modifier.graphicsLayer {
-                                    // How far behind the front this step sits, in pages: 1 for
-                                    // the first step, fractional as the drag ahead of it closes
-                                    // the gap. Read inside the layer, not the composable body -
-                                    // this one *does* change every frame of a drag, and reading
-                                    // it up there would recompose every card of every stack for
-                                    // each of them.
-                                    val distance =
-                                        (page - pager.currentPage) + pager.currentPageOffsetFraction
-                                    // Every card grows and shrinks about the middle of its own
-                                    // top edge. About its centre the shrink would pull the foot
-                                    // up by half of what it takes and eat the very step the deck
-                                    // is drawn to show; held at the top, a card's head stays
-                                    // where its neighbour's is and the whole of the shrink is
-                                    // spent below, which is where it can be seen.
-                                    transformOrigin = TransformOrigin(0.5f, 0f)
-                                    // Held at its own step regardless of how far a drag ahead of
-                                    // it has gone - the pager's own placement for this page is
-                                    // cancelled outright, using the same distance above with the
-                                    // fractional term flipped, because a page ahead of the one
-                                    // snapped is carried further along by a drag *toward* it, not
-                                    // pulled back by one. It only ever reaches the front slot once
-                                    // it becomes the page under the thumb - see `isStep` above -
-                                    // and hands off to the pager's own placement at that point.
-                                    val nativeOffset =
-                                        (page - pager.currentPage) - pager.currentPageOffsetFraction
-                                    translationX =
-                                        -nativeOffset * (size.width + StackPageSpacing.toPx())
-                                    val t = distance.coerceAtMost(StackDepth.toFloat())
-                                    val shrunk = 1f - StackShrink * t
-                                    scaleX = shrunk
-                                    scaleY = shrunk
-                                    // The shrink lifts this card's foot by its own height times
-                                    // what was taken off it; adding that back is what makes the
-                                    // step below the card in front exactly StackStep whatever
-                                    // height the deck settled on, rather than a figure that
-                                    // shrinks as the cards do.
-                                    translationY =
-                                        size.height * (1f - shrunk) + StackStep.toPx() * t
-                                    // The step a reader can actually see is never dimmed. Fully
-                                    // opaque throughout, like the page under the thumb above -
-                                    // nothing in this deck fades, ever, because a fade is the
-                                    // exact fault the opaque backing below exists to rule out:
-                                    // one card and the reading behind it both readable at once.
-                                    // Everything past the last drawn step sits under it at
-                                    // nothing, exactly covered rather than faded away.
-                                    alpha = if (distance > StackDepth + StackFadeTail) 0f else 1f
-                                }
-                            },
-                        )
-                        // Inside the layer for a step, so it travels and shrinks with the card it
-                        // backs; painted plain for the page under the thumb, which has no layer
-                        // to sit inside. What makes the deck opaque either way: the card's own
-                        // glass then resolves over the page's colour rather than over the reading
-                        // behind it.
+                                0f
+                            }
+                            // Symmetric about the front: a step still waiting (positive distance)
+                            // and a card that has just sunk into the deck (negative) shrink by the
+                            // same amount at the same remove, which is what makes leaving read as
+                            // joining the stack it came from rather than sliding off the edge.
+                            val t = distance.absoluteValue.coerceAtMost(StackDepth.toFloat())
+                            val shrunk = 1f - StackShrink * t
+                            scaleX = shrunk
+                            scaleY = shrunk
+                            // The shrink lifts this card's foot by its own height times what was
+                            // taken off it; adding that back is what makes the step below the card
+                            // in front exactly StackStep whatever height the deck settled on,
+                            // rather than a figure that shrinks as the cards do.
+                            translationY = size.height * (1f - shrunk) + StackStep.toPx() * t
+                            // The step a reader can actually see is never dimmed. Fully opaque
+                            // throughout - nothing in this deck fades, ever, because a fade is the
+                            // exact fault the opaque backing below exists to rule out: one card
+                            // and the reading behind it both readable at once. Everything past the
+                            // last drawn step sits under it at nothing, exactly covered rather
+                            // than faded away.
+                            // Against the uncapped distance: `t` stops at StackDepth, so it could
+                            // never pass this line and nothing past the last step was ever hidden.
+                            alpha = if (distance.absoluteValue > StackDepth + StackFadeTail) 0f else 1f
+                        }
+                        // The card's own glass resolves over the page's colour rather than over
+                        // the reading behind it, which is what makes the deck opaque.
                         .background(backing, cardShape)
                 },
             )
