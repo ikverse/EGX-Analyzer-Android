@@ -85,7 +85,19 @@ internal fun ColumnScope.AnalysisModelCard(
         }
     }
     if (picking) {
-        ModelPickerSheet(appState) { picking = false }
+        ModelPickerSheet(
+            appState = appState,
+            title = "Analysis model",
+            selected = appState.cloudConfiguration.model,
+            requireVision = true,
+            onChoose = {
+                appState.updateModel(it)
+                // Picking a model does not change the key, so this persists the choice without
+                // re-verifying.
+                appState.persistModelChoice()
+            },
+            onDismiss = { picking = false },
+        )
     }
 }
 
@@ -157,40 +169,62 @@ private fun CloudConfiguration.connectionLabel(): String =
  * The catalogue, the field that searches it, and the filter that keeps it to models that can do it.
  *
  * A flat menu was fine for a provider offering a dozen models and unusable for OpenRouter, which
- * lists hundreds - most of them embedders, rerankers and voice models that could not read a card at
- * any price. What is offered by default is what can read one: see `ModelSuitabilityRules`. The
- * filter can be turned off and an id can still be typed, because those rules read names, and names
- * change faster than this app is rebuilt.
+ * lists hundreds - most of them embedders, rerankers and voice models that could not do the job at
+ * any price. What is offered by default is what can: see `ModelSuitabilityRules`. The filter can be
+ * turned off and an id can still be typed, because those rules read names, and names change faster
+ * than this app is rebuilt.
+ *
+ * Shared by the analysis model, which needs a model that can see a screenshot, and Ask AI's, which
+ * sends no image and only needs a model that chats at all - [requireVision] is the one thing that
+ * tells the two jobs apart, so [selected] and [onChoose] are handed in rather than read off
+ * `appState.cloudConfiguration` directly, which is only ever true of the first.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ModelPickerSheet(appState: AppState, onDismiss: () -> Unit) {
+internal fun ModelPickerSheet(
+    appState: AppState,
+    title: String,
+    selected: String,
+    requireVision: Boolean,
+    onChoose: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var showAll by remember { mutableStateOf(false) }
-    val configuration = appState.cloudConfiguration
     val typed = query.trim()
     // Read once, here: the tally lives on disk and this sheet draws hundreds of rows.
-    LaunchedEffect(Unit) { appState.refreshModelUsage() }
+    LaunchedEffect(Unit) {
+        appState.refreshModelUsage()
+        // Sparing a tap that would only ever do one thing: a key is saved, so the list this sheet
+        // opened to show is worth fetching before the reader has to ask for it by hand.
+        if (appState.availableModels.isEmpty() &&
+            !appState.modelListLoading &&
+            appState.cloudConfiguration.hasCredential
+        ) {
+            appState.loadCloudModels()
+        }
+    }
     val catalogue = appState.availableModels
     val stated = remember(catalogue) {
         catalogue.count {
             ModelSuitabilityRules.capabilitiesOf(it).suitability == ModelSuitability.SUITABLE
         }
     }
-    val offered = remember(catalogue, showAll, configuration.model) {
-        offeredModels(catalogue, showAll, configuration.model)
+    val offered = remember(catalogue, showAll, selected, requireVision) {
+        offeredModels(catalogue, showAll, selected, requireVision)
     }
-    val matches = remember(offered, query, configuration.model) {
+    val matches = remember(offered, query, selected) {
         // The model in force leads its own list. Among three hundred rows it is otherwise the one
         // entry the reader cannot find, and sortedByDescending is stable, so everything below it
         // keeps the order the provider gave.
-        filterModels(offered, query).sortedByDescending { it.id == configuration.model }
+        filterModels(offered, query).sortedByDescending { it.id == selected }
     }
+    // Whatever was typed is offered as its own row unless it is already one of the rows above it -
+    // the way to a model the name rules did not recognise, or one this list does not carry at all.
+    val exactMatch = typed.isNotEmpty() && matches.any { it.id == typed }
     val choose: (String) -> Unit = { model ->
-        appState.updateModel(model)
-        // Picking a model does not change the key, so this persists the choice without re-verifying.
-        appState.persistModelChoice()
+        onChoose(model)
         onDismiss()
     }
     ModalBottomSheet(
@@ -204,7 +238,7 @@ private fun ModelPickerSheet(appState: AppState, onDismiss: () -> Unit) {
                 .padding(bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            Text("Analysis model", style = MaterialTheme.typography.headlineSmall)
+            Text(title, style = MaterialTheme.typography.headlineSmall)
             // One field doing both jobs. A second box for naming a model the provider never listed
             // only ever raised the question of which of the two to type into.
             OutlinedTextField(
@@ -236,10 +270,15 @@ private fun ModelPickerSheet(appState: AppState, onDismiss: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         // Says what is being held back and why, so a short list never looks like a
-                        // catalogue that came back short. Two numbers rather than one: what is on
-                        // offer is wider than what is known to see, because a name this build has
-                        // never heard of is still shown.
-                        "${offered.size} of ${catalogue.size} offered · $stated state image input",
+                        // catalogue that came back short. Two numbers rather than one, and only for
+                        // the picker that cares about vision: what is on offer is wider than what
+                        // is known to see, because a name this build has never heard of is still
+                        // shown.
+                        if (requireVision) {
+                            "${offered.size} of ${catalogue.size} offered · $stated state image input"
+                        } else {
+                            "${offered.size} of ${catalogue.size} offered"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
@@ -250,30 +289,36 @@ private fun ModelPickerSheet(appState: AppState, onDismiss: () -> Unit) {
                 }
             }
             when {
-                matches.isNotEmpty() -> LazyColumn(
+                matches.isNotEmpty() || (typed.isNotEmpty() && !exactMatch) -> LazyColumn(
                     // Lazy because this is the one list in the app that runs to hundreds of rows.
                     Modifier.heightIn(max = ModelListMaxHeight),
                     verticalArrangement = Arrangement.spacedBy(Space.xs),
                 ) {
+                    if (typed.isNotEmpty() && !exactMatch) {
+                        item(key = "use-typed") {
+                            ModelRow(
+                                label = "Use “$typed”",
+                                detail = null,
+                                selected = false,
+                            ) { choose(typed) }
+                        }
+                    }
                     items(matches, key = { it.id }) { model ->
                         ModelRow(
                             label = model.id,
                             detail = modelDetail(model, appState.usageFor(model.id)),
-                            selected = model.id == configuration.model,
+                            selected = model.id == selected,
                         ) { choose(model.id) }
                     }
                 }
-                // Nothing on offer answers to what was typed, so what was typed is the answer -
-                // which is what the separate manual-entry field used to be for. It is also the way
-                // to a model the name rules did not recognise: type the id and it is used.
-                typed.isNotEmpty() -> ModelRow(
-                    label = "Use “$typed”",
-                    detail = null,
-                    selected = false,
-                ) { choose(typed) }
                 catalogue.isNotEmpty() -> Text(
-                    "None of the ${catalogue.size} models loaded can read images. " +
-                        "Show all, or type a model id above.",
+                    if (requireVision) {
+                        "None of the ${catalogue.size} models loaded can read images. " +
+                            "Show all, or type a model id above."
+                    } else {
+                        "None of the ${catalogue.size} models loaded are chat models. " +
+                            "Show all, or type a model id above."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -333,12 +378,15 @@ internal fun offeredModels(
     catalogue: List<CloudModelInfo>,
     showAll: Boolean,
     chosen: String,
+    /** False for Ask AI: it sends no image, so a text-only chat model is exactly what it needs. */
+    requireVision: Boolean = true,
 ): List<CloudModelInfo> = when {
     showAll -> catalogue
-    else -> catalogue.filter {
+    requireVision -> catalogue.filter {
         ModelSuitabilityRules.capabilitiesOf(it).suitability != ModelSuitability.UNSUITABLE ||
             it.id == chosen
     }
+    else -> catalogue.filter { ModelSuitabilityRules.isChatModel(it) || it.id == chosen }
 }
 
 /**

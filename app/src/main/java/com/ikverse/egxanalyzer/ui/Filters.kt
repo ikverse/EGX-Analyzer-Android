@@ -31,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SelectableDates
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -198,7 +199,7 @@ internal fun CheckedSetFilter(
                     text = { Text("Select all") },
                     leadingIcon = {
                         Icon(
-                            Icons.Outlined.Close,
+                            Icons.Outlined.Check,
                             contentDescription = null,
                             modifier = Modifier.size(IconSize.Inline),
                         )
@@ -451,9 +452,51 @@ internal fun SingleSelectSection(
 }
 
 /**
+ * What a page's date filter is narrowed to - nothing, a rolling range from today, or one exact
+ * date. One slot rather than two flags, because a range and an exact date are two answers to the
+ * same question and only one can stand at a time: choosing one is what clears the other.
+ */
+sealed interface DateFilter {
+    data class Exact(val date: String) : DateFilter
+    data object ThisWeek : DateFilter
+    data object ThisMonth : DateFilter
+
+    /** Whether an ISO `yyyy-MM-dd` date falls inside what this filter asks for. */
+    fun matches(date: String): Boolean {
+        val parsed = runCatching { LocalDate.parse(date) }.getOrNull() ?: return false
+        return when (this) {
+            is Exact -> date == this.date
+            ThisWeek -> {
+                val start = LocalDate.now().with(java.time.DayOfWeek.MONDAY)
+                !parsed.isBefore(start) && !parsed.isAfter(start.plusDays(6))
+            }
+            ThisMonth -> {
+                val today = LocalDate.now()
+                parsed.year == today.year && parsed.month == today.month
+            }
+        }
+    }
+
+    /** What an empty list narrowed by this filter is empty of, for the sentence that says so. */
+    fun describe(): String = when (this) {
+        is Exact -> "on " + (
+            runCatching { LocalDate.parse(date) }.getOrNull()?.format(AppDates.DayMonthYear) ?: date
+            )
+        ThisWeek -> "this week"
+        ThisMonth -> "this month"
+    }
+}
+
+/** True when there is no filter at all, or [date] (nullable) falls inside the one there is. */
+internal fun DateFilter?.accepts(date: String?): Boolean =
+    this == null || (date != null && matches(date))
+
+/**
  * A choice restricted to the dates that actually have something behind them, picked from a
  * calendar rather than named as chips - the list of chips this replaced grew with the record and
- * pushed the rest of a page's filters further down the sheet on every report saved.
+ * pushed the rest of a page's filters further down the sheet on every report saved. "This week"
+ * and "this month" stay named rather than folding into the calendar: a rolling range is not a date
+ * the picker could ever land on by tapping a day.
  *
  * [SelectableDates] is what keeps a picked date honest: every date outside [dates] is greyed out
  * and cannot be tapped, so the picker can never land on a date the page would show nothing for.
@@ -463,26 +506,29 @@ internal fun SingleSelectSection(
 internal fun DateFilterSection(
     label: String,
     dates: List<String>,
-    selected: String?,
-    onSelect: (String?) -> Unit,
+    selected: DateFilter?,
+    onSelect: (DateFilter?) -> Unit,
 ) {
     if (dates.isEmpty()) return
     val allowed = remember(dates) {
         dates.mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.toSet()
     }
     var open by remember { mutableStateOf(false) }
+    val exact = selected as? DateFilter.Exact
     FilterSection(label) {
         ChoiceChip("All", selected == null) { onSelect(null) }
+        ChoiceChip("This week", selected == DateFilter.ThisWeek) { onSelect(DateFilter.ThisWeek) }
+        ChoiceChip("This month", selected == DateFilter.ThisMonth) { onSelect(DateFilter.ThisMonth) }
         ChoiceChip(
-            selected
+            exact?.date
                 ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
                 ?.format(AppDates.DayMonthYear)
                 ?: "Pick a date",
-            selected != null,
+            exact != null,
         ) { open = true }
     }
     if (open) {
-        val initial = selected?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        val initial = exact?.date?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
             ?: allowed.maxOrNull()
         val state = rememberDatePickerState(
             initialSelectedDateMillis = initial?.let {
@@ -502,7 +548,10 @@ internal fun DateFilterSection(
                     onClick = {
                         state.selectedDateMillis?.let { millis ->
                             onSelect(
-                                Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().toString(),
+                                DateFilter.Exact(
+                                    Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC)
+                                        .toLocalDate().toString(),
+                                ),
                             )
                         }
                         open = false
@@ -637,9 +686,14 @@ internal fun StockFilterField(
                     Icons.Outlined.Close,
                     contentDescription = "Clear stock filter",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // The icon stays small; the target it can be pressed from does not - the same
+                    // trick `ActionPill` uses to keep a 32dp control pressable at the full 48dp
+                    // Android asks for, wrapped outside the click and the visual size rather than
+                    // instead of either.
                     modifier = Modifier
-                        .size(IconSize.Inline)
-                        .clickable { onValueChange("") },
+                        .minimumInteractiveComponentSize()
+                        .clickable { onValueChange("") }
+                        .size(IconSize.Inline),
                 )
             }
         }

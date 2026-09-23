@@ -120,7 +120,7 @@ class PageState {
     val openResultId: MutableState<Long?> = mutableStateOf(null)
 
     val resultsChannels: MutableState<Set<String>> = mutableStateOf(emptySet())
-    val resultsDate: MutableState<String?> = mutableStateOf(null)
+    val resultsDate: MutableState<DateFilter?> = mutableStateOf(null)
     /** The header's stock box for this page: the pick, and what the reader is doing to it. */
     val resultsStockBox: StockBox = StockBox()
 
@@ -148,7 +148,7 @@ class PageState {
     /** Which session cards are open, by session date rather than by position in the list. */
     val openPortfolioGroups: MutableState<Set<LocalDate>> = mutableStateOf(emptySet())
 
-    val portfolioDate: MutableState<String?> = mutableStateOf(null)
+    val portfolioDate: MutableState<DateFilter?> = mutableStateOf(null)
     /** The header's stock box for this page: the pick, and what the reader is doing to it. */
     val portfolioStockBox: StockBox = StockBox()
 

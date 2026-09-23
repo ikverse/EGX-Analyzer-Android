@@ -20,6 +20,15 @@ data class TelegramAuthState(
     val message: String = "Starting Telegram…",
     val hint: String? = null,
     val link: String? = null,
+    /**
+     * Whether [message] is Telegram (or this app) refusing something, rather than an instruction.
+     *
+     * [TelegramAuthStep.ERROR] reads as the step for this but nothing ever sets it - every real
+     * failure here arrives while still on the step it happened on, so the reader can fix what was
+     * typed and try again without the fields they were looking at disappearing. This is what
+     * actually tells the message apart, and what it is read in red for.
+     */
+    val isError: Boolean = false,
 )
 
 data class TelegramChat(

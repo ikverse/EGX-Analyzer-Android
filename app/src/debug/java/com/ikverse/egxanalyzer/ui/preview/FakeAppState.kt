@@ -374,6 +374,8 @@ class FakeAppState(
 
     override fun recordBackupDay() = Unit
 
+    override fun recordBackupOutcome(succeeded: Boolean) = Unit
+
     override suspend fun refreshPrices(announce: Boolean): PriceRefreshOutcome = PriceRefreshOutcome(summary = "", succeeded = true)
 
     override suspend fun refreshCatalogPrices(announce: Boolean): PriceRefreshOutcome = PriceRefreshOutcome(summary = "", succeeded = true)

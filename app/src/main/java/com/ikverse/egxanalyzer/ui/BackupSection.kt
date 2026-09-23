@@ -13,11 +13,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Backing the record up, and getting it back.
@@ -38,12 +41,23 @@ fun BackupControls(appState: AppState) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var pendingRestore by remember { mutableStateOf<Uri?>(null) }
+    // Bumped after a manual backup actually writes, which is the one change below that does not
+    // already come with a new folder to key on.
+    var written by remember { mutableStateOf(0) }
 
     // Re-read on every composition rather than remembered: the grant can be revoked from a system
     // page, and a card that went on naming a folder this app can no longer write to would report a
-    // phone as backed up on the one day that mattered.
+    // phone as backed up on the one day that mattered. Cheap either way - a lookup in a list Android
+    // already holds in memory, not a query to the folder itself.
     val holdsFolder = appState.holdsBackupFolder()
-    val held = appState.backupsInFolder()
+    // The folder's own file list is a real query to whatever app actually holds it - local storage,
+    // or a cloud provider over its own connection - and reading it on every recomposition of a
+    // settings screen blocked the frame it landed on to ask a folder the reader had not touched.
+    // Read once, off the main thread, when the card first appears or the folder or its contents
+    // actually change.
+    val held by produceState(initialValue = emptyList<String>(), appState.backupFolder, written) {
+        value = withContext(Dispatchers.IO) { appState.backupsInFolder() }
+    }
 
     val chooseFolder = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
@@ -84,6 +98,7 @@ fun BackupControls(appState: AppState) {
                             runCatching { appState.writeBackup() }
                                 .onSuccess {
                                     appState.recordBackupDay()
+                                    written++
                                     appState.statusMessage = StatusMessage("Saved to $it", succeeded = true)
                                 }
                                 .onFailure {

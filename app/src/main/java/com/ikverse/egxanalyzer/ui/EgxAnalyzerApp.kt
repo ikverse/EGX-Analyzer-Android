@@ -869,7 +869,7 @@ private fun AppContent(appState: AppState, rail: Boolean) {
     LaunchedEffect(appState.statusMessage) {
         val message = appState.statusMessage ?: return@LaunchedEffect
         if (message.stage != StatusStage.DONE) return@LaunchedEffect
-        delay(StatusDoneMilliseconds)
+        delay(if (message.undo != null) StatusUndoMilliseconds else StatusDoneMilliseconds)
         appState.consumeStatusMessage()
     }
 
@@ -1138,6 +1138,15 @@ private fun DestinationScreen(
  * Material's own short snackbar, which is what these messages used to be shown for.
  */
 private const val StatusDoneMilliseconds = 4_000L
+
+/**
+ * How long a message carrying an undo stays before it clears itself.
+ *
+ * Longer than an ordinary confirmation on purpose: this is the only way back from something the
+ * reader cannot simply redo, and four seconds asked them to have already noticed, read and decided
+ * on it in the time it takes to glance up from what they just pressed.
+ */
+private const val StatusUndoMilliseconds = 10_000L
 
 /** Read by the navigation, on both layouts. */
 internal val AppDestination.icon: ImageVector

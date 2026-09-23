@@ -93,6 +93,34 @@ class AttentionNotifier(private val context: Context) {
         )
     }
 
+    /**
+     * Says the daily backup cannot write to the folder the reader chose.
+     *
+     * Raised **once per spell** by the caller, the same rule [feedQuiet] follows: a folder that has
+     * lost its grant or gone unreachable fails identically every day it is tried, and a repeat of
+     * this every morning would teach the reader to swipe it away unread rather than to fix the
+     * folder. What ends the spell is the daily write actually landing again, not the reader seeing
+     * the notification - dismissing it says nothing about whether the folder now works.
+     */
+    fun backupFailing() {
+        if (!permitted()) return
+        val detail = "Settings names how many copies your folder is holding, and the newest one - " +
+            "empty or old there means the folder is still unreachable."
+        manager.notify(
+            BACKUP_ID,
+            NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_egx_notification)
+                .setContentTitle("The daily backup can't reach its folder")
+                .setContentText(detail)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(openApp(BACKUP_REQUEST))
+                .build(),
+        )
+    }
+
     /** Takes the reader to Settings, which is where this is explained and answered. */
     private fun openApp(requestCode: Int): PendingIntent {
         val intent = Intent(context, MainActivity::class.java)
@@ -113,5 +141,7 @@ class AttentionNotifier(private val context: Context) {
         /** Clear of 1001-1005, which the notifiers before this one hold. */
         private const val FEED_ID = 1006
         private const val FEED_REQUEST = 6
+        private const val BACKUP_ID = 1007
+        private const val BACKUP_REQUEST = 7
     }
 }

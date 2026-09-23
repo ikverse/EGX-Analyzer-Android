@@ -403,6 +403,20 @@ class SettingsRepository(
     }
 
     /**
+     * Whether the reader has already been told the daily backup cannot write to its folder.
+     *
+     * The same on-the-way-in-and-armed-on-the-way-out shape [feedReportedQuiet] follows, for the
+     * same reason: a folder that stays unreachable fails the same way every day it is tried, and
+     * announcing the state rather than the crossing into it would be one notification a day about
+     * a folder the reader has known about since it first happened.
+     */
+    fun backupReportedFailing(): Boolean = preferences.getBoolean(KEY_BACKUP_FAILING_REPORTED, false)
+
+    fun recordBackupReportedFailing(reported: Boolean) {
+        preferences.edit().putBoolean(KEY_BACKUP_FAILING_REPORTED, reported).apply()
+    }
+
+    /**
      * Whether this phone keeps prices fresh while the market is trading.
      *
      * The whole of the configuration: the window and the interval are constants in
@@ -618,6 +632,7 @@ class SettingsRepository(
         const val KEY_LAST_PRICE_REFRESH_AT = "last_price_refresh_at"
         const val KEY_BACKUP_FOLDER = "backup_folder"
         const val KEY_LAST_BACKUP_DAY = "last_backup_day"
+        const val KEY_BACKUP_FAILING_REPORTED = "backup_failing_reported"
         const val KEY_MARKET_REFRESH = "market_refresh_enabled"
         const val KEY_PRICE_SERIES = "price_series_enabled"
         const val KEY_LAST_SERIES_HARVEST_AT = "last_series_harvest_at"

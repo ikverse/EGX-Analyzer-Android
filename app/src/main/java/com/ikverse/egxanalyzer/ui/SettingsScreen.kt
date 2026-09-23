@@ -83,7 +83,58 @@ internal fun SettingsScreen(appState: AppState) {
     var askModelMenuOpen by remember { mutableStateOf(false) }
     var credential by remember { mutableStateOf("") }
     var confirmDeleteAll by remember { mutableStateOf(false) }
+    var confirmRemoveCredential by remember { mutableStateOf(false) }
+    var confirmResetProvider by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    if (confirmRemoveCredential) {
+        AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
+            onDismissRequest = { confirmRemoveCredential = false },
+            title = { Text("Remove the saved API key?") },
+            text = {
+                Text(
+                    "Erases the key for this provider and the model list loaded with it. Analysis " +
+                        "cannot run again until a key is saved.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        appState.removeCredential()
+                        confirmRemoveCredential = false
+                    },
+                ) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemoveCredential = false }) { Text("Cancel") }
+            },
+        )
+    }
+    if (confirmResetProvider) {
+        AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
+            onDismissRequest = { confirmResetProvider = false },
+            title = { Text("Reset this provider?") },
+            text = {
+                Text(
+                    "Erases the chosen endpoint, the chosen model and the model list loaded with " +
+                        "it, back to their defaults. The saved API key is not touched.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        appState.resetProviderConfiguration()
+                        confirmResetProvider = false
+                    },
+                ) { Text("Reset") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmResetProvider = false }) { Text("Cancel") }
+            },
+        )
+    }
 
     if (confirmDeleteAll) {
         AlertDialog(
@@ -274,11 +325,11 @@ internal fun SettingsScreen(appState: AppState) {
                             scope.launch { appState.saveSettings(entered) }
                         },
                     ) { Text("Save and verify") }
-                    SettingsButton(onClick = appState::resetProviderConfiguration) {
+                    SettingsButton(onClick = { confirmResetProvider = true }) {
                         Text("Reset provider")
                     }
                     if (appState.cloudConfiguration.hasCredential) {
-                        SettingsButton(onClick = appState::removeCredential) {
+                        SettingsButton(onClick = { confirmRemoveCredential = true }) {
                             Text("Remove credential")
                         }
                     }
@@ -494,27 +545,20 @@ internal fun SettingsScreen(appState: AppState) {
                     )
                 },
             )
-            if (appState.availableModels.isNotEmpty()) {
-                Box {
-                    SettingsButton(onClick = { askModelMenuOpen = true }) { Text("Choose model") }
-                    AppMenu(
-                        expanded = askModelMenuOpen,
-                        onDismissRequest = { askModelMenuOpen = false },
-                    ) {
-                        // The list the analysis picker loaded, because it is the same key asking
-                        // the same provider what it has. Typing over it stays allowed: a provider
-                        // that lists nothing still has models.
-                        appState.availableModels.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text(option.id) },
-                                onClick = {
-                                    appState.updateOpinionModel(option.id)
-                                    askModelMenuOpen = false
-                                },
-                            )
-                        }
-                    }
-                }
+            SettingsButton(onClick = { askModelMenuOpen = true }) { Text("Choose model") }
+            if (askModelMenuOpen) {
+                ModelPickerSheet(
+                    appState = appState,
+                    title = "Ask AI model",
+                    selected = askModel,
+                    // Sends no image - it is a plain question about a call already on screen - so
+                    // a text-only chat model the analysis picker would hold back is exactly right
+                    // here, and holding it back too would leave Ask AI offering only the pricier
+                    // vision models a text question never needed.
+                    requireVision = false,
+                    onChoose = appState::updateOpinionModel,
+                    onDismiss = { askModelMenuOpen = false },
+                )
             }
             SettingToggle(
                 label = "Let it search the web",

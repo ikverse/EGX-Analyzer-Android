@@ -36,13 +36,13 @@ class PageFilterTest {
         pages.resultsChannels.value = setOf("a channel")
         assertTrue(pages.filtersActive(AppDestination.RESULTS))
         pages.clearFilters(AppDestination.RESULTS)
-        pages.resultsDate.value = "2026-08-14"
+        pages.resultsDate.value = DateFilter.Exact("2026-08-14")
         assertTrue(pages.filtersActive(AppDestination.RESULTS))
         pages.clearFilters(AppDestination.RESULTS)
         pages.insightsOutcomes.value = setOf("Stopped out")
         assertTrue(pages.filtersActive(AppDestination.INSIGHTS))
         pages.clearFilters(AppDestination.INSIGHTS)
-        pages.portfolioDate.value = "2026-08-14"
+        pages.portfolioDate.value = DateFilter.Exact("2026-08-14")
         assertTrue(pages.filtersActive(AppDestination.PORTFOLIO))
     }
 

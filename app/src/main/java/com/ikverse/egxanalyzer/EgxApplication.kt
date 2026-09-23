@@ -175,6 +175,9 @@ class EgxApplication : Application() {
             feedQuiet = { stocks, callsHeld, tickers ->
                 runCatching { AttentionNotifier(this).feedQuiet(stocks, callsHeld, tickers) }
             },
+            backupFailing = {
+                runCatching { AttentionNotifier(this).backupFailing() }
+            },
             // Already swallows its own failures - a launcher that refuses a shortcut is not
             // something the reader asked about - so it needs no wrapper here.
             // Two surfaces off one number: the launcher shortcut that counts overdue trades, and

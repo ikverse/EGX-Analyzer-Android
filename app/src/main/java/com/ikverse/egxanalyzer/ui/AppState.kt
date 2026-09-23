@@ -522,6 +522,12 @@ interface AppState : AppUpdates {
 
     fun recordBackupDay()
 
+    /**
+     * Says whether the daily backup just landed or failed, so a folder that stopped taking writes
+     * can be reported once rather than never - or every single morning. See `MainActivity.backUpIfDue`.
+     */
+    fun recordBackupOutcome(succeeded: Boolean)
+
     suspend fun refreshPrices(announce: Boolean = true): PriceRefreshOutcome
 
     /**
@@ -657,15 +663,16 @@ data class StatusMessage(
      * **A slot on this line rather than a snackbar**, deliberately. The floating toast was removed
      * on 2026-08-25 because it answered from the far end of the screen from the button that had
      * been pressed, and bringing one back for this would undo that on purpose. The line already
-     * says what happened, sits where the app's own name is, and clears itself after four seconds -
-     * which is exactly the shape an undo wants.
+     * says what happened and sits where the app's own name is. It also holds ten seconds rather
+     * than an ordinary confirmation's four, and [StatusChannel] queues one message behind it rather
+     * than letting whatever happens next take it off the line early - both because this is the one
+     * kind of message the reader is expected to actually read and decide on, not skim past.
      *
-     * **At most one, and only on something destructive.** Recording a sale and closing a trade by
-     * hand are the two irreversible things a reader does in this app; everything else is an edit
-     * they can simply make again. A confirmation carrying a button after every tap would turn the
-     * quietest piece of chrome in the app into the loudest.
+     * **At most one, and only on something the reader cannot simply do again.** Recording a sale,
+     * closing a trade by hand, and undoing a correction to a call are the shapes this takes; an
+     * ordinary edit is not, since making it again costs nothing.
      *
-     * Null on every other message, which is all but two of the fifty-odd outcomes here.
+     * Null on every other message.
      */
     val undo: StatusUndo? = null,
 )

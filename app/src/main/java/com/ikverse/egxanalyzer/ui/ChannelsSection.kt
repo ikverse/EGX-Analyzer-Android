@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
@@ -21,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,10 +32,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -75,8 +82,13 @@ internal fun ColumnScope.ChannelsSection(appState: AppState) {
 @Composable
 internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = true) {
     val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
     var firstValue by remember(appState.telegramAuthState.step) { mutableStateOf("") }
     var secondValue by remember(appState.telegramAuthState.step) { mutableStateOf("") }
+    // Outlives the step, unlike the two above: the phone number is still needed once the code
+    // screen has replaced the one it was typed on, for Resend code to ask Telegram for a new one
+    // at the same number rather than an empty one.
+    var submittedPhone by remember { mutableStateOf("") }
     val step = appState.telegramAuthState.step
     // Loose on the column only for the steps that draw no card, where the message is the whole of
     // what the screen has to say. Every step that does draw one carries it inside instead: above
@@ -91,15 +103,26 @@ internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = tru
     }
     when (step) {
         TelegramAuthStep.API_CONFIGURATION -> {
-            AuthCard("Telegram application", boxed, appState) {
-                AuthField(firstValue, { firstValue = it }, "API ID")
-                AuthField(secondValue, { secondValue = it }, "API hash", secret = true)
-                Button(onClick = {
+            AuthCard("Telegram application", boxed, appState, startOver = false) {
+                val save = {
                     scope.launch {
                         appState.saveTelegramApiConfiguration(firstValue, secondValue)
                         secondValue = ""
                     }
-                }) { Text("Initialize Telegram") }
+                    Unit
+                }
+                AuthField(
+                    firstValue, { firstValue = it }, "API ID",
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Next,
+                    onImeAction = { focusManager.moveFocus(FocusDirection.Down) },
+                )
+                AuthField(
+                    secondValue, { secondValue = it }, "API hash",
+                    secret = true,
+                    onImeAction = save,
+                )
+                Button(onClick = save) { Text("Initialize Telegram") }
                 ApiCredentialsHelp()
             }
         }
@@ -114,47 +137,86 @@ internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = tru
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            AuthField(firstValue, { firstValue = it }, "Phone number with country code")
-            Button(onClick = {
+            val send = {
+                submittedPhone = firstValue
                 scope.launch { appState.submitTelegramPhone(firstValue) }
-            }) { Text("Send verification code") }
+                Unit
+            }
+            AuthField(
+                firstValue, { firstValue = it }, "Phone number with country code",
+                keyboardType = KeyboardType.Phone,
+                onImeAction = send,
+            )
+            Button(onClick = send) { Text("Send verification code") }
         }
         TelegramAuthStep.VERIFICATION_CODE -> AuthCard("Verification code", boxed, appState) {
-            AuthField(firstValue, { firstValue = it }, "Telegram code")
-            Button(onClick = {
-                scope.launch { appState.submitTelegramCode(firstValue) }
-            }) { Text("Verify code") }
+            AuthField(
+                firstValue, { firstValue = it }, "Telegram code",
+                keyboardType = KeyboardType.Number,
+                onImeAction = { scope.launch { appState.submitTelegramCode(firstValue) } },
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                Button(onClick = {
+                    scope.launch { appState.submitTelegramCode(firstValue) }
+                }) { Text("Verify code") }
+                // Telegram resends to the number already on file - asking again would be typing
+                // the same digits a second time for no reason the reader can see.
+                TextButton(onClick = {
+                    scope.launch { appState.submitTelegramPhone(submittedPhone) }
+                }) { Text("Resend code") }
+            }
+            TextButton(onClick = { scope.launch { appState.logoutTelegram() } }) {
+                Text("Change number")
+            }
         }
         TelegramAuthStep.TWO_FACTOR_PASSWORD -> AuthCard("Two-step verification", boxed, appState) {
             appState.telegramAuthState.hint?.takeIf(String::isNotBlank)?.let {
                 Text("Hint: $it")
             }
-            AuthField(firstValue, { firstValue = it }, "Telegram password", secret = true)
-            Button(onClick = {
+            val submit = {
                 scope.launch {
                     appState.submitTelegramPassword(firstValue)
                     firstValue = ""
                 }
-            }) { Text("Continue") }
+                Unit
+            }
+            AuthField(
+                firstValue, { firstValue = it }, "Telegram password",
+                secret = true,
+                onImeAction = submit,
+            )
+            Button(onClick = submit) { Text("Continue") }
         }
         TelegramAuthStep.EMAIL_ADDRESS -> AuthCard("Login email", boxed, appState) {
-            AuthField(firstValue, { firstValue = it }, "Email address")
-            Button(onClick = {
-                scope.launch { appState.submitTelegramEmail(firstValue) }
-            }) { Text("Send email code") }
+            val send = { scope.launch { appState.submitTelegramEmail(firstValue) }; Unit }
+            AuthField(
+                firstValue, { firstValue = it }, "Email address",
+                keyboardType = KeyboardType.Email,
+                onImeAction = send,
+            )
+            Button(onClick = send) { Text("Send email code") }
         }
         TelegramAuthStep.EMAIL_CODE -> AuthCard("Email verification", boxed, appState) {
-            AuthField(firstValue, { firstValue = it }, "Email code")
-            Button(onClick = {
-                scope.launch { appState.submitTelegramEmailCode(firstValue) }
-            }) { Text("Verify email") }
+            val verify = { scope.launch { appState.submitTelegramEmailCode(firstValue) }; Unit }
+            AuthField(
+                firstValue, { firstValue = it }, "Email code",
+                keyboardType = KeyboardType.Number,
+                onImeAction = verify,
+            )
+            Button(onClick = verify) { Text("Verify email") }
         }
         TelegramAuthStep.REGISTRATION -> AuthCard("Finish registration", boxed, appState) {
-            AuthField(firstValue, { firstValue = it }, "First name")
-            AuthField(secondValue, { secondValue = it }, "Last name")
-            Button(onClick = {
+            val register = {
                 scope.launch { appState.registerTelegram(firstValue, secondValue) }
-            }) { Text("Register") }
+                Unit
+            }
+            AuthField(
+                firstValue, { firstValue = it }, "First name",
+                imeAction = ImeAction.Next,
+                onImeAction = { focusManager.moveFocus(FocusDirection.Down) },
+            )
+            AuthField(secondValue, { secondValue = it }, "Last name", onImeAction = register)
+            Button(onClick = register) { Text("Register") }
         }
         TelegramAuthStep.OTHER_DEVICE_CONFIRMATION -> AuthCard("Scan with Telegram", boxed, appState) {
             val link = appState.telegramAuthState.link.orEmpty()
@@ -165,6 +227,9 @@ internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = tru
                 "On a device already signed in to Telegram, open Settings, then Devices, then " +
                     "Link Desktop Device, and scan this code.",
             )
+            TextButton(onClick = { scope.launch { appState.logoutTelegram() } }) {
+                Text("Use phone number instead")
+            }
         }
         TelegramAuthStep.READY,
         TelegramAuthStep.INITIALIZING,
@@ -177,7 +242,12 @@ internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = tru
 @Composable
 private fun TelegramChats(appState: AppState) {
     val selectedCount = appState.channels.count(ChannelSelection::selected)
-    val chats = appState.channels
+    // Ticked first, so the chats a run actually reads from are the ones seen without scrolling -
+    // the app's own ordering otherwise, stable within each of the two groups. Sorted for display
+    // only: `appState.channels` itself keeps Telegram's own order for everything that reads it.
+    val chats = remember(appState.channels) {
+        appState.channels.sortedByDescending(ChannelSelection::selected)
+    }
     // The list, and the count that summarizes it. Being signed in and signing out are facts about
     // the account rather than steps of a run, so they sit in Settings under Telegram; here they
     // only competed with the chats for the top of the card.
@@ -281,12 +351,22 @@ private fun AuthCard(
     title: String,
     boxed: Boolean,
     appState: AppState,
+    /**
+     * Offers a way to abandon this step and go back to entering a phone number.
+     *
+     * Off only for the credentials step: nothing has been submitted to Telegram yet there, so
+     * there is no attempt to start over from. Every step reached after it - a code sent, a QR
+     * shown, a password asked for - can leave the reader stuck if what they typed was wrong and
+     * the only way out was to force-close the app, which is what this replaces.
+     */
+    startOver: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     if (boxed) {
         SectionCard(title = title) {
             AuthMessage(appState)
             content()
+            if (startOver) StartOverButton(appState)
         }
     } else {
         Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -294,7 +374,25 @@ private fun AuthCard(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             AuthMessage(appState)
             content()
+            if (startOver) StartOverButton(appState)
         }
+    }
+}
+
+/**
+ * Abandons whatever step of sign-in is showing and goes back to entering a phone number.
+ *
+ * The same action a phone number screen's "Change number" and a QR screen's "Use phone number
+ * instead" call, under the name that fits every other step: `logoutTelegram` is TDLib's only way
+ * back to `WaitPhoneNumber` from any step short of it, signed in or not, so it is what all three
+ * do. None of them touch a report, a trade, a rule or a setting - the record this app keeps is
+ * never Telegram's to hold.
+ */
+@Composable
+private fun StartOverButton(appState: AppState) {
+    val scope = rememberCoroutineScope()
+    TextButton(onClick = { scope.launch { appState.logoutTelegram() } }) {
+        Text("Start over")
     }
 }
 
@@ -310,7 +408,7 @@ private fun AuthMessage(appState: AppState) {
     if (state.message.isBlank()) return
     Text(
         state.message,
-        color = if (state.step == TelegramAuthStep.ERROR) {
+        color = if (state.isError) {
             MaterialTheme.colorScheme.error
         } else {
             MaterialTheme.colorScheme.primary
@@ -324,6 +422,13 @@ private fun AuthField(
     onValueChange: (String) -> Unit,
     label: String,
     secret: Boolean = false,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    /** Next moves to the field below; Done, the default, submits the step. */
+    imeAction: ImeAction = ImeAction.Done,
+    /** What the keyboard's own action key does - the step's submit button, or moving on to the
+     * next field, matching [imeAction]. Every field used to open on the full keyboard and end on
+     * whatever the keyboard itself defaulted to, which was usually "return" doing nothing at all. */
+    onImeAction: () -> Unit = {},
 ) {
     OutlinedTextField(
         value = value,
@@ -333,6 +438,11 @@ private fun AuthField(
             androidx.compose.ui.text.input.VisualTransformation.None
         },
         singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
+        keyboardActions = KeyboardActions(
+            onDone = { onImeAction() },
+            onNext = { onImeAction() },
+        ),
         modifier = Modifier.fillMaxWidth(),
     )
 }

@@ -169,10 +169,7 @@ internal fun ResultsScreen(appState: AppState) {
             val wanted = StockSearch.query(stockFilter)
             appState.savedResults
                 .filter { saved ->
-                    (
-                        dateFilter == null ||
-                            saved.result.recommendationTargetDate?.toString() == dateFilter
-                        ) &&
+                    dateFilter.accepts(saved.result.recommendationTargetDate?.toString()) &&
                         (channelFilter.isEmpty() || saved.channelNames().any { it in channelFilter }) &&
                         saved.result.consolidated.hasStockMatching(wanted)
                 }

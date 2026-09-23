@@ -1,15 +1,20 @@
 package com.ikverse.egxanalyzer.data
 
 import android.content.Context
+import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
-import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
+// The base `androidx.glance.action.actionStartActivity` only launches by class or component; the
+// overload that takes a plain `Intent` - the one this needs, to carry the same action string the
+// Portfolio shortcut and the overdue notification already launch with - lives in this package
+// instead.
+import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.updateAll
@@ -59,18 +64,24 @@ class TodayWidget : GlanceAppWidget() {
         val overdue = runCatching {
             SettingsRepository(context, AndroidKeystoreCredentialStore(context)).lastOverdueCount()
         }.getOrDefault(0)
-        provideContent { Content(digest, overdue) }
+        // The same action the Portfolio shortcut and the overdue notification both name, so all
+        // three entrances are read one way by `MainActivity.openRequestedResult` - which is what
+        // actually lands on Portfolio and refreshes the overdue count. A plain launch with no
+        // action opened whatever tab the app was last left on instead, which is what this fixes.
+        val openPortfolio = Intent(context, MainActivity::class.java)
+            .setAction(AppShortcuts.ACTION_PORTFOLIO)
+        provideContent { Content(digest, overdue, openPortfolio) }
     }
 
     @Composable
-    private fun Content(digest: SessionDigest?, overdue: Int) {
+    private fun Content(digest: SessionDigest?, overdue: Int, openPortfolio: Intent) {
         GlanceTheme {
             Column(
                 modifier = GlanceModifier
                     .fillMaxSize()
                     .background(GlanceTheme.colors.widgetBackground)
                     .padding(12.dp)
-                    .clickable(actionStartActivity<MainActivity>()),
+                    .clickable(actionStartActivity(openPortfolio)),
                 verticalAlignment = Alignment.Vertical.CenterVertically,
             ) {
                 Text(

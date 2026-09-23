@@ -47,6 +47,20 @@ data class ModelCapabilities(
  */
 object ModelSuitabilityRules {
 
+    /**
+     * Whether an id names a chat model at all - never mind whether it can see an image.
+     *
+     * Broader than [ModelSuitability.SUITABLE] on purpose: Ask AI sends no image, so a text-only
+     * chat model that [capabilitiesOf] marks [ModelSuitability.UNSUITABLE] for that job is exactly
+     * right for this one. What both pickers agree is never right is an embedder, a reranker, a
+     * voice model or an image generator, which is the one list this checks against.
+     */
+    fun isChatModel(info: CloudModelInfo): Boolean {
+        if (info.statedModalities.isNotEmpty()) return ModelModality.TEXT in info.statedModalities
+        val words = info.id.lowercase().split(*Separators).filter(String::isNotEmpty)
+        return words.none(::namesSomethingElse)
+    }
+
     fun capabilitiesOf(info: CloudModelInfo): ModelCapabilities {
         if (info.statedModalities.isNotEmpty()) {
             return ModelCapabilities(

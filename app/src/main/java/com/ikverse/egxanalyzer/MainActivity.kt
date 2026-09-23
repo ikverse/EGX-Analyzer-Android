@@ -74,14 +74,18 @@ class MainActivity : ComponentActivity() {
      *
      * The day is recorded **only on success**, so a write that failed - the phone asleep, the cloud
      * app offline, the card removed - is tried again on the next resume rather than counted as
-     * done. Nothing is announced either way: a message about a backup nobody asked for, on top of
-     * an app that has just opened, is noise. What reveals a folder that has quietly stopped
-     * accepting writes is the line in Settings naming how many copies it holds and the newest one.
+     * done. Nothing is announced on success: a message about a backup nobody asked for, on top of
+     * an app that has just opened, is noise. A failure is different - see
+     * `AppState.recordBackupOutcome` - and the same is true of a folder whose grant is simply gone,
+     * which is as unreachable as one that refused a write and used to return here unremarked.
      */
     private fun backUpIfDue(scope: CoroutineScope) {
         val folder = appState.backupFolder?.let(Uri::parse) ?: return
-        if (!holdsBackupFolder(this, folder)) return
         if (!appState.backupDue()) return
+        if (!holdsBackupFolder(this, folder)) {
+            appState.recordBackupOutcome(succeeded = false)
+            return
+        }
         scope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -94,7 +98,12 @@ class MainActivity : ComponentActivity() {
                         checkpoint = appState::checkpointDatabase,
                     )
                 }
-            }.onSuccess { appState.recordBackupDay() }
+            }.onSuccess {
+                appState.recordBackupDay()
+                appState.recordBackupOutcome(succeeded = true)
+            }.onFailure {
+                appState.recordBackupOutcome(succeeded = false)
+            }
         }
     }
 

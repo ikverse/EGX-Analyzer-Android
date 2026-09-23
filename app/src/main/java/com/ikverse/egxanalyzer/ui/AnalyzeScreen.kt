@@ -128,6 +128,10 @@ internal fun AnalyzeScreen(appState: AppState) {
     // Until Analyze is pressed this is guidance, not a complaint: painting it red on a freshly
     // opened app tells someone who has done nothing wrong that something is broken.
     var attempted by remember { mutableStateOf(false) }
+    // A stray tap on the floating button while a run is going used to cancel it outright - no
+    // confirmation, and everything the run had already read and paid for thrown away, since a
+    // cancelled run's batches are only saved when it finishes. This asks first.
+    var confirmingCancel by remember { mutableStateOf(false) }
     Screen(
         appState = appState,
         destination = AppDestination.ANALYZE,
@@ -169,7 +173,7 @@ internal fun AnalyzeScreen(appState: AppState) {
             }
             if (running) {
                 AnalyzeAction(
-                    onClick = { scope.launch { appState.cancelAnalysis() } },
+                    onClick = { confirmingCancel = true },
                     container = Color.Transparent,
                     content = accent.onAction,
                     // No halo here. The aurora is what says the control is alive, and a glow around
@@ -380,6 +384,23 @@ internal fun AnalyzeScreen(appState: AppState) {
             },
         )
         DuplicateAnalysisDialog(appState)
+        if (confirmingCancel) {
+            AlertDialog(
+                containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
+                onDismissRequest = { confirmingCancel = false },
+                title = { Text("Stop this analysis?") },
+                text = { Text("What it has read so far is lost.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmingCancel = false
+                        scope.launch { appState.cancelAnalysis() }
+                    }) { Text("Stop") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmingCancel = false }) { Text("Keep running") }
+                },
+            )
+        }
 
         if (appState.analysisStatus != AnalysisStatus.RUNNING) {
             // Every blocker is now drawn once, by the card it is about. The line that used to sit

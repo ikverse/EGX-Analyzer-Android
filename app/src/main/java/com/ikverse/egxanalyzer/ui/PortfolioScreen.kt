@@ -579,7 +579,7 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
             // other two tabs search by. See StockSearch.
             val wanted = StockSearch.query(stockFilter)
             groups
-                .filter { dateFilter == null || it.recommendationDate.toString() == dateFilter }
+                .filter { dateFilter.accepts(it.recommendationDate.toString()) }
                 // A search narrows the trades inside a card and then empties the card itself, rather
                 // than leaving a session heading standing over nothing. The summary line is read off
                 // the positions, so it recounts itself around what is left and cannot end up
@@ -615,7 +615,7 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
                 appState.consumePendingPosition()
                 return@LaunchedEffect
             }
-            if (dateFilter != null && dateFilter != target.recommendationDate.toString()) {
+            if (!dateFilter.accepts(target.recommendationDate.toString())) {
                 dateFilter = null
                 // The list is about to be rebuilt around the cleared filter; this effect restarts on it.
                 return@LaunchedEffect
@@ -646,7 +646,7 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
                     // listing the reader picked. See TickerPicker.name.
                     "No trades in ${TickerPicker.name(stockFilter)}"
                 } else {
-                    "Nothing called on $dateFilter"
+                    "Nothing called ${dateFilter?.describe().orEmpty()}"
                 },
                 detail = if (searching) {
                     "Nothing you recorded is a holding in that stock. Clear the stock filter to " +

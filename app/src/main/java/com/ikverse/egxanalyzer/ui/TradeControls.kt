@@ -1,7 +1,9 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.rememberScrollState
@@ -9,13 +11,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AddShoppingCart
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Sell
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PositionStatus
@@ -39,7 +48,9 @@ import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.callDate
 import com.ikverse.egxanalyzer.model.offeredTradeWindow
 import com.ikverse.egxanalyzer.ui.theme.extraColors
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 
 /**
  * What a card needs to record a trade against the call it happens to be showing.
@@ -441,6 +452,8 @@ internal fun SellDialog(
     AlertDialog(
         containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
         onDismissRequest = onDismiss,
+        // Tapping outside used to close this and lose whatever had been typed. Only Cancel does now.
+        properties = DialogProperties(dismissOnClickOutside = false),
         title = { Text(if (existing != null) "Edit the sale" else "Record the sale") },
         text = {
             Column(
@@ -473,13 +486,11 @@ internal fun SellDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                DateField(
+                    label = if (inTwoParts) "Target 1 date" else "Selling date",
                     value = date1,
                     onValueChange = { date1 = it },
-                    label = { Text(if (inTwoParts) "Target 1 date" else "Selling date") },
-                    singleLine = true,
                     isError = parsedDate1 == null,
-                    supportingText = { Text("YYYY-MM-DD") },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
@@ -510,21 +521,13 @@ internal fun SellDialog(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    OutlinedTextField(
+                    DateField(
+                        label = "Target 2 date",
                         value = date2,
                         onValueChange = { date2 = it },
-                        label = { Text("Target 2 date") },
-                        singleLine = true,
                         isError = parsedDate2 == null || !datesInOrder,
-                        supportingText = {
-                            Text(
-                                if (!datesInOrder) {
-                                    "The second part cannot have gone before the first."
-                                } else {
-                                    "YYYY-MM-DD"
-                                },
-                            )
-                        },
+                        supportingText = "The second part cannot have gone before the first."
+                            .takeIf { !datesInOrder },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -550,6 +553,70 @@ internal fun SellDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/**
+ * A date field the reader can only fill from the calendar, never by typing.
+ *
+ * Bought, Sold and Edit trade all asked for `YYYY-MM-DD` on the bare keyboard although the app
+ * already carries a date picker everywhere else a date is set. The field still reports the same
+ * ISO string every caller here already parses, so nothing downstream of it changes - only how the
+ * reader gets there. Read-only rather than disabled, so it keeps the same look as the fields
+ * beside it instead of greying out.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    isError: Boolean,
+    supportingText: String? = null,
+    modifier: Modifier = Modifier,
+) {
+    var picking by remember { mutableStateOf(false) }
+    Box(modifier) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            singleLine = true,
+            isError = isError,
+            supportingText = supportingText?.let { { Text(it) } },
+            trailingIcon = { Icon(Icons.Outlined.CalendarMonth, contentDescription = null) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        // A read-only field still claims its own clicks for focus and a cursor it will never show,
+        // so the picker is opened from a transparent layer above it rather than the field's own
+        // onClick - there isn't one.
+        Box(Modifier.matchParentSize().clickable(onClick = { picking = true }))
+    }
+    if (picking) {
+        val initial = runCatching { LocalDate.parse(value.trim()) }.getOrNull() ?: LocalDate.now()
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = initial.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+        )
+        DatePickerDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        state.selectedDateMillis?.let { millis ->
+                            onValueChange(
+                                Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                                    .toString(),
+                            )
+                        }
+                        picking = false
+                    },
+                ) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } },
+        ) {
+            DatePicker(state = state)
+        }
+    }
 }
 
 /** Half the holding, which is what a call naming two targets is usually taken in. */
@@ -606,6 +673,8 @@ internal fun TradeDialog(
     AlertDialog(
         containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
         onDismissRequest = onDismiss,
+        // Tapping outside used to close this and lose whatever had been typed. Only Cancel does now.
+        properties = DialogProperties(dismissOnClickOutside = false),
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
@@ -623,13 +692,11 @@ internal fun TradeDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                DateField(
+                    label = dateLabel,
                     value = date,
                     onValueChange = { date = it },
-                    label = { Text(dateLabel) },
-                    singleLine = true,
                     isError = parsedDate == null,
-                    supportingText = { Text("YYYY-MM-DD") },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (initialWindow != null) {

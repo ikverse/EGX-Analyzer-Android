@@ -1174,15 +1174,36 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
     }
 
     /**
-     * Drops every remembered chat selection.
+     * Remembers, or forgets, that one chat is ticked - across a restart, on this phone.
      *
-     * Selections used to survive a restart, so a chat picked days ago could still be feeding an
-     * analysis without appearing to. They now last only as long as the app is open, and this
-     * clears anything a previous version stored.
+     * A row's presence is the whole of what this table means: it holds the ids of the chats
+     * currently ticked, nothing else, so ticking one writes a row and clearing it deletes one
+     * rather than the table carrying a permanent true/false for every chat ever seen.
      */
-    fun forgetChannelSelections() {
-        writableDatabase.delete("channels", null, null)
+    fun setChannelSelected(id: Long, name: String, selected: Boolean) {
+        if (selected) {
+            writableDatabase.insertWithOnConflict(
+                "channels",
+                null,
+                ContentValues().apply {
+                    put("id", id)
+                    put("name", name)
+                    put("selected", 1)
+                },
+                SQLiteDatabase.CONFLICT_REPLACE,
+            )
+        } else {
+            writableDatabase.delete("channels", "id = ?", arrayOf(id.toString()))
+        }
     }
+
+    /** The chats remembered as ticked on this phone, read back to seed a fresh chat list. */
+    fun selectedChannelIds(): Set<Long> =
+        readableDatabase.rawQuery("SELECT id FROM channels", null).use { cursor ->
+            buildSet {
+                while (cursor.moveToNext()) add(cursor.getLong(0))
+            }
+        }
 
     /**
      * Saves a run, and beside it what that run read out of each source.

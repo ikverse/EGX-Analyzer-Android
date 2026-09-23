@@ -286,6 +286,8 @@ class LiveAppState(
      */
     private val feedQuiet: (stocks: Int, callsHeld: Int, tickers: List<String>) -> Unit =
         { _, _, _ -> },
+    /** Says the daily backup cannot reach its folder; supplied like the rest. */
+    private val backupFailing: () -> Unit = {},
     /**
      * How many trades are overdue, for the launcher shortcut that counts them.
      *
@@ -598,7 +600,7 @@ class LiveAppState(
         private set
 
     override fun consumeStatusMessage() {
-        statusMessage = null
+        status.advance()
     }
 
     /**
@@ -2007,12 +2009,12 @@ class LiveAppState(
         // Independent of Telegram, unlike the sync: this is one public URL, so it does not have to
         // wait for a session that may never arrive on a phone whose owner has not signed in.
         updates.checkQuietly()
-        // Nothing about a previous session carries into this one: a restart starts from the
-        // chat list Telegram reports now, with nothing selected.
-        localDataStore.forgetChannelSelections()
         appScope.launch {
             telegramRepository.chats.collect { telegramChats ->
-                val stillSelected = channels.filter(ChannelSelection::selected).map(ChannelSelection::id)
+                // Read fresh on every update rather than carried in `channels`: a toggle writes
+                // through immediately, so this is the same source whether the chat list changed
+                // because a refresh landed or because the app just started.
+                val selectedIds = localDataStore.selectedChannelIds()
                 channels = telegramChats
                     // Private chats are conversations, not published sources: the service account
                     // and one-to-one threads can only add noise to a recommendation run.
@@ -2021,8 +2023,9 @@ class LiveAppState(
                         ChannelSelection(
                             id = chat.id,
                             name = chat.title,
-                            // Kept across a refresh within the session, never across a restart.
-                            selected = chat.id in stillSelected,
+                            // Remembered across a restart, on this phone - a chat ticked days ago
+                            // keeps feeding a run without the reader having to tick it again.
+                            selected = chat.id in selectedIds,
                             kind = chat.kind,
                             photoPath = chat.photoPath,
                         )
@@ -2829,6 +2832,21 @@ class LiveAppState(
         settingsRepository.recordBackupDay(LocalDate.now(ZoneId.of(EGX_ZONE)).toString())
     }
 
+    /**
+     * Says once, per spell, that the daily backup cannot write to the folder the reader chose.
+     *
+     * On the way in, and re-armed on the way out, exactly as [reviewFeedHealth] tracks the feed:
+     * a folder that has lost its grant or gone unreachable fails the same way every day it is
+     * tried, so what ends the spell is a write actually landing again, not a swipe on the
+     * notification.
+     */
+    override fun recordBackupOutcome(succeeded: Boolean) {
+        val failing = !succeeded
+        if (failing == settingsRepository.backupReportedFailing()) return
+        settingsRepository.recordBackupReportedFailing(failing)
+        if (failing) backupFailing()
+    }
+
     /** Every stock worth a request: the ones analyses name, plus the ones actually held. */
     private fun pricedStocks(): Set<String> =
         savedResults.recommendedTickers() + positions.map(Position::ticker)
@@ -3567,6 +3585,7 @@ class LiveAppState(
     override fun toggleChannel(channel: ChannelSelection) {
         val updated = channel.copy(selected = !channel.selected)
         channels = channels.map { if (it.id == channel.id) updated else it }
+        localDataStore.setChannelSelected(channel.id, channel.name, updated.selected)
         dropLoadedTelegramSources()
         if (activeSourceChannelId !in channels.filter { it.selected }.map { it.id }) {
             activeSourceChannelId = channels.firstOrNull { it.selected }?.id
@@ -3575,6 +3594,7 @@ class LiveAppState(
 
     override fun removeChannel(channel: ChannelSelection) {
         channels = channels.filterNot { it.id == channel.id }
+        localDataStore.setChannelSelected(channel.id, channel.name, selected = false)
         dropLoadedTelegramSources()
         if (activeSourceChannelId == channel.id) {
             activeSourceChannelId = channels.firstOrNull { it.selected }?.id

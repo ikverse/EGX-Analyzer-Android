@@ -934,7 +934,7 @@ class TelegramRepository(
             val outcome = setTdlibParameters(apiId, apiHash, encryptionKey)
             if (outcome !is TdlResult.Failure) return
             if (!isWrongDatabaseKey(outcome.code, outcome.message)) {
-                showError(IllegalStateException("Telegram error ${outcome.code}: ${outcome.message}"))
+                showTelegramFailure(outcome.code, outcome.message)
                 return
             }
             // The database on disk was written with a key this device no longer holds, so nothing
@@ -949,7 +949,7 @@ class TelegramRepository(
             wipeTelegramDatabase()
             val retried = setTdlibParameters(apiId, apiHash, encryptionKey)
             if (retried is TdlResult.Failure) {
-                showError(IllegalStateException("Telegram error ${retried.code}: ${retried.message}"))
+                showTelegramFailure(retried.code, retried.message)
             }
         } finally {
             encryptionKey.fill(0)
@@ -1014,7 +1014,10 @@ class TelegramRepository(
     }
 
     private suspend fun execute(block: suspend () -> TdlResult<*>) {
-        runCatching { block().requireValue<Any?>() }.onFailure { showError(it) }
+        when (val result = runCatching { block() }.getOrElse { return showError(it) }) {
+            is TdlResult.Failure -> showTelegramFailure(result.code, result.message)
+            else -> Unit
+        }
     }
 
     private fun publishChats() {
@@ -1121,11 +1124,47 @@ class TelegramRepository(
     }
 
     private fun setError(message: String) {
-        _authState.value = _authState.value.copy(message = message)
+        _authState.value = _authState.value.copy(message = message, isError = true)
     }
 
     private fun showError(error: Throwable) {
         setError(error.message ?: "Telegram operation failed.")
+    }
+
+    /** [showError], but from a failure TDLib itself reported rather than a caught exception. */
+    private fun showTelegramFailure(code: Int, message: String) {
+        setError(friendlyTelegramError(code, message))
+    }
+
+    /**
+     * Turns a handful of Telegram's own error codes into a sentence a reader can act on.
+     *
+     * TDLib answers in the same handful of words whichever client is asking, not in a sentence
+     * meant to be shown - `PHONE_CODE_INVALID`, or a flood wait spelled as part of the code itself
+     * rather than given as a separate number. Everything else is shown exactly as Telegram sent it,
+     * in red: an unrecognised code is still Telegram's own account of what went wrong, which is
+     * more useful than this app guessing at a friendlier way to say "something else."
+     */
+    private fun friendlyTelegramError(code: Int, message: String): String {
+        val floodSeconds = Regex("FLOOD_WAIT_(\\d+)").find(message)?.groupValues?.get(1)?.toIntOrNull()
+        return when {
+            floodSeconds != null -> "Too many attempts. Telegram asks you to wait " +
+                "${floodWaitPhrase(floodSeconds)} before trying again."
+            "PHONE_CODE_INVALID" in message -> "That code isn't right. Check it and try again."
+            "PHONE_CODE_EXPIRED" in message -> "That code has expired. Ask for a new one."
+            "PHONE_NUMBER_INVALID" in message -> "That phone number doesn't look right."
+            "PASSWORD_HASH_INVALID" in message -> "That password isn't right."
+            else -> message
+        }
+    }
+
+    /** A flood wait in the unit that reads naturally - seconds under a minute, minutes above it. */
+    private fun floodWaitPhrase(seconds: Int): String = when {
+        seconds < 60 -> "$seconds ${if (seconds == 1) "second" else "seconds"}"
+        else -> {
+            val minutes = (seconds + 59) / 60
+            "$minutes ${if (minutes == 1) "minute" else "minutes"}"
+        }
     }
 
     @Suppress("UNCHECKED_CAST")
