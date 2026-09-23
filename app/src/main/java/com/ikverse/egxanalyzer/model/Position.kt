@@ -159,6 +159,27 @@ data class Sale(
         get() = date2?.takeIf { inTwoParts }?.let { minOf(date1, it) }
 }
 
+/**
+ * The sale actually recorded against this position, or null while it is still running.
+ *
+ * The reverse of what [recordSale] wrote onto a [Position]: [exitPrice1] and [exitDate1] carry the
+ * target-1 leg, [exitPrice2] the rest, and [exitDate] the day the position went flat - the second
+ * leg's day on a two-part sale, the only day on a one-part one. Built so a dialog correcting an
+ * already-sold trade can open on what was actually typed rather than on the call's own targets,
+ * which is what a fresh sale offers instead.
+ */
+fun Position.recordedSale(): Sale? {
+    val price1 = exitPrice1 ?: exitPrice ?: return null
+    val date1 = exitDate1 ?: exitDate ?: return null
+    return Sale(
+        price1 = price1,
+        date1 = date1,
+        price2 = exitPrice2,
+        date2 = exitDate.takeIf { exitPrice2 != null },
+        splitPct = exitSplitPct ?: FULL_SPLIT_PCT,
+    )
+}
+
 /** The whole holding at one price, and the default any sale dialog starts from being half of. */
 const val FULL_SPLIT_PCT = 100.0
 

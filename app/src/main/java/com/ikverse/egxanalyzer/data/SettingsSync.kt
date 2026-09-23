@@ -5,7 +5,6 @@ import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.PortfolioOrder
-import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.ResponseTimeout
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.ThemeMode
@@ -45,7 +44,6 @@ data class SettingsSnapshot(
     val provider: CloudProvider,
     val providers: List<ProviderSettings>,
     val useDefaultPromptOnly: Boolean,
-    val promptHistory: List<PromptSnapshot>,
     val updatedAt: Long,
     val updatedBy: String,
     /**
@@ -74,9 +72,6 @@ data class SettingsSnapshot(
                 "defaultContentTypes",
                 JSONArray(preferences.defaultContentTypes.map { it.name }.sorted()),
             )
-            .put("customSystemPrompt", preferences.customSystemPrompt)
-            .put("includePhrases", preferences.includePhrases)
-            .put("excludePhrases", preferences.excludePhrases)
             .put("correctionRetries", preferences.correctionRetries)
             .put("catalogEnrichmentEnabled", preferences.catalogEnrichmentEnabled)
             // The trade window, under the name it travelled as when it also decided scoring. A
@@ -105,20 +100,6 @@ data class SettingsSnapshot(
                                 .put("endpoint", entry.endpoint)
                                 .put("model", entry.model)
                                 .put("models", JSONArray(entry.models)),
-                        )
-                    }
-                },
-            )
-            .put(
-                "promptHistory",
-                JSONArray().apply {
-                    promptHistory.forEach { snapshot ->
-                        put(
-                            JSONObject()
-                                .put("systemPrompt", snapshot.systemPrompt)
-                                .put("includePhrases", snapshot.includePhrases)
-                                .put("excludePhrases", snapshot.excludePhrases)
-                                .put("savedAt", snapshot.savedAtEpochMilliseconds),
                         )
                     }
                 },
@@ -156,9 +137,6 @@ data class SettingsSnapshot(
                         }
                         ?.ifEmpty { null }
                         ?: defaults.defaultContentTypes,
-                    customSystemPrompt = json.optString("customSystemPrompt"),
-                    includePhrases = json.optString("includePhrases"),
-                    excludePhrases = json.optString("excludePhrases"),
                     correctionRetries = json.optInt("correctionRetries", defaults.correctionRetries)
                         .coerceIn(0, 2),
                     catalogEnrichmentEnabled = json.optBoolean(
@@ -222,17 +200,6 @@ data class SettingsSnapshot(
                     }
                     .orEmpty(),
                 useDefaultPromptOnly = json.optBoolean("useDefaultPromptOnly", false),
-                promptHistory = json.optJSONArray("promptHistory")
-                    ?.let { array -> (0 until array.length()).mapNotNull(array::optJSONObject) }
-                    ?.map { entry ->
-                        PromptSnapshot(
-                            systemPrompt = entry.optString("systemPrompt"),
-                            includePhrases = entry.optString("includePhrases"),
-                            excludePhrases = entry.optString("excludePhrases"),
-                            savedAtEpochMilliseconds = entry.optLong("savedAt"),
-                        )
-                    }
-                    .orEmpty(),
                 updatedAt = json.optLong("updatedAt"),
                 updatedBy = json.optString("updatedBy"),
                 unknown = JSONObject().apply {
@@ -261,16 +228,21 @@ data class SettingsSnapshot(
         /** A device name in the form a file name can carry it. Both sides compare this form. */
         fun deviceKey(device: String): String = device.replace(Regex("[^A-Za-z0-9._]"), "_")
 
+        // "customSystemPrompt", "includePhrases", "excludePhrases" and "promptHistory" are
+        // deliberately left out, not renamed away: the old prompt-customization feature they carry
+        // is gone from this build, so it no longer parses or writes them, and any it finds on a
+        // document from an older device falls through to [unknown] and travels on untouched - the
+        // same rule this set exists to state for a field this build simply does not recognise.
         private val KNOWN = setOf(
             "updatedAt", "updatedBy", "themeMode", "analysisLanguage", "responseTimeoutSeconds",
-            "defaultContentTypes", "customSystemPrompt", "includePhrases", "excludePhrases",
+            "defaultContentTypes",
             "correctionRetries", "catalogEnrichmentEnabled", "scoringWindowSessions",
             "overdueRemindersEnabled", "tradeAlertsEnabled", "callAlertsEnabled",
             "approachAlertsEnabled", "approachThresholdPercent", "sessionDigestEnabled",
             "feedAlertsEnabled",
             "portfolioOrder", "callOrder",
             "updateChecksEnabled",
-            "useDefaultPromptOnly", "provider", "providers", "promptHistory",
+            "useDefaultPromptOnly", "provider", "providers",
         )
 
         private const val PREFIX = "settings-"

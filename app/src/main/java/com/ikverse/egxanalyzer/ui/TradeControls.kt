@@ -382,26 +382,41 @@ internal fun SellButton(
  * optionally a window, and every field it has means the same thing in both of its uses; folding
  * five fields and a conditional half into it would leave one dialog whose questions depend on which
  * button opened it.
+ *
+ * @param existing the sale already recorded, when this is correcting one rather than making one.
+ *   Seeds every field from what was actually typed instead of the call's own targets, and the
+ *   title and button say "Edit" rather than "Record" - the only two things that differ between
+ *   selling a running trade and fixing a sale already on the books, which is otherwise the same
+ *   two prices and two dates either way.
  */
 @Composable
-private fun SellDialog(
+internal fun SellDialog(
     held: PositionView,
     suggestedExit: Double?,
+    existing: Sale? = null,
     onDismiss: () -> Unit,
     onConfirm: (Sale) -> Unit,
 ) {
     val position = held.position
-    // The call's own targets, which is where a holder following it gets out. Today's estimate
-    // stands in where the call never printed one, so a call without targets still sells.
+    // The call's own targets, which is where a holder following it gets out - unless a sale is
+    // already on the books, which is what a correction opens on instead. Today's estimate stands
+    // in for a fresh sale where the call never printed a target, so a call without targets still
+    // sells.
     var price1 by remember {
-        mutableStateOf((position.target1 ?: suggestedExit)?.let(::formatPrice).orEmpty())
+        mutableStateOf(
+            (existing?.price1 ?: position.target1 ?: suggestedExit)?.let(::formatPrice).orEmpty(),
+        )
     }
     var price2 by remember {
-        mutableStateOf((position.target2 ?: suggestedExit)?.let(::formatPrice).orEmpty())
+        mutableStateOf(
+            (existing?.price2 ?: position.target2 ?: suggestedExit)?.let(::formatPrice).orEmpty(),
+        )
     }
-    var split by remember { mutableStateOf(formatPrice(HALF_SPLIT_PCT)) }
-    var date1 by remember { mutableStateOf(LocalDate.now().toString()) }
-    var date2 by remember { mutableStateOf(LocalDate.now().toString()) }
+    var split by remember {
+        mutableStateOf(formatPrice(existing?.splitPct ?: HALF_SPLIT_PCT))
+    }
+    var date1 by remember { mutableStateOf((existing?.date1 ?: LocalDate.now()).toString()) }
+    var date2 by remember { mutableStateOf((existing?.date2 ?: LocalDate.now()).toString()) }
 
     val parsedPrice1 = price1.toPriceOrNull()
     val parsedPrice2 = price2.toPriceOrNull()
@@ -426,18 +441,26 @@ private fun SellDialog(
     AlertDialog(
         containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
         onDismissRequest = onDismiss,
-        title = { Text("Record the sale") },
+        title = { Text(if (existing != null) "Edit the sale" else "Record the sale") },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(Space.m),
                 modifier = Modifier.verticalScroll(rememberScrollState()),
             ) {
                 Text(
-                    "The prices you actually sold at. A call names two targets and the usual way " +
-                        "out is half at the first and the rest at the second, so both are " +
-                        "offered - set the share to 100% where the whole holding went at one " +
-                        "price. The position closes now, whether or not the recommendation's " +
-                        "sessions have run out.",
+                    if (existing != null) {
+                        "The prices you actually sold at. A call names two targets and the " +
+                            "usual way out is half at the first and the rest at the second, so " +
+                            "both are offered - set the share to 100% where the whole holding " +
+                            "went at one price. Every figure this trade reports is measured " +
+                            "from what is saved here."
+                    } else {
+                        "The prices you actually sold at. A call names two targets and the " +
+                            "usual way out is half at the first and the rest at the second, so " +
+                            "both are offered - set the share to 100% where the whole holding " +
+                            "went at one price. The position closes now, whether or not the " +
+                            "recommendation's sessions have run out."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -523,7 +546,7 @@ private fun SellDialog(
             TextButton(
                 enabled = sale != null,
                 onClick = { onConfirm(sale ?: return@TextButton) },
-            ) { Text("Close position") }
+            ) { Text(if (existing != null) "Save" else "Close position") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
@@ -561,9 +584,17 @@ internal fun TradeDialog(
     initialWindow: Int? = null,
     /** Says where the offered window came from, which differs between buying and editing. */
     windowHelp: String = "",
+    /**
+     * What the date field opens on. Today for a fresh purchase, which is when it was actually
+     * bought; the trade's own entry date for a correction, which must not move a date nobody
+     * touched - every figure the card reports (bought-on, sessions held, the peak and trough since
+     * entry) is measured from it, and a save that only meant to fix the price silently moved them
+     * all when this defaulted to today regardless of what was being edited.
+     */
+    initialDate: LocalDate = LocalDate.now(),
 ) {
     var price by remember { mutableStateOf(initialPrice?.let(::formatPrice).orEmpty()) }
-    var date by remember { mutableStateOf(LocalDate.now().toString()) }
+    var date by remember { mutableStateOf(initialDate.toString()) }
     var window by remember { mutableStateOf(initialWindow?.toString().orEmpty()) }
     val parsedPrice = price.toPriceOrNull()
     val parsedDate = remember(date) { runCatching { LocalDate.parse(date.trim()) }.getOrNull() }

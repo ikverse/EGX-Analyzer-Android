@@ -39,11 +39,11 @@ import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.TableChart
+import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -81,7 +81,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.ikverse.egxanalyzer.model.AnalysisDiagnostics
-import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.LatestPrice
@@ -215,7 +214,6 @@ internal fun ResultsScreen(appState: AppState) {
             // Not seeded from pendingResultId any more. The effect below opens a run arriving from a
             // notification and runs on first composition, so the seed only ever repeated it.
             var openRun by appState.pages.openResultId
-            var openReports by appState.pages.openReportMarkdown
             // The newest run held for each session, so a card can tell whether it is the current
             // reading of its session or an earlier one a re-run has since covered.
             val newestRunFor = remember(appState.savedResults) {
@@ -276,13 +274,6 @@ internal fun ResultsScreen(appState: AppState) {
                             // Expanding also selects, so the companion pane follows what is open.
                             if (open) appState.selectResult(saved)
                         },
-                        // Hoisted for the same reason `expanded` is, and kept by run id so that
-                        // re-sorting the list cannot hand one card's open report to another.
-                        showReport = saved.id in openReports,
-                        onShowReportChange = { show ->
-                            openReports =
-                                if (show) openReports + saved.id else openReports - saved.id
-                        },
                         highlighted = saved.id == appState.pendingResultId,
                         onHighlightShown = { appState.consumePendingResult() },
                         newerRunExists = saved.result.recommendationTargetDate
@@ -291,7 +282,6 @@ internal fun ResultsScreen(appState: AppState) {
                         onSaveLocally = { scope.launch { appState.saveReportToDownloads(saved) } },
                         onExport = { scope.launch { appState.exportReport(saved) } },
                         onDelete = { appState.deleteResult(saved) },
-                        report = { appState.reportFor(saved) },
                         peakFor = appState::peakSince,
                         // Normalized, because the record keys prices on the bare ticker and a
                         // report can name the same stock as COMI or COMI.CA - the grouping every
@@ -890,9 +880,6 @@ private fun SavedAnalysisCard(
     /** Held by the screen, which needs it to give an open report a row of its own. */
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
-    /** Whether the written report is showing. Held by the screen so a fold cannot close it. */
-    showReport: Boolean,
-    onShowReportChange: (Boolean) -> Unit,
     /** Opened from a notification: its edge flashes briefly. */
     highlighted: Boolean = false,
     onHighlightShown: () -> Unit = {},
@@ -904,7 +891,6 @@ private fun SavedAnalysisCard(
     /** The same file again, handed to whatever the user picks to send it with. */
     onExport: () -> Unit,
     onDelete: () -> Unit,
-    report: () -> AnalysisReport,
     /** Highest a stock has traded since the call, for the ladder's arrow. */
     peakFor: (String, LocalDate?) -> Double? = { _, _ -> null },
     /** Where a stock stands now, for the heading over its block of the table. */
@@ -920,6 +906,9 @@ private fun SavedAnalysisCard(
     // Asked for, because deleting is no longer local: it removes the report from the sync channel
     // and from every other device, and there is nothing left to restore it from.
     var confirmDelete by remember { mutableStateOf(false) }
+    // Asked for too: it throws away every correction in the report in one press, not just the one
+    // the reader is looking at.
+    var confirmUndoAll by remember { mutableStateOf(false) }
     val stockCount = saved.result.consolidated.size.takeIf { it > 0 }
         ?: saved.result.recommendations.map(RecommendationResult::ticker).distinct().size
     // Every occurrence in the report, which is what the table below actually lists: one stock named
@@ -1015,27 +1004,32 @@ private fun SavedAnalysisCard(
                     MoreButton(onClick = { menuOpen = true })
                     AppMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         AppMenuItem(
-                            if (showReport) "Hide report" else "Show report",
-                            Icons.Outlined.Description,
-                            onClick = { onShowReportChange(!showReport); menuOpen = false },
-                        )
-                        AppMenuItem(
-                            "Share",
+                            "Share as text",
                             Icons.Outlined.Share,
                             onClick = { menuOpen = false; onShare() },
                         )
                         AppMenuItem(
-                            "Save to Downloads",
-                            Icons.Outlined.Download,
-                            onClick = { menuOpen = false; onSaveLocally() },
-                        )
-                        AppMenuItem(
-                            "Send as Excel",
+                            "Share as Excel",
                             Icons.Outlined.TableChart,
                             onClick = { menuOpen = false; onExport() },
                         )
-                        // Four things that can be done again and one that cannot, and the fifth is
-                        // the only one that needs saying before it is pressed.
+                        AppMenuItem(
+                            "Save Excel to Downloads",
+                            Icons.Outlined.Download,
+                            onClick = { menuOpen = false; onSaveLocally() },
+                        )
+                        // Only where there is something to undo, and its own confirmation rather
+                        // than the quiet Undo a single correction gets: this throws away every
+                        // correction in the report at once, not the one the reader just made.
+                        if (editor.hasEdits) {
+                            AppMenuItem(
+                                "Undo all corrections",
+                                Icons.Outlined.Undo,
+                                onClick = { menuOpen = false; confirmUndoAll = true },
+                            )
+                        }
+                        // Everything above can be done again; this is the one thing on the menu
+                        // that cannot, which is why it is last and the only one that asks first.
                         AppMenuItem(
                             "Delete",
                             Icons.Outlined.Delete,
@@ -1211,14 +1205,6 @@ private fun SavedAnalysisCard(
                 }
             }
 
-            AnimatedVisibility(showReport) {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    HorizontalDivider()
-                    Text(report().title, style = MaterialTheme.typography.titleSmall)
-                    Text(report().markdown, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-
             AnimatedVisibility(expanded) {
                 ResultDetail(
                     saved,
@@ -1257,6 +1243,30 @@ private fun SavedAnalysisCard(
             },
             dismissButton = {
                 TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
+            },
+        )
+    }
+    if (confirmUndoAll) {
+        AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
+            onDismissRequest = { confirmUndoAll = false },
+            title = { Text("Undo every correction in this report?") },
+            text = {
+                Text(
+                    "Every call goes back to exactly what the model read, and any trade a " +
+                        "correction moved moves back with it. This cannot be undone.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmUndoAll = false
+                        editor.undoAll()
+                    },
+                ) { Text("Undo all") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmUndoAll = false }) { Text("Keep") }
             },
         )
     }

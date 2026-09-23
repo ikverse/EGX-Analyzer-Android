@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.HourglassEmpty
+import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -54,6 +55,7 @@ import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionStatus
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.Sale
+import com.ikverse.egxanalyzer.model.recordedSale
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.ui.theme.pageAccent
 import java.time.LocalDate
@@ -90,6 +92,8 @@ internal fun PositionCard(
     onEditTrade: (Double, LocalDate, Int?) -> Unit,
     onKeepOpen: (keep: Boolean, note: String?) -> Unit,
     onRemove: () -> Unit,
+    /** Puts a sold trade back the way it was before the sale, so it can be sold again correctly. */
+    onReopen: () -> Unit,
     modifier: Modifier = Modifier,
     /** True on the one card a Record sale action in the shade named. See `TradeStatusNotifier`. */
     startSelling: Boolean = false,
@@ -98,6 +102,7 @@ internal fun PositionCard(
     val position = view.position
     var menuOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
+    var editingSale by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
 
     // A **second-level** surface: it sits inside the session card, so it takes the container role's
@@ -228,7 +233,14 @@ internal fun PositionCard(
                             AppMenuItem(
                                 "Edit trade",
                                 Icons.Outlined.Edit,
-                                onClick = { menuOpen = false; editing = true },
+                                onClick = {
+                                    menuOpen = false
+                                    // A sold trade has no entry or window left to correct - what it
+                                    // has is the sale, so this opens the same dialog Sold does,
+                                    // seeded with what was actually typed rather than the call's own
+                                    // targets.
+                                    if (view.realized) editingSale = true else editing = true
+                                },
                             )
                             // Undoing Keep Open lives here rather than beside Sold. The pill already
                             // says the trade is being kept open, and a button repeating it took the
@@ -240,6 +252,17 @@ internal fun PositionCard(
                                     "Follow the deadline again",
                                     Icons.Outlined.HourglassEmpty,
                                     onClick = { menuOpen = false; onKeepOpen(false, null) },
+                                )
+                            }
+                            // The other side of a mistaken Sold: until now the only way back from a
+                            // sale was the brief Undo on the status line, which is gone the moment
+                            // anything else happens. This is the lasting one, reachable for as long
+                            // as the trade shows a sale to undo.
+                            if (view.realized) {
+                                AppMenuItem(
+                                    "Reopen trade",
+                                    Icons.Outlined.Undo,
+                                    onClick = { menuOpen = false; onReopen() },
                                 )
                             }
                             // The one press on this card that cannot be undone, and until now the one
@@ -654,6 +677,7 @@ internal fun PositionCard(
             dateLabel = "Entry date",
             confirmLabel = "Save",
             initialPrice = position.entryPrice,
+            initialDate = position.entryDate,
             initialWindow = position.windowSessions,
             windowHelp = "Trading sessions from ${position.recommendationDate}, the session this " +
                 "call was made for.",
@@ -661,6 +685,18 @@ internal fun PositionCard(
             onConfirm = { price, date, window ->
                 editing = false
                 onEditTrade(price, date, window)
+            },
+        )
+    }
+    if (editingSale) {
+        SellDialog(
+            held = view,
+            suggestedExit = view.exitPrice,
+            existing = position.recordedSale(),
+            onDismiss = { editingSale = false },
+            onConfirm = { sale ->
+                editingSale = false
+                onSell(sale)
             },
         )
     }

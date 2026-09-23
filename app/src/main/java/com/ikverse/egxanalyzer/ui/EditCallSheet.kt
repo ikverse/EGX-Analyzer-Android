@@ -134,12 +134,13 @@ internal fun EditCallSheet(
             ) {
                 // The one thing the card's own ⋮ menu used to offer that this sheet didn't: with
                 // that menu gone from the card, undoing a correction is reached from here instead,
-                // where the correction itself is made. Absent when there is nothing to undo, same
-                // guard the menu item used.
-                if (editor.hasEdits) {
+                // where the correction itself is made. Absent when there is nothing on this call to
+                // undo - guarded on this call's own edit, not the report's, so fixing one call does
+                // not offer to throw away a correction made on a different one.
+                if (editor.editFor(stock, point) != null) {
                     TextButton(
                         onClick = {
-                            editor.undoAll()
+                            editor.undo(stock, point)
                             onDismiss()
                         },
                     ) {
@@ -149,7 +150,7 @@ internal fun EditCallSheet(
                             modifier = Modifier.size(IconSize.Inline),
                         )
                         Spacer(Modifier.width(Space.xs))
-                        Text("Undo all edits")
+                        Text("Undo this call's edits")
                     }
                 }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
@@ -744,18 +745,18 @@ internal class CallEditor(
     /**
      * The correction standing against this occurrence, if one is actually in force.
      *
-     * The fingerprint is checked here as well as where the overlay is applied, and for the same
-     * reason: an edit whose occurrence has changed underneath it is not applied, so a chip drawn
-     * off the stored list alone would mark a card as corrected while showing the model's own
-     * figures - which is the one claim this screen cannot afford to get wrong.
+     * Matched by identity alone. The fingerprint that decides whether an edit still fits is
+     * already checked once, in [RecommendationEdits.apply] against the *raw* parse, before a
+     * fitting edit's values are folded into [stock]/[point] at all - so by the time this is
+     * called, `point` already carries the corrected figures, and re-checking its fingerprint here
+     * would be comparing it against the value it was corrected away from. That always disagrees,
+     * which is what silently hid the Edited chip and the per-call undo on every real correction.
      */
     fun editFor(
         stock: ConsolidatedRecommendation,
         point: RecommendationDataPoint,
     ): RecommendationEdit? = saved.result.edits.firstOrNull {
-        it.originalStockCode == stock.originalStockCode &&
-            it.pointIndex == point.parseIndex &&
-            it.fingerprint == point.editFingerprint()
+        it.originalStockCode == stock.originalStockCode && it.pointIndex == point.parseIndex
     }
 
     /** Whether anything in this report has been corrected, which is what the undo is offered on. */
@@ -797,6 +798,11 @@ internal class CallEditor(
         correctTrade: Boolean,
     ) = appState.editRecommendation(saved, edit, correctTrade)
 
+    /** Puts this one call back to what the model read, wherever its own undo is reached from. */
+    fun undo(stock: ConsolidatedRecommendation, point: RecommendationDataPoint) =
+        appState.undoRecommendationEdit(saved, stock.originalStockCode, point.parseIndex)
+
+    /** Puts every call in the report back at once. Offered only from the report's own menu. */
     fun undoAll() = appState.clearRecommendationEdits(saved)
 
     private fun channelsOf(stock: ConsolidatedRecommendation): Set<String> =

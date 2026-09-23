@@ -32,7 +32,6 @@ class FakeAppState(
     override val recommendationTargetDate: LocalDate = LocalDate.now(),
     override val settingsMessage: String? = null,
     override val credentialVerified: Boolean? = null,
-    override val promptHistory: List<PromptSnapshot> = emptyList(),
     override val catalogMessage: String = "",
     override val availableModels: List<CloudModelInfo> = emptyList(),
     override val modelUsage: List<ModelUsageRecord> = emptyList(),
@@ -247,6 +246,8 @@ class FakeAppState(
 
     override fun reopenPosition(position: Position) = Unit
 
+    override fun clearSale(position: Position) = Unit
+
     override fun reprice(
         position: Position,
         entryPrice: Double,
@@ -326,12 +327,6 @@ class FakeAppState(
     override fun updateResponseTimeout(value: Int) = Unit
 
     override fun toggleDefaultContentType(type: AnalysisContentType) = Unit
-
-    override fun updatePromptCustomization(systemPrompt: String, include: String, exclude: String) = Unit
-
-    override fun restorePromptSnapshot(snapshot: PromptSnapshot) = Unit
-
-    override fun resetPromptCustomization() = Unit
 
     override fun updateCorrectionRetries(value: Int) = Unit
 
@@ -443,6 +438,12 @@ class FakeAppState(
         correctTrade: Boolean,
     ) = Unit
 
+    override fun undoRecommendationEdit(
+        saved: SavedAnalysis,
+        originalStockCode: String,
+        pointIndex: Int,
+    ) = Unit
+
     override fun clearRecommendationEdits(saved: SavedAnalysis) = Unit
 
     /** Three real listings, so the picker draws with something to search rather than empty. */
@@ -456,6 +457,6 @@ class FakeAppState(
 
     override fun deleteAllResults() = Unit
 
-    override fun reportFor(saved: SavedAnalysis): AnalysisReport = AnalysisReport(title = "", markdown = "")
+    override fun reportFor(saved: SavedAnalysis): AnalysisReport = AnalysisReport(title = "", text = "")
 
 }

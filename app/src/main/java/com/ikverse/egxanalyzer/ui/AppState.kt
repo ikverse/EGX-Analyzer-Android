@@ -31,7 +31,6 @@ import com.ikverse.egxanalyzer.model.Portfolio
 import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionView
-import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.RecommendationEdit
 import com.ikverse.egxanalyzer.model.Sale
 import com.ikverse.egxanalyzer.model.SavedAnalysis
@@ -129,7 +128,6 @@ interface AppState : AppUpdates {
     val recommendationTargetDate: LocalDate
     val settingsMessage: String?
     val credentialVerified: Boolean?
-    val promptHistory: List<PromptSnapshot>
     val catalogMessage: String
     val availableModels: List<CloudModelInfo>
     val modelUsage: List<ModelUsageRecord>
@@ -390,6 +388,15 @@ interface AppState : AppUpdates {
 
     fun reopenPosition(position: Position)
 
+    /**
+     * Puts an already-sold trade back the way it was before the sale, from its own card's menu.
+     *
+     * Unlike [reopenPosition] - the brief Undo offered right after recording a sale, which restores
+     * the exact position it closed - this reaches a trade sold at any point since: it clears
+     * whatever sale is on the position now, whichever one that was.
+     */
+    fun clearSale(position: Position)
+
     fun reprice(
         position: Position,
         entryPrice: Double,
@@ -468,12 +475,6 @@ interface AppState : AppUpdates {
     fun updateResponseTimeout(value: Int)
 
     fun toggleDefaultContentType(type: AnalysisContentType)
-
-    fun updatePromptCustomization(systemPrompt: String, include: String, exclude: String)
-
-    fun restorePromptSnapshot(snapshot: PromptSnapshot)
-
-    fun resetPromptCustomization()
 
     fun updateCorrectionRetries(value: Int)
 
@@ -600,7 +601,14 @@ interface AppState : AppUpdates {
         correctTrade: Boolean,
     )
 
-    /** Puts a report back to exactly what the model read. */
+    /**
+     * Puts one call back to what the model read, moving its trade back too if the edit had moved
+     * one. Reached both by the message-line Undo right after a correction and by "Undo this call's
+     * edits" on the call itself, at any later time.
+     */
+    fun undoRecommendationEdit(saved: SavedAnalysis, originalStockCode: String, pointIndex: Int)
+
+    /** Puts a report back to exactly what the model read, every call at once. */
     fun clearRecommendationEdits(saved: SavedAnalysis)
 
     /**

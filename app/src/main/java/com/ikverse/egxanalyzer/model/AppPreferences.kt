@@ -41,9 +41,6 @@ data class AppPreferences(
     val analysisLanguage: AnalysisLanguage = AnalysisLanguage.BILINGUAL,
     val responseTimeoutSeconds: Int = ResponseTimeout.DEFAULT,
     val defaultContentTypes: Set<AnalysisContentType> = AnalysisContentType.entries.toSet(),
-    val customSystemPrompt: String = "",
-    val includePhrases: String = "",
-    val excludePhrases: String = "",
     val correctionRetries: Int = 1,
     val catalogEnrichmentEnabled: Boolean = true,
     /**
@@ -164,11 +161,4 @@ data class AppPreferences(
      * hidden anything. [CallOrder.TICKER] is the default because it is the record's own order.
      */
     val callOrder: CallOrder = CallOrder.TICKER,
-)
-
-data class PromptSnapshot(
-    val systemPrompt: String,
-    val includePhrases: String,
-    val excludePhrases: String,
-    val savedAtEpochMilliseconds: Long,
 )

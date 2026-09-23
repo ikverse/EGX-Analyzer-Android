@@ -20,6 +20,7 @@ import com.ikverse.egxanalyzer.ui.AnalysisStatus
 import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppState
 import com.ikverse.egxanalyzer.ui.AppUpdates
+import com.ikverse.egxanalyzer.ui.CallText
 import com.ikverse.egxanalyzer.ui.EGX_ZONE
 import com.ikverse.egxanalyzer.ui.NavStack
 import com.ikverse.egxanalyzer.ui.NavStop
@@ -62,7 +63,6 @@ import com.ikverse.egxanalyzer.data.PriceSeriesStore
 import com.ikverse.egxanalyzer.data.writePriceSeriesToDownloads
 import com.ikverse.egxanalyzer.data.PromptComposer
 import com.ikverse.egxanalyzer.data.PromptStore
-import com.ikverse.egxanalyzer.data.ScheduleMigration
 import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.SettingsSnapshot
 import com.ikverse.egxanalyzer.data.SyncOutcome
@@ -120,20 +120,17 @@ import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.PriceHealthReport
 import com.ikverse.egxanalyzer.model.StockHealth
 import com.ikverse.egxanalyzer.model.PriceSeriesSummary
-import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.PromptVersion
 import com.ikverse.egxanalyzer.model.ResponseTimeout
 import com.ikverse.egxanalyzer.model.RestoreOutcome
-import com.ikverse.egxanalyzer.model.RuleKind
 import com.ikverse.egxanalyzer.model.RuleOrigin
 import com.ikverse.egxanalyzer.model.RuleRejection
-import com.ikverse.egxanalyzer.model.RuleScope
 import com.ikverse.egxanalyzer.model.RuleSet
-import com.ikverse.egxanalyzer.model.RuleSlot
 import com.ikverse.egxanalyzer.model.Sale
 import com.ikverse.egxanalyzer.model.RecommendationEdit
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.CallIdentity
+import com.ikverse.egxanalyzer.model.callDate
 import com.ikverse.egxanalyzer.model.callSlot
 import com.ikverse.egxanalyzer.model.identity
 import com.ikverse.egxanalyzer.model.sourceIdsFor
@@ -372,8 +369,6 @@ class LiveAppState(
     /** True once the provider has accepted the key, false once it has rejected it, null untested. */
     override var credentialVerified by mutableStateOf<Boolean?>(null)
         private set
-    override var promptHistory by mutableStateOf(settingsRepository.promptHistory())
-        private set
     override var catalogMessage by mutableStateOf("${EgxCatalog.size()} seed stocks available offline.")
         private set
     // Seeded from disk rather than empty: the picker is the only safe way to choose a model, and a
@@ -463,9 +458,9 @@ class LiveAppState(
     override fun shareReport(saved: SavedAnalysis) {
         val report = reportFor(saved)
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/markdown"
+            type = "text/plain"
             putExtra(Intent.EXTRA_SUBJECT, report.title)
-            putExtra(Intent.EXTRA_TEXT, report.markdown)
+            putExtra(Intent.EXTRA_TEXT, report.text)
         }
         context.startActivity(
             Intent.createChooser(intent, "Share EGX analysis report")
@@ -820,40 +815,6 @@ class LiveAppState(
 
         if (changed) wordingRules = localDataStore.wordingRules()
         return changed
-    }
-
-    /**
-     * Carries the old free-text phrase fields over, once.
-     *
-     * They were one box for includes and one for excludes, applied both here and in the prompt with
-     * no way to say which - so they become rules scoped to both, which is what they already did.
-     */
-    private fun adoptLegacyPhrases() {
-        val stored = localDataStore.wordingRules()
-        if (stored.any { it.origin == RuleOrigin.USER }) return
-        val migrated = listOf(
-            RuleSlot.SOURCE_KEEP to appPreferences.includePhrases,
-            RuleSlot.SOURCE_DROP to appPreferences.excludePhrases,
-        ).flatMap { (slot, raw) ->
-            raw.split(",", "\n")
-                .map(String::trim)
-                .filter(String::isNotEmpty)
-                .map { phrase ->
-                    WordingRule(
-                        id = "legacy:${slot.name.lowercase()}:${WordingRule.normalize(phrase)}",
-                        slot = slot,
-                        kind = if (slot == RuleSlot.SOURCE_KEEP) RuleKind.INCLUDE else RuleKind.EXCLUDE,
-                        phrase = phrase,
-                        scope = RuleScope.BOTH,
-                        note = "Carried over from the old phrase boxes.",
-                        updatedAt = System.currentTimeMillis(),
-                        updatedBy = deviceName,
-                    )
-                }
-        }
-        if (migrated.isEmpty()) return
-        migrated.forEach(localDataStore::saveWordingRule)
-        wordingRules = localDataStore.wordingRules()
     }
 
     /**
@@ -1487,6 +1448,41 @@ class LiveAppState(
     }
 
     /**
+     * Clears whatever sale a trade carries now, reached from its own card rather than from the
+     * moment the sale was recorded.
+     *
+     * Built from the position's own exit fields rather than a snapshot from before the sale, which
+     * a menu pressed at any later time does not have. The one thing this cannot undo that the brief
+     * Undo on the status line can is a concurrent change to something other than the sale - there is
+     * none, since recording a sale touches nothing else on the position.
+     */
+    override fun clearSale(position: Position) {
+        val reopened = position.copy(
+            exitPrice = null,
+            exitDate = null,
+            exitPrice1 = null,
+            exitDate1 = null,
+            exitPrice2 = null,
+            exitSplitPct = null,
+            closedManually = false,
+            updatedAt = System.currentTimeMillis(),
+            updatedBy = deviceName,
+        )
+        localDataStore.savePosition(reopened)
+        positions = localDataStore.positions()
+        statusMessage = StatusMessage(
+            "${position.ticker} is open again",
+            true,
+            // The exact reverse of this action: the sale that was just cleared, put straight back
+            // rather than asking the reader to retype it - the same reasoning recordSale's own Undo
+            // follows.
+            undo = StatusUndo("Undo") { reopenPosition(position) },
+        )
+        publishPosition(reopened, deleted = false)
+        appScope.launch { recomputePortfolio() }
+    }
+
+    /**
      * Corrects what a trade was recorded at, and how long it was given.
      *
      * The call it belongs to and any recorded sale are untouched. The window is not: a deadline
@@ -1923,7 +1919,6 @@ class LiveAppState(
 
     init {
         syncCatalogEnrichment()
-        adoptLegacyPhrases()
         // Before the first sync, or this device's own settings would look like an empty install's
         // and be quietly overwritten by the other phone's rather than merged with them.
         settingsRepository.claimSettingsIfUnstamped(deviceName)
@@ -2371,34 +2366,6 @@ class LiveAppState(
         }
     }
 
-    override fun updatePromptCustomization(systemPrompt: String, include: String, exclude: String) {
-        saveAppPreferences(
-            appPreferences.copy(
-                customSystemPrompt = systemPrompt.trim(),
-                includePhrases = include.trim(),
-                excludePhrases = exclude.trim(),
-            ),
-        )
-        settingsRepository.savePromptSnapshot(appPreferences)
-        promptHistory = settingsRepository.promptHistory()
-        settingsMessage = "Prompt customization saved with a restorable history snapshot."
-    }
-
-    override fun restorePromptSnapshot(snapshot: PromptSnapshot) {
-        saveAppPreferences(
-            appPreferences.copy(
-                customSystemPrompt = snapshot.systemPrompt,
-                includePhrases = snapshot.includePhrases,
-                excludePhrases = snapshot.excludePhrases,
-            ),
-        )
-    }
-
-    override fun resetPromptCustomization() {
-        updatePromptCustomization("", "", "")
-        settingsMessage = "Default evidence-backed prompt restored."
-    }
-
     override fun updateCorrectionRetries(value: Int) {
         saveAppPreferences(appPreferences.copy(correctionRetries = value.coerceIn(0, 2)))
     }
@@ -2532,19 +2499,6 @@ class LiveAppState(
         get() = appPreferences.overdueRemindersEnabled || appPreferences.tradeAlertsEnabled
 
     /**
-     * The move off the old job table, before anything below reads what it writes.
-     *
-     * An init block rather than a line in the one further up, and its position is the whole point:
-     * Kotlin runs initialisers in source order, so a migration placed above these two properties
-     * is a migration whose writes their own initialisers then read - and one placed below them
-     * would be overwritten by exactly those initialisers instead. The same trap `foregroundStarted`
-     * is declared above `init` to avoid.
-     */
-    init {
-        migrateSchedules()
-    }
-
-    /**
      * Whether this phone keeps prices fresh while the market is trading.
      *
      * Off until it is switched on, unlike the daily catch-up beside it. That one runs on a launch
@@ -2608,25 +2562,6 @@ class LiveAppState(
         settingsRepository.saveMarketRefreshEnabled(enabled)
         marketRefreshEnabled = enabled
         rebookSchedules()
-    }
-
-    /**
-     * Moves what is on disk to what replaced it, once, on the first start of the build that did it.
-     *
-     * The rows this reads belonged to a job table that could hold any number of schedules of two
-     * kinds. What is left is a checkbox, so what a phone was already asking for is carried across
-     * rather than lost - and then the table goes, because a table nothing reads is one the next
-     * reader of this file has to work out the status of.
-     */
-    private fun migrateSchedules() {
-        if (settingsRepository.schedulesMigrated()) return
-        if (ScheduleMigration.marketRefreshWasOn(localDataStore.legacyScheduleRows())) {
-            settingsRepository.saveMarketRefreshEnabled(true)
-        }
-        localDataStore.dropScheduledJobs()
-        settingsRepository.markSchedulesMigrated()
-        // Nothing to re-book from here: this runs before the state that would be read, and the
-        // application books the alarm on every launch once the state is built.
     }
 
     /** Books the alarm for whatever is now nearest, after anything that could have moved it. */
@@ -3282,7 +3217,6 @@ class LiveAppState(
         cloudConfiguration = settingsRepository.load()
         availableModels = settingsRepository.modelCatalog(cloudConfiguration.provider)
         useDefaultPromptOnly = settingsRepository.useDefaultPromptOnly()
-        promptHistory = settingsRepository.promptHistory()
         // The daily check is booked with the system, not with this class: a device that adopts
         // "off" has to have the work cancelled, or it goes on waking up to say nothing.
         if (tradeWatchWanted != tradeWatchWas) {
@@ -4005,18 +3939,7 @@ class LiveAppState(
         val movedCall = was != null && now != null &&
             (now.ticker != was.ticker || now.openedOn != was.openedOn)
 
-        if (movedCall && was != null) {
-            // Keyed on the call the opinion was given about, which no longer exists.
-            val orphaned = opinionId(was.ticker, was.openedOn, was.channel)
-            localDataStore.deleteStockOpinion(orphaned)
-            opinions = opinions - orphaned
-            // The row saying this call had already been announced as reaching its buy zone. It
-            // describes a band on a different stock; left behind it would silence the corrected
-            // call's first crossing, which is the one worth hearing about.
-            localDataStore.saveCallAlertSeen(emptyMap(), forgotten = setOf(orphaned))
-        }
-
-        if (correctTrade && was != null) correctTradeOn(was, now, after?.point)
+        followIdentityChange(was, now, after?.point, correctTrade)
 
         // Only the message this occurrence was read out of. The rest of the run's reading is about
         // other cards and was not wrong.
@@ -4032,7 +3955,11 @@ class LiveAppState(
                 "$named updated"
             },
             succeeded = true,
-            undo = StatusUndo("Undo") { clearRecommendationEdits(saved) },
+            // Reverses only this edit, not every correction in the report - a second call fixed
+            // five minutes ago must not be thrown away because this one's Undo is still on screen.
+            undo = StatusUndo("Undo") {
+                undoRecommendationEdit(saved, edit.originalStockCode, edit.pointIndex)
+            },
         )
         publishReport(saved.id)
         appScope.launch {
@@ -4046,7 +3973,82 @@ class LiveAppState(
         }
     }
 
-    /** Puts a report back to what the model read. Offered as the undo on every correction. */
+    /**
+     * Follows one edit's effect on a call's identity wherever that identity is used: an orphaned
+     * Ask AI opinion, a stale call-alert mark, and a trade filed under the identity being left
+     * behind.
+     *
+     * Shared between making a correction and undoing one - see [editRecommendation] and
+     * [undoRecommendationEdit] - because both change what a call is filed as, or restore what it
+     * was, and the two must stay in step or one of them will silently orphan less than the other.
+     * [correctTradeOn] is itself direction-agnostic - it moves whatever it finds at [was] to [now]
+     * - so undoing a correction that moved a trade is the same call with the two identities the
+     * other way round, and undoing one that never moved a trade is a safe no-op: there is nothing
+     * sitting at [was] to find.
+     */
+    private fun followIdentityChange(
+        was: CallIdentity?,
+        now: CallIdentity?,
+        after: RecommendationDataPoint?,
+        correctTrade: Boolean,
+    ) {
+        if (was != null && (now == null || now.ticker != was.ticker || now.openedOn != was.openedOn)) {
+            // Keyed on the call the opinion was given about, which no longer exists.
+            val orphaned = opinionId(was.ticker, was.openedOn, was.channel)
+            localDataStore.deleteStockOpinion(orphaned)
+            opinions = opinions - orphaned
+            // The row saying this call had already been announced as reaching its buy zone. It
+            // describes a band on a different stock; left behind it would silence the call's next
+            // crossing at the identity it is filed under now.
+            localDataStore.saveCallAlertSeen(emptyMap(), forgotten = setOf(orphaned))
+        }
+        if (correctTrade && was != null) correctTradeOn(was, now, after)
+    }
+
+    /**
+     * Puts one call back to what the model read, and moves its trade back if the edit standing on
+     * it had moved one.
+     *
+     * The general form of "undo": [editRecommendation]'s own message-line Undo reaches here with
+     * the edit it just made, and "Undo this call's edits" reaches here with whichever edit is
+     * standing on the call at the time it is pressed - removing an edit is removing an edit whether
+     * it was made a moment ago or a week ago, so both go through the one function rather than one
+     * of them being a smaller copy of the other.
+     *
+     * No source reads are forgotten here, unlike [editRecommendation]: that step exists so a future
+     * run does not adopt a wrong reading for free, and undoing a correction goes back to the
+     * model's own reading, which was never the thing being guarded against.
+     */
+    override fun undoRecommendationEdit(saved: SavedAnalysis, originalStockCode: String, pointIndex: Int) {
+        if (saved.result.edits.none { it.originalStockCode == originalStockCode && it.pointIndex == pointIndex }) {
+            return
+        }
+        val before = saved.result.callSlot(originalStockCode, pointIndex) ?: return
+        val was = before.identity(saved.result)
+        val cleared = RecommendationEdit(
+            originalStockCode = originalStockCode,
+            pointIndex = pointIndex,
+            fingerprint = "",
+        )
+        val updated = localDataStore.saveResultEdit(saved.id, cleared) ?: return
+        val after = updated.callSlot(originalStockCode, pointIndex)
+        val now = after?.identity(updated)
+
+        followIdentityChange(was, now, after?.point, correctTrade = true)
+
+        reloadResults(saved.id)
+        val named = now?.ticker ?: was?.ticker ?: before.stock.stockCode
+        statusMessage = StatusMessage("$named's edits undone", succeeded = true)
+        publishReport(saved.id)
+        appScope.launch {
+            recomputePerformance()
+            recomputePortfolio()
+            runCatching { refreshPrices(announce = false) }
+            recomputePerformance()
+        }
+    }
+
+    /** Puts a report back to what the model read. Offered on the report's own menu. */
     override fun clearRecommendationEdits(saved: SavedAnalysis) {
         if (localDataStore.clearResultEdits(saved.id) == null) return
         reloadResults(saved.id)
@@ -4180,26 +4182,39 @@ class LiveAppState(
         }
     }
 
+    /**
+     * The report as plain text, for Share - one call per block in the same layout Copy call
+     * writes a single one in, so a reader who has learned that shape from one card is not taught a
+     * second one here.
+     *
+     * Built from `result.consolidated` rather than the flat `result.recommendations`, which is the
+     * model's answer before any correction is laid over it: a report shared after fixing a
+     * misread ticker used to go out under the wrong one, silently disagreeing with the Excel
+     * export - `reportSheet` - which has read the corrected calls all along.
+     */
     override fun reportFor(saved: SavedAnalysis): AnalysisReport {
         val result = saved.result
-        val markdown = buildString {
-            appendLine("# EGX analysis · ${result.recommendationTargetDate ?: "target not recorded"}")
-            appendLine()
-            appendLine("- Provider: ${saved.provider.displayName}")
-            appendLine("- Model: ${saved.model}")
-            appendLine("- Sources accepted: ${result.diagnostics.acceptedInputCount}")
-            appendLine("- Sources excluded: ${result.diagnostics.excludedSources.size}")
-            appendLine("- Validation warnings: ${result.diagnostics.validationWarnings.size}")
-            appendLine()
-            result.recommendations.forEachIndexed { index, recommendation ->
-                appendLine("## ${index + 1}. ${recommendation.ticker} — ${recommendation.companyName}")
-                appendLine("- Signal: ${recommendation.signal}")
-                appendLine("- Entry: ${recommendation.entryLow ?: "—"} to ${recommendation.entryHigh ?: "—"}")
-                appendLine("- Targets: ${recommendation.takeProfit1 ?: "—"}, ${recommendation.takeProfit2 ?: "—"}")
-                appendLine("- Stop loss: ${recommendation.stopLoss ?: "—"}")
-                appendLine("- Source IDs: ${recommendation.sourceIds.joinToString()}")
-                recommendation.notesArabic?.let { appendLine("- Notes: $it") }
-                appendLine()
+        val channelNames = result.sources
+            .filter { it.messageId != null }
+            .associate { it.messageId.toString() to it.channelName }
+        val text = buildString {
+            appendLine(
+                "EGX analysis for ${result.recommendationTargetDate ?: "an unrecorded session"} · " +
+                    saved.model,
+            )
+            result.consolidated.forEach { stock ->
+                stock.dataPoints.forEach { point ->
+                    appendLine()
+                    append(
+                        CallText.of(
+                            stock,
+                            point,
+                            channelNames[point.sourceMessageId],
+                            point.callDate(result.recommendationTargetDate),
+                        ),
+                    )
+                    appendLine()
+                }
             }
             // What was actually done about this session, on the prices actually paid. Closed by
             // hand or closed by the deadline, every position for the session is listed: a record
@@ -4208,14 +4223,15 @@ class LiveAppState(
                 ?.let { date -> portfolio.positions.filter { it.recommendationDate == date } }
                 .orEmpty()
             if (held.isNotEmpty()) {
-                appendLine("## Your positions")
                 appendLine()
+                appendLine("Your trades")
                 held.sortedBy(PositionView::ticker).forEach { view ->
                     val position = view.position
-                    appendLine("### ${position.ticker} — ${view.status.label}")
-                    appendLine("- Entry: ${formatPrice(position.entryPrice)} on ${position.entryDate}")
+                    appendLine()
+                    appendLine("${position.ticker} · ${view.status.label}")
+                    appendLine("Entry ${formatPrice(position.entryPrice)} on ${position.entryDate}")
                     appendLine(
-                        "- Exit: ${formatPrice(view.exitPrice)}" +
+                        "Exit ${formatPrice(view.exitPrice)}" +
                             (position.exitDate?.let { " on $it" } ?: "") +
                             " (${if (view.realized) "realized" else "estimated"})" +
                             // A sale made in two parts says so here too. The figure above it is
@@ -4230,9 +4246,9 @@ class LiveAppState(
                                 ""
                             },
                     )
-                    appendLine("- Return: ${formatPercent(view.returnPct)}")
+                    appendLine("Return ${formatPercent(view.returnPct)}")
                     appendLine(
-                        "- Deadline: " + (
+                        "Deadline " + (
                             view.deadlineDate?.let { "passed $it" }
                                 ?: "${view.sessionsRemaining} of ${position.windowSessions} sessions left"
                             ) +
@@ -4246,13 +4262,12 @@ class LiveAppState(
                                 ) +
                             (if (position.keepOpen) " · kept open until sold" else ""),
                     )
-                    appendLine()
                 }
             }
-        }
+        }.trim()
         return AnalysisReport(
             title = "EGX analysis ${result.recommendationTargetDate ?: result.completedAt}",
-            markdown = markdown,
+            text = text,
         )
     }
 }

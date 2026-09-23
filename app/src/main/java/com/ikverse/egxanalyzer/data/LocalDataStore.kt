@@ -2288,44 +2288,6 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
     }
 
     /**
-     * The rows of the job table this app used to keep, for the one migration that reads them.
-     *
-     * Raw columns rather than a parsed job: the types they parsed into are gone, and reviving them
-     * so that a one-time read can throw them away again would keep the whole vocabulary alive for
-     * a single function. Tolerant of the table being absent, which on a fresh install it is.
-     */
-    fun legacyScheduleRows(): List<LegacyScheduleRow> = runCatching {
-        readableDatabase
-            .query("scheduled_jobs", null, null, null, null, null, "created_at ASC")
-            .use { cursor ->
-                buildList {
-                    while (cursor.moveToNext()) {
-                        runCatching {
-                            LegacyScheduleRow(
-                                enabled = cursor.getInt(cursor.getColumnIndexOrThrow("enabled")) == 1,
-                                workKind = cursor.getString(cursor.getColumnIndexOrThrow("work_kind")),
-                                triggerKind = cursor.getString(cursor.getColumnIndexOrThrow("trigger_kind")),
-                                triggerAt = cursor.getString(cursor.getColumnIndexOrThrow("trigger_at")),
-                                workConfig = cursor.getString(cursor.getColumnIndexOrThrow("work_config")),
-                            )
-                        }.getOrNull()?.let(::add)
-                    }
-                }
-            }
-    }.getOrDefault(emptyList())
-
-    /**
-     * Takes the old job table away for good, once what was in it has been carried across.
-     *
-     * Dropped rather than left sitting unused: a table nothing reads is a table the next reader of
-     * this file has to work out the status of, and the migration that empties it is the only thing
-     * that ever knew the answer.
-     */
-    fun dropScheduledJobs() {
-        runCatching { writableDatabase.execSQL("DROP TABLE IF EXISTS scheduled_jobs") }
-    }
-
-    /**
      * What the user has already been told about each trade.
      *
      * Device-local and never published, for the reason `scheduled_jobs` is: a phone and a tablet
@@ -3156,18 +3118,3 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         const val DATABASE_VERSION = 28
     }
 }
-
-/**
- * One row of the retired job table, exactly as it was stored.
- *
- * Only the fields the migration needs to decide what a row meant: whether it was on, what it did,
- * and when. The name, the grace window and the outcome of its last fire are deliberately not here
- * - none of them survives into what replaced it.
- */
-data class LegacyScheduleRow(
-    val enabled: Boolean,
-    val workKind: String,
-    val triggerKind: String,
-    val triggerAt: String,
-    val workConfig: String,
-)

@@ -14,7 +14,6 @@ import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.ModelModality
 import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.ThemeMode
-import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.Scoring
 import org.json.JSONArray
 import org.json.JSONObject
@@ -248,9 +247,6 @@ class SettingsRepository(
         ).orEmpty().mapNotNullTo(mutableSetOf()) { stored ->
             AnalysisContentType.entries.firstOrNull { it.name == stored }
         }.ifEmpty { AnalysisContentType.entries.toSet() },
-        customSystemPrompt = preferences.getString(KEY_CUSTOM_PROMPT, "").orEmpty(),
-        includePhrases = preferences.getString(KEY_INCLUDE_PHRASES, "").orEmpty(),
-        excludePhrases = preferences.getString(KEY_EXCLUDE_PHRASES, "").orEmpty(),
         correctionRetries = preferences.getInt(KEY_CORRECTION_RETRIES, 1).coerceIn(0, 2),
         catalogEnrichmentEnabled = preferences.getBoolean(KEY_CATALOG_ENRICHMENT, true),
         defaultTradeWindowSessions = Scoring.clampWindow(
@@ -284,9 +280,6 @@ class SettingsRepository(
                 KEY_DEFAULT_CONTENT_TYPES,
                 value.defaultContentTypes.mapTo(mutableSetOf()) { it.name },
             )
-            .putString(KEY_CUSTOM_PROMPT, value.customSystemPrompt)
-            .putString(KEY_INCLUDE_PHRASES, value.includePhrases)
-            .putString(KEY_EXCLUDE_PHRASES, value.excludePhrases)
             .putInt(KEY_CORRECTION_RETRIES, value.correctionRetries.coerceIn(0, 2))
             .putBoolean(KEY_CATALOG_ENRICHMENT, value.catalogEnrichmentEnabled)
             .putInt(KEY_SCORING_WINDOW, Scoring.clampWindow(value.defaultTradeWindowSessions))
@@ -499,66 +492,10 @@ class SettingsRepository(
             .apply()
     }
 
-    /**
-     * Whether the one-time move off the old job table has happened.
-     *
-     * A flag rather than a look at the table, because the migration job is to leave that table
-     * gone: asking whether there are rows would answer no both before it has run on a phone that
-     * never had any and after it has run on one that did, and the difference matters exactly once.
-     */
-    fun schedulesMigrated(): Boolean = preferences.getBoolean(KEY_SCHEDULES_MIGRATED, false)
-
-    fun markSchedulesMigrated() {
-        preferences.edit().putBoolean(KEY_SCHEDULES_MIGRATED, true).apply()
-    }
-
     fun useDefaultPromptOnly(): Boolean = preferences.getBoolean(KEY_DEFAULT_PROMPT_ONLY, false)
 
     fun saveUseDefaultPromptOnly(value: Boolean) {
         preferences.edit().putBoolean(KEY_DEFAULT_PROMPT_ONLY, value).apply()
-    }
-
-    fun promptHistory(): List<PromptSnapshot> {
-        val raw = preferences.getString(KEY_PROMPT_HISTORY, "[]").orEmpty()
-        return runCatching {
-            val values = JSONArray(raw)
-            buildList {
-                for (index in 0 until values.length()) {
-                    val item = values.getJSONObject(index)
-                    add(
-                        PromptSnapshot(
-                            systemPrompt = item.optString("systemPrompt"),
-                            includePhrases = item.optString("includePhrases"),
-                            excludePhrases = item.optString("excludePhrases"),
-                            savedAtEpochMilliseconds = item.optLong("savedAt"),
-                        ),
-                    )
-                }
-            }
-        }.getOrDefault(emptyList())
-    }
-
-    fun savePromptSnapshot(value: AppPreferences) {
-        val updated = listOf(
-            PromptSnapshot(
-                systemPrompt = value.customSystemPrompt,
-                includePhrases = value.includePhrases,
-                excludePhrases = value.excludePhrases,
-                savedAtEpochMilliseconds = System.currentTimeMillis(),
-            ),
-        ) + promptHistory().take(9)
-        val json = JSONArray().apply {
-            updated.forEach { snapshot ->
-                put(
-                    JSONObject()
-                        .put("systemPrompt", snapshot.systemPrompt)
-                        .put("includePhrases", snapshot.includePhrases)
-                        .put("excludePhrases", snapshot.excludePhrases)
-                        .put("savedAt", snapshot.savedAtEpochMilliseconds),
-                )
-            }
-        }
-        preferences.edit().putString(KEY_PROMPT_HISTORY, json.toString()).apply()
     }
 
     /**
@@ -581,7 +518,6 @@ class SettingsRepository(
             )
         },
         useDefaultPromptOnly = useDefaultPromptOnly(),
-        promptHistory = promptHistory(),
         updatedAt = preferences.getLong(KEY_SETTINGS_UPDATED_AT, 0L),
         updatedBy = preferences.getString(KEY_SETTINGS_UPDATED_BY, "").orEmpty(),
         unknown = preferences.getString(KEY_SETTINGS_UNKNOWN, "{}").orEmpty(),
@@ -624,7 +560,6 @@ class SettingsRepository(
     fun adopt(snapshot: SettingsSnapshot) {
         savePreferences(snapshot.preferences)
         saveUseDefaultPromptOnly(snapshot.useDefaultPromptOnly)
-        replacePromptHistory(snapshot.promptHistory)
         snapshot.providers.forEach { entry ->
             preferences.edit()
                 .putString(entry.provider.endpointKey(), entry.endpoint)
@@ -643,21 +578,6 @@ class SettingsRepository(
             // has to survive this device saving its own settings over the top of it.
             .putString(KEY_SETTINGS_UNKNOWN, snapshot.unknown)
             .apply()
-    }
-
-    private fun replacePromptHistory(history: List<PromptSnapshot>) {
-        val json = JSONArray().apply {
-            history.forEach { snapshot ->
-                put(
-                    JSONObject()
-                        .put("systemPrompt", snapshot.systemPrompt)
-                        .put("includePhrases", snapshot.includePhrases)
-                        .put("excludePhrases", snapshot.excludePhrases)
-                        .put("savedAt", snapshot.savedAtEpochMilliseconds),
-                )
-            }
-        }
-        preferences.edit().putString(KEY_PROMPT_HISTORY, json.toString()).apply()
     }
 
     private inline fun <reified T : Enum<T>> enumPreference(key: String, fallback: T): T =
@@ -679,10 +599,7 @@ class SettingsRepository(
         const val KEY_ANALYSIS_LANGUAGE = "analysis_language"
         const val KEY_RESPONSE_TIMEOUT = "response_timeout"
         const val KEY_DEFAULT_CONTENT_TYPES = "default_content_types"
-        const val KEY_CUSTOM_PROMPT = "custom_system_prompt"
         const val KEY_DEFAULT_PROMPT_ONLY = "use_default_prompt_only"
-        const val KEY_INCLUDE_PHRASES = "analysis_include_phrases"
-        const val KEY_EXCLUDE_PHRASES = "analysis_exclude_phrases"
         const val KEY_CORRECTION_RETRIES = "correction_retries"
         const val KEY_CATALOG_ENRICHMENT = "catalog_enrichment"
         /**
@@ -718,7 +635,6 @@ class SettingsRepository(
         const val KEY_FEED_ALERTS = "feed_alerts_enabled"
         const val KEY_MARKET_REFRESH_NOTE = "market_refresh_note"
         const val KEY_MARKET_REFRESH_NOTE_AT = "market_refresh_note_at"
-        const val KEY_SCHEDULES_MIGRATED = "schedules_migrated"
         const val KEY_OPINION_SEARCH = "opinion_search_enabled"
         const val KEY_OPINION_NEWS_WINDOW = "opinion_news_window_days"
         const val KEY_OPINION_DEEP_SEARCH = "opinion_deep_search"
@@ -747,7 +663,6 @@ class SettingsRepository(
 
         /** Twelve rather than the provider's five, which was one usable Arabic item per press. */
         const val OPINION_SEARCH_RESULTS_DEFAULT = 12
-        const val KEY_PROMPT_HISTORY = "prompt_history"
         const val KEY_SETTINGS_UPDATED_AT = "settings_updated_at"
         const val KEY_SETTINGS_UPDATED_BY = "settings_updated_by"
         const val KEY_SETTINGS_UNKNOWN = "settings_unknown"

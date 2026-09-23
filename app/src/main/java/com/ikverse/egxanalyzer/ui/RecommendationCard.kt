@@ -100,7 +100,6 @@ internal fun RecommendationCards(
                     point = null,
                     page = 0,
                     pageCount = 0,
-                    session = null,
                     editor = null,
                 )
             }
@@ -181,10 +180,8 @@ private fun RecommendationCard(
         border = heldBorder(held) ?: cardOutline,
     ) {
         Column(Modifier.padding(Space.m)) {
-            // The session the call was made for, from the same source the Bought button
-            // reads it from, so the copied text and the trade agree about which day.
             StockHeader(
-                stock, point, page, pageCount, trades?.dateOf(point), editor,
+                stock, point, page, pageCount, editor,
                 onEdit = { editing = true },
             )
             Spacer(Modifier.height(Space.m))
@@ -414,8 +411,6 @@ private fun StockHeader(
     point: RecommendationDataPoint?,
     page: Int,
     pageCount: Int,
-    /** The session this occurrence was made for, which the copied text names. */
-    session: java.time.LocalDate?,
     editor: CallEditor?,
     onEdit: () -> Unit = {},
 ) {
@@ -548,13 +543,13 @@ internal fun CallMenu(
                         onEdit()
                     },
                 )
-                if (editor.hasEdits) {
+                if (editor.editFor(stock, point) != null) {
                     AppMenuItem(
-                        "Undo all edits",
+                        "Undo this call's edits",
                         Icons.Outlined.Undo,
                         onClick = {
                             open = false
-                            editor.undoAll()
+                            editor.undo(stock, point)
                         },
                     )
                 }

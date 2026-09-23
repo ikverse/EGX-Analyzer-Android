@@ -88,7 +88,6 @@ class BackupRoundTripTest {
         provider = CloudProvider.QWEN,
         providers = emptyList(),
         useDefaultPromptOnly = false,
-        promptHistory = emptyList(),
         updatedAt = 5_000,
         updatedBy = "phone",
     )

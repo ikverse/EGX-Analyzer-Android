@@ -5,7 +5,8 @@ import java.time.LocalDate
 
 data class AnalysisReport(
     val title: String,
-    val markdown: String,
+    /** Plain text - no markup, so it reads cleanly wherever Share hands it off to. */
+    val text: String,
 )
 
 /** One recommendation scored against the sessions that followed it. */

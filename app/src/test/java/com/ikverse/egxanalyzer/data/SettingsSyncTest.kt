@@ -4,7 +4,6 @@ import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.AppPreferences
 import com.ikverse.egxanalyzer.model.CloudProvider
 import com.ikverse.egxanalyzer.model.PortfolioOrder
-import com.ikverse.egxanalyzer.model.PromptSnapshot
 import com.ikverse.egxanalyzer.model.ThemeMode
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -34,7 +33,6 @@ class SettingsSyncTest {
             themeMode = theme,
             analysisLanguage = AnalysisLanguage.ARABIC,
             responseTimeoutSeconds = 420,
-            customSystemPrompt = "Read the levels as printed.",
             correctionRetries = 2,
             catalogEnrichmentEnabled = false,
             defaultTradeWindowSessions = window,
@@ -55,7 +53,6 @@ class SettingsSyncTest {
             ),
         ),
         useDefaultPromptOnly = true,
-        promptHistory = listOf(PromptSnapshot("system", "in", "out", 42)),
         updatedAt = at,
         updatedBy = by,
         unknown = unknown,

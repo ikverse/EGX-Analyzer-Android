@@ -872,6 +872,7 @@ private fun ColumnScope.PositionGrid(
                     appState.setKeepOpen(view.position, keep, note)
                 },
                 onRemove = { appState.deletePosition(view.position) },
+                onReopen = { appState.clearSale(view.position) },
                 modifier = if (revealed) {
                     Modifier.fillMaxWidth().bringIntoViewRequester(jump.reveal)
                 } else {

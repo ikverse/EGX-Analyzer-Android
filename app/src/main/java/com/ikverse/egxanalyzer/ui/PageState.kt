@@ -119,9 +119,6 @@ class PageState {
     /** The run whose table is open, which needs the whole row and so cannot be held by a card. */
     val openResultId: MutableState<Long?> = mutableStateOf(null)
 
-    /** Runs whose written report is showing, by run id: re-sorting must not move which card it is. */
-    val openReportMarkdown: MutableState<Set<Long>> = mutableStateOf(emptySet())
-
     val resultsChannels: MutableState<Set<String>> = mutableStateOf(emptySet())
     val resultsDate: MutableState<String?> = mutableStateOf(null)
     /** The header's stock box for this page: the pick, and what the reader is doing to it. */
@@ -166,11 +163,11 @@ class PageState {
      * A card defaults to expanded once it is wide enough to draw the chart in the ladder's place
      * and collapsed on a phone - see `PositionCard`'s own `chartExpanded` - so this holds only the
      * override, not the shown/hidden state itself: an id absent from the map means "use whichever
-     * the current width defaults to", not "collapsed". Survives a fold for the same reason
-     * [openReportMarkdown] does: a bare `remember` in `PositionCard` died on every fold, which on
-     * the Fold 7 is not a rare event but the ordinary way the phone is used - expand a chart on the
-     * cover screen, open the phone the rest of the way, and the card that greeted the reader had
-     * quietly closed it again.
+     * the current width defaults to", not "collapsed". Survives a fold for the reason everything on
+     * this page does: a bare `remember` in `PositionCard` died on every fold, which on the Fold 7 is
+     * not a rare event but the ordinary way the phone is used - expand a chart on the cover screen,
+     * open the phone the rest of the way, and the card that greeted the reader had quietly closed it
+     * again.
      */
     val expandedPositionCharts: MutableState<Map<String, Boolean>> = mutableStateOf(emptyMap())
 
