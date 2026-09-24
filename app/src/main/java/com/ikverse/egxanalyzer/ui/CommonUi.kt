@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -10,12 +11,18 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.repeatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -70,6 +77,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
@@ -97,6 +105,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -107,6 +116,9 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.takeOrElse
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import com.ikverse.egxanalyzer.R
 import com.ikverse.egxanalyzer.model.isEgx33
 import com.ikverse.egxanalyzer.ui.theme.LocalDarkTheme
@@ -114,6 +126,7 @@ import com.ikverse.egxanalyzer.ui.theme.pageAccent
 import java.time.LocalDate
 import kotlin.math.max
 import kotlin.math.min
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -808,6 +821,8 @@ internal fun ExpandableSection(
      */
     containerColor: Color? = null,
     showAccentEdge: Boolean = true,
+    /** Holding the header offers something beyond expanding the card - see [HoldPrompt]. */
+    onHeaderLongClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var localExpanded by remember { mutableStateOf(initiallyExpanded) }
@@ -832,9 +847,16 @@ internal fun ExpandableSection(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clickable {
-                        if (onExpandedChange != null) onExpandedChange(!expanded) else localExpanded = !expanded
-                    }
+                    .combinedClickable(
+                        onLongClick = onHeaderLongClick,
+                        onClick = {
+                            if (onExpandedChange != null) {
+                                onExpandedChange(!expanded)
+                            } else {
+                                localExpanded = !expanded
+                            }
+                        },
+                    )
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1385,11 +1407,26 @@ internal fun OutlinePill(
  * are not [OutlinePill] with a fill parameter, because a fill and a ring say different things here:
  * a ring annotates the call it sits on and a fill flags a standing fact about the stock. What they
  * must not differ in is their shape, and that is what this shares.
+ *
+ * [onClick] mirrors [OutlinePill]'s own: absent for the marks that are simply true of the stock -
+ * a rank, a badge - and given for the table's own timing pill, which explains itself the same way
+ * the card's [OutlinePill]-drawn one does.
  */
 @Composable
-internal fun FilledPill(text: String, container: Color, content: Color) {
-    Surface(color = container, contentColor = content, shape = PillShape) {
-        PillLabel(text)
+internal fun FilledPill(
+    text: String,
+    container: Color,
+    content: Color,
+    onClick: (() -> Unit)? = null,
+) {
+    if (onClick == null) {
+        Surface(color = container, contentColor = content, shape = PillShape) {
+            PillLabel(text)
+        }
+    } else {
+        Surface(onClick = onClick, color = container, contentColor = content, shape = PillShape) {
+            PillLabel(text)
+        }
     }
 }
 
@@ -1502,11 +1539,21 @@ private val PillOutline = 1.dp
  * dropped the ring and grew the glyph to 16dp on its own on 2026-09-20; asked for everywhere two
  * days later, since a mark that changes shape depending on which screen names the stock is the same
  * fault the pill pass fixed for wording, just for this one glyph instead.
+ *
+ * **Tappable since 2026-09-24**, like every other pill in the app that used to draw a fact and
+ * nothing else: a glyph with no wording is the one on this whole app most in need of a press that
+ * explains it.
  */
 @Composable
 internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
     if (!isEgx33(ticker)) return
-    Box(modifier.size(Egx33BadgeSize), contentAlignment = Alignment.Center) {
+    var explaining by remember { mutableStateOf(false) }
+    Box(
+        modifier
+            .size(Egx33BadgeSize)
+            .clickable { explaining = true },
+        contentAlignment = Alignment.Center,
+    ) {
         Icon(
             painterResource(R.drawable.ic_egx33),
             // Said in full, because nothing on screen says it. The glyph is the only place this
@@ -1515,6 +1562,18 @@ internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(Egx33GlyphSize),
         )
+    }
+    if (explaining) {
+        InfoSheet(
+            infoNote(
+                "EGX 33 Shariah index",
+                "The exchange counts this stock among the thirty-three companies whose business " +
+                    "and financing meet its Shariah screening criteria, reviewed every March and " +
+                    "September.",
+                "A property of the company, not of this call, this trade, or the run being " +
+                    "looked at - which is why the mark follows the ticker everywhere it appears.",
+            ),
+        ) { explaining = false }
     }
 }
 
@@ -1836,6 +1895,120 @@ private val MoreButtonSize = 40.dp
 
 /** Enough to read as floating over a card without the card showing through it. */
 private val MenuShadow = 8.dp
+
+/**
+ * One action offered on a [HoldPrompt]: its label, and whether it leads.
+ *
+ * [primary] draws the filled button the one action most likely to be chosen wears - the shape
+ * a hold's own "Edit call" has drawn since before this was a shared component. Every other action,
+ * and Cancel always, draws the outlined button beside it: a prompt of four filled buttons in a
+ * column is four equally loud claims, which says nothing about which one a reader actually wants.
+ */
+internal data class HoldAction(val label: String, val primary: Boolean = false, val onClick: () -> Unit)
+
+/**
+ * What holding something in this app now opens: its name, then what can be done about it.
+ *
+ * Generalizes the blurred, two-button prompt a hold on a Results call card has opened since
+ * `QuickEditPrompt` first drew it - the same blur, the same scale-and-fade, the same delayed
+ * dispatch - into the one shape a hold on a card, a tile or a ticker now shares, each supplying its
+ * own [title] and its own [actions] rather than each writing the animation and the blur again.
+ * Blurs what is behind it rather than dimming it flat - the platform's own way of saying "answer
+ * this and you're straight back", where a full-screen scrim would read as a new place navigated to.
+ * `Window.setBackgroundBlurRadius` is API 31, which is this app's `minSdk`, so there is no older
+ * path to fall back to.
+ *
+ * The dialog does not leave the moment a button is pressed: [visible] drives the exit animation and
+ * the dialog itself is only asked to close once that animation has actually run, so a press is
+ * answered by a shrink-and-fade rather than a cut, and the chosen action fires only once the dialog
+ * is already gone - which is what lets an action open a dialog of its own without the two fighting
+ * over one window.
+ */
+@Composable
+internal fun HoldPrompt(title: String, actions: List<HoldAction>, onDismiss: () -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+    var chosen by remember { mutableStateOf<(() -> Unit)?>(null) }
+    LaunchedEffect(Unit) { visible = true }
+    LaunchedEffect(visible) {
+        if (!visible) {
+            delay(HoldPromptExitMs.toLong())
+            chosen?.invoke() ?: onDismiss()
+        }
+    }
+    Dialog(
+        onDismissRequest = { visible = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        val view = LocalView.current
+        DisposableEffect(Unit) {
+            val window = (view.parent as? DialogWindowProvider)?.window
+            window?.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            window?.setBackgroundBlurRadius(HoldPromptBlurRadius)
+            window?.setDimAmount(HoldPromptDim)
+            onDispose {}
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { visible = false },
+            contentAlignment = Alignment.Center,
+        ) {
+            AnimatedVisibility(
+                visible = visible,
+                enter = fadeIn(tween(HoldPromptEnterMs)) +
+                    scaleIn(initialScale = 0.85f, animationSpec = tween(HoldPromptEnterMs)),
+                exit = fadeOut(tween(HoldPromptExitMs)) +
+                    scaleOut(targetScale = 0.85f, animationSpec = tween(HoldPromptExitMs)),
+            ) {
+                Column(
+                    Modifier
+                        .padding(Space.xl)
+                        .background(
+                            Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
+                            RoundedCornerShape(24.dp),
+                        )
+                        // Swallows a press so it does not fall through to the scrim behind the
+                        // buttons and dismiss the dialog it landed on.
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {}
+                        .padding(Space.l),
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
+                ) {
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(Space.xs))
+                    actions.forEach { action ->
+                        val fire = { chosen = action.onClick; visible = false }
+                        if (action.primary) {
+                            Button(onClick = fire, modifier = Modifier.fillMaxWidth()) {
+                                Text(action.label)
+                            }
+                        } else {
+                            OutlinedButton(onClick = fire, modifier = Modifier.fillMaxWidth()) {
+                                Text(action.label)
+                            }
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { visible = false },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private const val HoldPromptEnterMs = 220
+private const val HoldPromptExitMs = 160
+private const val HoldPromptDim = 0.32f
+private const val HoldPromptBlurRadius = 48
 
 /**
  * One band of a sheet's scroll, on the cards' own surface.

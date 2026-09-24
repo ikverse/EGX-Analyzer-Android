@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -158,8 +159,12 @@ internal fun PositionCard(
                         // than just the first - which is also what puts the name flush under the
                         // ticker with no padding hack: it is simply the next line in the same column.
                         val openStock = LocalOpenStock.current
+                        var filteringTicker by remember(position.ticker) { mutableStateOf(false) }
                         Row(
-                            Modifier.clickable { openStock(position.ticker) },
+                            Modifier.combinedClickable(
+                                onClick = { openStock(position.ticker) },
+                                onLongClick = { filteringTicker = true },
+                            ),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             StockLogo(position.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
@@ -180,6 +185,18 @@ internal fun PositionCard(
                                     )
                                 }
                             }
+                        }
+                        if (filteringTicker) {
+                            HoldPrompt(
+                                title = position.ticker,
+                                actions = listOf(
+                                    HoldAction("Filter this page to ${position.ticker}", primary = true) {
+                                        filteringTicker = false
+                                        appState.pages.portfolioStock.value = position.ticker
+                                    },
+                                ),
+                                onDismiss = { filteringTicker = false },
+                            )
                         }
                         // Every pill on this card, still in the one row the card says them all in -
                         // moved up into the header itself, so identity and status read as one block
@@ -913,25 +930,39 @@ private fun TPlusOneChip(position: Position) {
                 "${position.windowSessions.sessionWord()} below came from: the call named this " +
                 "trade's deadline, not your default."
         }
-        AlertDialog(
-            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-            onDismissRequest = { showing = false },
-            title = { Text("${position.ticker} · a T+1 trade") },
-            text = { Text("$call $deadline") },
-            confirmButton = {
-                TextButton(onClick = { showing = false }) { Text("Close") }
-            },
-        )
+        // `InfoNote`'s own constructor rather than the checked `infoNote` factory: that helper's
+        // callers are checked by InfoNoteTest for static prose, and both paragraphs here are built
+        // from this trade's own figures.
+        InfoSheet(InfoNote("${position.ticker} · a T+1 trade", listOf(call, deadline))) {
+            showing = false
+        }
     }
 }
 
+/**
+ * Says the trade is being followed past its own deadline instead of closed at it, on the user's
+ * own decision - see [KeepOpenButton]. Tappable since 2026-09-24, like every other note pill on
+ * this card: the wording says what happened but not why the reader would choose it.
+ */
 @Composable
 private fun KeptOpenChip() {
+    var showing by remember { mutableStateOf(false) }
     OutlinePill(
         "Keep open · sell to close",
         outline = MaterialTheme.colorScheme.tertiary,
         textColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        onClick = { showing = true },
     )
+    if (showing) {
+        InfoSheet(
+            infoNote(
+                "Keep open · sell to close",
+                "You chose to follow this trade past its own deadline rather than close it there. " +
+                    "It stays open, and every figure on this card keeps measuring it, until you " +
+                    "record a sale or undo Keep open from the card's own menu.",
+            ),
+        ) { showing = false }
+    }
 }
 
 /**

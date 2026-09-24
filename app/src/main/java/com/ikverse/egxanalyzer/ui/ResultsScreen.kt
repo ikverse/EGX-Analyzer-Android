@@ -212,14 +212,13 @@ internal fun ResultsScreen(appState: AppState) {
             // notification and runs on first composition, so the seed only ever repeated it.
             var openRun by appState.pages.openResultId
             // The newest run held for each session, so a card can tell whether it is the current
-            // reading of its session or an earlier one a re-run has since covered.
+            // reading of its session or an earlier one a re-run has since covered - and, since
+            // 2026-09-24, can open that newer run directly rather than only naming that it exists.
             val newestRunFor = remember(appState.savedResults) {
                 appState.savedResults
-                    .mapNotNull { saved ->
-                        saved.result.recommendationTargetDate?.let { it to saved.result.completedAt }
-                    }
-                    .groupBy({ it.first }, { it.second })
-                    .mapValues { (_, runAt) -> runAt.max() }
+                    .filter { it.result.recommendationTargetDate != null }
+                    .groupBy { it.result.recommendationTargetDate }
+                    .mapValues { (_, runs) -> runs.maxBy { it.result.completedAt } }
             }
             // A run arriving from a notification opens itself, whether the screen was already
             // showing or not.
@@ -273,8 +272,15 @@ internal fun ResultsScreen(appState: AppState) {
                         },
                         highlighted = saved.id == appState.pendingResultId,
                         onHighlightShown = { appState.consumePendingResult() },
-                        newerRunExists = saved.result.recommendationTargetDate
-                            ?.let { newestRunFor[it]?.isAfter(saved.result.completedAt) } == true,
+                        onOpenNewerRun = saved.result.recommendationTargetDate
+                            ?.let { newestRunFor[it] }
+                            ?.takeIf { it.result.completedAt.isAfter(saved.result.completedAt) }
+                            ?.let { newer ->
+                                {
+                                    openRun = newer.id
+                                    appState.selectResult(newer)
+                                }
+                            },
                         onShare = { appState.shareReport(saved) },
                         onSaveLocally = { scope.launch { appState.saveReportToDownloads(saved) } },
                         onExport = { scope.launch { appState.exportReport(saved) } },
@@ -288,6 +294,7 @@ internal fun ResultsScreen(appState: AppState) {
                         },
                         traceRoot = appState.traceRoot(),
                         stockFilter = stockFilter,
+                        onFilterToTicker = { ticker -> appState.pages.resultsStock.value = ticker },
                     )
                 }
 
@@ -880,8 +887,11 @@ private fun SavedAnalysisCard(
     /** Opened from a notification: its edge flashes briefly. */
     highlighted: Boolean = false,
     onHighlightShown: () -> Unit = {},
-    /** Whether a later run covered the same session, which makes this report the older reading. */
-    newerRunExists: Boolean = false,
+    /**
+     * Opens the later run that covered this session, which makes this report the older reading.
+     * Null where none exists.
+     */
+    onOpenNewerRun: (() -> Unit)? = null,
     onShare: () -> Unit,
     /** The same table as a spreadsheet, written to the phone's own Downloads folder. */
     onSaveLocally: () -> Unit,
@@ -896,6 +906,8 @@ private fun SavedAnalysisCard(
     traceRoot: File,
     /** What the screen is searching for, which the report opens already narrowed to. */
     stockFilter: String = "",
+    /** Holding a call's ticker offers this; narrows the page's own stock filter to it. */
+    onFilterToTicker: (String) -> Unit = {},
 ) {
     // Stays local and dies with the card, deliberately: a dropdown left hanging over a page that has
     // just been rebuilt into a different shape is not where the reader left anything.
@@ -990,11 +1002,23 @@ private fun SavedAnalysisCard(
                     // the unreadable notice exists for. Worded as a fact rather than "superseded":
                     // an older run keeps the chats the newer one never read, which is how the
                     // scoring treats it too.
-                    if (newerRunExists) {
+                    if (onOpenNewerRun != null) {
                         // Space.s, the same air the table's timing pill stands on. A 20dp ring
                         // set 4dp under a line of small print reads as hanging off it rather
                         // than as a mark beside it, and the two are one object.
-                        Box(Modifier.padding(top = Space.s)) { StatusPill("Newer run exists") }
+                        //
+                        // Tappable since 2026-09-24, and distinct from every other note pill's
+                        // press: this one opens the newer run itself rather than explaining
+                        // itself, since "read the current one instead" is a more useful answer
+                        // than a sentence saying that a current one exists.
+                        Box(Modifier.padding(top = Space.s)) {
+                            OutlinePill(
+                                "Newer run exists",
+                                outline = MaterialTheme.colorScheme.outline,
+                                textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                onClick = onOpenNewerRun,
+                            )
+                        }
                     }
                 }
                 Box {
@@ -1212,6 +1236,7 @@ private fun SavedAnalysisCard(
                     editor,
                     stockFilter = stockFilter,
                     onHide = { onExpandedChange(false) },
+                    onFilterToTicker = onFilterToTicker,
                 )
             }
         }
@@ -1322,6 +1347,8 @@ private fun ResultDetail(
     /** What the screen is searching for, which this report opens already narrowed to. */
     stockFilter: String,
     onHide: () -> Unit,
+    /** Holding a call's ticker offers this; narrows the page's own stock filter to it. */
+    onFilterToTicker: (String) -> Unit = {},
 ) {
     // The occurrence the sheet is showing, held as **where it is** rather than as what it held when
     // it was opened. A correction made from inside the sheet rewrites the report underneath it, and
@@ -1521,6 +1548,7 @@ private fun ResultDetail(
                         imagePathFor = { ref -> saved.result.imagePathFor(ref) },
                         showContext = showContext,
                         toolbar = { Toolbar(compact = false) },
+                        onFilterToTicker = onFilterToTicker,
                     )
                 } else {
                     // A sixteen-column table on a cover screen is a scroll bar with numbers behind
@@ -1534,6 +1562,7 @@ private fun ResultDetail(
                                 imagePathFor = { ref -> saved.result.imagePathFor(ref) },
                                 trades = trades,
                                 editor = editor,
+                                onFilterToTicker = onFilterToTicker,
                             )
                         }
                     }
@@ -1727,7 +1756,7 @@ private val TARGET_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE 
 private val COMPLETED_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm")
 
 /** IMAGE_REF is one-based over the images sent with the request. */
-private fun AnalysisResult.imagePathFor(reference: Int?): String? =
+internal fun AnalysisResult.imagePathFor(reference: Int?): String? =
     reference?.let { imagePaths.getOrNull(it - 1) }
 
 /** Below this a table can only be read by scrolling it sideways, which is not reading. */

@@ -229,15 +229,29 @@ internal fun TradeAction(
  * How far past its deadline a trade has run with nothing recorded about how it ended.
  *
  * The loss colour rather than a neutral one, and next to the status rather than buried in the
- * figures: it is the one thing on a card that is asking the user to do something.
+ * figures: it is the one thing on a card that is asking the user to do something. Tappable since
+ * 2026-09-24, like every other note pill on this card.
  */
 @Composable
 internal fun OverdueChip(days: Long) {
+    var showing by remember { mutableStateOf(false) }
     OutlinePill(
         "Overdue $days ${days.dayWord()}",
         outline = extraColors.loss,
         textColor = extraColors.onLossContainer,
+        onClick = { showing = true },
     )
+    if (showing) {
+        InfoSheet(
+            infoNote(
+                "Overdue",
+                "This trade's deadline passed $days ${days.dayWord()} ago with nothing recorded " +
+                    "about how it ended, because it was kept open past it rather than closed " +
+                    "there. Record the sale once you know what it was sold for, or hand it back " +
+                    "to its deadline from the card's own menu.",
+            ),
+        ) { showing = false }
+    }
 }
 
 /**
@@ -246,15 +260,29 @@ internal fun OverdueChip(days: Long) {
  * Neutral rather than a warning colour, and deliberately the same neutral the unjudged outcomes wear
  * in Insights: nothing has gone wrong with the trade, and nothing about it is known either. The
  * wording is [Outcome.PRICE_BREAK]'s own label rather than a second phrasing of it, so a card and the
- * report it came from can never end up describing this two different ways.
+ * report it came from can never end up describing this two different ways. Tappable since
+ * 2026-09-24, like every other note pill on this card.
  */
 @Composable
 internal fun PriceScaleChip() {
+    var showing by remember { mutableStateOf(false) }
     OutlinePill(
         Outcome.PRICE_BREAK.label,
         outline = MaterialTheme.colorScheme.outline,
         textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        onClick = { showing = true },
     )
+    if (showing) {
+        InfoSheet(
+            infoNote(
+                Outcome.PRICE_BREAK.label,
+                "The share price changed scale while this trade was running - a split or a bonus " +
+                    "issue - so the levels it was taken on and the prices since are in different " +
+                    "money. Nothing here is valued against them until that is sorted out, and " +
+                    "nothing about the trade itself is in question.",
+            ),
+        ) { showing = false }
+    }
 }
 
 /**
@@ -754,14 +782,40 @@ private fun String.toPriceOrNull(): Double? =
 private fun String.toWindowOrNull(): Int? = trim().toIntOrNull()
     ?.takeIf { it in Scoring.MIN_WINDOW_SESSIONS..Scoring.MAX_WINDOW_SESSIONS }
 
-/** Where the position stands, in one word, coloured the same everywhere it appears. */
+/**
+ * Where the position stands, in one word, coloured the same everywhere it appears. Tappable since
+ * 2026-09-24, like every other note pill on this card.
+ */
 @Composable
 internal fun PositionStatusChip(view: PositionView) {
+    var showing by remember(view.position.id) { mutableStateOf(false) }
     OutlinePill(
         view.status.label,
         outline = view.status.pillOutline(),
         textColor = view.status.onContainer(),
+        onClick = { showing = true },
     )
+    if (showing) {
+        // `InfoNote`'s own constructor rather than the checked `infoNote` factory: that helper's
+        // callers are checked by InfoNoteTest for static prose, and both the label and its
+        // explanation here are read off `view.status` rather than typed at the call site.
+        InfoSheet(InfoNote(view.status.label, listOf(view.status.explanation()))) { showing = false }
+    }
+}
+
+/** What this status means for the trade, in the reader's own words. */
+private fun PositionStatus.explanation(): String = when (this) {
+    PositionStatus.OPEN -> "Still running: neither a target nor the stop has been reached, and " +
+        "the deadline has not passed."
+    PositionStatus.PARTIAL_TARGET_HIT -> "Reached target 1. Still open for target 2 unless it was " +
+        "sold there, or the stop or the deadline has since ended it."
+    PositionStatus.FULL_TARGET_HIT -> "Reached target 2, the best outcome a call offers."
+    PositionStatus.STOPPED_OUT -> "Broke the stop by more than 2%, which is where the trade ends " +
+        "regardless of what it does afterwards."
+    PositionStatus.EXPIRED -> "The window ran out with neither a target nor the stop reached - " +
+        "still in the market's hands, not closed by a decision."
+    PositionStatus.CLOSED_MANUALLY -> "Closed by a sale you recorded, rather than by a target, the " +
+        "stop or the deadline."
 }
 
 /**

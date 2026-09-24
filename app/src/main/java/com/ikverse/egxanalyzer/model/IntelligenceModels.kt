@@ -142,6 +142,22 @@ data class ScoredCall(
      * working it out from a different set of inputs.
      */
     val signals: Set<CallSignal> = emptySet(),
+    /**
+     * The saved report this call's own occurrence was read out of - `SavedAnalysis.id`, not
+     * [requestId], which is the report's own identity rather than the row that names it.
+     *
+     * Together with [originalStockCode] and [pointIndex] this is what lets an Insights card reach
+     * back to the exact `ConsolidatedRecommendation`/`RecommendationDataPoint` pair it was built
+     * from - for View screenshot, Copy call, Edit call and Open its report, none of which this
+     * screen could otherwise reach: it holds a scored call, not a report's own parsed occurrence.
+     * Null only for a call built without a report behind it, which is every test fixture and
+     * nothing on a device.
+     */
+    val reportId: Long? = null,
+    /** The stock's own [ConsolidatedRecommendation.originalStockCode], for the lookup above. */
+    val originalStockCode: String? = null,
+    /** The occurrence's own [RecommendationDataPoint.parseIndex], for the lookup above. */
+    val pointIndex: Int? = null,
 ) {
 }
 
@@ -375,6 +391,8 @@ data class ScoredSession(
     val channelsFromLatest: Int = 0,
     val channelsTotal: Int = 0,
     val calls: List<ScoredCall>,
+    /** The newest report that contributed to this session - `SavedAnalysis.id` - for Open its report. */
+    val reportId: Long? = null,
 ) {
     val fullHits: Int get() = calls.count { it.outcome.isFullHit }
     val partialHits: Int get() = calls.count { it.outcome == Outcome.PARTIAL_HIT }

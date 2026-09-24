@@ -1,6 +1,7 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -102,7 +104,7 @@ internal fun PortfolioScreen(appState: AppState) {
         // in the filter below cannot hide a trade that is late.
         OverdueCard(
             overdue = remember(portfolio) { overdueRoster(portfolio.positions) },
-            onOpen = appState::openPosition,
+            appState = appState,
         )
 
         // Under Overdue and above the record, which is where it belongs in the order those two
@@ -224,7 +226,7 @@ private fun ColumnScope.PortfolioSummary(stats: PortfolioStats) {
  * overdue trades" is a permanent reminder of a state the app is not in.
  */
 @Composable
-private fun OverdueCard(overdue: List<PositionView>, onOpen: (String) -> Unit) {
+private fun OverdueCard(overdue: List<PositionView>, appState: AppState) {
     if (overdue.isEmpty()) return
     SectionCard(
         title = "Overdue",
@@ -244,7 +246,9 @@ private fun OverdueCard(overdue: List<PositionView>, onOpen: (String) -> Unit) {
                 ResponsiveRows(overdue, columns, spacing = Space.s) { view, tileModifier ->
                     OverdueTile(
                         view = view,
-                        onOpen = { onOpen(view.position.id) },
+                        onOpen = { appState.openPosition(view.position.id) },
+                        onRecordSale = { appState.openPositionToSell(view.position.id) },
+                        onFollowDeadline = { appState.setKeepOpen(view.position, keepOpen = false) },
                         modifier = tileModifier,
                     )
                 }
@@ -278,9 +282,22 @@ private fun OverdueCard(overdue: List<PositionView>, onOpen: (String) -> Unit) {
  * the arrival effect in [PositionSection], which clears the date filter only if it is what hides
  * the trade, unfolds the session card, scrolls to it and flashes its edge. No second path to
  * maintain, and no way for the two entrances to disagree about where a trade is.
+ *
+ * Holding it offers the two things worth doing about a late trade without opening it first:
+ * [onRecordSale], which is the same entrance [AppState.openPositionToSell] gives a trade status
+ * notification's own Record sale action, and [onFollowDeadline], which undoes Keep open in place.
+ * Not "Keep open" itself - a trade on this card is already overdue, which only happens by having
+ * been kept open once already, so offering it again would be offering a decision already made.
  */
 @Composable
-private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifier = Modifier) {
+private fun OverdueTile(
+    view: PositionView,
+    onOpen: () -> Unit,
+    onRecordSale: () -> Unit,
+    onFollowDeadline: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var holding by remember(view.position.id) { mutableStateOf(false) }
     // Read before the builder rather than inside it: the colour is a composable lookup and the line
     // it belongs to is plain text.
     val returnColor = PriceRole.forReturn(view.returnPct)
@@ -298,9 +315,12 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
         }
     }
     Card(
-        onClick = onOpen,
         modifier = modifier
             .fillMaxWidth()
+            .combinedClickable(
+                onClick = onOpen,
+                onLongClick = { holding = true },
+            )
             .semantics { onClick(label = "Open this trade", action = null) },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -350,6 +370,16 @@ private fun OverdueTile(view: PositionView, onOpen: () -> Unit, modifier: Modifi
             // the card's own heading repeated on every tile.
             OverdueMeta(days = days, held = held, ret = ret)
         }
+    }
+    if (holding) {
+        HoldPrompt(
+            title = view.ticker,
+            actions = listOf(
+                HoldAction("Record sale", primary = true) { holding = false; onRecordSale() },
+                HoldAction("Follow the deadline again") { holding = false; onFollowDeadline() },
+            ),
+            onDismiss = { holding = false },
+        )
     }
 }
 

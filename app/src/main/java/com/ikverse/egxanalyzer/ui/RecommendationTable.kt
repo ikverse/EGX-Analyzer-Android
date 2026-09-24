@@ -125,6 +125,8 @@ internal fun RecommendationTable(
      * scrolling back past every row to the top of the report.
      */
     toolbar: (@Composable () -> Unit)? = null,
+    /** Holding the ticker+logo heading offers this; narrows the page's own stock filter to it. */
+    onFilterToTicker: (String) -> Unit = {},
 ) {
     if (stocks.isEmpty()) return
     // How far the table's own top has been scrolled past the top of the page's viewport. The
@@ -183,6 +185,7 @@ internal fun RecommendationTable(
                         showContext = showContext,
                         onSelectPoint = onSelectPoint,
                         imagePathFor = imagePathFor,
+                        onFilterToTicker = onFilterToTicker,
                     )
                 }
             }
@@ -230,6 +233,7 @@ private fun StockBlock(
     showContext: Boolean,
     onSelectPoint: (ConsolidatedRecommendation, RecommendationDataPoint) -> Unit,
     imagePathFor: (Int?) -> String?,
+    onFilterToTicker: (String) -> Unit = {},
 ) {
     // A card within a card goes one step up, the rule the Portfolio's session cards already follow.
     // It was a full-bleed `surfaceContainerHighest` band under a 2dp rule - the heaviest divider in
@@ -242,7 +246,7 @@ private fun StockBlock(
         border = cardOutline,
     ) {
         Column {
-            StockHeading(stock, latest)
+            StockHeading(stock, latest, onFilterToTicker)
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             ColumnHeader()
             stock.dataPoints.forEachIndexed { index, point ->
@@ -284,7 +288,11 @@ private fun StockBlock(
  * dash because the reader is scanning down it for one; a heading is read once.
  */
 @Composable
-private fun StockHeading(stock: ConsolidatedRecommendation, latest: LatestPrice?) {
+private fun StockHeading(
+    stock: ConsolidatedRecommendation,
+    latest: LatestPrice?,
+    onFilterToTicker: (String) -> Unit = {},
+) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.s),
         verticalAlignment = Alignment.CenterVertically,
@@ -294,8 +302,12 @@ private fun StockHeading(stock: ConsolidatedRecommendation, latest: LatestPrice?
         // lines and a press target that tall over a heading reads as the whole heading being a
         // button. See LocalOpenStock.
         val openStock = LocalOpenStock.current
+        var filtering by remember(stock.stockCode) { mutableStateOf(false) }
         Row(
-            Modifier.clickable { openStock(stock.stockCode) },
+            Modifier.combinedClickable(
+                onClick = { openStock(stock.stockCode) },
+                onLongClick = { filtering = true },
+            ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
@@ -311,6 +323,18 @@ private fun StockHeading(stock: ConsolidatedRecommendation, latest: LatestPrice?
             // the same company was marked Shariah-compliant on its card and on its sheet and
             // unmarked on the table between them.
             Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
+        }
+        if (filtering) {
+            HoldPrompt(
+                title = stock.stockCode,
+                actions = listOf(
+                    HoldAction("Filter this page to ${stock.stockCode}", primary = true) {
+                        filtering = false
+                        onFilterToTicker(stock.stockCode)
+                    },
+                ),
+                onDismiss = { filtering = false },
+            )
         }
         Column(Modifier.weight(1f).padding(start = Space.m)) {
             stock.stockNameArabic?.let {
@@ -448,7 +472,7 @@ private fun CallRow(
             Modifier.fillMaxWidth().heightIn(min = RowHeight).padding(horizontal = Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SourceCell(channel, timing(point), Modifier.width(SourceWidth))
+            SourceCell(channel, point, Modifier.width(SourceWidth))
             StackedCell(
                 Modifier.weight(EntryWeight),
                 value = entry(point),
@@ -487,7 +511,8 @@ private fun CallRow(
  * every other name the app draws - including the stock's own, two rows above it.
  */
 @Composable
-private fun SourceCell(channel: String?, timing: String?, modifier: Modifier) {
+private fun SourceCell(channel: String?, point: RecommendationDataPoint, modifier: Modifier) {
+    val label = timing(point)
     // Space.s, and no longer the 3dp that was never on the spacing scale. That gap was set when
     // the timing was a line of small print carrying 1dp of padding; it is a 20dp pill now, and at
     // 3dp its edge closed on the channel name instead of standing under it.
@@ -513,15 +538,23 @@ private fun SourceCell(channel: String?, timing: String?, modifier: Modifier) {
             color = LocalContentColor.current,
             modifier = Modifier.fillMaxWidth(),
         )
-        timing?.let {
+        label?.let {
             // Neutral, and deliberately not a hue per timing. Every colour this app has spare means
             // something about a price - market blue most of all - and a T+1 chip borrowing one
             // would be spending a signal on chrome to save the reader reading two characters.
+            //
+            // Tappable since 2026-09-24, like the same pill on the card: a reader who has never
+            // seen "Watching" or "T+1" before had no way to ask what either meant.
+            var showing by remember(point) { mutableStateOf(false) }
             FilledPill(
                 it,
                 container = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f),
                 content = MaterialTheme.colorScheme.onSurfaceVariant,
+                onClick = { showing = true },
             )
+            if (showing) {
+                InfoSheet(InfoNote(it, listOf(timingExplanation(point)))) { showing = false }
+            }
         }
     }
 }

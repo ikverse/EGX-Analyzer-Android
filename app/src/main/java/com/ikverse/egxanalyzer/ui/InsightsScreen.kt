@@ -6,6 +6,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -32,7 +34,6 @@ import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Leaderboard
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -40,8 +41,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -55,6 +56,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -75,11 +78,14 @@ import com.ikverse.egxanalyzer.model.CallOrder
 import com.ikverse.egxanalyzer.model.CallSignal
 import com.ikverse.egxanalyzer.model.CallTally
 import com.ikverse.egxanalyzer.model.ChannelScore
+import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
 import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.RecommendationDataPoint
+import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.Scoring
@@ -428,15 +434,13 @@ private fun OutcomeLabel(call: ScoredCall) {
         onClick = { showing = true },
     )
     if (showing) {
-        AlertDialog(
-            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-            onDismissRequest = { showing = false },
-            title = { Text("${call.ticker} · ${call.outcome.label}") },
-            text = { Text(call.reason()) },
-            confirmButton = {
-                TextButton(onClick = { showing = false }) { Text("Close") }
-            },
-        )
+        // Built from the call rather than passed to `infoNote`: that helper's callers are checked
+        // by InfoNoteTest for static prose, and a call's reason is the one explanation in the app
+        // that is different on every card - so it is `InfoNote`'s own constructor, not the checked
+        // factory function, on purpose.
+        InfoSheet(InfoNote("${call.ticker} · ${call.outcome.label}", listOf(call.reason()))) {
+            showing = false
+        }
     }
 }
 
@@ -1086,6 +1090,10 @@ private fun SessionCard(
     // flag every session at once, which says exactly what flagging none of them says and takes a
     // page of chips to say it.
     val isNew = seenAt > 0L && run.lastRunAt.toEpochMilli() > seenAt
+    // Holding the header offers the one thing a session card cannot otherwise reach: the report
+    // this reading actually came from. Absent on a session with no report behind it, which is
+    // every test fixture and nothing on a device.
+    var holdingSession by remember(run.reportId) { mutableStateOf(false) }
     // Closed by default: a run is a summary line until asked for, so a page of them stays
     // readable however many analyses have been saved.
     ExpandableSection(
@@ -1100,6 +1108,7 @@ private fun SessionCard(
         summaryContent = { SessionSummary(run, tally, isNew) },
         expandedState = expanded,
         onExpandedChange = onExpandedChange,
+        onHeaderLongClick = run.reportId?.let { { holdingSession = true } },
         modifier = modifier,
     ) {
         // Where the card's contents came from. Built from more than one run it is not a single
@@ -1161,6 +1170,18 @@ private fun SessionCard(
             }
         }
     }
+    if (holdingSession) {
+        HoldPrompt(
+            title = run.targetDate?.format(AppDates.WeekdaySession) ?: "Target not recorded",
+            actions = listOf(
+                HoldAction("Open this session's report", primary = true) {
+                    holdingSession = false
+                    run.reportId?.let { appState.openSavedResult(it) }
+                },
+            ),
+            onDismiss = { holdingSession = false },
+        )
+    }
 }
 
 @Composable
@@ -1205,6 +1226,14 @@ private fun ScoredCallRow(
     // Set while this card's own request is out, so the answer opens itself when it lands. Without
     // it every card already holding an opinion would spring open the moment any request finished.
     var awaiting by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    // Holding the card offers what a card cannot otherwise reach without opening something first.
+    var holding by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    var viewingImage by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    var buying by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    // Resolved once per card rather than per action: View screenshot needs it to find the image
+    // and Copy call/Bought/Open its report do not, but all four are decided together for the one
+    // hold prompt the card offers.
+    val occurrence = remember(call, appState.savedResults) { appState.occurrenceFor(call) }
     LaunchedEffect(opinion) {
         if (awaiting && opinion != null) {
             awaiting = false
@@ -1268,13 +1297,17 @@ private fun ScoredCallRow(
                     // the one that leads to the stock. See LocalOpenStock.
                     val nameBlock: @Composable () -> Unit = {
                         val openStock = LocalOpenStock.current
+                        var filteringTicker by remember(call.ticker) { mutableStateOf(false) }
                         // The logo sits beside the ticker-and-name pair rather than the ticker
                         // alone, and CenterVertically is what centers it against both lines
                         // rather than just the first - which is also what puts the name flush
                         // under the ticker with no padding hack: it is simply the next line in
                         // the same column.
                         Row(
-                            Modifier.clickable { openStock(call.ticker) },
+                            Modifier.combinedClickable(
+                                onClick = { openStock(call.ticker) },
+                                onLongClick = { filteringTicker = true },
+                            ),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
@@ -1296,6 +1329,18 @@ private fun ScoredCallRow(
                                     )
                                 }
                             }
+                        }
+                        if (filteringTicker) {
+                            HoldPrompt(
+                                title = call.ticker,
+                                actions = listOf(
+                                    HoldAction("Filter this page to ${call.ticker}", primary = true) {
+                                        filteringTicker = false
+                                        appState.pages.insightsStock.value = call.ticker
+                                    },
+                                ),
+                                onDismiss = { filteringTicker = false },
+                            )
                         }
                     }
                     if (wide) {
@@ -1445,7 +1490,7 @@ private fun ScoredCallRow(
                     }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                ExtractionWarning(call)
+                ExtractionWarning(call, appState)
                 // What the outline means, in one line. Everything else on this card judges the
                 // channel on the levels it printed; this is the only figure here measured from
                 // what was paid.
@@ -1752,10 +1797,15 @@ private fun ScoredCallRow(
 
     // Two overloads over one body rather than a clickable wrapped round the card: Material's own
     // pressable card is what keeps the ripple inside the corners, and an unheld call must not
-    // answer a press at all - there is nothing to open.
+    // answer a *tap* at all - there is nothing to open. A hold is offered either way - see
+    // [HoldPrompt] - so the unheld branch still listens for one, through a plain pointer detector
+    // rather than `combinedClickable`, which cannot offer a long click without also drawing a tap
+    // ripple over a press that would otherwise do nothing.
     if (onOpenTrade == null) {
         Card(
-            modifier.fillMaxWidth(),
+            modifier
+                .fillMaxWidth()
+                .pointerInput(Unit) { detectTapGestures(onLongPress = { holding = true }) },
             colors = colors,
             border = border,
             shape = MaterialTheme.shapes.medium,
@@ -1763,10 +1813,10 @@ private fun ScoredCallRow(
         )
     } else {
         Card(
-            onClick = onOpenTrade,
             // A pressable card announces itself as "activate" and nothing more, which says nothing
             // about where the press goes. The action itself is Material's; only its name is ours.
             modifier = modifier.fillMaxWidth()
+                .combinedClickable(onClick = onOpenTrade, onLongClick = { holding = true })
                 .semantics { onClick(label = "Open this trade in the Portfolio", action = null) },
             colors = colors,
             border = border,
@@ -1774,7 +1824,116 @@ private fun ScoredCallRow(
             content = body,
         )
     }
+    if (holding) {
+        val imagePath = occurrence?.let { it.saved.result.imagePathFor(it.point.sourceImageRef) }
+        val clipboard = LocalClipboardManager.current
+        val actions = buildList {
+            if (imagePath != null) {
+                add(HoldAction("View screenshot") { holding = false; viewingImage = true })
+            }
+            add(
+                HoldAction("Copy call") {
+                    holding = false
+                    clipboard.setText(AnnotatedString(call.asCopyText()))
+                },
+            )
+            call.reportId?.let { reportId ->
+                add(
+                    HoldAction("Open its report") {
+                        holding = false
+                        appState.openSavedResult(reportId)
+                    },
+                )
+            }
+            if (held == null) {
+                add(HoldAction("Bought", primary = true) { holding = false; buying = true })
+            }
+        }
+        if (actions.isNotEmpty()) {
+            HoldPrompt(title = call.ticker, actions = actions, onDismiss = { holding = false })
+        }
+    }
+    if (viewingImage && occurrence != null) {
+        SourceImageViewer(
+            occurrence.saved.result.imagePathFor(occurrence.point.sourceImageRef),
+            occurrence.point.sourceImageRef,
+            onDismiss = { viewingImage = false },
+        )
+    }
+    if (buying) {
+        val offeredWindow = if (call.isTPlusOne) {
+            call.windowSessions
+        } else {
+            appState.appPreferences.defaultTradeWindowSessions
+        }
+        TradeDialog(
+            title = "Record the purchase",
+            explanation = "The price you actually paid, which is what every figure for this " +
+                "position is measured from. The deadline still runs from the session the call " +
+                "was made for - buying late does not buy extra time - but how many sessions it " +
+                "runs for is yours to set.",
+            priceLabel = "Entry price",
+            dateLabel = "Entry date",
+            confirmLabel = "Save",
+            initialPrice = call.entryMidpoint(),
+            initialWindow = offeredWindow,
+            windowHelp = if (call.isTPlusOne) {
+                "This call is T+1: the session it was made for, and the next one. Change it to " +
+                    "give this trade longer."
+            } else {
+                "Your default, from Settings. Change it to give this trade its own deadline - " +
+                    "it decides when this trade expires and nothing else."
+            },
+            onDismiss = { buying = false },
+            onConfirm = { price, date, window ->
+                buying = false
+                appState.recordPurchase(
+                    ticker = call.ticker,
+                    companyEnglish = call.companyEnglish,
+                    companyArabic = call.companyArabic,
+                    channel = call.channel,
+                    recommendationDate = call.openedOn,
+                    entryPrice = price,
+                    entryDate = date,
+                    entryLow = call.entryLow,
+                    entryHigh = call.entryHigh,
+                    target1 = call.target1,
+                    target2 = call.target2,
+                    stopLoss = call.stopLoss,
+                    windowSessions = window ?: offeredWindow,
+                    offeredWindow = offeredWindow,
+                    isTPlusOne = call.isTPlusOne,
+                )
+            },
+        )
+    }
 }
+
+/** The middle of the buy band, which is what a fill is usually nearest - offered as the default. */
+private fun ScoredCall.entryMidpoint(): Double? {
+    val low = entryLow
+    val high = entryHigh
+    return when {
+        low != null && high != null -> (low + high) / 2
+        else -> low ?: high
+    }
+}
+
+/** A call as plain text, for Copy call - the same shape [CallText.of] gives a report's own card. */
+private fun ScoredCall.asCopyText(): String = buildList {
+    add(listOfNotNull(ticker, companyArabic).joinToString(" · "))
+    val entry = when {
+        entryLow != null && entryHigh != null && entryLow != entryHigh ->
+            "${formatPrice(entryLow)} – ${formatPrice(entryHigh)}"
+        else -> (entryLow ?: entryHigh)?.let(::formatPrice)
+    }
+    entry?.let { add("Entry $it") }
+    target1?.let { add("Target 1 ${formatPrice(it)}") }
+    target2?.let { add("Target 2 ${formatPrice(it)}") }
+    stopLoss?.let { add("Stop ${formatPrice(it)}") }
+    channel.takeIf(String::isNotBlank)?.let { add("Source $it") }
+    add("For ${AppDates.DayMonth.format(openedOn)}")
+}.joinToString("\n")
 
 /**
  * Opens the session table, and says which way it is about to go.
@@ -1890,26 +2049,19 @@ private fun TimingLabel(call: ScoredCall) {
         onClick = { showing = true },
     )
     if (showing) {
-        AlertDialog(
-            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-            onDismissRequest = { showing = false },
-            title = { Text("${call.ticker} · a T+1 trade") },
-            text = {
-                Text(
-                    "${call.channel} printed this as a T+1 call: buy on the session it was made " +
-                        "for, and be out on the next one. So it is judged over those " +
-                        "${call.windowSessions} sessions and no more, where every other call runs " +
-                        "up to ${Scoring.JUDGING_HORIZON_SESSIONS} sessions before it counts as " +
-                        "expired with neither a target nor the stop reached. The buy zone counts " +
-                        "on both sessions - if the price never traded into it in either one, " +
-                        "there was no trade to take, and the call is counted neither for nor " +
-                        "against the channel.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { showing = false }) { Text("Close") }
-            },
-        )
+        InfoSheet(
+            infoNote(
+                "${call.ticker} · a T+1 trade",
+                "${call.channel} printed this as a T+1 call: buy on the session it was made " +
+                    "for, and be out on the next one. So it is judged over those " +
+                    "${call.windowSessions} sessions and no more, where every other call runs " +
+                    "up to ${Scoring.JUDGING_HORIZON_SESSIONS} sessions before it counts as " +
+                    "expired with neither a target nor the stop reached. The buy zone counts " +
+                    "on both sessions - if the price never traded into it in either one, " +
+                    "there was no trade to take, and the call is counted neither for nor " +
+                    "against the channel.",
+            ),
+        ) { showing = false }
     }
 }
 
@@ -1929,11 +2081,17 @@ private fun TimingLabel(call: ScoredCall) {
  *
  * Tappable, and it says so by looking the same as [OutcomeLabel] - a chip that is only sometimes
  * tappable teaches nobody that it can be tapped.
+ *
+ * The sheet also offers View screenshot and Edit call, where [AppState.occurrenceFor] can still
+ * resolve the report this call was read out of - absent once that report is gone, which a scored
+ * call otherwise has no way to notice.
  */
 @Composable
-private fun ExtractionWarning(call: ScoredCall) {
+private fun ExtractionWarning(call: ScoredCall, appState: AppState) {
     if (call.faults.isEmpty()) return
     var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    var viewingImage by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    var editing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
     val amber = extraColors.expired
     OutlinePill(
         if (call.faults.size == 1) {
@@ -1945,38 +2103,85 @@ private fun ExtractionWarning(call: ScoredCall) {
         textColor = amber,
         onClick = { showing = true },
     )
+    val occurrence = remember(call, appState.savedResults) { appState.occurrenceFor(call) }
     if (showing) {
-        AlertDialog(
-            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-            onDismissRequest = { showing = false },
-            title = { Text("${call.ticker} · levels to check") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Text(
-                        "This call was read out of a screenshot, and these levels do not hang " +
-                            "together the way a printed card would. Nothing about the record has " +
-                            "been changed: the call is still scored, and every rate still counts " +
-                            "it. Worth reading the original card against.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    call.faults.forEach { fault ->
-                        Column {
-                            Text(fault.label, style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                fault.detail,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+        InfoSheet(
+            note = infoNote(
+                "${call.ticker} · levels to check",
+                "This call was read out of a screenshot, and these levels do not hang together " +
+                    "the way a printed card would. Nothing about the record has been changed: the " +
+                    "call is still scored, and every rate still counts it. Worth reading the " +
+                    "original card against.",
+            ),
+            content = {
+                call.faults.forEach { fault ->
+                    Column {
+                        Text(fault.label, style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            fault.detail,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
+                if (occurrence != null) {
+                    Spacer(Modifier.height(Space.xs))
+                    val imagePath =
+                        occurrence.saved.result.imagePathFor(occurrence.point.sourceImageRef)
+                    if (imagePath != null) {
+                        OutlinedButton(
+                            onClick = { showing = false; viewingImage = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("View screenshot") }
+                    }
+                    OutlinedButton(
+                        onClick = { showing = false; editing = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Edit call") }
+                }
             },
-            confirmButton = {
-                TextButton(onClick = { showing = false }) { Text("Close") }
-            },
+            onDismiss = { showing = false },
         )
     }
+    if (viewingImage && occurrence != null) {
+        SourceImageViewer(
+            occurrence.saved.result.imagePathFor(occurrence.point.sourceImageRef),
+            occurrence.point.sourceImageRef,
+            onDismiss = { viewingImage = false },
+        )
+    }
+    if (editing && occurrence != null) {
+        val editor = remember(appState, occurrence.saved.id, occurrence.saved.result.editRevision) {
+            CallEditor(appState, occurrence.saved)
+        }
+        EditCallSheet(occurrence.stock, occurrence.point, editor, onDismiss = { editing = false })
+    }
+}
+
+/** One call's parsed occurrence, resolved back from a [ScoredCall] - see [AppState.occurrenceFor]. */
+private data class CallOccurrence(
+    val saved: SavedAnalysis,
+    val stock: ConsolidatedRecommendation,
+    val point: RecommendationDataPoint,
+)
+
+/**
+ * The exact report and occurrence a scored call was read out of, or null once that report is gone.
+ *
+ * A [ScoredCall] is a reading of the record, not the record itself: it holds no image path, no
+ * editable levels, no report id to jump to directly by its own type. [ScoredCall.reportId],
+ * [ScoredCall.originalStockCode] and [ScoredCall.pointIndex] are exactly the identity a correction
+ * is already anchored by - see [EditCallSheet] - so this is the one place that walk back to the
+ * report is made, rather than every call site that needs it making its own.
+ */
+private fun AppState.occurrenceFor(call: ScoredCall): CallOccurrence? {
+    val reportId = call.reportId ?: return null
+    val saved = savedResults.firstOrNull { it.id == reportId } ?: return null
+    val stock = saved.result.consolidated
+        .firstOrNull { it.originalStockCode == call.originalStockCode }
+        ?: return null
+    val point = stock.dataPoints.firstOrNull { it.parseIndex == call.pointIndex } ?: return null
+    return CallOccurrence(saved, stock, point)
 }
 
 /**

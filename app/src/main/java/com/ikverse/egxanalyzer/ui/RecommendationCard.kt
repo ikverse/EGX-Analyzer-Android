@@ -2,17 +2,10 @@ package com.ikverse.egxanalyzer.ui
 
 import com.ikverse.egxanalyzer.model.timing
 
-import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,15 +23,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,10 +40,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Undo
@@ -64,7 +50,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
-import kotlinx.coroutines.delay
 
 /**
  * Every occurrence of one stock, one card each, swiped through sideways.
@@ -85,6 +70,8 @@ internal fun RecommendationCards(
     trades: TradeBook? = null,
     /** Corrects what the model read off the card. Absent, the figures cannot be changed. */
     editor: CallEditor? = null,
+    /** Holding the ticker offers this; narrows the page to it. See [HoldPrompt]. */
+    onFilterToTicker: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val points = stock.dataPoints
@@ -101,6 +88,7 @@ internal fun RecommendationCards(
                     page = 0,
                     pageCount = 0,
                     editor = null,
+                    onFilterToTicker = onFilterToTicker,
                 )
             }
         }
@@ -127,6 +115,7 @@ internal fun RecommendationCards(
                 editor = editor,
                 page = page,
                 pageCount = points.size,
+                onFilterToTicker = onFilterToTicker,
             )
         }
     }
@@ -148,6 +137,7 @@ private fun RecommendationCard(
     editor: CallEditor?,
     page: Int,
     pageCount: Int,
+    onFilterToTicker: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember(point) { mutableStateOf(false) }
@@ -183,6 +173,7 @@ private fun RecommendationCard(
             StockHeader(
                 stock, point, page, pageCount, editor,
                 onEdit = { editing = true },
+                onFilterToTicker = onFilterToTicker,
             )
             Spacer(Modifier.height(Space.m))
 
@@ -305,8 +296,11 @@ private fun RecommendationCard(
         SourceImageViewer(imagePath, point.sourceImageRef, onDismiss = { viewingImage = false })
     }
     if (quickEditOpen) {
-        QuickEditPrompt(
-            onEdit = { quickEditOpen = false; editing = true },
+        HoldPrompt(
+            title = stock.stockCode,
+            actions = listOf(
+                HoldAction("Edit call", primary = true) { quickEditOpen = false; editing = true },
+            ),
             onDismiss = { quickEditOpen = false },
         )
     }
@@ -314,96 +308,6 @@ private fun RecommendationCard(
         EditCallSheet(stock, point, editor, onDismiss = { editing = false })
     }
 }
-
-/**
- * Two buttons over a blurred card, reached by holding rather than opening [CallMenu].
- *
- * Blurs what is behind it rather than dimming it flat - the platform's own way of saying "answer
- * this and you're straight back", where a full-screen scrim would read as a new place navigated
- * to. `Window.setBackgroundBlurRadius` is API 31, which is this app's `minSdk`, so there is no
- * older path to fall back to.
- *
- * The dialog does not leave the moment a button is pressed: `visible` drives the exit animation
- * and the dialog itself is only asked to close once that animation has actually run, so a press
- * is answered by a shrink-and-fade rather than a cut.
- */
-@Composable
-private fun QuickEditPrompt(onEdit: () -> Unit, onDismiss: () -> Unit) {
-    var visible by remember { mutableStateOf(false) }
-    var editRequested by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { visible = true }
-    LaunchedEffect(visible) {
-        if (!visible) {
-            delay(QuickEditExitMs.toLong())
-            if (editRequested) onEdit() else onDismiss()
-        }
-    }
-    Dialog(
-        onDismissRequest = { visible = false },
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        val view = LocalView.current
-        DisposableEffect(Unit) {
-            val window = (view.parent as? DialogWindowProvider)?.window
-            window?.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-            window?.setBackgroundBlurRadius(QuickEditBlurRadius)
-            window?.setDimAmount(QuickEditDim)
-            onDispose {}
-        }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) { visible = false },
-            contentAlignment = Alignment.Center,
-        ) {
-            AnimatedVisibility(
-                visible = visible,
-                enter = fadeIn(tween(QuickEditEnterMs)) +
-                    scaleIn(initialScale = 0.85f, animationSpec = tween(QuickEditEnterMs)),
-                exit = fadeOut(tween(QuickEditExitMs)) +
-                    scaleOut(targetScale = 0.85f, animationSpec = tween(QuickEditExitMs)),
-            ) {
-                Column(
-                    Modifier
-                        .padding(Space.xl)
-                        .background(
-                            Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-                            RoundedCornerShape(24.dp),
-                        )
-                        // Swallows a press so it does not fall through to the scrim behind the
-                        // buttons and dismiss the dialog it landed on.
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) {}
-                        .padding(Space.l),
-                    verticalArrangement = Arrangement.spacedBy(Space.s),
-                ) {
-                    Button(
-                        onClick = { editRequested = true; visible = false },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Edit call")
-                    }
-                    OutlinedButton(
-                        onClick = { visible = false },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Cancel")
-                    }
-                }
-            }
-        }
-    }
-}
-
-private const val QuickEditEnterMs = 220
-private const val QuickEditExitMs = 160
-private const val QuickEditDim = 0.32f
-private const val QuickEditBlurRadius = 48
 
 @Composable
 private fun StockHeader(
@@ -413,6 +317,7 @@ private fun StockHeader(
     pageCount: Int,
     editor: CallEditor?,
     onEdit: () -> Unit = {},
+    onFilterToTicker: (String) -> Unit = {},
 ) {
     // Ticker style and name style match the identity block Insights draws on its own call card
     // (InsightsScreen.kt's ScoredCallRow) - same stock, two screens, one look. The pills sit where
@@ -426,8 +331,12 @@ private fun StockHeader(
             // CenterVertically is what centers it against both lines rather than just the
             // first - which is also what puts the name flush under the ticker with no padding
             // hack: it is simply the next line in the same column.
+            var filtering by remember(stock.stockCode) { mutableStateOf(false) }
             Row(
-                Modifier.clickable { openStock(stock.stockCode) },
+                Modifier.combinedClickable(
+                    onClick = { openStock(stock.stockCode) },
+                    onLongClick = { filtering = true },
+                ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
@@ -446,6 +355,18 @@ private fun StockHeader(
                         )
                     }
                 }
+            }
+            if (filtering) {
+                HoldPrompt(
+                    title = stock.stockCode,
+                    actions = listOf(
+                        HoldAction("Filter this page to ${stock.stockCode}", primary = true) {
+                            filtering = false
+                            onFilterToTicker(stock.stockCode)
+                        },
+                    ),
+                    onDismiss = { filtering = false },
+                )
             }
         }
         if (point != null) {
@@ -579,11 +500,35 @@ internal fun TimingChip(point: RecommendationDataPoint) {
     // the app a different colour from its neighbours for a reason none of them showed. The
     // wording is what says this call names its own deadline; the hue was saying it twice, in a
     // language the card spends on prices everywhere else. Asked for on 2026-09-11.
+    //
+    // Tappable since 2026-09-24, like every other pill on this card that used to draw a fact and
+    // nothing else: a reader who has never seen "Watching" or "T+1" on a card before had no way to
+    // ask what either meant.
+    var showing by remember(point) { mutableStateOf(false) }
     OutlinePill(
         label,
         outline = MaterialTheme.colorScheme.outline,
         textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        onClick = { showing = true },
     )
+    if (showing) {
+        // `InfoNote`'s own constructor rather than the checked `infoNote` factory: that helper's
+        // callers are checked by InfoNoteTest for static prose, and this label and explanation are
+        // both read off the point rather than typed here.
+        InfoSheet(InfoNote(label, listOf(timingExplanation(point)))) { showing = false }
+    }
+}
+
+/** What decided the date this call is judged from, in the reader's own words. */
+internal fun timingExplanation(point: RecommendationDataPoint): String = when {
+    point.isWatching -> "The source named this stock with no date to act on - a level worth " +
+        "watching rather than a call to take now."
+    point.isTPlusOne -> "The source printed this as a T+1 call: buy on the session it was made " +
+        "for, and be out on the next one, rather than the thirty sessions an ordinary call runs."
+    point.effectiveDateBasis == "explicit_date" ->
+        "The source named a specific date for this call, rather than leaving it to the day it " +
+            "was posted."
+    else -> "How this call's date was worked out, off what the source actually printed."
 }
 
 /**

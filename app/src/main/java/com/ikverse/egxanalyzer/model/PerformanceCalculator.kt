@@ -164,6 +164,7 @@ object PerformanceCalculator {
                         channelsFromLatest = run.channelsFromLatest,
                         channelsTotal = run.channelsTotal,
                         calls = run.calls.sortedBy(ScoredCall::ticker),
+                        reportId = run.newestReportId,
                     )
                 }
                 .sortedByDescending { it.targetDate },
@@ -269,6 +270,8 @@ object PerformanceCalculator {
         val channelsFromLatest: Int,
         val channelsTotal: Int,
         val calls: List<ScoredCall>,
+        /** The newest report that contributed to this session, for Open its report. */
+        val newestReportId: Long,
     )
 
     /**
@@ -314,6 +317,7 @@ object PerformanceCalculator {
                 channelsFromLatest = chosen.getValue(newest).map(ScoredCall::channelId).distinct().size,
                 channelsTotal = claimed.size,
                 calls = chosen.values.flatten(),
+                newestReportId = newest.id,
             )
         }
 
@@ -420,7 +424,7 @@ object PerformanceCalculator {
         saved.result.consolidated.forEach { stock ->
             stock.dataPoints.forEach { point ->
                 val call = point.toCall(
-                    stock, channelNames, channelIds, targetDate, saved.result.requestId,
+                    stock, channelNames, channelIds, targetDate, saved.result.requestId, saved.id,
                 )
                     ?: return@forEach
                 if (call.openedOn < since) return@forEach
@@ -442,6 +446,8 @@ object PerformanceCalculator {
         targetDate: LocalDate?,
         /** The report this was read out of, so an opinion stored against it can be deleted with it. */
         requestId: String,
+        /** The saved report's own id, so a card can reach back to View screenshot/Copy/Edit/Open it. */
+        reportId: Long,
     ): ScoredCall? {
         val ticker = Scoring.normalizeTicker(stock.stockCode)
         // The session the run was aimed at, which is the one the recommendation is for. Reading the
@@ -480,6 +486,9 @@ object PerformanceCalculator {
             // from them would report every T+1 call as an ordinary one.
             isTPlusOne = isTPlusOne,
             requestId = requestId,
+            reportId = reportId,
+            originalStockCode = stock.originalStockCode,
+            pointIndex = parseIndex,
         )
     }
 

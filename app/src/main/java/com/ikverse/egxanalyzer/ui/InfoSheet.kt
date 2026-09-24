@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -108,10 +109,21 @@ internal fun InfoButton(
  * Same padding, same scroll, same full-height state - a reader who has opened one explanation in
  * this app has opened all of them. It states nothing the page does not: the sheet is where the
  * words moved to, not a second place for them to drift.
+ *
+ * @param content anything past the paragraphs a particular sheet needs - the per-fault detail and
+ *   the two buttons on the "levels to check" sheet, for one. Absent on every other explanation in
+ *   the app, which is a title and its prose and nothing more. Ahead of [onDismiss] rather than
+ *   after it, on purpose: [onDismiss] is what every other call site hands this as a trailing
+ *   lambda, and a defaulted parameter after it would have to be named at every one of those
+ *   call sites to keep compiling.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun InfoSheet(note: InfoNote, onDismiss: () -> Unit) {
+internal fun InfoSheet(
+    note: InfoNote,
+    content: (@Composable ColumnScope.() -> Unit)? = null,
+    onDismiss: () -> Unit,
+) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -133,6 +145,7 @@ internal fun InfoSheet(note: InfoNote, onDismiss: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            content?.invoke(this)
         }
     }
 }
