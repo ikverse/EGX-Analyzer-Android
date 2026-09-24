@@ -89,6 +89,14 @@ internal fun PortfolioScreen(appState: AppState) {
         PositionFilterSheet(portfolio.groups, appState)
 
         if (portfolio.isEmpty) {
+            if (!appState.initialDataLoaded) {
+                EmptyState(
+                    icon = Icons.Outlined.AccountBalanceWallet,
+                    title = "Loading…",
+                    detail = "Reading your trades.",
+                )
+                return@Screen
+            }
             EmptyState(
                 icon = Icons.Outlined.AccountBalanceWallet,
                 title = "No trades recorded yet",

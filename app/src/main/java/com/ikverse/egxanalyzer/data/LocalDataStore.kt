@@ -5,6 +5,10 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.os.Build
+import android.os.Looper
+import android.util.Log
+import com.ikverse.egxanalyzer.BuildConfig
 import com.ikverse.egxanalyzer.model.FeedFault
 import com.ikverse.egxanalyzer.model.PriceHealthReport
 import com.ikverse.egxanalyzer.model.StockHealth
@@ -64,6 +68,34 @@ import com.ikverse.egxanalyzer.model.StockOpinion
  */
 class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
     SQLiteOpenHelper(context, name, null, DATABASE_VERSION) {
+
+    /**
+     * Every read or write opens the database through here, which is what makes it the one place
+     * to notice a call landing on the thread drawing the screen.
+     *
+     * A warning, not a thrown exception: this is a debug-build tripwire for the next button press
+     * wired up without moving its own work off the main thread, not a behavior change, and a
+     * database that throws where it used to answer would be a worse bug than the one being caught.
+     * Skipped under Robolectric, which stands its "main looper" up on the JUnit thread that every
+     * `*StoreTest` already calls this class from synchronously - without the exemption, this would
+     * flag the entire migration test suite rather than the one thing it is meant to catch.
+     */
+    private fun warnIfCalledOnMainThread() {
+        if (!BuildConfig.DEBUG) return
+        if (Build.FINGERPRINT == "robolectric") return
+        if (Looper.myLooper() != Looper.getMainLooper()) return
+        Log.w(TAG, "LocalDataStore opened from the main thread", Throwable())
+    }
+
+    override fun getReadableDatabase(): SQLiteDatabase {
+        warnIfCalledOnMainThread()
+        return super.getReadableDatabase()
+    }
+
+    override fun getWritableDatabase(): SQLiteDatabase {
+        warnIfCalledOnMainThread()
+        return super.getWritableDatabase()
+    }
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -1594,6 +1626,37 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
     }
 
     /**
+     * One saved run, freshly read - for a caller that already holds the rest of the list and only
+     * needs to know what changed about this one.
+     *
+     * A correction used to be followed by [results] rereading and reparsing every saved run's JSON
+     * payload to bring back the one row that had actually changed. On a record of any size that is
+     * the expensive half of correcting a call, and it is paid for a change that touched one report.
+     * Null on a row that has gone or failed to parse, exactly as a failed row in [results] is simply
+     * left out - the caller falls back to a full reload in that case, which is rare enough to afford
+     * one.
+     */
+    fun result(id: Long): SavedAnalysis? = readableDatabase.query(
+        "analyses",
+        arrayOf("id", "provider", "model", "payload"),
+        "id = ?",
+        arrayOf(id.toString()),
+        null,
+        null,
+        null,
+    ).use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+        runCatching {
+            SavedAnalysis(
+                id = cursor.getLong(0),
+                provider = CloudProvider.valueOf(cursor.getString(1)),
+                model = cursor.getString(2),
+                result = JSONObject(cursor.getString(3)).toAnalysisResult(),
+            )
+        }.getOrNull()
+    }
+
+    /**
      * What Ask AI said about one call, kept so re-opening a card costs nothing.
      *
      * Keyed by the call rather than by the stock: two channels calling one stock on one session are
@@ -3082,6 +3145,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
 
     /** Internal rather than private so the migration test can open version 9 by the same name. */
     internal companion object {
+        private const val TAG = "LocalDataStore"
         const val DATABASE_NAME = "egx_analyzer.db"
         /** How many [FeedHealthCheck]s are kept. A log with no ceiling is a file that keeps growing. */
         const val FEED_HEALTH_CHECKS_KEPT = 200

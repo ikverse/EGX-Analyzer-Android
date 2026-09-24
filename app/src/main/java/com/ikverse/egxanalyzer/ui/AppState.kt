@@ -147,6 +147,12 @@ interface AppState : AppUpdates {
     val telegramSources: List<SourceTrace>
     val manualInputs: List<AnalysisInput>
     val savedResults: List<SavedAnalysis>
+    /**
+     * Whether the reports, trades, opinions and prompt versions a launch reads have come back
+     * yet. False only for the first moment after launch, while they load in the background - a
+     * page reads it to show "Loading..." rather than mistaking that gap for an empty record.
+     */
+    val initialDataLoaded: Boolean
     val wordingRules: List<WordingRule>
     val ruleSet: RuleSet
     val useDefaultPromptOnly: Boolean

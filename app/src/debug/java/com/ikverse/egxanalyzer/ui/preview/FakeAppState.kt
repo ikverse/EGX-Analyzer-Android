@@ -50,6 +50,7 @@ class FakeAppState(
     override val telegramSources: List<SourceTrace> = emptyList(),
     override val manualInputs: List<AnalysisInput> = emptyList(),
     override val savedResults: List<SavedAnalysis> = emptyList(),
+    override val initialDataLoaded: Boolean = true,
     override val wordingRules: List<WordingRule> = emptyList(),
     override val ruleSet: RuleSet = RuleSet(emptyList()),
     override val useDefaultPromptOnly: Boolean = false,

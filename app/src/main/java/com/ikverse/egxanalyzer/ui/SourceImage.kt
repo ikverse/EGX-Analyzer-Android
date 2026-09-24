@@ -44,19 +44,54 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
+ * What has already been decoded, so a picture shown once does not flash back to its placeholder on
+ * every tab switch or fold.
+ *
+ * A chat's photo used to be redecoded from disk on every composition that asked for it - which is
+ * cheap once, but this app disposes whole subtrees on the ordinary things a reader does: switching
+ * tabs, and folding or unfolding the phone (see `LiveAppState`'s own note on why every `remember` in
+ * every screen dies with the shell that composed it). Each of those redraws was the letter-placeholder
+ * flashing before the real picture reappeared. Held here rather than on a `remember`, because the
+ * whole point is to survive exactly the disposals a `remember` does not.
+ *
+ * Bounded by decoded bytes rather than by entry count: a 256px avatar and a 4096px screenshot are not
+ * the same cost, and a count-based limit either wastes the budget on avatars or starves them for one
+ * large image. 16 MB is dozens of avatars and thumbnails, or a couple of full-size screenshots, and an
+ * entry too big to fit is simply not cached rather than evicting everything ahead of it.
+ */
+private object TelegramImageCache {
+    private val bytes = object : android.util.LruCache<String, ImageBitmap>(16 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
+    }
+
+    fun get(path: String, maxPixels: Int): ImageBitmap? = bytes.get("$path@$maxPixels")
+
+    fun put(path: String, maxPixels: Int, bitmap: ImageBitmap) {
+        bytes.put("$path@$maxPixels", bitmap)
+    }
+}
+
+/**
  * Decodes an image out of Telegram's storage, downscaled, off the main thread.
  *
  * Returns null rather than throwing when the file has gone: these paths point into Telegram's own
  * storage, which it prunes on its own schedule, so a saved analysis can outlive its images and a
  * chat can outlive its picture. Shared with the chat list, whose profile photos come out of the
  * same cache and would otherwise want a second decoder saying the same thing.
+ *
+ * Checks [TelegramImageCache] first, so a picture already decoded once - by this card or any other
+ * asking about the same path at the same size - returns immediately instead of hitting the disk
+ * again.
  */
 @Composable
 internal fun rememberTelegramImage(path: String?, maxPixels: Int): ImageBitmap? {
-    val bitmap by produceState<ImageBitmap?>(null, path, maxPixels) {
+    val cached = path?.let { TelegramImageCache.get(it, maxPixels) }
+    val bitmap by produceState(cached, path, maxPixels) {
+        if (cached != null) return@produceState
+        val safePath = path
         value = withContext(Dispatchers.IO) {
             runCatching {
-                val file = File(Uri.parse(path ?: return@runCatching null).path ?: return@runCatching null)
+                val file = File(Uri.parse(safePath ?: return@runCatching null).path ?: return@runCatching null)
                 if (!file.isFile) return@runCatching null
                 // Measure first so a full-size chart is never decoded just to draw a thumbnail.
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -66,7 +101,7 @@ internal fun rememberTelegramImage(path: String?, maxPixels: Int): ImageBitmap? 
                 BitmapFactory
                     .decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
                     ?.asImageBitmap()
-            }.getOrNull()
+            }.getOrNull()?.also { if (safePath != null) TelegramImageCache.put(safePath, maxPixels, it) }
         }
     }
     return bitmap

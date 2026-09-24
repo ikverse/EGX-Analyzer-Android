@@ -196,11 +196,19 @@ internal fun ResultsScreen(appState: AppState) {
             )
         }
         if (appState.savedResults.isEmpty()) {
-            EmptyState(
-                icon = Icons.Outlined.Assessment,
-                title = "No saved results yet",
-                detail = "Run an analysis and it will be stored here with the sources behind it.",
-            )
+            if (!appState.initialDataLoaded) {
+                EmptyState(
+                    icon = Icons.Outlined.Assessment,
+                    title = "Loading…",
+                    detail = "Reading your saved analyses.",
+                )
+            } else {
+                EmptyState(
+                    icon = Icons.Outlined.Assessment,
+                    title = "No saved results yet",
+                    detail = "Run an analysis and it will be stored here with the sources behind it.",
+                )
+            }
         } else {
             // Which run is open lives outside the card, because a report needs the whole row to show
             // its table - half of one is under the width the table needs and falls back to cards -
@@ -220,10 +228,20 @@ internal fun ResultsScreen(appState: AppState) {
                     .groupBy { it.result.recommendationTargetDate }
                     .mapValues { (_, runs) -> runs.maxBy { it.result.completedAt } }
             }
+            // How many of the filtered day-groups are drawn - the filters and the stock search
+            // above have already run over the whole record, so this only trims what they left.
+            var visibleCount by appState.pages.resultsVisibleCount
             // A run arriving from a notification opens itself, whether the screen was already
-            // showing or not.
+            // showing or not - expanding the window first if the day it belongs to is not
+            // currently shown, so a jump from outside the page can still reach it.
             LaunchedEffect(appState.pendingResultId) {
-                appState.pendingResultId?.let { openRun = it }
+                appState.pendingResultId?.let { id ->
+                    val index = groupRunsByDay(shown).indexOfFirst { day -> day.any { it.id == id } }
+                    if (index >= visibleCount) {
+                        visibleCount = (index / PAGE_SIZE + 1) * PAGE_SIZE
+                    }
+                    openRun = id
+                }
             }
             BoxWithConstraints {
                 val columns = responsiveColumns(minColumnWidth = SavedRunMinWidth, maxColumns = 2)
@@ -231,7 +249,8 @@ internal fun ResultsScreen(appState: AppState) {
                 // row of the list, swiped through, newest reading in front. Done before the bands
                 // are cut because an open run takes the whole width and its whole stack goes with
                 // it - a day cannot be half in a grid row and half out of it.
-                val days = remember(shown) { groupRunsByDay(shown) }
+                val allDays = remember(shown) { groupRunsByDay(shown) }
+                val days = remember(allDays, visibleCount) { allDays.take(visibleCount) }
                 // Grouped before rendering rather than while: the open run interrupts the grid, and
                 // where it does so cannot be decided one card at a time.
                 val bands = remember(days, openRun) {
@@ -337,6 +356,13 @@ internal fun ResultsScreen(appState: AppState) {
                         } else {
                             ResponsiveRows(band, columns) { day, cardModifier ->
                                 key(day.first().id) { stack(day, open = false, cardModifier) }
+                            }
+                        }
+                    }
+                    if (allDays.size > visibleCount) {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            TextButton(onClick = { visibleCount += PAGE_SIZE }) {
+                                Text("Show older")
                             }
                         }
                     }

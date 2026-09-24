@@ -166,12 +166,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * How long settings have to stop changing before they are published.
@@ -192,6 +196,18 @@ private const val OPINION_HISTORY_DAYS = 400L
 
 /** How many stocks the feed-quiet notification names before falling back to "and N more". */
 private const val FEED_QUIET_NAMED_TICKERS = 3
+
+/**
+ * The four database reads a launch used to make synchronously, brought back together off the
+ * main thread instead - see [LiveAppState.initialDataLoaded].
+ */
+private data class InitialLoad(
+    val results: List<SavedAnalysis>,
+    val unreadable: Int,
+    val positions: List<Position>,
+    val opinions: Map<String, StockOpinion>,
+    val promptVersions: List<PromptVersion>,
+)
 
 class LiveAppState(
     /**
@@ -337,6 +353,43 @@ class LiveAppState(
     private val updates: LiveUpdates = LiveUpdates(updateRepository, status, settingsRepository),
 ) : AppState, AppUpdates by updates {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /**
+     * Serializes [recomputePerformance] and [recomputePortfolio], so two rebuilds started from
+     * different places can never overlap and race to overwrite [performance] or [portfolio] with
+     * whichever of them happens to finish last. [requestRebuild] is the queue built on top of it
+     * for the call sites that do not need their own rebuild to finish before they return.
+     */
+    private val recomputeMutex = Mutex()
+
+    /**
+     * Coalesces a burst of rebuild requests into one rebuild of the latest state.
+     *
+     * `CONFLATED` is the mechanism: a signal already waiting to be picked up is replaced rather
+     * than queued, so ten triggers arriving while one rebuild is in flight cost one more rebuild,
+     * not ten. What each of those ten actually wanted is or'd into the flags below rather than
+     * lost, so the one rebuild that runs afterward does everything the last of them asked for.
+     */
+    private val rebuildSignal = Channel<Unit>(Channel.CONFLATED)
+    private val rebuildWantsPerformance = AtomicBoolean(false)
+    private val rebuildWantsPortfolio = AtomicBoolean(false)
+    private val rebuildAnnounce = AtomicBoolean(false)
+
+    /**
+     * Asks for a rebuild without waiting for it - the shape almost every caller actually wants,
+     * since a rebuild only ever feeds back into published state the caller was not blocking on
+     * anyway. See the consumer started in `init` for where these flags are read.
+     */
+    private fun requestRebuild(
+        performance: Boolean = false,
+        portfolio: Boolean = false,
+        announceChanges: Boolean = false,
+    ) {
+        if (performance) rebuildWantsPerformance.set(true)
+        if (portfolio) rebuildWantsPortfolio.set(true)
+        if (announceChanges) rebuildAnnounce.set(true)
+        rebuildSignal.trySend(Unit)
+    }
 
     /** Started by whichever path first needs Telegram, and never by merely existing. */
     private val telegramRepository: TelegramRepository by lazy { telegramProvider() }
@@ -659,7 +712,12 @@ class LiveAppState(
      */
     override val manualInputs: List<AnalysisInput>
         get() = inputs.filterNot { it.sourceId in telegramTraces.keys }
-    override var savedResults by mutableStateOf(localDataStore.results())
+    /**
+     * Empty until [initialDataLoaded], rather than read here: this is one of the four synchronous
+     * database reads that used to run in this constructor, on the main thread, before the first
+     * frame - see [initialDataLoaded].
+     */
+    override var savedResults by mutableStateOf(emptyList<SavedAnalysis>())
         private set
 
     /**
@@ -684,7 +742,8 @@ class LiveAppState(
     override var useDefaultPromptOnly by mutableStateOf(settingsRepository.useDefaultPromptOnly())
         private set
 
-    override var promptVersions by mutableStateOf(localDataStore.promptVersions())
+    /** Empty until [initialDataLoaded]; see the note on [savedResults]. */
+    override var promptVersions by mutableStateOf(emptyList<PromptVersion>())
         private set
 
     /** The version a run would use right now. */
@@ -825,9 +884,22 @@ class LiveAppState(
      * Kept visible rather than swallowed: a report that cannot be read looks exactly like a report
      * that was never produced, and the newest one on screen is then silently an older run.
      */
-    override var unreadableResults by mutableIntStateOf(localDataStore.unreadableResults)
+    /** Empty (zero) until [initialDataLoaded]; see the note on [savedResults]. */
+    override var unreadableResults by mutableIntStateOf(0)
         private set
     override var selectedResult by mutableStateOf<SavedAnalysis?>(savedResults.firstOrNull())
+        private set
+    /**
+     * Whether the four database reads a launch used to make synchronously - [savedResults],
+     * [promptVersions], the trades and [opinions] - have come back yet.
+     *
+     * The first screen used to wait on all four before it could draw anything, on the thread
+     * drawing it, and the wait grew with the record. It draws immediately now, on empty
+     * defaults, while this stays false; a page reads it to draw "Loading..." rather than its
+     * ordinary empty state for that one gap, so an empty record and a record not yet read back
+     * are not shown as the same thing.
+     */
+    override var initialDataLoaded by mutableStateOf(false)
         private set
     override var analysisStatus by mutableStateOf(AnalysisStatus.IDLE)
         private set
@@ -1075,7 +1147,8 @@ class LiveAppState(
     override var sessionDigest by mutableStateOf<SessionDigest?>(null)
         private set
 
-    private var positions = localDataStore.positions()
+    /** Empty until [initialDataLoaded]; see the note on [savedResults]. */
+    private var positions = emptyList<Position>()
 
     /**
      * What Ask AI has said, by the call it was asked about.
@@ -1084,7 +1157,8 @@ class LiveAppState(
      * user has actually pressed the button on, and a card has to know on sight whether to offer
      * "Ask AI" or "AI opinion" without a database read while the list scrolls.
      */
-    override var opinions by mutableStateOf(localDataStore.stockOpinions())
+    /** Empty until [initialDataLoaded]; see the note on [savedResults]. */
+    override var opinions by mutableStateOf(emptyMap<String, StockOpinion>())
         private set
 
     /** Non-null while one opinion is being fetched, so only that card shows a spinner. */
@@ -1356,15 +1430,16 @@ class LiveAppState(
             updatedAt = System.currentTimeMillis(),
             updatedBy = deviceName,
         )
-        localDataStore.savePosition(position)
-        positions = localDataStore.positions()
-        statusMessage = StatusMessage("$normalized bought at ${formatPrice(entryPrice)}", true)
-        publishPosition(position, deleted = false)
-        appScope.launch {
-            // A stock only just named may have no stored history at all, and a position with no
-            // price says nothing until it does.
-            priceStocksWithNoHistory(listOf(normalized))
-            recomputePortfolio()
+        writePositions(write = { localDataStore.savePosition(position) }) { updated ->
+            positions = updated
+            statusMessage = StatusMessage("$normalized bought at ${formatPrice(entryPrice)}", true)
+            publishPosition(position, deleted = false)
+            appScope.launch {
+                // A stock only just named may have no stored history at all, and a position with
+                // no price says nothing until it does.
+                priceStocksWithNoHistory(listOf(normalized))
+                requestRebuild(portfolio = true)
+            }
         }
     }
 
@@ -1394,28 +1469,30 @@ class LiveAppState(
             updatedAt = System.currentTimeMillis(),
             updatedBy = deviceName,
         )
-        localDataStore.savePosition(closed)
-        positions = localDataStore.positions()
-        statusMessage = StatusMessage(
-            "${position.ticker} closed at ${formatPrice(sale.blended)}" +
-                // The parts, where there were parts. The blend alone is a price the user never
-                // typed, and a line reporting it back without saying so reads like a mistyped sale.
-                if (sale.inTwoParts) {
-                    " · ${formatPrice(sale.splitPct)}% at ${formatPrice(sale.price1)}, " +
-                        "${formatPrice(FULL_SPLIT_PCT - sale.splitPct)}% at " +
-                        formatPrice(sale.price2)
-                } else {
-                    ""
-                },
-            true,
-            // The one genuinely irreversible thing a reader does here, and until now the only way
-            // back from a mistyped sale was Edit trade, which does not clear one. The offer lives
-            // as long as the line does - four seconds - which is the window in which a wrong price
-            // is noticed at all.
-            undo = StatusUndo("Undo") { reopenPosition(position) },
-        )
-        publishPosition(closed, deleted = false)
-        appScope.launch { recomputePortfolio() }
+        writePositions(write = { localDataStore.savePosition(closed) }) { updated ->
+            positions = updated
+            statusMessage = StatusMessage(
+                "${position.ticker} closed at ${formatPrice(sale.blended)}" +
+                    // The parts, where there were parts. The blend alone is a price the user never
+                    // typed, and a line reporting it back without saying so reads like a mistyped
+                    // sale.
+                    if (sale.inTwoParts) {
+                        " · ${formatPrice(sale.splitPct)}% at ${formatPrice(sale.price1)}, " +
+                            "${formatPrice(FULL_SPLIT_PCT - sale.splitPct)}% at " +
+                            formatPrice(sale.price2)
+                    } else {
+                        ""
+                    },
+                true,
+                // The one genuinely irreversible thing a reader does here, and until now the only
+                // way back from a mistyped sale was Edit trade, which does not clear one. The offer
+                // lives as long as the line does - four seconds - which is the window in which a
+                // wrong price is noticed at all.
+                undo = StatusUndo("Undo") { reopenPosition(position) },
+            )
+            publishPosition(closed, deleted = false)
+            requestRebuild(portfolio = true)
+        }
     }
 
     /**
@@ -1442,11 +1519,12 @@ class LiveAppState(
      */
     override fun reopenPosition(position: Position) {
         val reopened = position.copy(updatedAt = System.currentTimeMillis(), updatedBy = deviceName)
-        localDataStore.savePosition(reopened)
-        positions = localDataStore.positions()
-        statusMessage = StatusMessage("${position.ticker} is open again", true)
-        publishPosition(reopened, deleted = false)
-        appScope.launch { recomputePortfolio() }
+        writePositions(write = { localDataStore.savePosition(reopened) }) { updated ->
+            positions = updated
+            statusMessage = StatusMessage("${position.ticker} is open again", true)
+            publishPosition(reopened, deleted = false)
+            requestRebuild(portfolio = true)
+        }
     }
 
     /**
@@ -1470,18 +1548,19 @@ class LiveAppState(
             updatedAt = System.currentTimeMillis(),
             updatedBy = deviceName,
         )
-        localDataStore.savePosition(reopened)
-        positions = localDataStore.positions()
-        statusMessage = StatusMessage(
-            "${position.ticker} is open again",
-            true,
-            // The exact reverse of this action: the sale that was just cleared, put straight back
-            // rather than asking the reader to retype it - the same reasoning recordSale's own Undo
-            // follows.
-            undo = StatusUndo("Undo") { reopenPosition(position) },
-        )
-        publishPosition(reopened, deleted = false)
-        appScope.launch { recomputePortfolio() }
+        writePositions(write = { localDataStore.savePosition(reopened) }) { updated ->
+            positions = updated
+            statusMessage = StatusMessage(
+                "${position.ticker} is open again",
+                true,
+                // The exact reverse of this action: the sale that was just cleared, put straight
+                // back rather than asking the reader to retype it - the same reasoning recordSale's
+                // own Undo follows.
+                undo = StatusUndo("Undo") { reopenPosition(position) },
+            )
+            publishPosition(reopened, deleted = false)
+            requestRebuild(portfolio = true)
+        }
     }
 
     /**
@@ -1511,18 +1590,19 @@ class LiveAppState(
             updatedAt = System.currentTimeMillis(),
             updatedBy = deviceName,
         )
-        localDataStore.savePosition(corrected)
-        positions = localDataStore.positions()
-        statusMessage = StatusMessage(
-            if (movedWindow) {
-                "${position.ticker} now runs $window ${window.sessionWord()}"
-            } else {
-                "${position.ticker} entry now ${formatPrice(entryPrice)}"
-            },
-            true,
-        )
-        publishPosition(corrected, deleted = false)
-        appScope.launch { recomputePortfolio() }
+        writePositions(write = { localDataStore.savePosition(corrected) }) { updated ->
+            positions = updated
+            statusMessage = StatusMessage(
+                if (movedWindow) {
+                    "${position.ticker} now runs $window ${window.sessionWord()}"
+                } else {
+                    "${position.ticker} entry now ${formatPrice(entryPrice)}"
+                },
+                true,
+            )
+            publishPosition(corrected, deleted = false)
+            requestRebuild(portfolio = true)
+        }
     }
 
     /**
@@ -1544,24 +1624,26 @@ class LiveAppState(
             updatedAt = System.currentTimeMillis(),
             updatedBy = deviceName,
         )
-        localDataStore.savePosition(updated)
-        positions = localDataStore.positions()
-        statusMessage = StatusMessage(
-            if (keepOpen) {
-                "${position.ticker} stays open until you sell it"
-            } else {
-                "${position.ticker} follows its deadline again"
-            },
-            true,
-            // Reversible on its own through the card, so the offer here is a convenience rather
-            // than a rescue - but it is the other switch that can silently change what a deadline
-            // does to a trade, and it can now be pressed from a notification with the app closed.
-            undo = StatusUndo("Undo") {
-                setKeepOpen(position, keepOpen = !keepOpen, note = position.keepOpenNote)
-            },
-        )
-        publishPosition(updated, deleted = false)
-        appScope.launch { recomputePortfolio() }
+        writePositions(write = { localDataStore.savePosition(updated) }) { refreshed ->
+            positions = refreshed
+            statusMessage = StatusMessage(
+                if (keepOpen) {
+                    "${position.ticker} stays open until you sell it"
+                } else {
+                    "${position.ticker} follows its deadline again"
+                },
+                true,
+                // Reversible on its own through the card, so the offer here is a convenience rather
+                // than a rescue - but it is the other switch that can silently change what a
+                // deadline does to a trade, and it can now be pressed from a notification with the
+                // app closed.
+                undo = StatusUndo("Undo") {
+                    setKeepOpen(position, keepOpen = !keepOpen, note = position.keepOpenNote)
+                },
+            )
+            publishPosition(updated, deleted = false)
+            requestRebuild(portfolio = true)
+        }
     }
 
     /**
@@ -1573,11 +1655,12 @@ class LiveAppState(
      */
     override fun deletePosition(position: Position) {
         val at = System.currentTimeMillis()
-        localDataStore.buryPosition(position.id, at, deviceName)
-        positions = localDataStore.positions()
-        statusMessage = StatusMessage("${position.ticker} removed", succeeded = true)
-        publishPosition(position.copy(updatedAt = at, updatedBy = deviceName), deleted = true)
-        appScope.launch { recomputePortfolio() }
+        writePositions(write = { localDataStore.buryPosition(position.id, at, deviceName) }) { updated ->
+            positions = updated
+            statusMessage = StatusMessage("${position.ticker} removed", succeeded = true)
+            publishPosition(position.copy(updatedAt = at, updatedBy = deviceName), deleted = true)
+            requestRebuild(portfolio = true)
+        }
     }
 
     /**
@@ -1589,10 +1672,29 @@ class LiveAppState(
      * something they did not ask for and cannot act on.
      */
     private fun publishPosition(position: Position, deleted: Boolean) {
-        // Read back rather than sent as `{}`: whatever a newer app version wrote against this trade
-        // has to travel with every revision, or this device erases it simply by editing the price.
-        val unknown = localDataStore.unknownFor(position.id)
-        publish { telegramRepository.uploadPosition(SyncedPosition(position, deleted, unknown)) }
+        publish {
+            // Read back rather than sent as `{}`: whatever a newer app version wrote against this
+            // trade has to travel with every revision, or this device erases it simply by editing
+            // the price. Read here, inside the block `publish` already runs on `Dispatchers.IO`,
+            // rather than on whatever thread called this - see `writePositions` beside it.
+            val unknown = localDataStore.unknownFor(position.id)
+            telegramRepository.uploadPosition(SyncedPosition(position, deleted, unknown))
+        }
+    }
+
+    /**
+     * Saves a position off the main thread, then hands back every trade re-read the same way -
+     * the two database calls a press on a position card used to make on the thread drawing the
+     * screen. `onSaved` runs back on the main thread, since it is what assigns [positions] and
+     * publishes the change: nothing here changes which thread the rest of a button press runs on,
+     * only the database work in front of it.
+     */
+    private fun writePositions(write: () -> Unit, onSaved: (List<Position>) -> Unit) {
+        appScope.launch(Dispatchers.IO) {
+            write()
+            val updated = localDataStore.positions()
+            withContext(Dispatchers.Main.immediate) { onSaved(updated) }
+        }
     }
 
     /**
@@ -1645,7 +1747,7 @@ class LiveAppState(
 
         if (changed) {
             positions = localDataStore.positions()
-            recomputePortfolio(announceChanges = true)
+            requestRebuild(portfolio = true, announceChanges = true)
         }
         return changed
     }
@@ -1660,7 +1762,7 @@ class LiveAppState(
      * costs a database read and no requests.
      */
     override fun refreshOverdue() {
-        appScope.launch { recomputePortfolio(announceChanges = true) }
+        requestRebuild(portfolio = true, announceChanges = true)
     }
 
     /**
@@ -1674,7 +1776,7 @@ class LiveAppState(
      * refresh announcing a change the user made themselves - and only the paths where the market or
      * the calendar moved are allowed to speak.
      */
-    private suspend fun recomputePortfolio(announceChanges: Boolean = false) {
+    private suspend fun recomputePortfolio(announceChanges: Boolean = false): Unit = recomputeMutex.withLock {
         val held = positions
         // The exchange's own calendar, not the phone's: a user abroad must not see a trade fall
         // a day further behind simply for having crossed a time zone.
@@ -1924,13 +2026,44 @@ class LiveAppState(
         // Before the first sync, or this device's own settings would look like an empty install's
         // and be quietly overwritten by the other phone's rather than merged with them.
         settingsRepository.claimSettingsIfUnstamped(deviceName)
-        // Recorded on first launch too, so the very first run has a version to name rather than
-        // a gap where one should be.
-        regeneratePrompt("First run")
         appScope.launch {
+            // The first screen used to wait on all four of these, on the thread drawing it, before
+            // it could appear at all - see [initialDataLoaded].
+            val loaded = withContext(Dispatchers.IO) {
+                InitialLoad(
+                    results = localDataStore.results(),
+                    unreadable = localDataStore.unreadableResults,
+                    positions = localDataStore.positions(),
+                    opinions = localDataStore.stockOpinions(),
+                    promptVersions = localDataStore.promptVersions(),
+                )
+            }
+            savedResults = loaded.results
+            unreadableResults = loaded.unreadable
+            positions = loaded.positions
+            opinions = loaded.opinions
+            promptVersions = loaded.promptVersions
+            selectedResult = savedResults.firstOrNull()
+            initialDataLoaded = true
+            // Recorded on first launch too, so the very first run has a version to name rather
+            // than a gap where one should be. Moved here from a synchronous call at the top of
+            // `init`: it checks `promptVersions` for a duplicate before writing a new one, and
+            // that list is empty until the load just above brings it back.
+            regeneratePrompt("First run")
             recomputePerformance()
             recomputePortfolio(announceChanges = true)
             refreshPricesIfStale()
+        }
+        // The one consumer of `requestRebuild`'s signal, for the whole life of this class - see the
+        // fields declared beside `recomputeMutex` for why a burst collapses to one pass here.
+        appScope.launch {
+            for (signal in rebuildSignal) {
+                val wantsPerformance = rebuildWantsPerformance.getAndSet(false)
+                val wantsPortfolio = rebuildWantsPortfolio.getAndSet(false)
+                val announce = rebuildAnnounce.getAndSet(false)
+                if (wantsPerformance) recomputePerformance()
+                if (wantsPortfolio) recomputePortfolio(announceChanges = announce)
+            }
         }
         appScope.launch {
             val stored = localDataStore.stocks()
@@ -2878,8 +3011,7 @@ class LiveAppState(
         }
         if (unpriced.isEmpty()) return
         runCatching { priceRepository.refresh(unpriced) }
-        recomputePerformance()
-        recomputePortfolio(announceChanges = true)
+        requestRebuild(performance = true, portfolio = true, announceChanges = true)
     }
 
     /**
@@ -3022,7 +3154,7 @@ class LiveAppState(
         }.getOrDefault(0) > 0
     }
 
-    private suspend fun recomputePerformance() {
+    private suspend fun recomputePerformance(): Unit = recomputeMutex.withLock {
         val analyses = savedResults
         val computed = withContext(Dispatchers.IO) {
             val breaks = localDataStore.priceBreakDates()
@@ -3376,12 +3508,11 @@ class LiveAppState(
         if (downloaded > 0 || forgotten > 0) {
             savedResults = localDataStore.results()
             unreadableResults = localDataStore.unreadableResults
-            recomputePerformance()
+            requestRebuild(performance = true)
         } else if (settingsChanged) {
             // A scoring window that arrived from another device re-judges every call already here,
             // whether or not a single report moved.
-            recomputePerformance()
-            recomputePortfolio(announceChanges = true)
+            requestRebuild(performance = true, portfolio = true, announceChanges = true)
         }
         return SyncOutcome(uploaded, downloaded, local.size - toUpload.size)
     }
@@ -3471,13 +3602,13 @@ class LiveAppState(
             // Silent: every one of these changed because a file was read, not because the market
             // did anything, and a restore that ends in a burst of notifications about trades the
             // user already knew about is the app announcing its own bookkeeping.
-            recomputePortfolio(announceChanges = false)
+            requestRebuild(portfolio = true)
         }
         if (reports > 0) {
             savedResults = localDataStore.results()
             unreadableResults = localDataStore.unreadableResults
         }
-        if (reports > 0 || trades > 0 || settingsAdopted) recomputePerformance()
+        if (reports > 0 || trades > 0 || settingsAdopted) requestRebuild(performance = true)
         return RestoreOutcome(reports, rules, trades, prompts, settingsAdopted)
     }
 
@@ -4080,9 +4211,20 @@ class LiveAppState(
         }
     }
 
+    /**
+     * Brings [keep] up to date after a correction, without rereading every other saved run.
+     *
+     * [LocalDataStore.result] replaces just that one entry in the list already held; only a row that
+     * has gone missing or failed to reparse falls back to [LocalDataStore.results]'s full reload,
+     * which is also what keeps [unreadableResults] honest in that case.
+     */
     private fun reloadResults(keep: Long) {
-        savedResults = localDataStore.results()
-        unreadableResults = localDataStore.unreadableResults
+        val refreshed = localDataStore.result(keep)
+        savedResults = if (refreshed != null) {
+            savedResults.map { if (it.id == keep) refreshed else it }
+        } else {
+            localDataStore.results().also { unreadableResults = localDataStore.unreadableResults }
+        }
         selectedResult = savedResults.firstOrNull { it.id == keep } ?: selectedResult
     }
 
@@ -4175,8 +4317,8 @@ class LiveAppState(
         savedResults = localDataStore.results()
         unreadableResults = localDataStore.unreadableResults
         selectedResult = savedResults.firstOrNull()
+        requestRebuild(performance = true)
         appScope.launch {
-            recomputePerformance()
             runCatching { telegramRepository.buryReport(result.result.requestId) }
                 .onSuccess { localDataStore.clearDeletion(result.result.requestId) }
         }
@@ -4193,8 +4335,8 @@ class LiveAppState(
         unreadableResults = 0
         selectedResult = null
         settingsMessage = "All saved analyses deleted."
+        requestRebuild(performance = true)
         appScope.launch {
-            recomputePerformance()
             doomed.forEach { requestId ->
                 runCatching { telegramRepository.buryReport(requestId) }
                     .onSuccess { localDataStore.clearDeletion(requestId) }

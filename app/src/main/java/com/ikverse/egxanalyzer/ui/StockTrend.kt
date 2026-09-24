@@ -144,12 +144,18 @@ internal fun List<DailySession>.moveTo(session: DailySession): Double? {
  * Shared between the position card and the Insights call card's own chart, which is what it is
  * named for rather than for either caller - a ticker's price history is the same six months
  * whichever card is asking.
+ *
+ * Refetched on every [AppState.performance] as well as on the ticker, which is what [StockSheet]'s
+ * own fetch already keys on: `performance` is a fresh instance on every recompute, so keying on it
+ * is what notices a price refresh landed and asks again, rather than going on showing whatever this
+ * card fetched once. Without it, this was the one chart in the app - beside the stock sheet's own -
+ * that kept drawing stale prices after every refresh.
  */
 @Composable
 internal fun rememberPriceHistory(appState: AppState, ticker: String): List<DailySession> {
     val key = remember(ticker) { Scoring.normalizeTicker(ticker) }
     var history by remember(key) { mutableStateOf(emptyList<DailySession>()) }
-    LaunchedEffect(key) {
+    LaunchedEffect(key, appState.performance) {
         history = appState.priceHistory(key, ChartRange.Widest.since(LocalDate.now()))
     }
     return history

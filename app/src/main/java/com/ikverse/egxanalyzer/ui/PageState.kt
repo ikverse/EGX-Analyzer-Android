@@ -81,6 +81,9 @@ class StockBox {
     }
 }
 
+/** How many day-groups or sessions a page shows before a "Show older" press asks for more. */
+internal const val PAGE_SIZE = 10
+
 class PageState {
 
     // ── Shared by Portfolio and Insights ─────────────────────────────────────────────────────
@@ -129,6 +132,16 @@ class PageState {
     val resultsOrder: MutableState<RunOrder> = mutableStateOf(RunOrder.RUN_NEWEST)
     val resultsFiltersOpen: MutableState<Boolean> = mutableStateOf(false)
 
+    /**
+     * How many of the filtered day-groups Results draws, before a "Show older" press asks for
+     * [PAGE_SIZE] more.
+     *
+     * The filters and the stock search run over the whole record regardless of this - it only
+     * trims what a `Column` already filtered down to, which is what keeps clearing a filter from
+     * ever hiding a run this was never meant to hide.
+     */
+    val resultsVisibleCount: MutableState<Int> = mutableStateOf(PAGE_SIZE)
+
     // ── Insights ─────────────────────────────────────────────────────────────────────────────
 
     /** The session card that is open, by `ScoredSession.key()`. */
@@ -142,6 +155,9 @@ class PageState {
     /** What Insights is narrowed to. The box that writes it is [insightsStockBox]. */
     val insightsStock: MutableState<String> get() = insightsStockBox.picked
     val insightsFiltersOpen: MutableState<Boolean> = mutableStateOf(false)
+
+    /** How many of the filtered sessions Insights draws; see [resultsVisibleCount]. */
+    val insightsVisibleCount: MutableState<Int> = mutableStateOf(PAGE_SIZE)
 
     // ── Portfolio ────────────────────────────────────────────────────────────────────────────
 

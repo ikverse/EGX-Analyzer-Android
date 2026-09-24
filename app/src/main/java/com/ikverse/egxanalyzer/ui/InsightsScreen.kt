@@ -43,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -130,6 +131,14 @@ internal fun InsightsScreen(appState: AppState) {
         refreshing = appState.pricesRefreshing,
     ) {
         if (full.tracked == 0) {
+            if (!appState.initialDataLoaded) {
+                EmptyState(
+                    icon = Icons.Outlined.Insights,
+                    title = "Loading…",
+                    detail = "Reading your saved analyses and trades.",
+                )
+                return@Screen
+            }
             EmptyState(
                 icon = Icons.Outlined.Insights,
                 title = if (full.scoringSince == null) "No prices stored yet" else "Nothing scored yet",
@@ -315,6 +324,9 @@ internal fun InsightsScreen(appState: AppState) {
         // Collapsed cards share a row; an open one takes the whole width, because its contents are
         // a table of figures and half a row squeezes every price onto two lines.
         var openSession by appState.pages.openInsightsSession
+        // How many of the filtered sessions are drawn - the filters and the stock search above
+        // have already run over the whole record, so this only trims what they left.
+        var visibleCount by appState.pages.insightsVisibleCount
         // Where the call being pointed at sits, so the page can scroll to it inside whichever
         // session card holds it.
         val reveal = remember { BringIntoViewRequester() }
@@ -329,6 +341,12 @@ internal fun InsightsScreen(appState: AppState) {
                 // otherwise flash a card for a press nobody remembers making.
                 if (full.sessionFor(pendingCall) == null) appState.consumePendingCall()
                 return@LaunchedEffect
+            }
+            // Expand the window first if this session is not currently shown, so a jump from the
+            // Portfolio tab or a notification can still reach a session paged out of view.
+            val index = report.sessions.indexOf(session)
+            if (index >= visibleCount) {
+                visibleCount = (index / PAGE_SIZE + 1) * PAGE_SIZE
             }
             openSession = session.key()
             // The card is unfolding as this runs, and a scroll measured against a height it is
@@ -345,10 +363,13 @@ internal fun InsightsScreen(appState: AppState) {
         }
         BoxWithConstraints {
             val columns = responsiveColumns(minColumnWidth = SessionCardMinWidth, maxColumns = 3)
+            val shownSessions = remember(report.sessions, visibleCount) {
+                report.sessions.take(visibleCount)
+            }
             // Grouped before rendering rather than while: the open session interrupts the grid, and
             // where it does so cannot be decided one card at a time.
-            val bands = remember(report.sessions, openSession) {
-                expandableBands(report.sessions) { openSession == it.key() }
+            val bands = remember(shownSessions, openSession) {
+                expandableBands(shownSessions) { openSession == it.key() }
             }
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 bands.forEach { (band, open) ->
@@ -414,6 +435,13 @@ internal fun InsightsScreen(appState: AppState) {
                                 reveal = reveal,
                                 modifier = cardModifier,
                             )
+                        }
+                    }
+                }
+                if (report.sessions.size > visibleCount) {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        TextButton(onClick = { visibleCount += PAGE_SIZE }) {
+                            Text("Show older")
                         }
                     }
                 }
