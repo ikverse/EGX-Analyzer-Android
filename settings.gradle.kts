@@ -22,4 +22,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "EGX Analyzer Android"
 include(":app")
+include(":baselineprofile")
 

@@ -1,6 +1,7 @@
 ﻿plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.androidx.baselineprofile)
 }
 
 // One place decides the version. It stayed at 0.1.0 through every build, so a device could not be
@@ -168,6 +169,16 @@ android {
     }
 }
 
+// What `:baselineprofile` records is a plain text file, `src/main/baselineProfiles/baseline-prof.txt` -
+// checked in like any other source file, and packaged into every release build from here on by
+// AGP's own art-profile step (the `compileReleaseArtProfile` task already runs on every release;
+// this is what gives it something real to compile instead of an empty default). Nothing about an
+// ordinary release re-runs the instrumented test that produced it - only
+// `./gradlew :app:generateReleaseBaselineProfile`, by hand, on a connected device, does that.
+baselineProfile {
+    automaticGenerationDuringBuild = false
+}
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
@@ -191,6 +202,8 @@ dependencies {
     implementation(libs.tdl.coroutines.android)
     // Encodes the tg://login link TDLib hands back; scanning it beats typing a phone and a code.
     implementation(libs.zxing.core)
+    // Where `./gradlew :app:generateReleaseBaselineProfile` reads its instrumented test from.
+    baselineProfile(project(":baselineprofile"))
 
     testImplementation(libs.junit)
     // Compose, tested on this machine rather than on a phone.
