@@ -4,6 +4,49 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.0.0] — 2026-09-24
+
+A major release: a full pass over the app's warnings, dialogs, pop-ups and pills, plus real speed and reliability work.
+
+**Reports and corrections**
+- Corrections can now be undone one call at a time, not just all at once, from both the report menu and the call's own menu.
+- Undoing a correction that had moved a trade to a different ticker now moves the trade back too.
+- A closed trade's "Edit trade" now edits the sale itself (price and date), and a closed trade can be reopened.
+- "Share as text" now shares the corrected report, in plain text with no markdown.
+- Removed the unused custom system prompt / phrase customization feature.
+
+**Pop-ups, pills and holds**
+- Holding a call card, an overdue trade, a session card, or a stock's name opens a proper menu naming what you held, instead of a plain two-button box.
+- Insights call cards can now open the screenshot, copy the call as text, jump to its report, or record a purchase, straight from a hold.
+- Every pill that used to do nothing now explains itself on tap: trade status, Overdue, Kept open, Price scale changed, T+1/Watching/date pills, and the EGX 33 badge. "Newer run exists" now opens that run directly.
+- The outcome, T+1 and "levels look misread" pop-ups are slide-up sheets now, matching the rest of the app.
+
+**Speed and reliability**
+- The app opens noticeably faster - saved reports, trades and Ask AI answers now load in the background instead of blocking the first screen.
+- Charts on trade and call cards now update after a price refresh, matching the stock sheet.
+- Chat and channel pictures stay in memory once loaded, so they stop flashing back to a placeholder on every tab switch or fold.
+- Correcting a call is faster on a large record - only that one report is re-read.
+- Results and Insights now show your latest 10 reports/sessions with a "Show older" button instead of the whole record at once. Filters, search and jumping in from a notification still reach everything.
+- Fixed a rare case where two rapid actions could briefly show stale data.
+- Fixed a stack of saved-run cards sometimes snapping in size mid-swipe.
+
+**Dialogs and sign-in**
+- Bought/Sold/Edit trade now use a calendar picker for the date, and only Cancel closes the dialog - tapping outside no longer discards what you typed.
+- The Analyze button now asks before cancelling a run in progress.
+- An undo on the status line now stays up for 10 seconds and won't be interrupted by the next message.
+- Telegram sign-in has a way back at every step (switch to phone number, resend code, change number, start over).
+- Phone and code fields use a number pad; the keyboard's own key submits the step.
+- Clearer error messages for the common Telegram sign-in failures.
+- Ticked Telegram chats are remembered per phone and listed first.
+
+**Settings and elsewhere**
+- A dozen wording fixes: delete/remove warnings now say what they take with them; the T+1 and default-window explanations no longer overstate how long a call is followed; Sync and Delete explanations match what the app actually does; the overdue reminder is reworded to match how it actually works.
+- The home-screen widget now opens Portfolio.
+- One notification if the daily backup can't reach its folder, instead of failing silently.
+- Ask AI's model picker now matches the analysis picker.
+- "Remove credential" and "Reset provider" confirm first and say what they erase.
+- Results and Portfolio's date filters gain "This week"/"This month" shortcuts.
+
 ## [3.8.9] — 2026-09-22
 
 - Insights: fixed the T+1 pill on a call card reading as detached from the "Still open"/outcome pill above it - the gap between them wasn't the 4dp `spacedBy` the `Column` asked for but up to 48dp of invisible touch-target padding Material3's clickable `Surface` adds by default, which also centred the narrower T+1 pill instead of flushing it to the same left edge. Both pills now opt out of that minimum via `LocalMinimumInteractiveComponentSize`.

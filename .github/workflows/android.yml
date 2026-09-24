@@ -8,7 +8,11 @@ on:
   pull_request:
 
 jobs:
+  # Skipped on a tag: a tag is always cut from a commit already on main, which already ran this
+  # job when it was pushed. Running it again here would test the same commit twice and upload a
+  # debug APK the release job never reads - the release job runs its own tests instead.
   build:
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,10 +51,10 @@ jobs:
 
   # What the app updates itself from. A tag is the whole release process: this signs a release
   # build with the key every previous release was signed with, and publishes it where the app
-  # looks. Behind the build job, so a tag that fails its tests never becomes a release.
+  # looks. Not `needs: build` any more - a tag is always cut from a commit that job already ran
+  # against, so this job runs its own tests instead of waiting on a second run of the same ones.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -63,6 +67,38 @@ jobs:
           java-version: '21'
 
       - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: app/build/reports/tests/
+
+      # The notes this tag ships are whatever CHANGELOG.md says about it - written by hand as part
+      # of cutting the release, not GitHub's own commit-log summary, which is neither short nor
+      # plain language. Extracted here rather than trusted to exist: a tag pushed without its
+      # entry would otherwise publish with no notes at all and nobody would notice until a user
+      # asked what changed.
+      - name: Extract this version's release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v needle="[$version]" '
+            /^## \[/ {
+              if (matched) exit
+              if (index($0, needle) > 0) { matched = 1 }
+              next
+            }
+            matched && NF { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          if [ ! -s "$RUNNER_TEMP/release-notes.md" ]; then
+            echo "CHANGELOG.md has no entry for $GITHUB_REF_NAME; add one before tagging." >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/release-notes.md"
 
       # Refused rather than skipped: an unsigned APK attached to a release is one every device
       # would offer and none could install.
@@ -98,6 +134,29 @@ jobs:
         run: |
           if ! grep -q 'TELEGRAM_API_ID = [1-9]' "app/build/generated/source/buildConfig/release/com/ikverse/egxanalyzer/BuildConfig.java"; then
             echo "The release build has no Telegram api_id; set the TELEGRAM_API_ID and TELEGRAM_API_HASH secrets." >&2
+            exit 1
+          fi
+
+      # Catches the 3.6.15 crash before it ships rather than after: a dependency bump can make R8
+      # strip a member a class only reaches by reflection, which built and ran clean right up until
+      # WorkManager's own WorkDatabase_Impl lost its constructor and the app died before drawing a
+      # frame. `usage.txt` lists every member the shrinker removed, by class; this fails the release
+      # if any `_Impl` class - Room's naming pattern for every class it reflects on - lost its
+      # constructor to it.
+      - name: Check the shrinker kept what Room and WorkManager need
+        run: |
+          if ! awk '
+            /^[^[:space:]]/ { cls = $0; next }
+            /<init>\(\)/ {
+              if (cls ~ /_Impl:$/) {
+                print cls
+                print $0
+                found = 1
+              }
+            }
+            END { exit (found ? 1 : 0) }
+          ' app/build/outputs/mapping/release/usage.txt; then
+            echo "R8 stripped a constructor off a Room-generated *_Impl class - see the lines above. This is the 3.6.15 crash; do not publish this build." >&2
             exit 1
           fi
 
@@ -138,7 +197,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             app/build/outputs/apk/release/egx-analyzer-*.apk \
             --title "$GITHUB_REF_NAME" \
-            --generate-notes
+            --notes-file "$RUNNER_TEMP/release-notes.md"
 
       - name: Forget the signing key
         if: always()
