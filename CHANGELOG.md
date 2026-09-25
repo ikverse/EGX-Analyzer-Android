@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.0.1] — 2026-09-25
+
+- The app now ships a startup profile recorded from what it actually does when it opens and while you first scroll, so it should feel a bit faster to open. No other change.
+
 ## [4.0.0] — 2026-09-24
 
 A major release: a full pass over the app's warnings, dialogs, pop-ups and pills, plus real speed and reliability work.
