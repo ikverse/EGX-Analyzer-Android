@@ -1,0 +1,122 @@
+package com.ikverse.egxanalyzer.model
+
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+
+/**
+ * When the market refresh, close sweep and series harvest fire.
+ *
+ * Pure arithmetic over a zone and a clock, with no Android and no storage in it, because this is
+ * the part of the feature that is impossible to check by hand: a rule about what happens at 07:00
+ * next Sunday cannot be tested by waiting for next Sunday. Everything above it - the alarm, the
+ * worker, the card - only asks this file the questions below.
+ *
+ * Times are Cairo's, always. A schedule belongs to the exchange the app follows, not to wherever
+ * the phone happens to be. The zone is a parameter only so the tests can drive it through a
+ * daylight-saving boundary on purpose.
+ */
+object ScheduleClock {
+
+    val ZONE: ZoneId = ZoneId.of("Africa/Cairo")
+
+    /**
+     * The days the exchange is open.
+     *
+     * What the price refresh's slots are built from.
+     */
+    val tradingDays: Set<DayOfWeek> = setOf(
+        DayOfWeek.SUNDAY,
+        DayOfWeek.MONDAY,
+        DayOfWeek.TUESDAY,
+        DayOfWeek.WEDNESDAY,
+        DayOfWeek.THURSDAY,
+    )
+
+    /** The bell, Cairo time. */
+    val sessionStart: LocalTime = LocalTime.of(10, 0)
+
+    /**
+     * A quarter of an hour after the close, not the close itself.
+     *
+     * The exchange stops at 14:30 and the day's figures settle over the minutes after it, so a
+     * window ending on the bell stores a session that is very nearly but not quite final. One more
+     * fetch past it costs a single pass and leaves the day's row correct until the next session
+     * opens, which is the whole promise of keeping prices fresh while the market is trading.
+     */
+    val sessionEnd: LocalTime = LocalTime.of(14, 45)
+
+    /**
+     * The newest session the exchange has finished with.
+     *
+     * Today's date once the day's figures have settled - [sessionEnd], a quarter of an hour past
+     * the close - and yesterday's until then. A session dated on or before this is final; one
+     * dated after it is still moving, whatever the price table already holds about it.
+     *
+     * **One definition, for the two questions that ask it.** The scorer may not run a window out
+     * on a session that is still trading, and a card may not call a price settled while it is. Read
+     * from two definitions they disagreed for the nine hours between the close and midnight - which
+     * is the whole of this: the date alone answers "is that session still trading" only at
+     * midnight, so a trade whose last session ended at 14:30 stayed open until 00:00 and was
+     * announced whenever something next happened to look. The close is when the market finished
+     * with it, and the close is when the app should say so.
+     *
+     * Nothing here asks whether the exchange was open on either date. A weekend or a holiday has no
+     * row in the price table to be final about, so a date naming no session answers no question -
+     * and the comparison downstream is against the sessions that exist.
+     */
+    fun lastFinalSession(now: Instant = Instant.now(), zone: ZoneId = ZONE): LocalDate {
+        val here = now.atZone(zone)
+        val date = here.toLocalDate()
+        return if (here.toLocalTime() < sessionEnd) date.minusDays(1) else date
+    }
+
+    /**
+     * The first fire of [at] on one of [days] strictly after [after].
+     *
+     * Strictly after, so asking again the instant a schedule fires gives its next day rather than
+     * the slot just served. Null only where [days] is empty, which is a schedule the user has
+     * emptied: there is no honest time to name for it, and naming one anyway is how a card ends up
+     * promising a run that will never come.
+     */
+    fun nextFire(
+        at: LocalTime,
+        days: Set<DayOfWeek>,
+        after: Instant,
+        zone: ZoneId = ZONE,
+    ): Instant? {
+        if (days.isEmpty()) return null
+        val from = after.atZone(zone).toLocalDate()
+        // Eight candidates, not seven: today's own slot may already be past, so a schedule that
+        // keeps only Thursdays has to be able to reach the Thursday of the following week.
+        return (0..7).asSequence()
+            .map { from.plusDays(it.toLong()) }
+            .filter { it.dayOfWeek in days }
+            // A local time that daylight saving skipped does not exist, and atZone moves it
+            // forward across the gap rather than throwing. That is the right answer for a
+            // schedule: the run happens once, an hour later than it reads.
+            .map { it.atTime(at).atZone(zone).toInstant() }
+            .firstOrNull { it.isAfter(after) }
+    }
+
+    /** The most recent fire of [at] on one of [days] at or before [moment], served or not. */
+    fun previousFire(
+        at: LocalTime,
+        days: Set<DayOfWeek>,
+        moment: Instant,
+        zone: ZoneId = ZONE,
+    ): Instant? {
+        if (days.isEmpty()) return null
+        val from = moment.atZone(zone).toLocalDate()
+        return (0..7).asSequence()
+            .map { from.minusDays(it.toLong()) }
+            .filter { it.dayOfWeek in days }
+            .map { it.atTime(at).atZone(zone).toInstant() }
+            .firstOrNull { !it.isAfter(moment) }
+    }
+
+    /** 24-hour, because 18:00 cannot be read as the morning and "6:00 PM" is three characters longer. */
+    fun clock(time: LocalTime): String = "%02d:%02d".format(time.hour, time.minute)
+}

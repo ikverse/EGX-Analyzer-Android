@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  No `updatePeriodMillis`, deliberately. The record changes when prices arrive rather than on a
+  clock, and the system's minimum period is half an hour of wake-ups spent finding nothing new. The
+  app pushes an update on every recompute instead - see `refreshTodayWidget`.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:resizeMode="horizontal|vertical"
+    android:description="@string/widget_description"
+    android:widgetCategory="home_screen"
+    android:initialLayout="@layout/glance_default_loading_layout" />

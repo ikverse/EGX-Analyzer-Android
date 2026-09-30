@@ -1,0 +1,2082 @@
+package com.ikverse.egxanalyzer.ui
+
+import android.view.WindowManager
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.repeatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.takeOrElse
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import com.ikverse.egxanalyzer.R
+import com.ikverse.egxanalyzer.model.isEgx33
+import com.ikverse.egxanalyzer.ui.theme.LocalDarkTheme
+import com.ikverse.egxanalyzer.ui.theme.pageAccent
+import java.time.LocalDate
+import kotlin.math.max
+import kotlin.math.min
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+
+/**
+ * Standard page frame: the page's own name at the top, shrinking as the page is read.
+ *
+ * The title used to be the first line inside the scroll, under a band that said `EGX Analyzer` on
+ * all five tabs. The band is gone as of 2026-09-09 and this is what replaced it - see [PageHeader],
+ * which explains the shrink, and `AppContent`, which explains why there is no chrome above it any
+ * more.
+ *
+ * **The header eats the scroll before the page moves.** [HeaderCollapseTravel] of every downward
+ * gesture goes into the collapse first and is not passed on, which is the whole reason there is a
+ * `NestedScrollConnection` here rather than an arithmetic on `scroll.value`: a header that merely
+ * shrank *as* the page scrolled would move the content at twice the speed of the finger for the
+ * first 40dp, because the page rises by whatever height the header gives up on top of its own
+ * travel.
+ *
+ * **It grows back only with the page at its top.** Expanding on any upward delta would pop the
+ * title open in the middle of a long page, and - on the three screens that pull to refresh - would
+ * fight the gesture: this connection is the outer one, so it sees a downward drag before
+ * `PullToRefreshBox` does. Gated on `scroll.value == 0` the two take their turns in the order a
+ * reader expects, the header first and then the refresh.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun Screen(
+    /** For the header's stock search, the status line, and the progress hairline under it. */
+    appState: AppState,
+    /**
+     * Which page this is - the title and the icon both come from it.
+     *
+     * Taken rather than a `title` string so that the name at the top of the page and the label in
+     * the navigation cannot drift apart: there is one of each, on [AppDestination].
+     */
+    destination: AppDestination,
+    /** Stays put while the page scrolls. The content reserves room so it never covers anything. */
+    floatingAction: (@Composable () -> Unit)? = null,
+    /** Given, the page pulls down to refresh. Its spinner is [refreshing]. */
+    onRefresh: (() -> Unit)? = null,
+    refreshing: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    // Seeded from PageState rather than starting at 0, so a fold restores exactly where the
+    // reader left off instead of resetting to the top - see PageState.scrollOffset for why this
+    // was one of the few things on a page still held in a bare `remember`. Read once, since
+    // `remember` only evaluates its lambda on this composable's first composition; the effect
+    // below is what keeps it current for the fold after this one.
+    val savedScroll = appState.pages.scrollOffset(destination)
+    val scroll = rememberScrollState(initial = savedScroll.value)
+    LaunchedEffect(scroll) {
+        snapshotFlow { scroll.value }.collect { savedScroll.value = it }
+    }
+    // Where the scrolling area begins on screen, so anything inside it can pin itself there. A
+    // table header has no other way to know how far it has been scrolled past.
+    var viewportTop by remember { mutableFloatStateOf(0f) }
+    // How much of the header has been taken, in pixels, between 0 and [HeaderCollapseTravel].
+    //
+    // Written from the scroll callback below and read in two places: [PageHeader]'s own
+    // composition, and the wash's draw lambda. Never read in this function's composition - the page
+    // under it would then recompose on every frame of a collapse.
+    val travel = with(LocalDensity.current) { HeaderCollapseTravel.toPx() }
+    val taken = remember { mutableFloatStateOf(0f) }
+    val headerScroll = remember(travel, scroll) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                return when {
+                    // Reading on: the header shrinks before the page underneath is asked to move.
+                    delta < 0f && taken.floatValue < travel -> {
+                        val used = max(delta, -(travel - taken.floatValue))
+                        taken.floatValue -= used
+                        Offset(0f, used)
+                    }
+                    // Back at the top: the title comes back before anything else takes the gesture.
+                    delta > 0f && taken.floatValue > 0f && scroll.value == 0 -> {
+                        val used = min(delta, taken.floatValue)
+                        taken.floatValue -= used
+                        Offset(0f, used)
+                    }
+                    else -> Offset.Zero
+                }
+            }
+        }
+    }
+    // The bottom bar gets out of the way while a page is being read, and comes back the moment it is
+    // pulled back up. Taken from this page's own scroll position rather than from the gesture, so
+    // scrolling a list inside a card - the chat list, the source list - leaves the bar alone.
+    val navBarVisible = LocalNavBarVisible.current
+    val slop = with(LocalDensity.current) { NavBarScrollSlop.toPx() }
+    // Less scroll than this and the bar stays: the page has less left to read than the bar is
+    // covering, so moving it out of the way uncovers nothing worth the movement.
+    val worthHiding = with(LocalDensity.current) { NavBarFootprint.toPx() } + slop
+    LaunchedEffect(scroll, slop, worthHiding) {
+        var mark = scroll.value
+        var lastMax = scroll.maxValue
+        snapshotFlow { scroll.value to scroll.maxValue }.collect { (offset, max) ->
+            // **Only a still page is read as a gesture.** The header collapsing gives this page a
+            // taller viewport, which shortens `maxValue` - and at the foot of a page a shorter
+            // `maxValue` clamps the offset down by the height the header just gave up. That drop is
+            // not a reader pulling the page back; it is the page growing under them. Read as a
+            // gesture it showed the chrome again, which shrank the viewport, which pushed the
+            // offset back down, which hid it again - the chrome flickering for as long as a finger
+            // was moving, and never settling hidden. So a frame where the extent changed only
+            // re-marks where the page is: the watcher picks up again from there once the header has
+            // finished moving.
+            if (max != lastMax) {
+                lastMax = max
+                mark = offset
+                return@collect
+            }
+            when {
+                // The top of a page always shows it: there is nothing hidden behind the bar up
+                // here, and a page that opens with no navigation showing looks broken.
+                offset <= slop -> navBarVisible.value = true
+                offset - mark > slop && max > worthHiding -> navBarVisible.value = false
+                mark - offset > slop -> navBarVisible.value = true
+                else -> return@collect
+            }
+            mark = offset
+        }
+    }
+    // How much of the wash is left, eased rather than tracking the raw scroll fraction 1:1.
+    // Scrolling down still snaps straight to the target - the wash is meant to get out of the way
+    // quickly - but scrolling back up used to reveal it exactly as fast as the finger moved, which
+    // read as the wash being dragged into view rather than appearing. Only the direction that grows
+    // it is eased. [PageWash] draws this directly; the rail reads the same value below, so the two
+    // can never show two different amounts of it.
+    val washHeight = with(LocalDensity.current) { PageWashHeight.toPx() }
+    val wash = remember { Animatable(1f) }
+    LaunchedEffect(scroll, washHeight) {
+        var last = wash.value
+        snapshotFlow { (1f - (scroll.value + taken.floatValue) / washHeight).coerceIn(0f, 1f) }
+            .collectLatest { target ->
+                val from = last
+                last = target
+                if (target > from) {
+                    wash.animateTo(target, spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow))
+                } else {
+                    wash.snapTo(target)
+                }
+            }
+    }
+    // The rail beside the page wears this page's wash and has no way to work out how much of it is
+    // left. Written from the same eased value in a flow rather than in composition, for the reason
+    // `wash.value` is never read here directly: a page that read it in its own composition would
+    // recompose whole on every frame it changes.
+    //
+    // **Only the page actually on screen writes.** Beside a rail two of them are composed at once
+    // while the destinations cross-fade, and the one being left would otherwise report its own
+    // scroll as the arriving page's.
+    val railWash = LocalPageWash.current
+    val onScreen = appState.destination == destination
+    LaunchedEffect(railWash, onScreen) {
+        if (!onScreen) return@LaunchedEffect
+        snapshotFlow { wash.value }.collect { railWash.floatValue = it }
+    }
+
+    // Pressing the destination already showing means "take me back to the top". Animated rather
+    // than jumped, so it reads as the page travelling rather than as the content being replaced -
+    // and the watcher above brings the navigation back on its own as the offset passes the slop.
+    // The header comes back with it: the scroll that took it is being undone, so leaving it
+    // collapsed would strand the one piece of chrome the press is aimed at.
+    val scrollToTop = LocalScrollToTop.current
+    LaunchedEffect(scrollToTop) {
+        if (scrollToTop <= 0) return@LaunchedEffect
+        launch { animate(taken.floatValue, 0f) { value, _ -> taken.floatValue = value } }
+        scroll.animateScrollTo(0)
+    }
+
+    // The bar floats over the page, so the page has to hold its own content out from under it.
+    // Beside a rail there is no bar over anything and nothing to hold clear of.
+    val compact = LocalWindowWidth.current == WindowWidth.COMPACT
+    val barClearance = if (compact) NavBarFootprint else 0.dp
+    val page = @Composable {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { viewportTop = it.positionInWindow().y }
+                .fadingScrollbar(scroll)
+                .verticalScroll(scroll)
+                .padding(horizontal = Space.l)
+                .padding(
+                    top = Space.l,
+                    bottom = (if (floatingAction == null) Space.xl else FloatingActionInset) +
+                        barClearance,
+                ),
+            verticalArrangement = Arrangement.spacedBy(Space.m),
+        ) {
+            content()
+        }
+    }
+    // The page keeps a copy of itself so the action floating over it can frost against what is
+    // actually behind it. Recorded around the wash and the page together and **not** around the
+    // floating action below, which has to stay outside the recording it reads. See PageBackdrop.
+    val backdrop = rememberPageBackdrop()
+    // The ground the page stands on, recorded separately so a card can frost against it. Only
+    // Results carries one while the frosted treatment is being judged - see PageGround.
+    //
+    // Nested inside the page's own recording rather than drawn beside it: the ground is part of the
+    // page, so a floating action frosting against `backdrop` gets the wash and the aurora it is
+    // actually sitting over. Beside it, the action's frost had the wash and not the lights, and a
+    // card's frost had the lights and not the wash - which is the same page drawn two ways.
+    CompositionLocalProvider(LocalViewportTop provides viewportTop) {
+    Box(Modifier.fillMaxSize().nestedScroll(headerScroll)) {
+      Box(Modifier.fillMaxSize().recordBackdrop(backdrop)) {
+        PageWash { wash.value }
+        Column(Modifier.fillMaxSize()) {
+            PageHeader(
+                destination = destination,
+                // A lambda, not a value. Read here it would be this function recomposing on every
+                // frame of a collapse, and this function composes the whole page.
+                collapse = { (taken.floatValue / travel).coerceIn(0f, 1f) },
+                // The page's own stock box, or null where the page has no list to narrow. See
+                // PageState.stockBox - and StockBox for why every part of it is held out there.
+                search = appState.pages.stockBox(destination),
+                current = appState.destination == destination,
+                // The flag the filter icon sets; the page below draws the sheet it opens. Null
+                // where the page has no filters at all. See PageState.filtersOpen.
+                filters = appState.pages.filtersOpen(destination),
+                // Only the filters that live in the sheet, so the dot never reports the stock box
+                // the reader can already see. See PageState.filtersInSheet.
+                filtered = appState.pages.filtersInSheet(destination),
+                // A lambda, for `collapse`'s reason turned the other way round: reading the runs,
+                // the calls or the positions here would subscribe every page to all three and walk
+                // them on every recomposition. The picker calls it once, when its list opens.
+                stocksOnPage = { pageStocks(appState, destination) },
+            )
+            // Under the header rather than above it, because the header is the top of the window
+            // now. Above the page's own content, so a run starting does not push the first card
+            // down the screen.
+            if (appState.busyLabel != null) {
+                LinearProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary,
+                    // A tint of the page's own hue rather than Material's grey track, so the bar is
+                    // one line with a light running through it rather than a grey rail with a
+                    // coloured piece on it.
+                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = BusyTrackAlpha),
+                    strokeCap = StrokeCap.Round,
+                    // Material punches a gap either side of the moving piece, which on a bar this
+                    // wide reads as three separate bars rather than as one thing in motion.
+                    gapSize = 0.dp,
+                    // Held to the page's own margin. Edge to edge it was the one thing on the
+                    // screen touching the frame, on a page whose every card is inset - which is
+                    // what made it read as a system bar dropped on top rather than as the app's.
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.l),
+                )
+            }
+            // One line for everything the app is doing or has just done. It sat in the app-name
+            // band until that band was removed; it is here, on the page, because the page starts at
+            // the top of the window now and there is nowhere above it left to be. Still outside the
+            // scroll, so a message can never land off screen.
+            AppStatusLine(
+                appState = appState,
+                onDismiss = appState::consumeStatusMessage,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = Space.l),
+            )
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                if (onRefresh == null) {
+                    page()
+                } else {
+                    // The gesture wraps only the scrolling page: a floating button that slid down
+                    // with the indicator would look like it had come loose.
+                    PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh) { page() }
+                }
+            }
+        }
+      }
+        floatingAction?.let {
+          CompositionLocalProvider(LocalPageBackdrop provides backdrop) {
+            if (compact) {
+                // The action keeps the bar's side margins and its corner, and **never leaves**. It
+                // used to go with the bar on the same scroll, so the one control that starts a run
+                // could not be reached from anywhere but the top of the page - a poor trade for
+                // chrome that tidies itself away.
+                //
+                // It follows the bar down instead of holding its height. Above the bar it stands
+                // clear of it and then the same gap again, so the two read as one stack; with the
+                // bar gone it takes the bar's own place, on the bar's own PillBottomMargin, rather
+                // than hovering over the hole it left. The travel is exactly NavBarFootprint, which
+                // is what makes it land there and not near there.
+                val liftedClear = NavBarFootprint + PillBottomMargin
+                val lift by animateDpAsState(
+                    if (navBarVisible.value) liftedClear else PillBottomMargin,
+                    label = "action lift",
+                )
+                Box(
+                    Modifier.align(Alignment.BottomCenter)
+                        .padding(start = PillSideMargin, end = PillSideMargin, bottom = lift),
+                ) { it() }
+            } else {
+                // Further in from the corner on a big screen, where the edge is a long way from the
+                // content and a button hard against it reads as stuck to the frame. Not stretched
+                // and not pinned: beside a rail the navigation is a column at the side, so there is
+                // no bar at the foot to match, nothing to travel with, and a full-width action here
+                // would be an 88dp slab the width of an unfolded Fold.
+                Box(Modifier.align(Alignment.BottomEnd).padding(Space.xl + Space.s)) { it() }
+            }
+          }
+        }
+    }
+    }
+}
+
+/**
+ * The top of the scrolling area, in window coordinates.
+ *
+ * Published so a header deep inside the page can hold itself against it. Measuring the window again
+ * from down there gets the top of the screen, which is not the same thing once a rail, a status bar
+ * or a pull-to-refresh indicator is in the way.
+ */
+internal val LocalViewportTop = compositionLocalOf { 0f }
+
+/**
+ * Whether the bottom navigation bar is showing.
+ *
+ * Owned by the shell and written by whichever page is on screen. The bar is drawn outside every
+ * screen, so a page being scrolled has no other way to tell it to get out of the way.
+ */
+internal val LocalNavBarVisible = staticCompositionLocalOf { mutableStateOf(true) }
+
+/**
+ * How much of the page's accent wash is still standing: 1f at the top of a page, 0f once it has been
+ * scrolled away.
+ *
+ * Owned by the shell and written by the page, the same way round as [LocalNavBarVisible] and for the
+ * same reason - the rail is drawn outside every screen. It wears this page's wash across its own
+ * width so the band runs unbroken along the top of the window rather than stopping dead at the
+ * rail's edge, and a band that stayed put while the page's faded would be a column of colour beside
+ * a plain page. Only the page being scrolled knows the answer.
+ *
+ * One float for the whole app: only the page on screen writes it, only the rail reads it, and on a
+ * phone nothing reads it at all. Read in a draw lambda rather than in composition - see `AppRail`.
+ */
+internal val LocalPageWash = staticCompositionLocalOf { mutableFloatStateOf(1f) }
+
+/**
+ * Whether the pager holding the five tabs has come to rest.
+ *
+ * Owned by the shell and written by `DestinationPager`, the same way round as [LocalNavBarVisible]:
+ * something outside every screen knows this, and a page has no other way to ask. True beside a rail
+ * and true whenever there is no pager at all, because there is then nothing to arrive from.
+ *
+ * Read by [revealIfOnScreen], which is the only thing that needs it - see the trap written up
+ * there. A page composing is not the same event as a reader arriving on it: on a phone the two are
+ * a whole travel apart.
+ */
+internal val LocalTabsSettled = staticCompositionLocalOf { mutableStateOf(true) }
+
+/**
+ * How many times this page has been asked to return to the top, or zero.
+ *
+ * The counterpart of [LocalNavBarVisible] and provided the other way round: the shell writes this
+ * and the page reads it. Zero means "nothing asked"; every press after that is a distinct number,
+ * which is what makes a second press restart the effect rather than look like the first one again.
+ *
+ * Provided **per destination** by the shell, so a page only ever sees presses meant for it - see
+ * `DestinationScreen`. Not `static`, because it changes.
+ */
+internal val LocalScrollToTop = compositionLocalOf { 0 }
+
+/**
+ * How far text sitting loose on a page is set in from the page's own edge.
+ *
+ * A card holds its outline at the page edge and its contents [Space.l] inside that, so every
+ * heading on a page reads down one column that starts an inset further in. The page name and any
+ * other text that sits on the page rather than in a card takes the same inset, or it hangs to the
+ * left of every heading under it and the page looks unaligned.
+ */
+internal val PageTextInset = Space.l
+
+/**
+ * The unlit part of the busy bar: the page's hue, most of the way down.
+ *
+ * Faint enough that an idle stretch of the bar is a hint of the line rather than a second object,
+ * and the eye follows the one lit piece travelling along it.
+ */
+internal const val BusyTrackAlpha = 0.14f
+
+/** Enough movement to be a scroll rather than a wobble, so the bar does not flicker on a nudge. */
+private val NavBarScrollSlop = 6.dp
+
+/** Height of an extended action plus its margin, so the last card clears it when scrolled to. */
+private val FloatingActionInset = 88.dp
+
+/**
+ * A group inside a card, for settings that belong to one another.
+ *
+ * Deliberately lighter than [ExpandableSection]: a card drawn inside a card reads as a mistake, so
+ * this is a heading, a chevron, and a rule underneath. It keeps its own open state, because which
+ * group someone is reading is not the parent's business.
+ */
+@Composable
+internal fun SubSection(
+    title: String,
+    /** One line saying what is inside, so a closed group still informs. */
+    summary: String? = null,
+    /** The group's own explanation, on the same terms as [ExpandableSection]'s. */
+    about: InfoNote? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = Space.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                summary?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            about?.let { InfoButton(it) }
+            Icon(
+                if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(IconSize.Inline),
+            )
+        }
+        AnimatedVisibility(expanded) {
+            Column(
+                Modifier.padding(bottom = Space.m),
+                verticalArrangement = Arrangement.spacedBy(Space.m),
+                content = content,
+            )
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+/**
+ * A titled group of related controls, replacing the loose outlined boxes used before.
+ *
+ * @param about what the group is for, behind the heading's question mark rather than in a paragraph
+ *   under it. Ignored without a [title]: there is no heading to hang it on.
+ * @param contentInset how far the content is held in from the card's edge.
+ *
+ * [Space.l] everywhere the content is things to read - controls, figures, sentences - which is what
+ * a card normally holds. A card whose children are themselves **cards** passes [Space.s], because
+ * the child draws its own border and the parent is then paying for an edge that is already there.
+ * The heading and its rule keep the full inset whatever this is: the alternative is a title that
+ * sits at a different distance from the card's edge than every other title on the page, which is
+ * the almost-aligned this file's spacing scale exists to stop.
+ *
+ * It matters because these nest. Positions is a card holding session cards holding trade cards, and
+ * at a full inset per level the innermost card had 285dp of a 411dp screen.
+ *
+ * @param accent this card's own hue, on the tile behind [icon] and on the edge down its left side.
+ *
+ * **A card's accent is chrome and never a figure.** It says which card this is in a column of them;
+ * what a number on it means is still said by the tertiary/error/market roles, which are the same on
+ * every page. So a card may take any hue without the prices on it changing meaning.
+ *
+ * Null takes the page's own, which is what the **first** card on a page should have - the rest name
+ * one, in the order the screens keep. A default of "the page's hue" rather than a grey is what makes
+ * an untouched call site look deliberate rather than unfinished.
+ */
+@Composable
+internal fun SectionCard(
+    title: String? = null,
+    icon: ImageVector? = null,
+    modifier: Modifier = Modifier,
+    about: InfoNote? = null,
+    contentInset: Dp = Space.l,
+    accent: Color? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val hue = accent ?: pageAccent.ink
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        // The colour is see-through in the theme itself - see GlassSection - so what this adds is
+        // only what a **first-level** card gets: the light along its top edge. **No shadow**: a
+        // shadow is drawn behind the card's whole shape, and behind a see-through card that is a
+        // dark panel tinting the card's own face rather than a lift under its edge - which is what
+        // was reading as a solid background on every card on every tab. It comes off every card
+        // that had it: the treatment is the material and the edge, not depth faked under glass.
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        shape = MaterialTheme.shapes.large,
+        border = Glass.outline,
+    ) {
+        // Drawn behind the content rather than as a `Row` beside it: the edge runs the whole height
+        // of the card, which is not known until everything inside it has been laid out, and a column
+        // that had to reserve width for it would hold that width open on every card in the app.
+        // Clipped by the card's own shape, so it takes the corner radius with it.
+        Box(
+            Modifier.drawBehind {
+                drawRect(hue, size = Size(AccentEdgeWidth.toPx(), size.height))
+            },
+        ) {
+        // Vertical only, so the heading band and the content band can be held in by different
+        // amounts. Both were one padding on this Column until the nesting above made the two
+        // different questions.
+        Column(
+            Modifier.padding(vertical = Space.l),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            if (title != null) {
+                Row(
+                    Modifier.padding(horizontal = Space.l),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (icon != null) {
+                        // A tile rather than a bare glyph. An icon tinted on its own is a coloured
+                        // mark on a card; the same icon on a field of its own hue is the card's
+                        // heading having a place, which is what lets a column of cards be told
+                        // apart at the speed they are actually scanned.
+                        Box(
+                            Modifier
+                                .size(AccentTileSize)
+                                .background(hue.copy(alpha = AccentTileAlpha), MaterialTheme.shapes.small),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                icon,
+                                contentDescription = null,
+                                tint = hue,
+                                modifier = Modifier.size(IconSize.Inline),
+                            )
+                        }
+                        Spacer(Modifier.width(Space.s))
+                    }
+                    Text(
+                        title,
+                        // Weighted only when something sits after it, so a card without an
+                        // explanation keeps a heading that is as wide as its own words.
+                        modifier = if (about == null) Modifier else Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    // Dense: the 48dp target on a plain IconButton would make this header band
+                    // taller than the cards beside it on the page that carry no explanation.
+                    about?.let { InfoButton(it, dense = true) }
+                }
+                // The same hairline the chrome uses to separate the app header from the page, so a
+                // card says where its heading ends the way the app does. Only with a title: there is
+                // nothing to separate without one.
+                HorizontalDivider(
+                    Modifier.padding(horizontal = Space.l),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+            }
+            Column(
+                Modifier.padding(horizontal = contentInset),
+                verticalArrangement = Arrangement.spacedBy(Space.s),
+                content = content,
+            )
+        }
+        }
+    }
+}
+
+/**
+ * The page's own hue at the top of the page, faded to nothing.
+ *
+ * An arrival cue and not a paint job: it announces which page this is in the moment it appears and
+ * then gets out of the way, because a permanent tint behind the first card would be one more thing
+ * every card on the page has to be read against.
+ *
+ * Inside the page's own recording, which is what lets the floating action frost against the wash it
+ * is actually sitting over rather than against a page that does not have it - see [recordBackdrop].
+ * The lights behind it are the window's and not the page's: see `appGround`.
+ *
+ * **Faded on the scroll rather than pinned**, and read inside the draw lambda for the reason
+ * [PageHeader]'s collapse is passed as a lambda: read at composition, every frame of a scroll would
+ * recompose the whole page, where here a frame costs one rectangle repainted. The fraction itself -
+ * eased on the way back up, snapped on the way down - is computed once in [Screen] and handed down
+ * as [strength], because the rail reads that same value and the two must never disagree about it.
+ */
+@Composable
+private fun PageWash(strength: () -> Float) {
+    val wash = pageAccent.wash
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(PageWashHeight)
+            .drawBehind {
+                val left = strength().coerceIn(0f, 1f)
+                if (left <= 0f) return@drawBehind
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(wash.copy(alpha = wash.alpha * left), Color.Transparent),
+                    ),
+                )
+            },
+    )
+}
+
+/**
+ * How far down the page the wash reaches, and so how far it takes to scroll it away.
+ *
+ * Measured from the top of the *window* rather than from the top of the content, since the page
+ * runs up behind the status bar now - see `AppContent`. 120 became 160 for the bar it has to cover
+ * before it starts on the page at all, and 160 became 280 because covering the bar is not the same
+ * as reaching the page: at 160 the hue was spent by the second card, which reads as a band that
+ * stopped rather than a page that opens in its own colour. The start alpha is untouched, so the top
+ * of the page looks the same and the difference is only how far down the colour is still there.
+ *
+ * Published because the rail measures its own wash from it - one number, or the two halves of the
+ * band across the top of a wide window would fade out at different rates. See `AppRail`.
+ */
+internal val PageWashHeight = 280.dp
+
+/** A hairline of the card's own hue. Wider and it is a stripe the content has to sit clear of. */
+private val AccentEdgeWidth = 2.dp
+
+/** Room for [IconSize.Inline] with a margin, on the tile behind a section card's icon. */
+private val AccentTileSize = 26.dp
+
+/** Enough that the tile is a field of colour, little enough that the glyph on it stays the figure. */
+private const val AccentTileAlpha = 0.16f
+
+/**
+ * A settings group that starts closed.
+ *
+ * Settings is long enough that showing every control at once buries the one being looked for, so
+ * each group opens on demand and the headers act as the index.
+ */
+@Composable
+internal fun ExpandableSection(
+    title: String,
+    icon: ImageVector? = null,
+    /**
+     * Colour for [icon], where the card's own **state** is what it should be saying.
+     *
+     * A session on Insights is the case: how that session went is the card's whole subject, and the
+     * icon is where it can be said before a word is read. It outranks [accent] when given, because a
+     * card reporting its own state has something to say that its place in a column does not.
+     *
+     * It used to argue that colouring each icon would be a page of noise, and every card took
+     * `primary`. That was true of a page of identical grey headings and is not true of a tile per
+     * card in a hue the page keeps to - see [accent].
+     */
+    iconTone: Color? = null,
+    /**
+     * This card's own hue, on the tile behind [icon] and the edge down its left side.
+     *
+     * [SectionCard.accent]'s rule exactly, and for the reason given there: chrome, never a figure.
+     * Null takes the page's own, which is what the first card on a page should have.
+     */
+    accent: Color? = null,
+    modifier: Modifier = Modifier,
+    initiallyExpanded: Boolean = false,
+    /** One line under the title saying what is inside, so a closed card still informs. */
+    summary: String? = null,
+    /** Colour for [summary], where the figure itself carries a verdict. */
+    summaryTone: Color? = null,
+    /**
+     * Draws that line itself, for a summary whose parts want different colours.
+     *
+     * Takes the place of [summary] where it is given. A plain string covers almost every card in the
+     * app, and making all of them build one would be paying for a Portfolio card's state counts
+     * everywhere else.
+     */
+    summaryContent: (@Composable () -> Unit)? = null,
+    /** Caps the content, for groups of form controls: a text field the width of a desk is unusable. */
+    contentMaxWidth: Dp? = null,
+    /**
+     * How far the content is held in from the card's edge, on [SectionCard]'s rule.
+     *
+     * [Space.s] where the children are cards - the child's own border is the edge, and a full inset
+     * at every level of a nest is what left a trade card 285dp of a 411dp screen. The header row and
+     * the rule under it keep their 16 whatever this is.
+     */
+    contentInset: Dp = Space.l,
+    /**
+     * What the whole group is for, behind a question mark in the header.
+     *
+     * Beside the chevron rather than inside the card, on purpose: a section-wide explanation used to
+     * be the first thing under the fold, so it was read once and then stood between the reader and
+     * the controls on every later visit. Here it is reachable without opening the card at all.
+     */
+    about: InfoNote? = null,
+    /** Hoisted when the layout around it needs to know: an open card claims the whole row. */
+    expandedState: Boolean? = null,
+    onExpandedChange: ((Boolean) -> Unit)? = null,
+    /**
+     * The card's own fill, for one drawn **inside** another card.
+     *
+     * `surfaceContainer` is right on the page, where the well behind it is darker. Nested in a card
+     * of the same fill it disappears into its parent, so a card within a card goes one step up -
+     * the rule `OverdueTile` and `EventTile` already follow with `surfaceContainerHigh`. Named
+     * rather than assumed, because only the caller knows what it is sitting on.
+     */
+    containerColor: Color? = null,
+    showAccentEdge: Boolean = true,
+    /** Holding the header offers something beyond expanding the card - see [HoldPrompt]. */
+    onHeaderLongClick: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var localExpanded by remember { mutableStateOf(initiallyExpanded) }
+    val expanded = expandedState ?: localExpanded
+    val hue = accent ?: pageAccent.ink
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = containerColor ?: MaterialTheme.colorScheme.surfaceContainer,
+        ),
+        shape = MaterialTheme.shapes.large,
+        // A session card stands on the page exactly as a section card does, so it is lit exactly
+        // as one - and casts no shadow, for the reason given there.
+        border = Glass.outline,
+    ) {
+        Column(
+            // SectionCard's edge, drawn the same way and for the same reason.
+            if (showAccentEdge) Modifier.drawBehind {
+                drawRect(hue, size = Size(AccentEdgeWidth.toPx(), size.height))
+            } else Modifier,
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onLongClick = onHeaderLongClick,
+                        onClick = {
+                            if (onExpandedChange != null) {
+                                onExpandedChange(!expanded)
+                            } else {
+                                localExpanded = !expanded
+                            }
+                        },
+                    )
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (icon != null) {
+                    // SectionCard's tile, so a group heading and a card heading are the same object
+                    // at a glance. iconTone wins where a card is reporting its own state.
+                    val ink = iconTone ?: hue
+                    Box(
+                        Modifier
+                            .size(AccentTileSize)
+                            .background(ink.copy(alpha = AccentTileAlpha), MaterialTheme.shapes.small),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            tint = ink,
+                            modifier = Modifier.size(IconSize.Inline),
+                        )
+                    }
+                    Spacer(Modifier.width(Space.s))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    when {
+                        summaryContent != null -> summaryContent()
+                        summary != null -> Text(
+                            summary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = summaryTone ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                about?.let { InfoButton(it) }
+                Icon(
+                    if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = if (expanded) "Collapse $title" else "Expand $title",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AnimatedVisibility(expanded) {
+                Column {
+                    // Inside the reveal rather than above it: a closed card would otherwise carry a
+                    // rule along its bottom edge with nothing under it.
+                    HorizontalDivider(
+                        Modifier.padding(horizontal = Space.l),
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                    Column(
+                        Modifier
+                            .padding(start = contentInset, end = contentInset, top = Space.s, bottom = Space.l)
+                            .then(contentMaxWidth?.let { Modifier.widthIn(max = it) } ?: Modifier),
+                        verticalArrangement = Arrangement.spacedBy(Space.s),
+                        content = content,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The edge a card wears when the app has just brought the reader to it.
+ *
+ * A flash rather than a permanent tint: it answers "which one" on arrival and then gets out of the
+ * way, instead of leaving a card looking special long after the reason has passed. Null when there
+ * is nothing to point out, so a card falls back to whatever edge it draws for itself - the held
+ * outline on a traded call, the hairline everywhere else.
+ *
+ * The animation is composed only while it is wanted. Left running behind every card it would be a
+ * frame callback each, on screens that draw dozens of them, to animate nothing.
+ *
+ * @param statusColor the card's own held-outline colour, when it has one, so the flash reads as
+ *   that outline announcing itself rather than as a second, unrelated colour landing on top of it.
+ *   Null falls back to the page accent, for a card with no status of its own.
+ * @param onShown fires once the flash has run, so the caller can forget the arrival.
+ */
+@Composable
+internal fun arrivalFlash(
+    highlighted: Boolean,
+    onShown: () -> Unit,
+    statusColor: Color? = null,
+): BorderStroke? {
+    if (!highlighted) return null
+    val edge = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        edge.animateTo(
+            1f,
+            // Linear, not the tween default: RepeatMode.Reverse chains this segment back to back
+            // with itself, and the default FastOutSlowIn easing is asymmetric - the gentle tail
+            // easing into the peak collided with the same curve's steep opening dropping away from
+            // it, which read as a snap at the top of each blink rather than a smooth reversal.
+            animationSpec = repeatable(
+                FlashBlinks * 2,
+                tween(FlashHalfCycleMs, easing = LinearEasing),
+                RepeatMode.Reverse,
+            ),
+        )
+        onShown()
+    }
+    val color = statusColor ?: MaterialTheme.colorScheme.primary
+    return BorderStroke(FlashOutline, color.copy(alpha = edge.value))
+}
+
+/** The same weight as the held outline, so a flash does not resize the card it lands on. */
+private val FlashOutline = 0.5.dp
+
+/** Fast enough that two of them read as a blink rather than a fade. */
+private const val FlashHalfCycleMs = 250
+
+/** Two blinks, not a pulse held open: enough to catch the eye without nagging at it. */
+private const val FlashBlinks = 2
+
+/**
+ * How long to let a card's own reveal finish before scrolling to it.
+ *
+ * A jump opens the section holding the card and scrolls to it in one go, and a request made while
+ * that section is still unfolding is measured against a height it is about to leave behind - which
+ * lands the reader short of the card they asked for. Material's default reveal is 300ms.
+ */
+internal const val REVEAL_SETTLE_MS = 320L
+
+/**
+ * Scrolls to a card, unless the reader has left the tab it is drawn on.
+ *
+ * A [BringIntoViewRequester]'s request travels up through every scrollable ancestor, and on a phone
+ * the outermost one is the pager holding the five tabs. Fired from a page the reader is no longer
+ * looking at, it scrolls that page back into view - which is the pager travelling back to the tab
+ * they had just left. The pager keeps its neighbours composed, so a page walked away from is still
+ * alive and still running the effect that reveals a card on it. See `DestinationPager`.
+ *
+ * It won against a tab press rather than losing to one: a press animates the pager at the same
+ * priority a reveal scrolls it, so the later of the two wins, and the reveal was the later one. A
+ * swipe survived, which is what made this look like the bar alone was broken - a drag holds the
+ * pager at a priority no reveal can take.
+ *
+ * Dropped rather than held for the reader's return, which is the rule [NavStop] already states
+ * about the trip back: revealing the wrong card is worse than revealing none, and a press answered
+ * minutes late is a card flashing for a reason nobody remembers. The section holding it is left
+ * unfolded either way, which is most of what the reveal was for.
+ *
+ * **The tab alone was not enough, and that is the whole of [settled].** A destination names where
+ * the reader is going, not whether they have got there: a press sets it in the same breath it
+ * starts the travel, so a page arriving *during* that travel passes the check and cancels the very
+ * scroll that is carrying the reader to it. The pager, barely off the tab they pressed from, then
+ * snaps back to it. Only a tab two or more pages away can do this - a neighbour is already
+ * composed and its effects do not run again - which is why the Portfolio reached Insights and
+ * never Results. So the request waits out the pager and asks again on the other side, rather than
+ * being dropped: an arrival that should reveal, a notification opening a saved report among them,
+ * composes its page mid-travel too, and dropping the request would answer the notification with a
+ * page scrolled to wherever it was left.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+internal suspend fun BringIntoViewRequester.revealIfOnScreen(
+    appState: AppState,
+    tab: AppDestination,
+    settled: State<Boolean>,
+) {
+    if (appState.destination != tab) return
+    snapshotFlow { settled.value }.first { it }
+    // Asked again on the other side of the wait: a travel is long enough for the reader to press
+    // somewhere else, and the tab this was for may no longer be the tab on screen.
+    if (appState.destination != tab) return
+    bringIntoView()
+}
+
+/** A single figure with its label, for wherever a screen summarises counts or totals. */
+@Composable
+internal fun StatTile(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier,
+    tone: Color = MaterialTheme.colorScheme.onSurface,
+    /** Centred where the tile is one cell of a divided strip, so figures line up under each other. */
+    alignment: Alignment.Horizontal = Alignment.Start,
+    /**
+     * A step down, for a strip that annotates a card rather than being what the card is for.
+     *
+     * The report card carries four of these over everything it says about a run, where the
+     * Portfolio's are the record itself and lead their own page. Same tile either way - a second
+     * composable for a smaller figure is how the label under one drifts from the label under the
+     * other - and the caller says which of the two jobs it is doing.
+     */
+    dense: Boolean = false,
+) {
+    Column(
+        modifier,
+        verticalArrangement = Arrangement.spacedBy(if (dense) DenseFigureGap else Space.xs),
+        horizontalAlignment = alignment,
+    ) {
+        // The role sets the size; the figure sets its own face. Everything a tile ever holds is a
+        // number, and the display face is for names.
+        Text(
+            value,
+            style = if (dense) {
+                MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures)
+            } else {
+                MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures)
+            },
+            color = tone,
+        )
+        Text(
+            label.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Tighter than [Space.xs], which read as two facts where a dense tile is meant to read as one. */
+private val DenseFigureGap = 2.dp
+
+/**
+ * A handful of counts as one instrument rather than as loose numbers.
+ *
+ * Bounded and divided because figures in a strip are read *against each other* - twelve stocks from
+ * twenty-eight readings is a different report from twelve out of twelve, and 2.2M sent against 249K
+ * returned is a different bill from an even split. Numbers floating in open space with 24dp between
+ * them read as unrelated facts, which is what the divider is for.
+ *
+ * Lifted out of `ResultsScreen`'s own `ReportFigures` when the token usage section wanted the same
+ * instrument, for the reason [FigureGroup] was lifted out of the three screens that had each grown
+ * one: a strip of counts is a shape this app draws, not something a screen invents.
+ *
+ * Every cell is [StatTile] in its `dense` form and centred, so the figures line up under each other
+ * whatever the labels beneath them do. The first cell takes the page's own hue by default - it is
+ * the figure that says how much there is of whatever the strip is counting - and [leadTone] is for
+ * a caller whose lead figure means something other than "the page".
+ */
+@Composable
+internal fun StatStrip(
+    figures: List<Pair<String, String>>,
+    modifier: Modifier = Modifier,
+    leadTone: Color = MaterialTheme.colorScheme.primary,
+) {
+    if (figures.isEmpty()) return
+    // The width comes from the Row inside rather than from the surface, which is how the report
+    // card's own version was written: in a Row between two weighted spacers, a surface that filled
+    // the width itself would measure before them and leave them nothing.
+    Surface(
+        modifier,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.small,
+        border = cardOutline,
+    ) {
+        // Intrinsic height so the dividers run the full depth of the row rather than the height
+        // Material would otherwise give a divider with nothing to measure against.
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            figures.forEachIndexed { index, (value, label) ->
+                if (index > 0) VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                StatTile(
+                    value = value,
+                    label = label,
+                    modifier = Modifier.weight(1f).padding(vertical = Space.xs, horizontal = Space.xs),
+                    tone = if (index == 0) leadTone else MaterialTheme.colorScheme.onSurface,
+                    alignment = Alignment.CenterHorizontally,
+                    dense = true,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * How one quantity divides in two, as a bar rather than as a ratio the reader works out.
+ *
+ * Deliberately not [OutcomeBar], which is about *verdicts* - four fixed outcomes in four fixed
+ * colours, with a legend drawn once above the cards that use it. This is the general case: two
+ * parts of one total, where the second part is the first part's own colour thinned rather than a
+ * second hue, because the two halves are the same kind of thing and a second hue would claim they
+ * were not.
+ *
+ * It carries no figures. A share is a shape, and the sentence under it is where the numbers go -
+ * which is also what stops it being read as a second, rounder copy of them.
+ */
+@Composable
+internal fun ShareBar(
+    part: Long,
+    total: Long,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+    height: Dp = ShareBarHeight,
+) {
+    if (total <= 0L) return
+    val share = (part.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(ShareBarCorner)),
+    ) {
+        // Nothing is drawn for a part that rounds to none of the width: a sliver one pixel wide
+        // reads as a rendering fault rather than as a small share, and the line beneath says the
+        // figure anyway.
+        if (share > 0f) Box(Modifier.weight(share).fillMaxHeight().background(color))
+        if (share < 1f) {
+            Box(
+                Modifier
+                    .weight(1f - share)
+                    .fillMaxHeight()
+                    .background(color.copy(alpha = ShareRestAlpha)),
+            )
+        }
+    }
+}
+
+/** [OutcomeBarCompact]'s height, so a share and a verdict drawn on one screen are one object. */
+private val ShareBarHeight = 8.dp
+
+/** [PillCorner] would round a bar this short into a capsule; 3dp cuts it without closing it. */
+private val ShareBarCorner = 3.dp
+
+/**
+ * Enough that the remainder reads as the same quantity, unspent - and deliberately above
+ * [BusyTrackAlpha].
+ *
+ * A progress track is scenery behind the part that moves, so it wants to be nearly invisible. Both
+ * halves of a share are the answer, so the smaller half has to be legible on its own: at the track's
+ * own 0.14 the 10% end of a lopsided split read as the bar simply stopping short.
+ */
+private const val ShareRestAlpha = 0.22f
+
+/**
+ * Every button on a card that changes the record: bought, sold, kept open.
+ *
+ * One shape and one colour for the three of them, because they are one kind of act. They were a
+ * filled tonal button and two outlined ones, which said that recording a purchase is a heavier
+ * thing than recording a sale - and on a position card the two sat in the same row disagreeing
+ * about it. What a card's buttons say now is what pressing costs: a ring in the app's own cyan
+ * changes something, a bare label with an arrow ([DisclosureButton]) only opens something, and
+ * violet is still the model's alone. The screen's own action keeps the teal aurora, a tier above
+ * anything drawn on a card; a dialog's buttons stay Material's, because that is a convention the
+ * app did not invent and must not fork.
+ *
+ * A ring rather than a fill, for the reason [OutlinePill] is one: a position card can carry three
+ * of these at once, and three blocks of colour compete with the figures they sit under.
+ *
+ * [PillHeight] like every other pill here, and the target under it is still the full 48dp -
+ * `minimumInteractiveComponentSize` is what separates how big a button looks from how big a
+ * fingertip is.
+ */
+@Composable
+internal fun ActionPill(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val ink = MaterialTheme.colorScheme.primary
+    Row(
+        modifier
+            .minimumInteractiveComponentSize()
+            .height(PillHeight)
+            .border(ActionRing, ink.copy(alpha = ActionRingAlpha), PillShape)
+            // After the edge, so the ripple is bounded by the pill rather than by the row.
+            .clip(PillShape)
+            .clickable(enabled = enabled, onClick = onClick)
+            // A step under [Space.m]. The ring is tighter on its label than a capsule was, and the
+            // side padding is what a pill's own edge is read against.
+            .padding(horizontal = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(IconSize.Hint))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** A hairline, so a row of these never competes with the edge of the card holding them. */
+private val ActionRing = 1.dp
+
+/**
+ * Half strength.
+ *
+ * The label is the button and the ring is only its boundary; at full strength a row of two came out
+ * as two bright wires on a dark card - the same fault the action's own edge was taken down for.
+ */
+private const val ActionRingAlpha = 0.5f
+
+/**
+ * An action on a settings card, at the size a settings card wants.
+ *
+ * Material's own button is 40dp tall with 24dp of padding on each side, which is the size of a
+ * button that is the point of the screen it is on. Down a list of settings it is not: it is one row
+ * among twenty, standing beside switches 32dp tall, and at the default it was the heaviest thing on
+ * a card whose subject is the words next to it. [PillHeight] and [Space.m] put it at the height
+ * every other button in this app is already drawn at.
+ *
+ * It stays an [OutlinedButton] rather than becoming an [ActionPill], and the two are different
+ * things rather than one thing drawn twice. A pill sits **on a card about one call or one trade**
+ * and takes the page's own hue to say that pressing it changes the record. These sit on a page of
+ * settings, several to a card, half of them opening a picker rather than changing anything - and a
+ * column of cyan rings down Settings would be the page of coloured glyphs the question mark is
+ * muted to avoid.
+ *
+ * `labelMedium`, which is what both card buttons already carry: at this height Material's
+ * `labelLarge` is a 14sp line in a 32dp box, and the button reads as the text having outgrown it.
+ *
+ * This is the pass of 2026-09-03 finished. It stopped at the cards and left Settings, Channels,
+ * Backup and Schedules holding about forty buttons in the old mixed state.
+ *
+ * @param filled the card's own primary action, where it has one - Save and verify, Sync now,
+ *   Download. It carries **both** shapes rather than leaving the filled ones at Material's height,
+ *   because they share a row with the outlined ones: Save and verify stands in a `FlowRow` beside
+ *   Reset provider and Remove credential, and a row 40dp tall at one end and 32 at the other reads
+ *   as a layout fault rather than as an emphasis. Which button is filled is unchanged; only how
+ *   tall the row is.
+ */
+@Composable
+internal fun SettingsButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    filled: Boolean = false,
+    content: @Composable RowScope.() -> Unit,
+) {
+    // Ahead of Material's own `defaultMinSize`, which raises a minimum only where nothing has set
+    // one - so this wins by being applied first, and the button is not fighting a 40dp floor it can
+    // never get under.
+    val sized = modifier.heightIn(min = PillHeight)
+    val padding = PaddingValues(horizontal = Space.m)
+    // The row is held rather than passed through: `ProvideTextStyle` takes a plain composable, so
+    // inside it the button's own `RowScope` is out of scope and an icon's `align` would not resolve.
+    val label: @Composable RowScope.() -> Unit = {
+        val row = this
+        ProvideTextStyle(MaterialTheme.typography.labelMedium) { row.content() }
+    }
+    if (filled) {
+        Button(onClick, sized, enabled, shape = PillShape, contentPadding = padding, content = label)
+    } else {
+        OutlinedButton(onClick, sized, enabled, shape = PillShape, contentPadding = padding, content = label)
+    }
+}
+
+/**
+ * The button that opens or closes a section of the card it sits on, and does nothing else.
+ *
+ * The arrow is the state rather than the label: down where there is more under it, up where what is
+ * under it is showing. No ring, because [ActionPill]'s ring is what says a press changes something,
+ * and a control that only moves the page must not borrow it.
+ */
+@Composable
+internal fun DisclosureButton(
+    label: String,
+    expanded: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val ink = MaterialTheme.colorScheme.primary
+    Row(
+        modifier
+            .minimumInteractiveComponentSize()
+            .height(PillHeight)
+            .clip(PillShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Icon(
+            if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+            contentDescription = null,
+            tint = ink,
+            modifier = Modifier.size(IconSize.Hint),
+        )
+    }
+}
+
+internal enum class StatusTone { GOOD, BAD, NEUTRAL }
+
+/** Short status line, coloured by whether it reports something good, bad, or neutral. */
+@Composable
+internal fun StatusPill(text: String, tone: StatusTone = StatusTone.NEUTRAL) {
+    val outline = when (tone) {
+        StatusTone.GOOD -> MaterialTheme.colorScheme.tertiary
+        StatusTone.BAD -> MaterialTheme.colorScheme.error
+        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.outline
+    }
+    val ink = when (tone) {
+        StatusTone.GOOD -> MaterialTheme.colorScheme.onTertiaryContainer
+        StatusTone.BAD -> MaterialTheme.colorScheme.onErrorContainer
+        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    OutlinePill(text, outline = outline, textColor = ink)
+}
+
+/**
+ * Every label pill in the app. The shape and the height are [PillShape] and [LabelPillHeight],
+ * beside the spacing scale, because the buttons and the badge are cut to them too.
+ *
+ * A ring rather than a block of colour. A card can carry three of these at once - what the position
+ * did, how late it is, why it is still open - and three filled pills stacked beside the name were
+ * competing with the figures they are supposed to annotate. The outline says the same thing in the
+ * same colour without spending a colour's worth of area on it.
+ *
+ * [outline] is the hue the state means and [textColor] is the ink the filled pill already used, so
+ * the wording keeps the weight it reads at while the colour moves to the edge. [onClick] is for the
+ * one pill that explains itself when pressed; the rest are labels and take no press.
+ */
+@Composable
+internal fun OutlinePill(
+    text: String,
+    outline: Color,
+    textColor: Color,
+    onClick: (() -> Unit)? = null,
+) {
+    val label: @Composable () -> Unit = { PillLabel(text) }
+    val ring = BorderStroke(PillOutline, outline)
+    if (onClick == null) {
+        Surface(
+            color = Color.Transparent,
+            contentColor = textColor,
+            shape = PillShape,
+            border = ring,
+            content = label,
+        )
+    } else {
+        Surface(
+            onClick = onClick,
+            color = Color.Transparent,
+            contentColor = textColor,
+            shape = PillShape,
+            border = ring,
+            content = label,
+        )
+    }
+}
+
+/**
+ * The same pill with the colour inside the edge rather than on it.
+ *
+ * Two surfaces draw a pill as a block of colour - the stock sheet's flags, and the table's own
+ * marks - and both were spelling their own corner, their own padding and their own text size. They
+ * are not [OutlinePill] with a fill parameter, because a fill and a ring say different things here:
+ * a ring annotates the call it sits on and a fill flags a standing fact about the stock. What they
+ * must not differ in is their shape, and that is what this shares.
+ *
+ * [onClick] mirrors [OutlinePill]'s own: absent for the marks that are simply true of the stock -
+ * a rank, a badge - and given for the table's own timing pill, which explains itself the same way
+ * the card's [OutlinePill]-drawn one does.
+ */
+@Composable
+internal fun FilledPill(
+    text: String,
+    container: Color,
+    content: Color,
+    onClick: (() -> Unit)? = null,
+) {
+    if (onClick == null) {
+        Surface(color = container, contentColor = content, shape = PillShape) {
+            PillLabel(text)
+        }
+    } else {
+        Surface(onClick = onClick, color = container, contentColor = content, shape = PillShape) {
+            PillLabel(text)
+        }
+    }
+}
+
+/**
+ * One choice in a row where exactly one is chosen - a price chart's range and its levels toggle.
+ *
+ * Not Material's own `FilterChip`: its padding is fixed and generous, which is what made five
+ * ranges and a toggle need 290dp of scrolling room on a card that can have as little as 313dp to
+ * give in total. Drawn at [PillHeight] and [PillShape] instead, the size every other pressed pill
+ * on a card already carries, filled when chosen and ringed when not - the same two states
+ * [FilledPill] and [OutlinePill] already draw, so choosing an option reads the same way reading one
+ * does. [minimumInteractiveComponentSize] keeps the tap target at 48dp regardless, the same trick
+ * [ActionPill] and [DisclosureButton] already rely on.
+ */
+@Composable
+internal fun CompactFilterChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ink = if (selected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        onClick = onClick,
+        modifier = modifier.minimumInteractiveComponentSize(),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        contentColor = ink,
+        border = if (selected) null else BorderStroke(ChipOutline, MaterialTheme.colorScheme.outline),
+        shape = PillShape,
+    ) {
+        Box(
+            // PillPaddingH, not Space.s: the same tight ring every label pill in the app already
+            // hugs its word with, rather than the looser padding a pressed pill usually carries -
+            // five ranges and a toggle need every point of width this row can give back.
+            Modifier.height(PillHeight).padding(horizontal = PillPaddingH),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** A hairline, matching every other pill's own edge. */
+private val ChipOutline = 1.dp
+
+/** One label, one height, one padding - the whole of what the two pills have in common. */
+@Composable
+private fun PillLabel(text: String) {
+    Box(
+        Modifier.height(LabelPillHeight).padding(horizontal = PillPaddingH),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            // A step under `labelMedium`, set as a copy of it rather than as `labelSmall`: that
+            // style is tracked out for uppercase keys over figures, and a pill is a sentence.
+            text,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = PillText,
+                lineHeight = PillLine,
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+// An 11sp line, centred in [LabelPillHeight] rather than propping the box open from inside. The
+// height is the pill's and no longer the text's: two pills whose words set at different heights
+// used to close to different sizes, and that is what a card of them read as.
+private val PillText = 11.sp
+private val PillLine = 14.sp
+
+/** A hairline. A card's own held outline is twice it, so a pill never competes with the edge. */
+private val PillOutline = 1.dp
+
+/**
+ * The mark a stock carries when the exchange counts it in the EGX 33 Shariah index.
+ *
+ * Draws nothing for a stock outside the index, so the three places that show it each cost one line
+ * rather than one line and a condition. The ticker is the whole input: membership is a property of
+ * the company, not of the call, the trade, or the run being looked at.
+ *
+ * A glyph with no wording, which is the one pill in the app that carries none. Every other pill is
+ * a sentence about what happened to a call - reached target 1, expired, still open - and is read.
+ * This is a standing fact about the company, repeated on every card that names it, and spelling
+ * "EGX33" out beside a ticker on all of them adds a third thing to a line that already holds a
+ * logo and a name. The reader learns one mark once; a screen reader still hears the whole phrase.
+ *
+ * Square rather than the ring the pills wear, and that is not a free choice. Round, its outline sat
+ * concentric with the eight-pointed star inside it, and two rings around a small dark shape is the
+ * shape of a settings cog - which is what it read as.
+ *
+ * **It is deliberately outside [PillShape], and it was folded in once and had to come back out.**
+ * The pill pass of 2026-09-11 gave it the shared 6dp on the reasoning that one corner everywhere is
+ * one object everywhere, which took it from 4dp to 6 - rounder, on the one mark in the app whose
+ * whole history is that it must not be round. It read as a gear on the device inside the hour. The
+ * rule the pills follow is about labels; this carries no wording, and a glyph in a ring is a
+ * different object from a word in one however the two are cut.
+ *
+ * **No ring at all now, and the glyph is bigger inside the same box.** The recommendation card
+ * dropped the ring and grew the glyph to 16dp on its own on 2026-09-20; asked for everywhere two
+ * days later, since a mark that changes shape depending on which screen names the stock is the same
+ * fault the pill pass fixed for wording, just for this one glyph instead.
+ *
+ * **Tappable since 2026-09-24**, like every other pill in the app that used to draw a fact and
+ * nothing else: a glyph with no wording is the one on this whole app most in need of a press that
+ * explains it.
+ */
+@Composable
+internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
+    if (!isEgx33(ticker)) return
+    var explaining by remember { mutableStateOf(false) }
+    Box(
+        modifier
+            .size(Egx33BadgeSize)
+            .clickable { explaining = true },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painterResource(R.drawable.ic_egx33),
+            // Said in full, because nothing on screen says it. The glyph is the only place this
+            // fact appears, so a reader who cannot see it would otherwise not be told at all.
+            contentDescription = "EGX 33 Shariah index",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(Egx33GlyphSize),
+        )
+    }
+    if (explaining) {
+        InfoSheet(
+            infoNote(
+                "EGX 33 Shariah index",
+                "The exchange counts this stock among the thirty-three companies whose business " +
+                    "and financing meet its Shariah screening criteria, reviewed every March and " +
+                    "September.",
+                "A property of the company, not of this call, this trade, or the run being " +
+                    "looked at - which is why the mark follows the ticker everywhere it appears.",
+            ),
+        ) { explaining = false }
+    }
+}
+
+/**
+ * [LabelPillHeight], which is every other pill on the card.
+ *
+ * One size on all three screens rather than one per ticker style. It shares a line with a 27dp
+ * headline on Results and a titleSmall on Insights, and sized to each it was two different marks.
+ *
+ * It was 24dp, which is [LogoSize.Row], on the reasoning that the logo at the head of the line is
+ * what a mark at the end of it should match. That was the wrong thing to match: the logo is the
+ * stock's own picture and this is a label about it, so the badge stood 4dp over every ring on the
+ * card while agreeing with the one thing on the line nobody reads it against. Matching the pills
+ * was the other way to make it one object, and it is the way that does not ask them to grow.
+ */
+private val Egx33BadgeSize: Dp = LabelPillHeight
+
+/** 16dp of glyph in the 20dp box, the size the recommendation card grew it to. */
+private val Egx33GlyphSize: Dp = 16.dp
+
+
+/** Placeholder for a screen with nothing to show yet, so empty states explain themselves. */
+@Composable
+internal fun EmptyState(icon: ImageVector, title: String, detail: String) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        shape = MaterialTheme.shapes.large,
+        border = cardOutline,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(vertical = 32.dp, horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = CircleShape) {
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(14.dp).size(28.dp),
+                    )
+                }
+            }
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * Figures that belong together, laid out four across or two when the width cannot take four.
+ *
+ * The cover screen has plenty of height and little width, so wrapping beats shrinking: four
+ * columns at 443dp truncates every price it is supposed to show.
+ *
+ * Four was once the whole story and is now only the cap - a group can carry five - and a group
+ * whose last row is short spreads that row across the width rather than padding it out to the
+ * column count.
+ *
+ * One implementation, for the three screens that draw the same thing. Insights, the Portfolio and
+ * the occurrence sheet each grew their own, and two of them declared the same 420dp threshold
+ * under different names: the wrap point of a price row is a fact about the device, not about the
+ * screen that happens to be asking.
+ */
+@Composable
+internal fun FigureGroup(
+    title: String,
+    figures: List<@Composable RowScope.() -> Unit>,
+    /** The page's own accent where a group wants to say it is the card's structure, not a caption. */
+    titleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        Text(
+            title.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = titleColor,
+        )
+        BoxWithConstraints {
+            // Taken as a list rather than a row of slots, because wrapping means splitting them -
+            // and a lambda that draws four figures cannot be cut in half.
+            //
+            // Capped rather than "all of them on a wide screen": the threshold below was measured
+            // for four prices, and a group of five would put all five on one row at a width that
+            // was only ever proved to hold four.
+            val perRow = if (maxWidth >= FourFiguresMinWidth) {
+                minOf(figures.size, MaxFiguresPerRow)
+            } else {
+                2
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                figures.chunked(perRow).forEach { row ->
+                    // A short last row spreads across the width rather than being padded out to
+                    // the column count. Every figure here already carries `weight(1f)`, so dropping
+                    // the spacers is what lets the odd one out have the room.
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                        row.forEach { figure -> figure() }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Four prices need this much before the digits start truncating. */
+internal val FourFiguresMinWidth = 420.dp
+
+/** What [FourFiguresMinWidth] was measured against, so a longer group wraps rather than shrinks. */
+private const val MaxFiguresPerRow = 4
+
+/**
+ * One labelled figure, with room under it for the one thing that makes it mean something.
+ *
+ * [on] is the session a high or a low was set on - a price without its date says half of it - and
+ * [caption] takes its place wherever the line has more to say than a date.
+ */
+@Composable
+internal fun Figure(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    tone: Color = MaterialTheme.colorScheme.onSurface,
+    on: LocalDate? = null,
+    caption: String? = null,
+    /**
+     * Overridden only where the value is not a price.
+     *
+     * The default monospaces the digits, because a column of figures is read down as well as
+     * across and proportional digits put the same price at a different width on every card. A
+     * deadline reads "3 of 10 left", and monospacing prose sets it apart from the prices for no
+     * reason; the occurrence sheet sets its figures larger, being a sheet about one call.
+     */
+    valueStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
+) {
+    Column(modifier) {
+        Text(
+            label.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(value, style = valueStyle, color = tone, textAlign = TextAlign.Start)
+        val note = caption ?: on?.let(AppDates.DayMonth::format)
+        if (note != null) {
+            Text(
+                note,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * One line of text that shrinks to fit rather than ending in an ellipsis.
+ *
+ * For the cells of a fixed-column table, where the alternative is worse than small type. A price
+ * read as `123.4…` is not a smaller price, it is a different one, and the column it sits in is the
+ * one thing the reader is there to compare - so where a cell cannot hold its figure at the row's
+ * size, the figure keeps its digits and gives up a point of type instead. Widths come first: every
+ * column that uses this is sized to hold its longest real value outright, and the shrink is what
+ * catches the value nobody sized for and the large system font scales.
+ *
+ * It starts at the size the caller asked for and steps down only as far as it has to, so a table
+ * whose values all fit is drawn at exactly the size it was before this existed.
+ *
+ * [TextOverflow.Ellipsis] is still set, and is now a floor rather than a first resort: it can only
+ * appear on text that does not fit at [minFontSize], which prices never reach and a long channel
+ * name can. Three dots read better there than a glyph cut in half.
+ */
+@Composable
+internal fun AutoSizeText(
+    text: String,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+    textAlign: TextAlign = TextAlign.Start,
+    minFontSize: TextUnit = MinAutoFontSize,
+) {
+    BasicText(
+        text,
+        modifier = modifier,
+        style = style.merge(color = color, textAlign = textAlign),
+        maxLines = 1,
+        // No wrapping at any size. With a break allowed, an entry range would split at the space
+        // around its dash and the shrink would chase a second line instead of the width.
+        softWrap = false,
+        overflow = TextOverflow.Ellipsis,
+        autoSize = TextAutoSize.StepBased(
+            minFontSize = minFontSize,
+            // The caller's own size is the ceiling: this may only make text smaller, never larger
+            // than the style it shares with everything around it.
+            maxFontSize = style.fontSize.takeOrElse { DefaultAutoFontSize },
+            // Half a point. A whole one overshoots on a cell that is a hair too narrow and drops a
+            // row of figures a visible step below the row above it for a pixel of overflow.
+            stepSize = 0.5.sp,
+        ),
+    )
+}
+
+/**
+ * How small [AutoSizeText] may go before it gives up and truncates.
+ *
+ * Set where a price stops being readable at arm's length rather than where it stops being drawn.
+ * A cell that needs less than this is too narrow to be a column, and that is a width bug to fix
+ * where the width is declared.
+ */
+internal val MinAutoFontSize = 9.sp
+
+/** Only for a style with no size of its own, which none of the app's typography has. */
+private val DefaultAutoFontSize = 14.sp
+
+
+/**
+ * Every dropdown in the app, and the only place a menu's surface is described.
+ *
+ * Twelve bare `DropdownMenu`s were the last piece of this app still wearing Material's factory
+ * look: a 4dp-cornered slab of `surfaceContainer` with no edge, floating over cards drawn at 14dp
+ * with a hairline. One menu restyled and eleven not is worse than none restyled, so the container
+ * lives here and every call site takes it - the overflow menus on the three cards, and the nine
+ * select-style menus on Filters and Settings, which change in appearance only.
+ *
+ * The edge is [cardOutline], the same hairline a card and the page well are drawn with, for the
+ * reason given there: the edge of a menu and the edge of what it opened over should be one line
+ * rather than two that happen to agree. `surfaceContainerHigh` rather than the default, because a
+ * menu has to sit clearly above the card it covers; the shadow lifts it rather than a tint, which
+ * a see-through surface would only show the card through.
+ */
+@Composable
+internal fun AppMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    offset: DpOffset = DpOffset(0.dp, 0.dp),
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        modifier = modifier,
+        offset = offset,
+        shape = MaterialTheme.shapes.large,
+        // Opaque: a menu is not on the page, it is over whatever it was opened from. See Glass.solid.
+        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
+        border = cardOutline,
+        shadowElevation = MenuShadow,
+        content = content,
+    )
+}
+
+/**
+ * One row of an [AppMenu].
+ *
+ * [IconSize.Inline] leading icons, which is what every other icon-beside-text in this app is set
+ * at; the menu default is [IconSize.Action], sized for something with a touch target of its own,
+ * and a 24dp glyph beside a 14sp label made a five-item menu read as a column of buttons.
+ *
+ * [destructive] is the point of having this at all. Every one of these menus ends in the one action
+ * that cannot be undone - Remove, Delete - drawn in exactly the ink of Share and Edit above it. The
+ * error hue is the only thing on the row that says which press is the one to be careful about.
+ */
+@Composable
+internal fun AppMenuItem(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    destructive: Boolean = false,
+) {
+    val ink = if (destructive) {
+        MaterialTheme.colorScheme.error
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    DropdownMenuItem(
+        text = { Text(text, style = MaterialTheme.typography.bodyMedium) },
+        leadingIcon = {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(IconSize.Inline))
+        },
+        onClick = onClick,
+        colors = MenuDefaults.itemColors(
+            textColor = ink,
+            leadingIconColor = if (destructive) ink else MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    )
+}
+
+/**
+ * The ⋮ that opens one, at one size.
+ *
+ * The three cards carrying an overflow menu had drifted to two buttons: a 24dp one holding a 20dp
+ * glyph on the call card, and Material's 48dp default on the other two. The same control doing the
+ * same job in the same corner cannot be two sizes.
+ *
+ * 40dp, which is neither of them. The 24dp one left a 20dp glyph in 2dp of air - a mark rather than
+ * a control, and the reason the timing pill beside it looked enormous. The 48dp default is a
+ * screen's worth of button in the corner of a card, and it is 48dp of *drawn* width for no reason:
+ * `IconButton` already expands its touch target to the platform minimum through
+ * `minimumInteractiveComponentSize`, so the visual size is free to be what the card wants. 40dp
+ * leaves 10dp of air around the glyph, which is what makes it read as pressable.
+ */
+@Composable
+internal fun MoreButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    IconButton(onClick, modifier.size(MoreButtonSize)) {
+        Icon(
+            Icons.Outlined.MoreVert,
+            contentDescription = "More actions",
+            modifier = Modifier.size(IconSize.Inline),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Drawn size only. The touch target stays at the platform minimum, which is larger. */
+private val MoreButtonSize = 40.dp
+
+/** Enough to read as floating over a card without the card showing through it. */
+private val MenuShadow = 8.dp
+
+/**
+ * One action offered on a [HoldPrompt]: its label, and whether it leads.
+ *
+ * [primary] draws the filled button the one action most likely to be chosen wears - the shape
+ * a hold's own "Edit call" has drawn since before this was a shared component. Every other action,
+ * and Cancel always, draws the outlined button beside it: a prompt of four filled buttons in a
+ * column is four equally loud claims, which says nothing about which one a reader actually wants.
+ */
+internal data class HoldAction(val label: String, val primary: Boolean = false, val onClick: () -> Unit)
+
+/**
+ * What holding something in this app now opens: its name, then what can be done about it.
+ *
+ * Generalizes the blurred, two-button prompt a hold on a Results call card has opened since
+ * `QuickEditPrompt` first drew it - the same blur, the same scale-and-fade, the same delayed
+ * dispatch - into the one shape a hold on a card, a tile or a ticker now shares, each supplying its
+ * own [title] and its own [actions] rather than each writing the animation and the blur again.
+ * Blurs what is behind it rather than dimming it flat - the platform's own way of saying "answer
+ * this and you're straight back", where a full-screen scrim would read as a new place navigated to.
+ * `Window.setBackgroundBlurRadius` is API 31, which is this app's `minSdk`, so there is no older
+ * path to fall back to.
+ *
+ * The dialog does not leave the moment a button is pressed: [visible] drives the exit animation and
+ * the dialog itself is only asked to close once that animation has actually run, so a press is
+ * answered by a shrink-and-fade rather than a cut, and the chosen action fires only once the dialog
+ * is already gone - which is what lets an action open a dialog of its own without the two fighting
+ * over one window.
+ */
+@Composable
+internal fun HoldPrompt(title: String, actions: List<HoldAction>, onDismiss: () -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+    var chosen by remember { mutableStateOf<(() -> Unit)?>(null) }
+    LaunchedEffect(Unit) { visible = true }
+    LaunchedEffect(visible) {
+        if (!visible) {
+            delay(HoldPromptExitMs.toLong())
+            chosen?.invoke() ?: onDismiss()
+        }
+    }
+    Dialog(
+        onDismissRequest = { visible = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        val view = LocalView.current
+        DisposableEffect(Unit) {
+            val window = (view.parent as? DialogWindowProvider)?.window
+            window?.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            window?.setBackgroundBlurRadius(HoldPromptBlurRadius)
+            window?.setDimAmount(HoldPromptDim)
+            onDispose {}
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { visible = false },
+            contentAlignment = Alignment.Center,
+        ) {
+            AnimatedVisibility(
+                visible = visible,
+                enter = fadeIn(tween(HoldPromptEnterMs)) +
+                    scaleIn(initialScale = 0.85f, animationSpec = tween(HoldPromptEnterMs)),
+                exit = fadeOut(tween(HoldPromptExitMs)) +
+                    scaleOut(targetScale = 0.85f, animationSpec = tween(HoldPromptExitMs)),
+            ) {
+                Column(
+                    Modifier
+                        .padding(Space.xl)
+                        .background(
+                            Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
+                            RoundedCornerShape(24.dp),
+                        )
+                        // Swallows a press so it does not fall through to the scrim behind the
+                        // buttons and dismiss the dialog it landed on.
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {}
+                        .padding(Space.l),
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
+                ) {
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(Space.xs))
+                    actions.forEach { action ->
+                        val fire = { chosen = action.onClick; visible = false }
+                        if (action.primary) {
+                            Button(onClick = fire, modifier = Modifier.fillMaxWidth()) {
+                                Text(action.label)
+                            }
+                        } else {
+                            OutlinedButton(onClick = fire, modifier = Modifier.fillMaxWidth()) {
+                                Text(action.label)
+                            }
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { visible = false },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private const val HoldPromptEnterMs = 220
+private const val HoldPromptExitMs = 160
+private const val HoldPromptDim = 0.32f
+private const val HoldPromptBlurRadius = 48
+
+/**
+ * One band of a sheet's scroll, on the cards' own surface.
+ *
+ * The stock sheet's sections were divided by rules and read as one long column that happened to
+ * have lines in it; a card each is what the rest of the app uses to say "this is one thing", and it
+ * is what lets the heading of a section sit inside the thing it heads rather than floating above
+ * the gap. It lives here rather than beside either sheet because two sheets now draw it - the stock
+ * sheet and the occurrence sheet - and a card shape spelled twice is two that agree until one is
+ * adjusted.
+ *
+ * Not [SectionCard], which is a page's card: that one carries an icon tile, an accent edge and a
+ * title in the page's own hue, and a sheet is raised over a page rather than on one - see
+ * **A hue per page**.
+ */
+@Composable
+internal fun SheetSection(content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        border = cardOutline,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(
+            Modifier.padding(Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.xs),
+            content = content,
+        )
+    }
+}
+
+/** What a [SheetSection] is called, in the key style every label over a figure already uses. */
+@Composable
+internal fun SheetSectionLabel(text: String) {
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * What a call risks against what it seeks, drawn as a length rather than a number to divide.
+ *
+ * Built for the table's own risk column and now drawn on the occurrence sheet as well, which is the
+ * one surface where a single call is the whole subject: 1 : 3.0 is arithmetic, and two segments are
+ * a proportion the eye reads without doing any.
+ *
+ * Clamped off both ends so a lopsided call still draws two segments: at 1 : 20 the risk side rounds
+ * to nothing, and a bar that is entirely one colour says "no risk" rather than "little". Only ever
+ * drawn where the ratio is real - an empty track under a dash would be a proportion made out of
+ * levels the source never printed.
+ */
+@Composable
+internal fun RiskRewardBar(ratio: Double, modifier: Modifier = Modifier) {
+    val riskShare = (1.0 / (1.0 + ratio)).coerceIn(0.08, 0.92).toFloat()
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(RiskBarHeight)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)),
+    ) {
+        Box(Modifier.weight(riskShare).fillMaxHeight().background(PriceRole.stop))
+        Box(Modifier.weight(1f - riskShare).fillMaxHeight().background(PriceRole.target))
+    }
+}
+
+private val RiskBarHeight = 4.dp

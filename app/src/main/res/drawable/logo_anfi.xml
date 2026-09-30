@@ -1,0 +1,27 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="56dp"
+    android:height="56dp"
+    android:viewportWidth="56"
+    android:viewportHeight="56">
+    <path
+        android:fillColor="#FFF0F3FA"
+        android:pathData="M0 0h56v56H0z"/>
+    <path
+        android:fillColor="#FF1B236C"
+        android:fillType="evenOdd"
+        android:pathData="M45 28a17 17 0 1 0-34 0 17 17 0 0 0 34 0Zm-5 0a12 12 0 1 0-24 0 12 12 0 0 0 24 0Z"/>
+    <path
+        android:fillColor="#FF1B236C"
+        android:pathData="M37 31v1h-3v-1h3Zm-5 0v1h-3v-1h3Zm-7 0v1h-3v-1h3Zm-5 0v1h-3v-1h3Zm18 2h-3v1h3v-1Zm-6 0v1h-3v-1h3Zm-6 0v1h-3v-1h3Zm-5 0v1h-3v-1h3Zm14 2v1h-3v-1h3Zm-7 0v1h-3v-1h3Zm-5 0v1h-3v-1h3Zm11 2h-1v1h1v-1Zm-3 0v1h-3v-1h3Zm-6 0v1h-3v-1h3Zm11-9h1v3h-1v-3Zm-10-4h4l-0.2 1-3.8-1Zm-5 0h-5l0.25 1L21 24Zm-2.48-2L21 23h-3l0.52-1ZM26 22.72L28.38 22 29 23l-3-0.28ZM27.69 21H29l-3 1 1.69-1Zm-2.19 0H26l-1 1 0.5-1Zm-3.33 0l0.95 1.06L21 21h1.17Zm-2.65-1.5l1.89 2.18-2.97-1.8 1.08-0.38Zm4.02-1.5s-0.07 0.55 0.02 1.05c0.08 0.5 0.44 0.87 0.44 1.56 0 0.68-0.34 1.2-0.51 1.39 0 0-0.49-1.08-0.49-2.05 0-0.98 0.54-1.95 0.54-1.95ZM20 31l1.02-1h4.33L26 31h-6Z"/>
+    <path
+        android:fillColor="#FF1B236C"
+        android:fillType="evenOdd"
+        android:pathData="M23.75 23h-1.06l-1.07 7h3.2l-1.07-7Zm-0.35 4.42h-0.6l-0.33 2.56h0.93v-2.56ZM22.94 25h0.59v1.64h-0.59V25Zm0.6-1.77h-0.56l-0.05 1.42h0.62v-1.42Z"/>
+    <path
+        android:fillColor="#FF1B236C"
+        android:pathData="M34 28.5l0.5-0.5 0.5 0.5-0.5 0.5-0.5-0.5Zm0 1l0.5-0.5 0.5 0.5-0.5 0.5-0.5-0.5Zm2-3.5l-1.5 0.67L33 26v0.33L34.5 27l1.5-0.67V26Zm0-1l-1.5 0.67L33 25v0.33L34.5 26l1.5-0.67V25Zm0-1l-1.5 0.67L33 24v0.33L34.5 25l1.5-0.67V24Zm0-1l-1.5 0.67L33 23v0.33L34.5 24l1.5-0.67V23Zm0-1l-1.5 0.67L33 22v0.33L34.5 23l1.5-0.67V22Zm-2-1l0.5-1 0.5 1-0.5 1-0.5-1Z"/>
+    <path
+        android:fillColor="#FFF0F3FA"
+        android:fillAlpha="0.5"
+        android:pathData="M28 13a15 15 0 0 1 13.75 21h-1.1a14 14 0 1 0-25.3 0h-1.1A15 15 0 0 1 28 13Z"/>
+</vector>

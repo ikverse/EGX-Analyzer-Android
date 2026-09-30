@@ -1,0 +1,615 @@
+package com.ikverse.egxanalyzer.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
+import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
+
+/**
+ * The page's own name, at the top of the page, shrinking as the page is read.
+ *
+ * It replaces the band that used to say `EGX Analyzer` above every screen, removed on 2026-09-09.
+ * That band said the same two words on all five tabs and cost a row of the window to do it, while
+ * the thing a reader actually needs at the top - which page this is - was the first line *inside*
+ * the scroll and went away as soon as they read anything.
+ *
+ * **One title, shrinking, rather than two cross-fading.** Material's own large app bar fades a big
+ * title out and a small one in, which is two titles briefly drawn over each other. Here the size,
+ * the letter spacing and the icon are interpolated on [collapse], so what a reader sees is the page
+ * name getting smaller and staying put - and the header can never be caught showing two of them.
+ * That costs a recomposition of this row per frame of the first [HeaderCollapseTravel] of a scroll,
+ * which is one glyph and one word; the page below is untouched, because nothing here is read from
+ * inside it.
+ *
+ * **The icon is the destination's own**, taken from the same property the navigation bar reads and
+ * tinted `primary`, which inside a page is that page's hue. So the glyph at the top of Analyze and
+ * the lit glyph in the bar are the same drawing in the same cyan, and neither can drift from the
+ * other. It is the **selected** icon on purpose: the page you are looking at is the selected one.
+ *
+ * @param collapse 0 with the page at the top, 1 once the header has finished shrinking. Owned by
+ *   [Screen], which is where the scroll it is read from lives. **A lambda rather than a value**:
+ *   read at the call site it would be the whole page recomposing on every frame of a collapse, and
+ *   read here it is this row and nothing else.
+ * @param search the page's own stock box, or null on a page with no list to narrow - see
+ *   `PageState.stockBox`. Null draws no search icon at all, because an icon opening a box that
+ *   narrows nothing is a control the page cannot honour. It filters by a **picked ticker** rather
+ *   than by whatever was typed: see [SearchField] and [TickerPicker]. **Every part of it lives on
+ *   the page rather than in a `remember` here** - see [StockBox] for what that cost.
+ * @param stocksOnPage the tickers this page actually holds, which the picker offers first. Called
+ *   once when the list opens rather than per keystroke - see `pageStocks` for what it walks.
+ * @param current whether this page is the one the reader is actually on. See [SearchField], where
+ *   it is what keeps a keyboard from opening on a page nobody has arrived at.
+ * @param filters the page's own "is the filter sheet open" flag, or null on a page with no filters
+ *   - `PageState.filtersOpen`. The icon sets it; the screen underneath draws what is inside, since
+ *   this row has no idea what a page filters by. See `FilterSheet`.
+ * @param filtered whether one of the filters **in that sheet** is narrowing the page, which puts a
+ *   dot on the filter icon. The stock box is not counted: it says so itself by staying open. See
+ *   `PageState.filtersInSheet`.
+ */
+@Composable
+internal fun PageHeader(
+    destination: AppDestination,
+    collapse: () -> Float,
+    search: StockBox?,
+    current: Boolean,
+    filters: MutableState<Boolean>?,
+    filtered: Boolean,
+    /** The tickers this page holds, for the picker's **On this page** group. See `pageStocks`. */
+    stocksOnPage: () -> Set<String>,
+    modifier: Modifier = Modifier,
+) {
+    // **Read from the page, and not one of them remembered here.** `opened` and `typed` were held
+    // in this composition until 2026-09-11, which is what made the box disappear on the first letter
+    // pressed into it: a rebuilt header came back with both at their defaults, so the reader was
+    // looking at the page's title again with nothing typed. See [StockBox], and `PageState` for the
+    // older half of the same lesson.
+    val picked = search?.picked?.value.orEmpty()
+    val opened = search?.opened?.value == true
+    val typed = search?.typed?.value.orEmpty()
+    // Whether the catalog is dropped under the field, which is deliberately not the same question
+    // as whether the box is open - see [StockBox.listing].
+    val listing = search?.listing?.value == true
+    // Open because it was pressed, or because it is still narrowing the page. The second half is
+    // what makes the box the indicator as well as the control: a page filtered to one stock with no
+    // box on screen saying so is a page that looks as though it has lost its other rows.
+    val searching = search != null && (opened || picked.isNotBlank())
+
+    fun open() {
+        search?.opened?.value = true
+        search?.listing?.value = true
+    }
+    // Only the X, back and Clear filters mean this: the box goes, and the page opens back up.
+    fun close() {
+        search?.clear()
+    }
+    // What is typed narrows the listings on offer and never the page, and it brings the list back
+    // with it: typing is the one thing a reader can do to a field whose list they have dismissed.
+    fun type(text: String) {
+        search?.typed?.value = text
+        search?.listing?.value = true
+    }
+    /**
+     * Pressing past the list: "never mind the **list**", which is not "throw away what I was doing".
+     *
+     * A pick already made collapses the box onto it, as it always has. A half-typed query keeps the
+     * field and loses only the list - a press that lands here while somebody is typing must not be
+     * able to undo their typing, which is the failure this whole change exists to make impossible.
+     * An untouched empty box goes away, because that is plainly what pressing past it means.
+     */
+    fun dismiss() {
+        search?.listing?.value = false
+        when {
+            picked.isNotBlank() -> {
+                search?.opened?.value = false
+                search?.typed?.value = ""
+            }
+            typed.isBlank() -> close()
+        }
+    }
+
+    fun pick(ticker: String) {
+        search?.picked?.value = ticker
+        search?.typed?.value = ""
+        search?.listing?.value = false
+        search?.opened?.value = false
+    }
+    // The same entrance every ticker in the app opens the stock sheet through. Read here rather
+    // than inside the list, because the list has to be put away before the sheet is raised: one
+    // left standing over a modal sheet is a scrim across the thing it was asked to open.
+    val openStock = LocalOpenStock.current
+    // Closing the box is not navigation and never reaches `AppState.goBack`: back closes what is
+    // open on the screen, which is what the press means while a keyboard is up. Enabled only while
+    // the box is open **and this is the page the reader is on** - the pager keeps the neighbouring
+    // pages composed, so an unguarded handler here would let a filtered page one tab away swallow a
+    // back press meant for the tab in front of the reader.
+    BackHandler(enabled = searching && current, onBack = ::close)
+
+    // Held collapsed while the box is open, whatever the scroll says. The box lives in the bar the
+    // title collapses into, so a page too short to scroll - which is most pages once a filter is
+    // narrowing them - would otherwise expand the title back over the control being typed into.
+    val fraction = if (searching) 1f else collapse()
+
+    Box(
+        modifier
+            .fillMaxWidth()
+            // The top inset, held by the header rather than by the shell. The page runs to the top
+            // of the window now so that its wash carries up behind the clock - see `AppContent` -
+            // which leaves this row responsible for not being under it. `safeDrawing` rather than
+            // `statusBars`, so a cutout taller than the bar is cleared too; `.only(Top)` keeps the
+            // keyboard's inset out of it.
+            .padding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top).asPaddingValues())
+            .height(lerp(ExpandedHeight, CollapsedHeight, fraction))
+            .padding(horizontal = Space.l),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        AnimatedContent(
+            targetState = searching,
+            // **A plain cross-fade, and the box does not grow out of the icon's corner.** It did,
+            // through `expandHorizontally(expandFrom = End)`, and that was the whole of the bug
+            // where pressing search on any tab but the first walked the reader back towards it.
+            // An expand-from-end starts the content at zero width with its **end** pinned, so on
+            // the first frame the field is laid out with its left edge most of a screen to the
+            // left of the window - and the focus request below fired on exactly that frame. A
+            // `BasicTextField` taking focus asks every scrollable ancestor to bring its rect into
+            // view; the outermost of those is `DestinationPager`, which duly scrolled left to
+            // reveal a rect sitting off the start edge, landing on the previous tab. Nothing was
+            // wrong with the focus or with the pager: the rect was honestly reported and honestly
+            // answered. Both ends of that are fixed here - the field is full width from its first
+            // frame, and the focus waits for the transition to finish - because either alone would
+            // leave the trap armed for the next person who animates this row.
+            transitionSpec = { fadeIn(tween(SearchSwapMillis)) togetherWith fadeOut(tween(SearchSwapMillis)) },
+            label = "header search",
+        ) { open ->
+            // Both halves fill the row, so this only ever reports "has the fade finished".
+            val settledIn = transition.currentState == transition.targetState
+            if (open && search != null) {
+                // Two states inside one open box, swapped without a fade: the field while a stock
+                // is being chosen, and the stock itself once one has been. They are the same
+                // control at two moments, so a cross-fade between them would announce a change of
+                // control where the reader has just made a choice.
+                if (opened) {
+                    SearchField(
+                        typed = typed,
+                        listing = listing,
+                        onTyped = ::type,
+                        onClose = ::close,
+                        onPick = ::pick,
+                        onDismiss = ::dismiss,
+                        onOpenStock = { ticker ->
+                            dismiss()
+                            openStock(ticker)
+                        },
+                        stocksOnPage = stocksOnPage,
+                        focusable = current && settledIn,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    PickedStock(
+                        ticker = picked,
+                        onReopen = ::open,
+                        onClear = ::close,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            } else {
+                TitleRow(
+                    destination = destination,
+                    collapse = fraction,
+                    onSearch = if (search == null) null else ::open,
+                    onFilters = if (filters == null) null else ({ filters.value = true }),
+                    filtered = filtered,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TitleRow(
+    destination: AppDestination,
+    collapse: Float,
+    /** Null on a page with nothing to narrow, which draws no icon rather than a dead one. */
+    onSearch: (() -> Unit)?,
+    /** Null on a page with no filters, for the same reason. */
+    onFilters: (() -> Unit)?,
+    filtered: Boolean,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Space.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            destination.selectedIcon,
+            // The word is right beside it, and a reader announcing both says it twice.
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(lerp(ExpandedIcon, CollapsedIcon, collapse)),
+        )
+        Text(
+            destination.label,
+            style = MaterialTheme.typography.headlineLarge.copy(
+                fontSize = lerp(ExpandedTitle, CollapsedTitle, collapse),
+                letterSpacing = lerp(ExpandedTracking, CollapsedTracking, collapse),
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        // **The icons are there from the first frame, sized on the same curve as the page's own
+        // icon beside them** - `lerp(ExpandedIcon, CollapsedIcon, collapse)`, the exact 30dp-to-22dp
+        // travel the destination glyph already makes. They used to fade in over the last 40% of the
+        // shrink instead, at one fixed size throughout, which is two different animations answering
+        // one gesture: the title shrinking continuously and the icons cutting in late. Now a page at
+        // the top of its scroll shows both controls large, in the header a reader is actually
+        // looking at, and they shrink into the collapsed bar's icons rather than appearing there.
+        // Always pressable, because there is no longer a partial-fade frame for a stray tap to land
+        // on. `filtered` no longer needs to force early arrival - every page arrives early now - and
+        // stays only to light the dot on the filter icon.
+        val searchIconSize = lerp(ExpandedIcon, CollapsedIcon, collapse)
+        if (onSearch != null) {
+            HeaderAction(
+                icon = Icons.Outlined.Search,
+                description = "Filter by stock",
+                size = searchIconSize,
+                onClick = onSearch,
+            )
+        }
+        if (onFilters != null) {
+            HeaderAction(
+                icon = Icons.Outlined.FilterList,
+                description = if (filtered) "Filters, on" else "Filters",
+                size = searchIconSize,
+                dot = filtered,
+                onClick = onFilters,
+            )
+        }
+    }
+}
+
+/**
+ * One of the header's two glyphs, shrinking with the title as the header collapses.
+ *
+ * @param size the glyph's edge, lerped by the caller on the same curve as the destination icon
+ *   beside it - see [TitleRow]. The touch target stays [SearchTarget] throughout; only the glyph
+ *   inside it grows and shrinks.
+ * @param dot a mark in the corner saying this control is doing something right now. Only the
+ *   filters carry one: the search box reports itself by being open.
+ */
+@Composable
+private fun HeaderAction(
+    icon: ImageVector,
+    description: String,
+    size: Dp,
+    onClick: () -> Unit,
+    dot: Boolean = false,
+) {
+    Box(
+        Modifier
+            .size(SearchTarget)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = description,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(size),
+        )
+        if (dot) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(DotInset)
+                    .size(DotSize)
+                    .clip(CircleShape)
+                    // The page's own hue, which is what the title's icon beside it is tinted with:
+                    // a dot in any other colour would be the one mark on this row that belongs to
+                    // no page in particular.
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+        }
+    }
+}
+
+/**
+ * The box the search icon opens, across the bar the title was in, with the catalog under it.
+ *
+ * **It is the page's own stock filter, and what it narrows by is now a listing rather than a
+ * phrase.** Results, Insights and the Portfolio each drew a box on their filter shelf; this is the
+ * same state - `PageState.resultsStock` and its two siblings - drawn once, at the top, reachable
+ * from anywhere down a long page. What changed on 2026-09-11 is what reaches that state: typing
+ * narrows [TickerPickerList] and a pick writes a ticker. Nothing here is a lookup in the sense the
+ * first version of this header was - the page is still filtered rather than replaced by a sheet -
+ * and the sheet is a trailing target on a row, not what a press does.
+ *
+ * Not a `TextField`, for [StockFilterField]'s reason, which this deliberately resembles: Material's
+ * own is built for a form and brings a label, a container and 56dp of height with it, where this is
+ * one line inside a bar that is 56dp in total.
+ *
+ * @param focusable whether it is safe to take focus yet: this page is the one the reader is on,
+ *   the pager has stopped moving, and the row's own cross-fade has finished. **All three are
+ *   load-bearing**, because a `BasicTextField` taking focus asks every scrollable ancestor to bring
+ *   its rect into view and the outermost of those is `DestinationPager`. Focus taken on a page the
+ *   reader has not arrived at, or on a frame where the field has not reached its final position,
+ *   is a rect the pager answers by scrolling somewhere nobody asked to go. See the transition at
+ *   the call site for the frame that actually shipped this bug, and `revealIfOnScreen` for the
+ *   same trap arriving through a reveal instead.
+ */
+@Composable
+private fun SearchField(
+    typed: String,
+    /** Whether the catalog is dropped under the field right now. See [StockBox.listing]. */
+    listing: Boolean,
+    onTyped: (String) -> Unit,
+    onClose: () -> Unit,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onOpenStock: (String) -> Unit,
+    stocksOnPage: () -> Set<String>,
+    focusable: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val focus = remember { FocusRequester() }
+    val density = LocalDensity.current
+    // Where the list hangs from, in pixels, measured off this row's own top edge - the popup is
+    // positioned against the box's bounds and knows nothing about how tall the box is drawn.
+    val anchorOffset = with(density) { (SearchFieldHeight + Space.s).roundToPx() }
+    // And how much window is left under that point, which the list is drawn exactly as tall as.
+    // A popup taller than the space it hangs in is shifted **up** by the window manager to fit,
+    // which would put the list back over the header it belongs to. See `TickerPickerList`.
+    //
+    // **The keyboard comes off it.** The window's own height is all of it, keys included, and the
+    // keyboard is the whole reason this box is open - measured against the bare window the list ran
+    // to within a row of the keys on a tall phone and clean under them on a short one. Read here
+    // rather than through an inset padding inside the popup, because a popup is its own window and
+    // is handed none of this one's insets.
+    val windowHeight = LocalWindowInfo.current.containerSize.height
+    val keyboard = WindowInsets.ime.getBottom(density)
+    // -1 until the row has been laid out once. Nothing is drawn on a guess: measured as 0 the list
+    // would be laid out a window too tall for one frame, and a popup that does not fit is shifted
+    // **up** by the window manager - back over the header it hangs from.
+    var anchorTop by remember { mutableIntStateOf(-1) }
+    val spaceBelow = if (anchorTop < 0) 0 else windowHeight - keyboard - (anchorTop + anchorOffset)
+    // The box was opened by somebody who wants to type in it - but only once the pages have stopped
+    // moving and this is the one in front of them. `LocalTabsSettled` is the shell's own answer to
+    // "has the reader arrived", written by the pager and true beside a rail.
+    val settled = LocalTabsSettled.current
+    LaunchedEffect(focusable, settled.value) {
+        if (focusable && settled.value) focus.requestFocus()
+    }
+    // The list is anchored to this box rather than to the row, so it stands under the field
+    // wherever the field is laid out.
+    Box(
+        modifier.onGloballyPositioned { placed ->
+            anchorTop = placed.positionInWindow().y.roundToInt()
+        },
+    ) {
+        Surface(
+            Modifier.fillMaxWidth().height(SearchFieldHeight),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Row(
+                Modifier.padding(start = Space.m, end = Space.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(IconSize.Inline),
+                )
+                Box(Modifier.weight(1f).padding(horizontal = Space.s)) {
+                    if (typed.isEmpty()) {
+                        Text(
+                            // What it asks for, not what it does: the reader is choosing a listing
+                            // here, and the page being narrowed is the consequence of the choice.
+                            "Search stocks",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    BasicTextField(
+                        value = typed,
+                        onValueChange = onTyped,
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                    )
+                }
+                Box(
+                    Modifier.size(SearchTarget).clip(CircleShape).clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Outlined.Close,
+                        // It clears as well as closes, which is what keeps the box the one visible
+                        // sign that the page underneath is narrowed.
+                        contentDescription = "Clear stock filter",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(IconSize.Inline),
+                    )
+                }
+            }
+        }
+        if (!listing) return@Box
+        TickerPickerList(
+            typed = typed,
+            stocksOnPage = stocksOnPage,
+            onPick = onPick,
+            onDismiss = onDismiss,
+            onOpenStock = onOpenStock,
+            anchorOffset = anchorOffset,
+            spaceBelow = spaceBelow,
+        )
+    }
+}
+
+/**
+ * The listing the page is narrowed to, in the bar the box was in.
+ *
+ * The box closes onto this rather than back to the title, for the reason the box used to stay open
+ * while it held text: a page showing one stock's rows with nothing at the top saying which stock is
+ * a page that looks as though it has lost the rest. It says more than the typed query ever could -
+ * the mark, the code and the company's own name - because the pick is a listing rather than a
+ * phrase somebody remembered.
+ *
+ * Pressing it reopens the picker; the X clears the page, which is the same X the field carries and
+ * means the same thing.
+ */
+@Composable
+private fun PickedStock(
+    ticker: String,
+    onReopen: () -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier.height(SearchFieldHeight),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Row(
+            Modifier
+                .clickable(onClick = onReopen)
+                .padding(start = Space.s, end = Space.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StockLogo(ticker, LogoSize.Row)
+            Text(
+                ticker,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                modifier = Modifier.padding(start = Space.s),
+            )
+            Text(
+                TickerPicker.name(ticker),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(start = Space.s),
+            )
+            Box(
+                Modifier.size(SearchTarget).clip(CircleShape).clickable(onClick = onClear),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Outlined.Close,
+                    contentDescription = "Clear stock filter",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(IconSize.Inline),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * How tall the header stands with the page at the top, and how far it falls.
+ *
+ * The difference between the two is what the header eats out of the scroll before the page moves,
+ * so it is deliberately small: 40dp is a flick, and a reader who scrolls a whole screen should be
+ * looking at content rather than watching chrome finish an animation.
+ */
+private val ExpandedHeight = 96.dp
+private val CollapsedHeight = 56.dp
+
+/** How far the page scrolls into the header before it has finished shrinking. */
+internal val HeaderCollapseTravel: Dp = ExpandedHeight - CollapsedHeight
+
+/** Sized to the title beside it at either end, the way the app's mark used to be. */
+private val ExpandedIcon = 30.dp
+private val CollapsedIcon = 22.dp
+
+/**
+ * `headlineLarge`'s own size, and what it falls to.
+ *
+ * The collapsed end is a shade above `titleLarge`'s 19sp, which is where the app's name used to
+ * sit, because this one shares its row with an icon and a control rather than heading a page alone.
+ * The tracking travels with it: -0.5sp is set for 30sp text and reads as cramped at 20.
+ */
+private val ExpandedTitle = 30.sp
+private val CollapsedTitle = 20.sp
+private val ExpandedTracking = (-0.5).sp
+private val CollapsedTracking = (-0.2).sp
+
+/** A press target for the glyph, not the size of it - the glyph itself is [ExpandedIcon]/[CollapsedIcon]. */
+private val SearchTarget = 40.dp
+
+/**
+ * The mark on the filter icon, and how far in from the corner of its target it sits.
+ *
+ * Placed against the glyph rather than the 40dp press target - the glyph is 22 to 30 of that 40, so
+ * a dot hung in the target's own corner floats in the gap beside the icon instead of touching it.
+ */
+private val DotSize = 7.dp
+private val DotInset = 8.dp
+
+private val SearchFieldHeight = 40.dp
+
+/**
+ * How long the title and the search box take to trade places.
+ *
+ * Brief, because the keyboard is waiting on the other side of it - see [SearchField], where the
+ * focus is held back until this has finished.
+ */
+private const val SearchSwapMillis = 120

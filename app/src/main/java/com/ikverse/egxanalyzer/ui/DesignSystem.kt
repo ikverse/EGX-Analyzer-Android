@@ -1,0 +1,977 @@
+package com.ikverse.egxanalyzer.ui
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.BoxWithConstraintsScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlin.math.abs
+import kotlin.math.floor
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+import com.ikverse.egxanalyzer.ui.theme.LocalDarkTheme
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
+/**
+ * Anything that floats over a page rather than sitting in it.
+ *
+ * The navigation bar and the action button are both loose on top of the content, and both have to
+ * say so the same way: slightly see-through, so the page carries on behind them, and outlined, so
+ * their edge holds against whatever scrolls under it. Defined once here because two definitions of
+ * "floating" drift apart the first time one of them is adjusted.
+ *
+ * They are the same material and deliberately not the same edge. The bar wears the neutral hairline
+ * below; the action wears a gradient in its own colours while it is ready and a red one while a run
+ * is going. That is what makes the action read as the thing to press rather than as a second piece
+ * of furniture - two identically edged slabs at the foot of the screen said nothing about which of
+ * them did anything.
+ *
+ * The shape is still the caller's, though both callers currently pass the page's own card radius.
+ *
+ * @param painted draws the surface itself, for a caller whose fill is not one colour. It is applied
+ *   to the content rather than to [modifier] so it lands where the flat tint would have - inside the
+ *   shape's clip and on top of the elevation shadow - and it carries its own alpha, so a gradient
+ *   here is as see-through as a tint here. [color] is ignored when it is passed; pass
+ *   `Color.Transparent`.
+ * @param outline overrides the neutral hairline for a caller that needs the edge to mean something.
+ *   A [Brush] rather than a colour, so a gradient edge and a flat one are one parameter and not two
+ *   that can both be set - pass `SolidColor(…)` for a flat one.
+ */
+@Composable
+internal fun FloatingSurface(
+    shape: Shape,
+    color: Color,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    painted: Modifier? = null,
+    outline: Brush? = null,
+    content: @Composable () -> Unit,
+) {
+    // See-through enough that the page carries on behind it, opaque enough that it cannot be read
+    // there. At 0.88 a heading passing underneath came through as a second row of words tangled in
+    // the labels; what is wanted is the movement, not the content.
+    val tinted = if (painted == null) color.copy(alpha = 0.94f) else Color.Transparent
+    // The tint alone leaves the edge indistinct against a card of a similar colour; the hairline is
+    // what draws the shape whatever is behind it.
+    val hairline = BorderStroke(
+        HairlineWidth,
+        outline ?: SolidColor(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
+    )
+    // Only wrapped when there is something to paint: an unconditional Box would put a layout node
+    // under every floating surface in the app to serve the one that needs it.
+    val body: @Composable () -> Unit = if (painted == null) {
+        content
+    } else {
+        { Box(painted, propagateMinConstraints = true) { content() } }
+    }
+    if (onClick == null) {
+        Surface(modifier, shape = shape, color = tinted, border = hairline, shadowElevation = FloatingElevation) {
+            body()
+        }
+    } else {
+        Surface(onClick, modifier, shape = shape, color = tinted, border = hairline, shadowElevation = FloatingElevation) {
+            body()
+        }
+    }
+}
+
+/** Enough to lift the surface off the page without casting a shadow the tint then shows through. */
+private val FloatingElevation = 6.dp
+
+/**
+ * The page, held as something a floating surface can look through itself at.
+ *
+ * A card cannot be frosted in any way worth the frame it costs: the page behind one is a flat
+ * colour and no card overlaps anything, so blurring what is behind it produces the tint a tint
+ * already is. **A floating surface is the opposite case.** The page runs under the action and the
+ * navigation the whole time it is being read, so what is behind them is cards, figures and moving
+ * text - and softening that is the difference between a control the page passes under and a pane of
+ * glass it passes behind.
+ *
+ * The page draws itself into [layer] on its way to the screen (see [Modifier.recordBackdrop]) and
+ * anything floating over it can then draw that same recording, blurred, as its own ground. The two
+ * must be **different subtrees**: a surface inside the recorded page drawing the recording it is
+ * part of is a layer being read while it is written.
+ *
+ * @property origin where the recording's own top-left sits in the window, so a surface anywhere on
+ *   screen can work out which part of it is behind itself.
+ */
+internal class PageBackdrop(val layer: GraphicsLayer) {
+    var origin by mutableStateOf(Offset.Zero)
+}
+
+/**
+ * The backdrop a floating surface should frost against, or null where nothing is recording one.
+ *
+ * Null is the working default and not a failure: a sheet, a preview and a widget all draw floating
+ * surfaces with no page behind them, and [Modifier.frostedBackdrop] simply does nothing there
+ * rather than each of those having to know whether it is inside a [Screen].
+ */
+internal val LocalPageBackdrop = staticCompositionLocalOf<PageBackdrop?> { null }
+
+/**
+ * The page's **ground** - its wash and its aurora and nothing that stands on them.
+ *
+ * A card cannot frost against [LocalPageBackdrop]: a card is part of the page that recording is of,
+ * so it would be reading a layer while that layer is being written. It can frost against the ground
+ * under the page, because nothing standing on the page is in it - and a ground with an aurora on it
+ * is the one thing that makes frosting a card worth doing at all. A flat colour blurred is the
+ * colour.
+ */
+internal val LocalPageGround = staticCompositionLocalOf<PageBackdrop?> { null }
+
+@Composable
+internal fun rememberPageBackdrop(): PageBackdrop {
+    val layer = rememberGraphicsLayer()
+    return remember(layer) { PageBackdrop(layer) }
+}
+
+/**
+ * Draws the page as usual and keeps a copy of it in [backdrop].
+ *
+ * The copy is what the blur is taken from, so it is re-recorded every frame the page draws - which
+ * is the cost of this treatment and the whole of it: one screen-sized layer, written once and read
+ * by however many floating surfaces are frosted. Anything that must be frosted has to sit outside
+ * the subtree this is applied to.
+ */
+internal fun Modifier.recordBackdrop(backdrop: PageBackdrop): Modifier = this
+    .onGloballyPositioned { backdrop.origin = it.positionInWindow() }
+    .drawWithContent {
+        backdrop.layer.record { this@drawWithContent.drawContent() }
+        drawLayer(backdrop.layer)
+    }
+
+/**
+ * The page behind this surface, blurred, as the surface's own ground.
+ *
+ * Drawn behind whatever else the surface paints, so a fill over it still reads as a fill - the frost
+ * replaces the flat page showing through, not the colour. The caller's fill has to be see-through
+ * enough to let it show, which is the one thing this modifier cannot do for it.
+ *
+ * A second layer is needed because the blur belongs to this surface and not to the page: a render
+ * effect set on the recording itself would blur the page on its way to the screen, which is the one
+ * thing nobody asked for. It samples only what is behind the surface's own bounds, so the edges are
+ * clamped rather than faded - a decal edge leaves a pale rim around a surface this small.
+ */
+@Composable
+internal fun Modifier.frostedBackdrop(
+    /**
+     * What to frost against. The page for something floating over it, the ground under the page for
+     * a card standing on it - see [LocalPageGround] for why a card cannot take the first.
+     */
+    backdrop: PageBackdrop? = LocalPageBackdrop.current,
+    radius: Dp = FrostRadius,
+): Modifier {
+    backdrop ?: return this
+    val blurred = rememberGraphicsLayer()
+    val blur = with(LocalDensity.current) { radius.toPx() }
+    val position = remember { mutableStateOf(Offset.Zero) }
+    return this
+        .onGloballyPositioned { position.value = it.positionInWindow() }
+        .drawBehind {
+            // Where the recording's top-left falls in this surface's own coordinates, which is what
+            // the recording has to be shifted by for the part behind this surface to land under it.
+            val shift = backdrop.origin - position.value
+            blurred.renderEffect = BlurEffect(blur, blur, TileMode.Clamp)
+            blurred.record { translate(shift.x, shift.y) { drawLayer(backdrop.layer) } }
+            drawLayer(blurred)
+        }
+}
+
+/**
+ * How far the frost carries.
+ *
+ * Far enough that a headline passing under the action is light and movement rather than words -
+ * which is the same thing the 0.94 tint was for, said in the medium instead of by hiding the page.
+ */
+private val FrostRadius = 20.dp
+
+/**
+ * One width for every floating edge, gradient or not.
+ *
+ * The bar and the action sit one above the other at the foot of a compact screen, so an edge that
+ * were thicker on one of them would read as the two not matching rather than as one of them being
+ * the control. A gradient wants width to be seen as a gradient and does not get it here; the colour
+ * is what separates them.
+ */
+private val HairlineWidth = 1.dp
+
+/**
+ * The one spacing scale.
+ *
+ * Twelve different gaps were in use - 2, 3, 4, 6, 8, 10, 12, 14, 16, 20, 24 and 28 - which is what
+ * made the screens read as almost-aligned rather than aligned. Four steps cover every case here.
+ */
+object Space {
+    val xs: Dp = 4.dp
+    val s: Dp = 8.dp
+    val m: Dp = 12.dp
+    val l: Dp = 16.dp
+    val xl: Dp = 24.dp
+}
+
+/**
+ * How tall a pill-shaped button stands.
+ *
+ * Shorter than a Material button, because these share a row with each other rather than anchoring
+ * a screen. Defined here rather than beside either of them: two pills side by side at two heights
+ * is the kind of almost-aligned this scale exists to stop.
+ */
+val PillHeight: Dp = 32.dp
+
+/**
+ * How tall a pill that is only read stands.
+ *
+ * A label pill used to be as tall as its padding happened to make it, which is why a card carrying
+ * three of them carried three heights: the ring around "T+1" closed tighter than the ring around
+ * "Price scale changed" the moment either one's text metrics moved, and at a larger font scale they
+ * separated further. Fixed here, the text is centred inside a known box instead of pushing it open,
+ * so every label on a card is one object repeated.
+ *
+ * 20dp, which is where those pills already sat - the ring hugs its word, and nothing on a card grew
+ * to make this agree. [Egx33Badge] came down to it instead.
+ *
+ * Not [PillHeight]: that is the height of something you press, and the extra 12dp is the fingertip,
+ * not the label. The two are deliberately the only two.
+ */
+val LabelPillHeight: Dp = 24.dp
+
+/**
+ * The corner every pill in the app is cut at.
+ *
+ * They were all `CircleShape` - a capsule, whatever the pill's height - and that is what read as
+ * "too round" inside cards drawn at 14dp: the fully rounded end of a ring is a shape the rest of
+ * the screen never makes.
+ *
+ * **It is 6dp and not 8, and the arithmetic is why.** `CircleShape` takes half the *shorter* side,
+ * so on a [LabelPillHeight] pill the capsule it replaced was already only a 10dp corner - 8dp moved
+ * it by two, which is nothing anybody can see, and the first pass at this shipped that and looked
+ * identical on the phone. At 6dp the pill is visibly cut; below that it stops reading as a pill at
+ * all. The 32dp buttons had further to come - 16dp to 6 - so one number serves both.
+ *
+ * The cost of leaving the theme's `small` behind is that this is now a radius of its own rather
+ * than a step on the shape scale. That is the trade: 8dp was on the scale and did nothing.
+ *
+ * Kept as a [Dp] beside the shape because one caller paints its own background rather than clipping
+ * to a shape, and a corner given twice in two units is a corner that drifts.
+ */
+val PillCorner: Dp = 6.dp
+
+/** [PillCorner] as a shape, which is what every pill but the painted one asks for. */
+val PillShape: Shape = RoundedCornerShape(PillCorner)
+
+/**
+ * The corner a tinted panel inside a card is cut at - "The call"/"What happened" on the Insights
+ * call card, "Your trade"/"Where it stands" on a position card. Shared rather than declared twice,
+ * so the two families of card cannot drift apart on a number neither of them has a reason to own.
+ */
+val SectionPanelShape: Shape = RoundedCornerShape(10.dp)
+
+/**
+ * How wide a card has to measure before it draws its wide layout instead of its phone one.
+ *
+ * Clear of both real widths a full-width card is drawn at now that neither the Insights nor the
+ * Portfolio grid ever splits a row in two - the ~380-411dp a phone gives one, and the 614-682dp a
+ * Fold unfolded or a tablet gives one. Nothing between the two, so the exact value only has to sit
+ * in the gap. Shared for the same reason [SectionPanelShape] is: two cards asking the same question
+ * ("is there room for the wide layout") should never answer it differently.
+ */
+val WideCardMinWidth: Dp = 480.dp
+
+/**
+ * The air between a pill's text and its own edge.
+ *
+ * Six, and not [Space.s]: a ring is drawn around one or two words and reads as a label only while
+ * it is close to them. At 8dp the box stood visibly off its text, which is the same fault as the
+ * height being loose - the pill looked like a container for something rather than a mark on it.
+ */
+val PillPaddingH: Dp = 6.dp
+
+/**
+ * Three icon sizes, and no others.
+ *
+ * [Inline] sits beside text - section headings, chips, list rows. [Action] is for anything with a
+ * touch target of its own: navigation, buttons, menu affordances.
+ *
+ * [Hint] is the exception the overdue tile earned: a glyph whose whole job is to say the surface
+ * leads somewhere, on a card small enough that an [Inline] arrow stands nearly as tall as the logo
+ * across from it and reads as a control rather than a hint. Not for anything that is pressed on its
+ * own - it is under the touch target every such thing has to clear.
+ */
+object IconSize {
+    val Hint: Dp = 16.dp
+    val Inline: Dp = 20.dp
+    val Action: Dp = 24.dp
+}
+
+/**
+ * The hairline a card is drawn with.
+ *
+ * The same width and colour as the stroke around the page well, on purpose: the edge of a card and
+ * the edge of the page it sits on are then one line rather than two that happen to agree. Defined
+ * once so the three places that draw a card cannot drift apart.
+ */
+val cardOutline: BorderStroke
+    @Composable get() = BorderStroke(
+        1.dp,
+        androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant,
+    )
+
+/**
+ * What a card is made of where it is drawn as glass rather than as a slab.
+ *
+ * Three parts that only mean anything together: a fill the page shows through, a sheen across the
+ * top corner, and an edge lit along its top. Any one of them alone reads as a card that failed to
+ * paint rather than as a card made of something - a see-through card with a flat grey edge is the
+ * worst of the three - so they are declared here together and applied in one line at each call site.
+ *
+ * **Not a blur, deliberately.** The page behind a card is one flat colour and cards do not overlap,
+ * so blurring what is behind one would cost a layer a frame to produce the tint this already is.
+ * What makes these read as glass is the page coming through them and the light along their top,
+ * neither of which needs a [android.graphics.RenderEffect].
+ *
+ * Held to the two cards it is being judged on - the Results occurrence card and the Portfolio
+ * position card - rather than applied to [SectionCard], which every page draws.
+ */
+internal object Glass {
+    /**
+     * A container role with its alpha taken back off, for something floating outside the page.
+     *
+     * The three container roles are see-through in the theme, which is what makes every surface in
+     * the app glass in one place - see `GlassSection`. A dialog and a menu are the exception and not
+     * an oversight: a dialog sits on a scrim and a menu sits on whatever it was opened over, so
+     * neither has the page behind it that the material means anything against. See-through, a
+     * confirm dialog shows the very card it is asking about through its own words.
+     */
+    @Composable
+    fun solid(color: Color): Color = color.copy(alpha = 1f)
+
+    /**
+     * Light along the top edge, falling away down the sides.
+     *
+     * Stands in for [cardOutline] **only where the card has nothing better to say with its edge**. A
+     * trade's status and an arrival flash both own this edge while they are there, and what a card
+     * means outranks how it is lit - so both call sites keep their own border where they have one
+     * and take this where they would have taken the hairline.
+     */
+    val outline: BorderStroke
+        @Composable get() = BorderStroke(
+            1.dp,
+            if (LocalDarkTheme.current) {
+                Brush.verticalGradient(
+                    listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.07f)),
+                )
+            } else {
+                // White at the top and the card hairline below it: on this theme the lit edge is
+                // the page's own light catching the top of the card, and the rest of the outline
+                // still has to be the line every other card is drawn with.
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White,
+                        androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant,
+                    ),
+                )
+            },
+        )
+
+}
+
+
+/**
+ * Colour carries meaning for a price, not decoration.
+ *
+ * A row of eight numbers in one colour has to be read left to right before any of it means
+ * anything. Tying the hue to the role - what you pay, what you hope for, what you cannot afford -
+ * makes a row scannable at a glance.
+ */
+object PriceRole {
+    /** What the call asks you to pay. Neutral: it is the reference every other figure is read against. */
+    val entry: Color @Composable get() = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+
+    /** Where the call says to take profit. */
+    val target: Color @Composable get() = androidx.compose.material3.MaterialTheme.colorScheme.tertiary
+
+    /** Where the call says to give up. */
+    val stop: Color @Composable get() = com.ikverse.egxanalyzer.ui.theme.extraColors.loss
+
+    /**
+     * A price the market reached, rather than one a channel chose.
+     *
+     * Its own hue rather than `primary`, which is the app's own voice and was doing both jobs. See
+     * `market` in `ExtraColors`.
+     */
+    val market: Color @Composable get() = com.ikverse.egxanalyzer.ui.theme.extraColors.market
+
+    /** Supporting context: dates, notes, counts. */
+    val muted: Color @Composable get() = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+
+    /**
+     * A figure the app worked out rather than read from a source: the role's own colour, softened.
+     *
+     * Not a colour of its own. Drawn in [muted] it came out the exact grey of the notes and dates
+     * beside it, and a column holding both kinds of figure was left in two different hues - which
+     * one a row got depending only on whether its channel happened to print the number. Hue stays
+     * the role, opacity carries the provenance, and the column reads as one column again.
+     */
+    fun derived(of: Color): Color = of.copy(alpha = DerivedAlpha)
+
+    /**
+     * How far a derived figure is softened.
+     *
+     * Shared with the Excel export, which mixes it onto the page by hand because an xlsx font
+     * colour carries no alpha. Two constants would drift apart the first time either was adjusted.
+     */
+    const val DerivedAlpha = com.ikverse.egxanalyzer.model.DERIVED_ALPHA
+
+    @Composable
+    fun forReturn(value: Double?): Color = when {
+        value == null -> muted
+        value > 0 -> target
+        value < 0 -> stop
+        else -> androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+    }
+}
+
+/**
+ * Digits that line up in a column, so a table can be compared down as well as read across.
+ *
+ * IBM Plex Mono rather than `FontFamily.Monospace`, which resolved to whatever the device happened
+ * to call monospace and matched nothing else on screen. See `Figures` in `theme/Type.kt`.
+ */
+val TabularFigures = com.ikverse.egxanalyzer.ui.theme.Figures
+
+const val Dash = "—"
+
+/**
+ * A price exactly as it is worth reading.
+ *
+ * EGX trades plenty of stocks below one pound - 0.243, 0.408 - so two decimals is not enough, and
+ * a raw Double prints float noise. Three is the most any source prints; trailing zeros go because
+ * `0.250` and `0.25` are the same price and the extra digit only adds width.
+ */
+fun formatPrice(value: Double?): String {
+    if (value == null || value.isNaN()) return Dash
+    val rounded = (value * 1000).roundToInt() / 1000.0
+    if (abs(rounded - rounded.toLong()) < 1e-9) return rounded.toLong().toString()
+    return rounded.toString().trimEnd('0').trimEnd('.')
+}
+
+/** A signed percentage, at one decimal: past that the figure implies a precision it does not have. */
+fun formatPercent(value: Double?, signed: Boolean = true): String {
+    if (value == null || value.isNaN()) return Dash
+    val rounded = (value * 10).roundToInt() / 10.0
+    val sign = if (signed && rounded > 0) "+" else ""
+    return "$sign${if (abs(rounded - rounded.toLong()) < 1e-9) rounded.toLong().toString() else rounded}%"
+}
+
+/** "session" or "sessions", so the three places that count them all read the same. */
+fun Int.sessionWord(): String = if (this == 1) "session" else "sessions"
+
+/** "day" or "days", for the overdue count. */
+fun Long.dayWord(): String = if (this == 1L) "day" else "days"
+
+/**
+ * How many columns of at least [minColumnWidth] fit in the space actually available.
+ *
+ * Derived rather than enumerated: a width nobody thought to test still gets a sensible answer,
+ * which is the whole point of a responsive layout. Measured from the container, because a pane is
+ * often narrower than the window and window width promises room a component does not have.
+ */
+fun BoxWithConstraintsScope.responsiveColumns(
+    minColumnWidth: Dp = 320.dp,
+    maxColumns: Int = 3,
+): Int = max(1, min(maxColumns, floor(maxWidth / minColumnWidth).toInt()))
+
+/**
+ * Lays [items] out in [columns] rows of equal width.
+ *
+ * A grid rather than a list, so a wide screen stops running one card per row across a metre of
+ * empty space. The last row is padded with blanks so its cards keep the same width as the rest.
+ */
+@Composable
+fun <T> ColumnScope.ResponsiveRows(
+    items: List<T>,
+    columns: Int,
+    spacing: Dp = Space.m,
+    /**
+     * Receives a modifier that must be applied to whatever the item draws.
+     *
+     * Cards in a row are sized to the tallest of them, so a stock whose name wraps to two lines no
+     * longer leaves its neighbour floating with a ragged edge beneath it. Handing the modifier down
+     * is what lets the card itself stretch; a box around a short card only pads the gap.
+     */
+    item: @Composable (T, Modifier) -> Unit,
+) {
+    if (columns <= 1) {
+        Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
+            items.forEach { value -> item(value, Modifier.fillMaxWidth()) }
+        }
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
+        items.chunked(columns).forEach { row ->
+            // Deliberately not IntrinsicSize.Min: every cell here contains a BoxWithConstraints
+            // somewhere, and intrinsic measurement of a SubcomposeLayout throws. Cards are kept
+            // level by giving their headers a common height instead, which is where the raggedness
+            // came from.
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+            ) {
+                row.forEach { value ->
+                    Box(Modifier.weight(1f)) { item(value, Modifier.fillMaxWidth()) }
+                }
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+/**
+ * Splits a list into grid rows and full-width open items, in the order they are drawn.
+ *
+ * An open item needs the whole width - half a row squeezes a table of prices onto two lines - so it
+ * gets a band of its own. Nothing else moves. Opening the second card of a row therefore leaves the
+ * first alone on a half-empty row above it, and that gap is deliberate: the list is sorted by date,
+ * so its order is the only thing telling you which run is the newest one.
+ *
+ * An earlier version closed that gap by moving the neighbour below the open item, which put the
+ * second card of a row ahead of the first for as long as it was open - the newest report read as
+ * the second newest, which is exactly what the sort exists to prevent.
+ *
+ * @return each band with a flag saying whether it is the open one.
+ */
+internal fun <T> expandableBands(
+    items: List<T>,
+    isOpen: (T) -> Boolean,
+): List<Pair<List<T>, Boolean>> {
+    val bands = mutableListOf<Pair<List<T>, Boolean>>()
+    val closed = mutableListOf<T>()
+    items.forEach { item ->
+        if (!isOpen(item)) {
+            closed += item
+            return@forEach
+        }
+        if (closed.isNotEmpty()) bands += closed.toList() to false
+        closed.clear()
+        bands += listOf(item) to true
+    }
+    if (closed.isNotEmpty()) bands += closed.toList() to false
+    return bands
+}
+
+/**
+ * Which page of a pager is showing, and how many there are.
+ *
+ * Lives here because two screens now page through cards - the occurrences of one stock, and the
+ * runs of one session - and a pager whose dots are drawn a second way reads as a different control
+ * doing a different thing.
+ *
+ * A readout, never a control. Swiping is what moves a pager; a dot large enough to press
+ * comfortably is no longer a dot, and one that is not is a control nobody can hit.
+ */
+@Composable
+internal fun PageDots(current: Int, total: Int) = PageDots(total) { current.toFloat() }
+
+/**
+ * The same readout, following a drag rather than reporting where one ended.
+ *
+ * The marker travels between two dots on the same fraction the cards are moving on, so a swipe
+ * abandoned half way walks it back rather than leaving it where it was and then jumping. A dot lit
+ * at the snap can only report a page turn after the fact, which on a stack of two or three - a
+ * short flick, decided in a few hundred milliseconds - is the whole gesture reported once it is
+ * over.
+ *
+ * `position` is a lambda and not a `Float` deliberately: read as a parameter, every card of every
+ * stack would recompose for each frame of a drag. Read inside the draw, they redraw. Same reason
+ * the cards' own transform is read in their `graphicsLayer` and not in the composable body.
+ *
+ * One even pitch, where the dots used to be spaced by their own widths - the marker has to travel a
+ * fixed distance per page or it would arrive at each dot at a different moment.
+ */
+@Composable
+internal fun PageDots(total: Int, position: () -> Float) {
+    val marker = MaterialTheme.colorScheme.primary
+    val rest = MaterialTheme.colorScheme.outlineVariant
+    Canvas(Modifier.size(width = DotPitch * total, height = DotMarkerSize)) {
+        val pitch = DotPitch.toPx()
+        val middle = size.height / 2f
+        repeat(total) { index ->
+            drawCircle(rest, DotSize.toPx() / 2f, Offset(pitch * (index + 0.5f), middle))
+        }
+        val at = position().coerceIn(0f, (total - 1).toFloat())
+        drawCircle(marker, DotMarkerSize.toPx() / 2f, Offset(pitch * (at + 0.5f), middle))
+    }
+}
+
+private val DotSize = 5.dp
+private val DotMarkerSize = 7.dp
+
+/** Wide enough for the marker and the gap either side of it, so the row reads as evenly spaced. */
+private val DotPitch = 11.dp
+
+/**
+ * Draws a scrollbar that appears while scrolling and fades out afterwards.
+ *
+ * Compose draws none at all, so a long card gave no sign that anything sat below the fold. It
+ * fades rather than staying put because a permanent bar on every container is its own kind of
+ * clutter.
+ */
+fun Modifier.fadingScrollbar(
+    state: ScrollState,
+    horizontal: Boolean = false,
+    thickness: Dp = 3.dp,
+    color: Color? = null,
+): Modifier = composed {
+    val scheme = androidx.compose.material3.MaterialTheme.colorScheme
+    val bar = color ?: scheme.onSurfaceVariant
+    var scrolling by remember { mutableStateOf(false) }
+    // The effect also runs when the screen first composes, which showed a bar on every scrollable
+    // the moment it appeared, before anything had been scrolled.
+    var composed by remember { mutableStateOf(false) }
+    LaunchedEffect(state.value) {
+        if (!composed) {
+            composed = true
+            return@LaunchedEffect
+        }
+        scrolling = true
+        delay(SCROLLBAR_LINGER_MS)
+        scrolling = false
+    }
+    val alpha by animateFloatAsState(
+        targetValue = if (scrolling) 0.5f else 0f,
+        animationSpec = tween(if (scrolling) 120 else 400),
+        label = "scrollbar",
+    )
+    drawWithContent {
+        drawContent()
+        if (alpha <= 0.01f || state.maxValue == 0 || state.maxValue == Int.MAX_VALUE) return@drawWithContent
+        val track = if (horizontal) size.width else size.height
+        val visible = track / (track + state.maxValue)
+        val thumb = max(track * visible, MIN_THUMB_PX)
+        val travel = (track - thumb) * (state.value.toFloat() / state.maxValue)
+        val weight = thickness.toPx()
+        val radius = CornerRadius(weight / 2, weight / 2)
+        if (horizontal) {
+            drawRoundRect(
+                color = bar,
+                topLeft = Offset(travel, size.height - weight),
+                size = Size(thumb, weight),
+                cornerRadius = radius,
+                alpha = alpha,
+            )
+        } else {
+            drawRoundRect(
+                color = bar,
+                topLeft = Offset(size.width - weight, travel),
+                size = Size(weight, thumb),
+                cornerRadius = radius,
+                alpha = alpha,
+            )
+        }
+    }
+}
+
+private const val SCROLLBAR_LINGER_MS = 900L
+private const val MIN_THUMB_PX = 48f
+
+/** A vertical scroll that shows how much is left. Use instead of `verticalScroll` directly. */
+@Composable
+fun Modifier.scrollableColumn(): Modifier {
+    val state = rememberScrollState()
+    // The bar is drawn outside the scroll, not inside it: a draw modifier placed after
+    // verticalScroll is a child of it, so it would be measured against the content and slide away
+    // with it instead of staying pinned to the edge of the viewport.
+    return this.fadingScrollbar(state).verticalScroll(state)
+}
+
+/** A horizontal scroll that shows how much is left. */
+@Composable
+fun Modifier.scrollableRow(): Modifier {
+    val state = rememberScrollState()
+    return this.fadingScrollbar(state, horizontal = true).horizontalScroll(state)
+}
+
+/**
+ * How far a downward drag has to travel over a sheet's content before the sheet takes it as
+ * "close me".
+ *
+ * Far enough that pulling a record back up at its top is never read as a dismissal, short enough
+ * that a deliberate push down still closes the sheet in the one gesture. Material's own sheet
+ * dismisses on **56dp** of travel or a flick of **125dp/s**, whichever arrives first - both read
+ * off `BottomSheetDefaults` in material3 1.4.0 - so a push has to cover this and then the 56dp
+ * behind it, which is about a finger's width twice over and cannot be reached by accident.
+ */
+private val SheetDragSlop = 64.dp
+
+/**
+ * Holds a sheet still while the thing inside it is being read.
+ *
+ * `ModalBottomSheet` hands every downward drag its content could not use straight to the sheet,
+ * and the sheet settles to hidden on 56dp of travel or on a flick of 125dp/s - the flick being the
+ * half that bites. Content already scrolled to its top gives back every pixel of a pull downwards,
+ * so the ordinary gesture for "let me see the start again" was closing the sheet under the
+ * reader's finger.
+ *
+ * **The thresholds themselves cannot be raised.** `rememberModalBottomSheetState` takes neither;
+ * they reach a `SheetState` only through `rememberSheetState`, which is `internal` to material3 -
+ * compiling a call to it against 1.4.0 fails outright. So the distance is held out here instead,
+ * in front of the sheet. Raising them would also have been the blunter fix: they govern the drag
+ * handle too, and a handle that has to be dragged half a screen is a handle that looks stuck.
+ *
+ * **On the scroller, not on the whole sheet.** The drag handle, a fixed heading and an action bar
+ * are dragged on purpose and still dismiss from the first pixel; only the band a reader scrolls
+ * has to prove what a drag over it means.
+ *
+ * The slop is re-armed the moment the content actually scrolls, so a long record read back to its
+ * top arrives there with the whole of [SheetDragSlop] in hand rather than having spent it on the
+ * way, and re-armed again when the gesture ends - it is per-drag, never a budget that runs down
+ * over a sitting.
+ *
+ * Place it **before** the scroll modifier. It has to be the scroller's parent connection to be
+ * offered what the scroller could not use, and placed after it would be a child that never hears.
+ */
+@Composable
+fun Modifier.sheetDragSlop(): Modifier {
+    val slop = with(LocalDensity.current) { SheetDragSlop.toPx() }
+    val connection = remember(slop) {
+        object : NestedScrollConnection {
+            /** What is left of this gesture's [SheetDragSlop], in pixels. */
+            var left = slop
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                // The content moved, so this gesture is reading: anything left over is the far end
+                // of a scroll rather than the start of a pull, and the slop starts again from there.
+                if (consumed.y != 0f) left = slop
+                if (available.y <= 0f) return Offset.Zero
+                val taken = min(available.y, left)
+                left -= taken
+                return Offset(0f, taken)
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                // A flick that never spent the distance must not close the sheet either, or the
+                // distance would be for nothing. Held only while the sheet is still where it
+                // started: once the slop is spent it has been moving under the finger, and a sheet
+                // left part way down is worse than one that closes.
+                val hold = left > 0f && available.y > 0f
+                left = slop
+                return if (hold) available else Velocity.Zero
+            }
+        }
+    }
+    return this.nestedScroll(connection)
+}
+
+/**
+ * A tall thing beside the short things that configure it, once there is room for both.
+ *
+ * A screen of full-width cards wastes most of a wide display: a card holding three checkboxes was
+ * spanning 1600 pixels. Below [minWidth] the two panes stack, which is the right answer on a cover
+ * screen where height is the plentiful dimension.
+ *
+ * The one rule in this app for "two things beside each other, or stacked when they will not fit",
+ * and it is deliberately the only one. A second helper would be a second threshold, a second
+ * fallback and a second gap, and the two would agree until one of them was touched. So a pair of
+ * equals - two cards of the same standing rather than a subject and its settings - is this with
+ * [mainWeight] at 1f, not a layout of its own.
+ */
+@Composable
+fun AdaptivePanes(
+    minWidth: Dp = 720.dp,
+    mainWeight: Float = 1.3f,
+    /**
+     * Stretches both columns to the taller of them, so their cards' backgrounds line up.
+     *
+     * Off by default, because it is wrong for the case this was built for: a tall main pane beside a
+     * short side one would drag the side column's last card down the screen to meet it. It is right
+     * for a **pair**, where two cards of the same standing sitting at two different heights reads as
+     * one of them having failed to load rather than as one simply having less in it.
+     *
+     * **Measured, not intrinsic, and that distinction crashed the Analyze screen once.**
+     * `Modifier.height(IntrinsicSize.Max)` is the obvious way to write this and it throws here:
+     * intrinsic measurement of a `SubcomposeLayout` is unsupported, and a pane holds whatever the
+     * screen puts in one. At the time that was a `BoxWithConstraints` inside Analyze's Content
+     * types card, since replaced by a `FlowRow` - but the rule outlived that call site, because the
+     * Row branch is only ever taken above [minWidth]. An intrinsic here stands up on a cover screen
+     * and dies the moment the phone is unfolded, and the next `BoxWithConstraints`, `LazyRow` or
+     * `SubcomposeAsyncImage` a pane acquires brings it straight back. `ResponsiveRows` carries the
+     * same warning about `IntrinsicSize.Min` a few hundred lines up.
+     *
+     * So the height is read back from what the columns actually measured and applied to both. It
+     * can only ever grow, which is what stops it oscillating; the reset key is the width, so a fold
+     * does not carry the other layout's height across.
+     */
+    alignHeights: Boolean = false,
+    main: @Composable ColumnScope.() -> Unit,
+    side: @Composable ColumnScope.() -> Unit,
+) {
+    BoxWithConstraints {
+        if (maxWidth >= minWidth) {
+            // Keyed on the width so a fold starts this over rather than stretching one layout's
+            // columns to a height measured under the other.
+            var tallest by remember(maxWidth, alignHeights) { mutableIntStateOf(0) }
+            val stretch = with(LocalDensity.current) { tallest.toDp() }
+            val column = Modifier
+                .then(if (alignHeights && tallest > 0) Modifier.height(stretch) else Modifier)
+                .then(
+                    if (alignHeights) {
+                        // Grows only. Once both columns are held at the tallest height they both
+                        // report it, so this settles after one pass instead of trading heights.
+                        Modifier.onSizeChanged { if (it.height > tallest) tallest = it.height }
+                    } else {
+                        Modifier
+                    },
+                )
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                Column(
+                    column.weight(mainWeight),
+                    verticalArrangement = Arrangement.spacedBy(Space.m),
+                    content = main,
+                )
+                Column(
+                    column.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(Space.m),
+                    content = side,
+                )
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                main()
+                side()
+            }
+        }
+    }
+}
+
+/**
+ * Every date pattern the app prints, in one place.
+ *
+ * They were declared beside the screens that used them and had drifted into five near-copies of
+ * three ideas: two files spelling "d MMM" separately, three spelling the run stamp. A pattern that
+ * lives next to one screen is a pattern the next screen writes again slightly differently, and a
+ * reader moving between tabs is the one who notices.
+ */
+object AppDates {
+    /** "14 Aug" - a session in the current year, which is nearly every one a screen shows. */
+    val DayMonth: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM")
+
+    /** "14 Aug 25", the same date two characters wider, for one set in another year. */
+    val DayMonthShortYear: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yy")
+
+    /** "14 Aug 2026", where the year is worth spelling out in full. */
+    val DayMonthYear: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy")
+
+    /** "14 Aug · 09:30" - a Telegram message, which is dated by the minute rather than the day. */
+    val DayMonthTime: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM · HH:mm")
+
+    /** "14 Aug 2026 · 09:30" - when a run happened, on the three screens that say so. */
+    val Stamp: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy · HH:mm")
+
+    /** "Fri 14 Aug 2026". The weekday is the point: a run is aimed at a trading session. */
+    val WeekdaySession: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM yyyy")
+
+    /**
+     * "14 Aug 2026, 09:30" - [Stamp] in all but the separator, which Results has always used.
+     *
+     * Kept apart rather than folded into [Stamp]: the two are one comma from being the same
+     * pattern, and merging them would silently restyle a line on a screen nobody asked about.
+     * Worth doing on purpose one day; not worth doing by accident.
+     */
+    val CompletedStamp: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm")
+}
+
+/**
+ * A date short enough to sit among figures, with the year back only where it has to be.
+ *
+ * "2026-08-14" was the longest thing on any row that carried one, and on a narrow card it was what
+ * pushed the row into an ellipsis. "14 Aug" is the same date in six characters. The year returns
+ * for a date in another one, which is the only time its absence can be read wrong; every date in a
+ * normal season stays at the short form.
+ */
+fun shortDate(date: LocalDate, today: LocalDate = LocalDate.now()): String =
+    if (date.year == today.year) {
+        AppDates.DayMonth.format(date)
+    } else {
+        AppDates.DayMonthShortYear.format(date)
+    }
+
+/**
+ * A risk-to-reward ratio, always written against a risk of one.
+ *
+ * "1 : 2.4" rather than a bare 2.4, which on a card of prices reads as one - and which way round
+ * it goes is the whole meaning of the figure.
+ */
+internal fun Double?.asRatio(): String =
+    if (this == null || isNaN()) Dash else "1 : ${formatPrice(this)}"
+
+/**
+ * A distance, named as one.
+ *
+ * A bare percentage under a price is read as the day's move, which is the one thing it is not.
+ */
+internal fun Double?.distance(): String? = this?.let { "${formatPercent(it)} from entry" }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Only the directory an exported spreadsheet is written to. It is emptied and rewritten on
+         every export, so nothing else the app holds is ever reachable through this authority. -->
+    <files-path name="exports" path="exports/" />
+</paths>

@@ -1,0 +1,94 @@
+package com.ikverse.egxanalyzer.data
+
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import com.ikverse.egxanalyzer.model.CloseSweep
+import com.ikverse.egxanalyzer.model.MarketRefresh
+import com.ikverse.egxanalyzer.model.SeriesHarvest
+import java.time.Instant
+
+/**
+ * Books the one alarm that wakes the app for whatever is next.
+ *
+ * One alarm for everything this phone does on its own - keeping prices fresh through a session, one
+ * sweep at the close, and the intraday archive - rather than one each: only the nearest fire
+ * matters, and the run that answers it books the one after.
+ *
+ * WorkManager is not the timekeeper here, deliberately. Its delays are a floor and not a promise -
+ * in Doze a fifteen-minute period becomes whenever the system next feels like it - so 11:15 would
+ * mean some time that afternoon. OverdueWorker can live with that because it asks a question whose
+ * answer changes once a day; a refresh that is meant to keep up with a moving market cannot. The
+ * alarm is the clock, and WorkManager runs the work once the alarm has woken the phone.
+ */
+class JobScheduler(private val context: Context) {
+
+    private val alarms: AlarmManager = context.getSystemService(AlarmManager::class.java)
+
+    /**
+     * Whether the system will honour an exact alarm.
+     *
+     * From Android 14 this is off until the user grants it, and the app asks rather than declaring
+     * USE_EXACT_ALARM, which is meant for alarm clocks and calendars. Without it the fallback is
+     * inexact and can drift by the better part of an hour, which for a fifteen-minute refresh means
+     * most fires quietly not happening - which is why the screen says so rather than leaving the
+     * user to wonder.
+     */
+    fun canScheduleExact(): Boolean = alarms.canScheduleExactAlarms()
+
+    /**
+     * Points the alarm at the earliest fire anything here has left, or takes it down.
+     *
+     * Called after anything that could move that moment: any switch flipped, a reboot, the
+     * exact-alarm permission changing, and every launch. Booking is cheap and idempotent, so the
+     * safe thing on all of those is to book again.
+     */
+    fun rebook(
+        marketRefresh: Boolean,
+        /**
+         * Whether anyone here wants to be told what the session did to their trades.
+         *
+         * Its own flag rather than [marketRefresh]'s, because the two are different promises: that
+         * one keeps up with a market while it moves and is off until it is asked for, this one is a
+         * single fetch after the exchange has shut so an ending can be announced on the day it
+         * happened. See [CloseSweep].
+         */
+        closeSweep: Boolean,
+        /**
+         * Whether this phone keeps the five-minute archive.
+         *
+         * A third flag rather than a reading of [closeSweep], although the two fire at the same
+         * moment: one is a promise to announce what the session did to a trade and the other is a
+         * promise to copy the session before the feed forgets it, and a phone wanting the second
+         * with no trade notifications on would otherwise book no alarm at all.
+         */
+        priceSeries: Boolean = false,
+    ) {
+        val pending = fireIntent()
+        val now = Instant.now()
+        val at = listOfNotNull(
+            if (marketRefresh) MarketRefresh.nextFire(now) else null,
+            if (closeSweep) CloseSweep.nextFire(now) else null,
+            if (priceSeries) SeriesHarvest.nextFire(now) else null,
+        ).minOrNull()
+        if (at == null) {
+            alarms.cancel(pending)
+            return
+        }
+        // RTC and not elapsed-realtime: a schedule is a wall-clock promise, so it has to follow the
+        // clock across a reboot or a time-zone change rather than count seconds from a boot.
+        if (canScheduleExact()) {
+            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at.toEpochMilli(), pending)
+        } else {
+            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at.toEpochMilli(), pending)
+        }
+    }
+
+    private fun fireIntent(): PendingIntent = PendingIntent.getBroadcast(
+        context,
+        0,
+        Intent(context, ScheduleReceiver::class.java).setAction(ScheduleReceiver.ACTION_FIRE),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+}

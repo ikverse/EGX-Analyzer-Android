@@ -1,0 +1,186 @@
+package com.ikverse.egxanalyzer.ui
+
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * Backing the record up, and getting it back.
+ *
+ * Everything already travels through a private Telegram channel, and for anyone using this app that
+ * is the one cloud account there is certain to be - signing into Telegram is what makes it work at
+ * all. What the channel cannot survive is the Telegram account itself going, and what it never
+ * offered is a copy the user holds. These three buttons are that copy and the way back from it.
+ *
+ * **No account, no key, nothing to configure**, which is the whole design. Picking a folder goes
+ * through Android's own document picker, so OneDrive, Dropbox, Nextcloud, an SD card and a plain
+ * local folder all appear in the same list: a user ends up backed up to whatever cloud they already
+ * have while this app learns none of them, holds no credential for any of them, and costs nothing
+ * per person to run.
+ */
+@Composable
+fun BackupControls(appState: AppState) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var pendingRestore by remember { mutableStateOf<Uri?>(null) }
+    // Bumped after a manual backup actually writes, which is the one change below that does not
+    // already come with a new folder to key on.
+    var written by remember { mutableStateOf(0) }
+
+    // Re-read on every composition rather than remembered: the grant can be revoked from a system
+    // page, and a card that went on naming a folder this app can no longer write to would report a
+    // phone as backed up on the one day that mattered. Cheap either way - a lookup in a list Android
+    // already holds in memory, not a query to the folder itself.
+    val holdsFolder = appState.holdsBackupFolder()
+    // The folder's own file list is a real query to whatever app actually holds it - local storage,
+    // or a cloud provider over its own connection - and reading it on every recomposition of a
+    // settings screen blocked the frame it landed on to ask a folder the reader had not touched.
+    // Read once, off the main thread, when the card first appears or the folder or its contents
+    // actually change.
+    val held by produceState(initialValue = emptyList<String>(), appState.backupFolder, written) {
+        value = withContext(Dispatchers.IO) { appState.backupsInFolder() }
+    }
+
+    val chooseFolder = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { picked ->
+        if (picked == null) return@rememberLauncherForActivityResult
+        appState.keepBackupFolder(picked.toString())
+    }
+
+    // Every type, deliberately. A zip that has been round a cloud folder, a chat and a downloads
+    // directory arrives labelled anything at all - `application/octet-stream` is common - and a
+    // filter would hide the user's own backup from the picker they opened to find it. What the file
+    // actually is gets decided by reading its first bytes, in `readBackup`.
+    val pickBackup = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { picked -> pendingRestore = picked }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        // In the row with the buttons it describes. It was a second grey paragraph under the
+        // status line, so the card said what a backup is every time somebody came to read whether
+        // one had been written.
+        SettingRow(
+            about = infoNote(
+                "What a backup holds",
+                "Every report, trade, rule and setting.",
+                "Your provider API key is not in it and never leaves this phone.",
+            ),
+        ) {
+            FlowRow(
+                Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalArrangement = Arrangement.spacedBy(Space.s),
+            ) {
+                SettingsButton(
+                    enabled = !busy,
+                    onClick = {
+                        scope.launch {
+                            busy = true
+                            runCatching { appState.writeBackup() }
+                                .onSuccess {
+                                    appState.recordBackupDay()
+                                    written++
+                                    appState.statusMessage = StatusMessage("Saved to $it", succeeded = true)
+                                }
+                                .onFailure {
+                                    appState.statusMessage = StatusMessage(
+                                        it.message?.takeIf(String::isNotBlank) ?: "Could not write a backup",
+                                        succeeded = false,
+                                    )
+                                }
+                            busy = false
+                        }
+                    },
+                ) {
+                    Text(if (busy) "Working…" else "Back up now")
+                }
+                SettingsButton(enabled = !busy, onClick = { chooseFolder.launch(null) }) {
+                    Text(if (holdsFolder) "Change folder" else "Choose a folder")
+                }
+                SettingsButton(enabled = !busy, onClick = { pickBackup.launch(arrayOf("*/*")) }) {
+                    Text("Restore from a backup")
+                }
+            }
+        }
+
+        Text(
+            when {
+                holdsFolder && held.isNotEmpty() ->
+                    "Backing up daily to ${appState.backupFolderLabel(appState.backupFolder!!)}. " +
+                        "${held.size} kept, " +
+                        "newest ${held.first()}."
+                holdsFolder ->
+                    "Backing up daily to ${appState.backupFolderLabel(appState.backupFolder!!)}. " +
+                        "Nothing written yet - " +
+                        "the first copy goes there today."
+                // Not an error: the app works perfectly well like this, and a red warning about a
+                // folder nobody has chosen yet would be scolding someone for the default. Neither
+                // branch below claims a daily copy goes to Downloads on its own - only the button
+                // above falls back there, and only when pressed.
+                appState.backupFolder != null ->
+                    "Automatic backups have stopped: the folder can no longer be reached. Choose " +
+                        "it again to start writing there."
+                else ->
+                    "No automatic backup yet. Choose a folder your cloud app syncs - OneDrive, " +
+                        "Dropbox, Nextcloud, an SD card - and a copy is written there once a day. " +
+                        "Back up now saves to Downloads instead."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    pendingRestore?.let { source ->
+        AlertDialog(
+            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
+            onDismissRequest = { pendingRestore = null },
+            title = { Text("Restore from this backup?") },
+            // Says what it will not do, because that is the question somebody hesitating over this
+            // button is actually asking. A restore that could delete is one nobody dares press.
+            text = {
+                Text(
+                    "Anything in the backup that this phone is missing is added back. Nothing " +
+                        "already here is deleted or overwritten with an older version.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingRestore = null
+                    scope.launch {
+                        busy = true
+                        appState.runAction(
+                            label = "Restoring from a backup",
+                            success = { outcome -> outcome.summary },
+                        ) {
+                            appState.restoreFromBackup(source.toString())
+                        }
+                        busy = false
+                    }
+                }) { Text("Restore") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRestore = null }) { Text("Cancel") }
+            },
+        )
+    }
+}
+

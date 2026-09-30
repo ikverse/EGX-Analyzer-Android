@@ -1,0 +1,204 @@
+name: Android
+
+on:
+  push:
+    branches: [main, master]
+    # Releases are cut by pushing a tag, which is also what the app checks for.
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  # Skipped on a tag: a tag is always cut from a commit already on main, which already ran this
+  # job when it was pushed. Running it again here would test the same commit twice and upload a
+  # debug APK the release job never reads - the release job runs its own tests instead.
+  build:
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 21, because Robolectric refuses to build a sandbox for Android SDK 36 on anything older -
+      # "requires Java 21 (have Java 17)" - and the migration and settings tests are Robolectric.
+      # It is also what Android Studio's bundled JBR runs locally, so both sides agree.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # local.properties is gitignored because the SDK path is per-machine; the runner's
+      # ANDROID_HOME is already set, so Gradle resolves the SDK without it.
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Assemble debug
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: app/build/reports/tests/
+
+  # What the app updates itself from. A tag is the whole release process: this signs a release
+  # build with the key every previous release was signed with, and publishes it where the app
+  # looks. Not `needs: build` any more - a tag is always cut from a commit that job already ran
+  # against, so this job runs its own tests instead of waiting on a second run of the same ones.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: app/build/reports/tests/
+
+      # The notes this tag ships are whatever CHANGELOG.md says about it - written by hand as part
+      # of cutting the release, not GitHub's own commit-log summary, which is neither short nor
+      # plain language. Extracted here rather than trusted to exist: a tag pushed without its
+      # entry would otherwise publish with no notes at all and nobody would notice until a user
+      # asked what changed.
+      - name: Extract this version's release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v needle="[$version]" '
+            /^## \[/ {
+              if (matched) exit
+              if (index($0, needle) > 0) { matched = 1 }
+              next
+            }
+            matched && NF { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          if [ ! -s "$RUNNER_TEMP/release-notes.md" ]; then
+            echo "CHANGELOG.md has no entry for $GITHUB_REF_NAME; add one before tagging." >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/release-notes.md"
+
+      # Refused rather than skipped: an unsigned APK attached to a release is one every device
+      # would offer and none could install.
+      - name: Restore the signing key
+        env:
+          EGX_KEYSTORE_BASE64: ${{ secrets.EGX_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$EGX_KEYSTORE_BASE64" ]; then
+            echo "EGX_KEYSTORE_BASE64 is not set; a release cannot be signed." >&2
+            exit 1
+          fi
+          printf '%s' "$EGX_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/egx-release.jks"
+
+      # -PabiSplits is what turns on one APK per architecture; without it this builds the single
+      # APK every other build here produces. See the splits block in app/build.gradle.kts.
+      - name: Assemble release
+        env:
+          EGX_KEYSTORE_FILE: ${{ runner.temp }}/egx-release.jks
+          EGX_KEYSTORE_PASSWORD: ${{ secrets.EGX_KEYSTORE_PASSWORD }}
+          EGX_KEY_ALIAS: ${{ secrets.EGX_KEY_ALIAS }}
+          EGX_KEY_PASSWORD: ${{ secrets.EGX_KEY_PASSWORD }}
+          # local.properties is gitignored, so a build here has none of it. Without these the app
+          # cannot reach Telegram at all and asks its user to register an application at
+          # my.telegram.org before it will show a sign-in code.
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          ./gradlew :app:assembleRelease -PabiSplits --no-daemon
+
+      # A release that cannot sign in to Telegram does nothing this app is for, and the failure only
+      # surfaces on a phone after an install. Cheaper to refuse the release than to publish one.
+      - name: Refuse a release with no Telegram credentials
+        run: |
+          if ! grep -q 'TELEGRAM_API_ID = [1-9]' "app/build/generated/source/buildConfig/release/com/ikverse/egxanalyzer/BuildConfig.java"; then
+            echo "The release build has no Telegram api_id; set the TELEGRAM_API_ID and TELEGRAM_API_HASH secrets." >&2
+            exit 1
+          fi
+
+      # Catches the 3.6.15 crash before it ships rather than after: a dependency bump can make R8
+      # strip a member a class only reaches by reflection, which built and ran clean right up until
+      # WorkManager's own WorkDatabase_Impl lost its constructor and the app died before drawing a
+      # frame. `usage.txt` lists every member the shrinker removed, by class; this fails the release
+      # if any `_Impl` class - Room's naming pattern for every class it reflects on - lost its
+      # constructor to it.
+      - name: Check the shrinker kept what Room and WorkManager need
+        run: |
+          if ! awk '
+            /^[^[:space:]]/ { cls = $0; next }
+            /<init>\(\)/ {
+              if (cls ~ /_Impl:$/) {
+                print cls
+                print $0
+                found = 1
+              }
+            }
+            END { exit (found ? 1 : 0) }
+          ' app/build/outputs/mapping/release/usage.txt; then
+            echo "R8 stripped a constructor off a Room-generated *_Impl class - see the lines above. This is the 3.6.15 crash; do not publish this build." >&2
+            exit 1
+          fi
+
+      # The signing config reaching a build type is not something the development machine can check:
+      # it holds no key, so every build there is unsigned whether the wiring is right or not. The
+      # first build that could tell us is this one, and left unguarded the answer would arrive as a
+      # published release every device is offered and none can install. An unsigned APK is named for
+      # it, so this is the cheapest place to catch it.
+      - name: Refuse an unsigned build
+        run: |
+          dir="app/build/outputs/apk/release"
+          if ls "$dir"/*-unsigned.apk >/dev/null 2>&1; then
+            echo "The release build produced unsigned APKs, so its signing config is not wired up." >&2
+            ls -la "$dir" >&2
+            exit 1
+          fi
+
+      # Named for the version and the architecture, because those names are what the app matches
+      # against its own device and what a person picks from when installing by hand.
+      - name: Name the APKs for their version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cd app/build/outputs/apk/release
+          # Whatever the split produced, rather than a list that has to be kept in step with
+          # build.gradle.kts - a name in this loop that the build no longer makes fails the release
+          # at its last step, with the APKs built and nothing published.
+          for apk in app-*-release.apk; do
+            abi="${apk#app-}"
+            abi="${abi%-release.apk}"
+            mv "$apk" "egx-analyzer-$version-$abi.apk"
+          done
+          ls -la
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            app/build/outputs/apk/release/egx-analyzer-*.apk \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+
+      - name: Forget the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/egx-release.jks"

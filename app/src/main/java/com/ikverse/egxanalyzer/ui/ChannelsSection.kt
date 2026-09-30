@@ -1,0 +1,620 @@
+package com.ikverse.egxanalyzer.ui
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.model.ChannelSelection
+import com.ikverse.egxanalyzer.model.ChatKind
+import com.ikverse.egxanalyzer.model.TelegramAuthStep
+import kotlinx.coroutines.launch
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material.icons.outlined.Campaign
+import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.selection.selectable
+
+/** The Telegram half of the Analyze screen: the chat list once signed in, the way in before that. */
+@Composable
+internal fun ColumnScope.ChannelsSection(appState: AppState) {
+    if (appState.telegramAuthState.step == TelegramAuthStep.READY) {
+        TelegramChats(appState)
+    } else {
+        TelegramSignIn(appState)
+    }
+}
+
+/**
+ * Every step of signing in to Telegram, from application credentials through to registration.
+ *
+ * Shared by Analyze and by Settings rather than owned by either: signing out is on the Settings
+ * card, and a sign-out that can only be undone by leaving for another screen is a trap.
+ *
+ * [boxed] is how one step sits on the page - a card of its own on Analyze, where it stands alone,
+ * and a plain titled block in Settings, where it is already inside the Telegram card and a card
+ * within a card reads as two unrelated things. Draws nothing once signed in.
+ */
+@Composable
+internal fun ColumnScope.TelegramSignIn(appState: AppState, boxed: Boolean = true) {
+    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    var firstValue by remember(appState.telegramAuthState.step) { mutableStateOf("") }
+    var secondValue by remember(appState.telegramAuthState.step) { mutableStateOf("") }
+    // Outlives the step, unlike the two above: the phone number is still needed once the code
+    // screen has replaced the one it was typed on, for Resend code to ask Telegram for a new one
+    // at the same number rather than an empty one.
+    var submittedPhone by remember { mutableStateOf("") }
+    val step = appState.telegramAuthState.step
+    // Loose on the column only for the steps that draw no card, where the message is the whole of
+    // what the screen has to say. Every step that does draw one carries it inside instead: above
+    // the card it set this column 36dp below the one beside it once the panes sit side by side,
+    // and two headings meant to read as one row did not. Once READY the chat card speaks for
+    // itself, which is why nothing is drawn here at all.
+    if (step == TelegramAuthStep.INITIALIZING ||
+        step == TelegramAuthStep.LOGGING_OUT ||
+        step == TelegramAuthStep.ERROR
+    ) {
+        AuthMessage(appState)
+    }
+    when (step) {
+        TelegramAuthStep.API_CONFIGURATION -> {
+            AuthCard("Telegram application", boxed, appState, startOver = false) {
+                val save = {
+                    scope.launch {
+                        appState.saveTelegramApiConfiguration(firstValue, secondValue)
+                        secondValue = ""
+                    }
+                    Unit
+                }
+                AuthField(
+                    firstValue, { firstValue = it }, "API ID",
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Next,
+                    onImeAction = { focusManager.moveFocus(FocusDirection.Down) },
+                )
+                AuthField(
+                    secondValue, { secondValue = it }, "API hash",
+                    secret = true,
+                    onImeAction = save,
+                )
+                Button(onClick = save) { Text("Initialize Telegram") }
+                ApiCredentialsHelp()
+            }
+        }
+        TelegramAuthStep.PHONE_NUMBER -> AuthCard("Sign in to Telegram", boxed, appState) {
+            // Scanning is offered first: it is the shorter path on any device, and on a tablet
+            // typing a phone number and then a code is the worst part of setting the app up.
+            Button(onClick = {
+                scope.launch { appState.startTelegramQrSignIn() }
+            }) { Text("Sign in by QR code") }
+            Text(
+                "Or sign in with your phone number:",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val send = {
+                submittedPhone = firstValue
+                scope.launch { appState.submitTelegramPhone(firstValue) }
+                Unit
+            }
+            AuthField(
+                firstValue, { firstValue = it }, "Phone number with country code",
+                keyboardType = KeyboardType.Phone,
+                onImeAction = send,
+            )
+            Button(onClick = send) { Text("Send verification code") }
+        }
+        TelegramAuthStep.VERIFICATION_CODE -> AuthCard("Verification code", boxed, appState) {
+            AuthField(
+                firstValue, { firstValue = it }, "Telegram code",
+                keyboardType = KeyboardType.Number,
+                onImeAction = { scope.launch { appState.submitTelegramCode(firstValue) } },
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                Button(onClick = {
+                    scope.launch { appState.submitTelegramCode(firstValue) }
+                }) { Text("Verify code") }
+                // Telegram resends to the number already on file - asking again would be typing
+                // the same digits a second time for no reason the reader can see.
+                TextButton(onClick = {
+                    scope.launch { appState.submitTelegramPhone(submittedPhone) }
+                }) { Text("Resend code") }
+            }
+            TextButton(onClick = { scope.launch { appState.logoutTelegram() } }) {
+                Text("Change number")
+            }
+        }
+        TelegramAuthStep.TWO_FACTOR_PASSWORD -> AuthCard("Two-step verification", boxed, appState) {
+            appState.telegramAuthState.hint?.takeIf(String::isNotBlank)?.let {
+                Text("Hint: $it")
+            }
+            val submit = {
+                scope.launch {
+                    appState.submitTelegramPassword(firstValue)
+                    firstValue = ""
+                }
+                Unit
+            }
+            AuthField(
+                firstValue, { firstValue = it }, "Telegram password",
+                secret = true,
+                onImeAction = submit,
+            )
+            Button(onClick = submit) { Text("Continue") }
+        }
+        TelegramAuthStep.EMAIL_ADDRESS -> AuthCard("Login email", boxed, appState) {
+            val send = { scope.launch { appState.submitTelegramEmail(firstValue) }; Unit }
+            AuthField(
+                firstValue, { firstValue = it }, "Email address",
+                keyboardType = KeyboardType.Email,
+                onImeAction = send,
+            )
+            Button(onClick = send) { Text("Send email code") }
+        }
+        TelegramAuthStep.EMAIL_CODE -> AuthCard("Email verification", boxed, appState) {
+            val verify = { scope.launch { appState.submitTelegramEmailCode(firstValue) }; Unit }
+            AuthField(
+                firstValue, { firstValue = it }, "Email code",
+                keyboardType = KeyboardType.Number,
+                onImeAction = verify,
+            )
+            Button(onClick = verify) { Text("Verify email") }
+        }
+        TelegramAuthStep.REGISTRATION -> AuthCard("Finish registration", boxed, appState) {
+            val register = {
+                scope.launch { appState.registerTelegram(firstValue, secondValue) }
+                Unit
+            }
+            AuthField(
+                firstValue, { firstValue = it }, "First name",
+                imeAction = ImeAction.Next,
+                onImeAction = { focusManager.moveFocus(FocusDirection.Down) },
+            )
+            AuthField(secondValue, { secondValue = it }, "Last name", onImeAction = register)
+            Button(onClick = register) { Text("Register") }
+        }
+        TelegramAuthStep.OTHER_DEVICE_CONFIRMATION -> AuthCard("Scan with Telegram", boxed, appState) {
+            val link = appState.telegramAuthState.link.orEmpty()
+            if (link.isNotBlank()) {
+                QrCode(link)
+            }
+            Text(
+                "On a device already signed in to Telegram, open Settings, then Devices, then " +
+                    "Link Desktop Device, and scan this code.",
+            )
+            TextButton(onClick = { scope.launch { appState.logoutTelegram() } }) {
+                Text("Use phone number instead")
+            }
+        }
+        TelegramAuthStep.READY,
+        TelegramAuthStep.INITIALIZING,
+        TelegramAuthStep.LOGGING_OUT,
+        TelegramAuthStep.ERROR -> Unit
+    }
+}
+
+/** The chats a run reads from, and how many of them are picked. */
+@Composable
+private fun TelegramChats(appState: AppState) {
+    val selectedCount = appState.channels.count(ChannelSelection::selected)
+    // Ticked first, so the chats a run actually reads from are the ones seen without scrolling -
+    // the app's own ordering otherwise, stable within each of the two groups. Sorted for display
+    // only: `appState.channels` itself keeps Telegram's own order for everything that reads it.
+    val chats = remember(appState.channels) {
+        appState.channels.sortedByDescending(ChannelSelection::selected)
+    }
+    // The list, and the count that summarizes it. Being signed in and signing out are facts about
+    // the account rather than steps of a run, so they sit in Settings under Telegram; here they
+    // only competed with the chats for the top of the card.
+    SectionCard(title = "Telegram", icon = Icons.Outlined.Forum) {
+        if (chats.isNotEmpty()) {
+            // Only the figure is coloured. The whole line in primary would read as a message about
+            // something having gone right, where all it is saying is how many are ticked.
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                        append(selectedCount.toString())
+                    }
+                    append(" of ${chats.size} chats selected")
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        // Every chat is offered, broadcast channel or not: recommendations also arrive in groups
+        // and direct messages, and hiding those decided for the user which sources were worth
+        // reading.
+        if (chats.isEmpty()) {
+            EmptyState(
+                icon = Icons.Outlined.Forum,
+                title = "No chats loaded",
+                detail = "Refresh to pull your Telegram chat list onto this device.",
+            )
+        } else {
+            // Bounded and scrolled in place: a long chat list otherwise pushes the whole run out
+            // of reach.
+            BoxWithConstraints {
+                val columns = responsiveColumns(minColumnWidth = 300.dp, maxColumns = 3)
+                Column(
+                    Modifier
+                        .heightIn(max = ChatListMaxHeight)
+                        .scrollableColumn(),
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
+                ) {
+                    ResponsiveRows(chats, columns, spacing = Space.s) { chat, cardModifier ->
+                        ChannelCard(chat, appState, chats, cardModifier)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Where the two application credentials come from, for anyone who has to supply their own.
+ *
+ * Offered on the sign-in screens as well as the one with the fields: someone who has not hit the
+ * wall yet is the person best placed to read it, and a help note that only appears once you are
+ * stuck has already failed.
+ */
+@Composable
+private fun ApiCredentialsHelp() {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "Where do the API ID and hash come from?",
+            Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        InfoButton(ApiCredentialsNote)
+    }
+}
+
+/**
+ * The five steps and the caveat, as one sheet rather than a collapsing group of its own.
+ *
+ * It was a `SubSection`, which is already folded away and was therefore not the crowding this pass
+ * was about - but it was a second thing on the screen that opens to explain something, on a screen
+ * that now has one. Two affordances meaning "there is more to say here" is the drift a single
+ * pattern exists to stop.
+ */
+private val ApiCredentialsNote = infoNote(
+    "Where do the API ID and hash come from?",
+    "This build has no application credentials of its own, so it needs a pair from " +
+        "my.telegram.org. They are encrypted on this device.",
+    "1. Open my.telegram.org and sign in with the phone number on your Telegram account.",
+    "2. Enter the code Telegram sends. It arrives in the Telegram app, not by SMS.",
+    "3. Choose API development tools.",
+    "4. Give the app a title and a short name. Platform and description do not matter.",
+    "5. It shows App api_id, a number, and App api_hash, 32 characters. Those are the two fields.",
+    "They identify the application, not you - every third-party Telegram client registers a pair " +
+        "and ships it, which is why a release of this app already has its own and never asks. " +
+        "Treat the hash like a password: anyone holding both can act as this app.",
+)
+
+/**
+ * One step of the sign-in flow.
+ *
+ * Boxed it is a card in its own right; unboxed it keeps the same heading and hairline but no
+ * surface of its own, for the caller that has already drawn one around it.
+ *
+ * Carries the step's message under its heading. Both forms do, so the card and the block inside
+ * Settings say the same thing in the same place.
+ */
+@Composable
+private fun AuthCard(
+    title: String,
+    boxed: Boolean,
+    appState: AppState,
+    /**
+     * Offers a way to abandon this step and go back to entering a phone number.
+     *
+     * Off only for the credentials step: nothing has been submitted to Telegram yet there, so
+     * there is no attempt to start over from. Every step reached after it - a code sent, a QR
+     * shown, a password asked for - can leave the reader stuck if what they typed was wrong and
+     * the only way out was to force-close the app, which is what this replaces.
+     */
+    startOver: Boolean = true,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    if (boxed) {
+        SectionCard(title = title) {
+            AuthMessage(appState)
+            content()
+            if (startOver) StartOverButton(appState)
+        }
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            AuthMessage(appState)
+            content()
+            if (startOver) StartOverButton(appState)
+        }
+    }
+}
+
+/**
+ * Abandons whatever step of sign-in is showing and goes back to entering a phone number.
+ *
+ * The same action a phone number screen's "Change number" and a QR screen's "Use phone number
+ * instead" call, under the name that fits every other step: `logoutTelegram` is TDLib's only way
+ * back to `WaitPhoneNumber` from any step short of it, signed in or not, so it is what all three
+ * do. None of them touch a report, a trade, a rule or a setting - the record this app keeps is
+ * never Telegram's to hold.
+ */
+@Composable
+private fun StartOverButton(appState: AppState) {
+    val scope = rememberCoroutineScope()
+    TextButton(onClick = { scope.launch { appState.logoutTelegram() } }) {
+        Text("Start over")
+    }
+}
+
+/**
+ * What the sign-in has to say right now: an instruction, or what went wrong.
+ *
+ * Drawn nothing at all when there is nothing to say, rather than an empty line - blank, it still
+ * took a line's height and moved everything under it for no reason.
+ */
+@Composable
+private fun AuthMessage(appState: AppState) {
+    val state = appState.telegramAuthState
+    if (state.message.isBlank()) return
+    Text(
+        state.message,
+        color = if (state.isError) {
+            MaterialTheme.colorScheme.error
+        } else {
+            MaterialTheme.colorScheme.primary
+        },
+    )
+}
+
+@Composable
+private fun AuthField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    secret: Boolean = false,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    /** Next moves to the field below; Done, the default, submits the step. */
+    imeAction: ImeAction = ImeAction.Done,
+    /** What the keyboard's own action key does - the step's submit button, or moving on to the
+     * next field, matching [imeAction]. Every field used to open on the full keyboard and end on
+     * whatever the keyboard itself defaulted to, which was usually "return" doing nothing at all. */
+    onImeAction: () -> Unit = {},
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        visualTransformation = if (secret) PasswordVisualTransformation() else {
+            androidx.compose.ui.text.input.VisualTransformation.None
+        },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
+        keyboardActions = KeyboardActions(
+            onDone = { onImeAction() },
+            onNext = { onImeAction() },
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun ChannelCard(
+    channel: ChannelSelection,
+    appState: AppState,
+    allChannels: List<ChannelSelection>,
+    modifier: Modifier = Modifier,
+) {
+    // Two chats can carry the same words and differ only by a trailing emoji, which reads as a
+    // duplicate. When that happens the id is promoted so the difference is visible.
+    val ambiguous = remember(allChannels, channel.id) {
+        // A chat with no title has nothing to confuse, so blank names never count as a clash.
+        channel.baseName().isNotBlank() &&
+            allChannels.count { it.baseName() == channel.baseName() } > 1
+    }
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .selectable(
+                selected = channel.selected,
+                role = Role.Checkbox,
+                onClick = { appState.toggleChannel(channel) },
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = if (channel.selected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                // A step above the card behind it. At surfaceContainer the two were the same
+                // colour with no hairline between them, so a dozen chats read as one slab.
+                MaterialTheme.colorScheme.surfaceContainerHigh
+            },
+        ),
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Row(
+            Modifier.padding(Space.m),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.m),
+        ) {
+            ChatAvatar(channel)
+            Column(Modifier.weight(1f)) {
+                // Not truncated: chats can differ only by a trailing emoji, so cutting the name
+                // short can make two different chats look identical.
+                Text(channel.displayName, style = MaterialTheme.typography.titleSmall)
+                // Stated for every chat, channels included. Shown only on the ones that were not
+                // channels, it read as a warning about those rather than as what kind of chat this
+                // is - and the line it replaces, the chat's id, is a number no one here has ever
+                // needed to read.
+                Text(
+                    channel.kind.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (channel.selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+                // The one place the id still earns its keep: two rows carrying the same words and
+                // the same kind cannot be told apart by anything else on the card.
+                if (ambiguous) {
+                    Text(
+                        "Another chat has the same name · ${channel.id}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = TabularFigures,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+            }
+            Checkbox(checked = channel.selected, onCheckedChange = null)
+        }
+    }
+}
+
+/**
+ * The head of a chat row: the chat's own picture, where Telegram has one.
+ *
+ * Falls back to [KindBadge] rather than to initials on a colour. The glyph is what made a list of a
+ * dozen chats sortable in the first place, and a chat with no picture is better served by the badge
+ * that says what kind it is than by a coloured letter that says nothing.
+ *
+ * Selection has to survive the swap. The badge carries it as a fill, which a photograph cannot do,
+ * so here it is a ring - still down the left edge, where every row starts, and still only confirming
+ * what the card's own colour and the checkbox already say.
+ */
+@Composable
+private fun ChatAvatar(channel: ChannelSelection) {
+    val photo = rememberTelegramImage(channel.photoPath, maxPixels = AvatarPixels)
+    if (photo == null) {
+        KindBadge(channel)
+        return
+    }
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        border = if (channel.selected) {
+            BorderStroke(AvatarRing, MaterialTheme.colorScheme.primary)
+        } else {
+            null
+        },
+        modifier = Modifier.size(AvatarSize),
+    ) {
+        Image(
+            bitmap = photo,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/**
+ * The chat's kind as a glyph, at the head of its row.
+ *
+ * Selection is easiest to read down the left edge, where every row starts, rather than from a tick
+ * at the right; the badge carries it as a fill so the checkbox is confirming what the row already
+ * says. It repeats the kind named beside it on purpose - the word is what is precise, the glyph is
+ * what makes a list of a dozen chats sortable at a glance.
+ */
+@Composable
+private fun KindBadge(channel: ChannelSelection) {
+    Surface(
+        shape = CircleShape,
+        color = if (channel.selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+    ) {
+        Icon(
+            channel.kind.icon(),
+            contentDescription = null,
+            tint = if (channel.selected) {
+                MaterialTheme.colorScheme.onPrimary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            modifier = Modifier.padding(BadgePadding).size(IconSize.Inline),
+        )
+    }
+}
+
+/** Big enough to read as an avatar rather than a stray icon, small enough for a two-line row. */
+private val BadgePadding = 8.dp
+
+/** Derived from the badge rather than restated, so a picture leaves the row exactly as it was. */
+private val AvatarSize = IconSize.Inline + BadgePadding * 2
+
+/** Thick enough to read as chosen at 36dp; a hairline round a photograph disappears into it. */
+private val AvatarRing = 2.dp
+
+/**
+ * Telegram's small profile photo is 160px square, so this decodes it whole.
+ *
+ * Sampling it down to fit a 36dp box lands under the pixels a 3x screen actually draws, and a
+ * blurred avatar reads as a broken one rather than as a small one.
+ */
+private const val AvatarPixels = 256
+
+private fun ChatKind.icon(): ImageVector = when (this) {
+    ChatKind.CHANNEL -> Icons.Outlined.Campaign
+    ChatKind.SUPERGROUP -> Icons.Outlined.Groups
+    ChatKind.GROUP -> Icons.Outlined.Group
+    ChatKind.DIRECT -> Icons.Outlined.Person
+}
+
+/** Name reduced to its letters and digits, so emoji and punctuation do not hide a clash. */
+private fun ChannelSelection.baseName(): String =
+    displayName.filter(Char::isLetterOrDigit).lowercase()
+
+/** Tall enough to browse, short enough that the run stays on screen. */
+private val ChatListMaxHeight = 320.dp

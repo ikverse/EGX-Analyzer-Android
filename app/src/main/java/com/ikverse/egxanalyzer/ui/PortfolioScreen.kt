@@ -1,0 +1,930 @@
+package com.ikverse.egxanalyzer.ui
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.HourglassEmpty
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.ui.theme.CardHue
+import com.ikverse.egxanalyzer.ui.theme.color
+import com.ikverse.egxanalyzer.model.PortfolioGroup
+import com.ikverse.egxanalyzer.model.PortfolioOrder
+import com.ikverse.egxanalyzer.model.PortfolioStats
+import com.ikverse.egxanalyzer.model.PositionStatus
+import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.callIds
+import com.ikverse.egxanalyzer.ui.theme.extraColors
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+/**
+ * What the user actually bought, and what it has done since.
+ *
+ * The other tabs are readings of the market; this is the only one holding anything of the user's
+ * own, so every figure on it is measured from the prices they paid rather than from the levels a
+ * channel printed. Positions are grouped by the session their recommendation was for, because that
+ * is what dates them - not when the user got round to buying.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun PortfolioScreen(appState: AppState) {
+    val scope = rememberCoroutineScope()
+    val portfolio = appState.portfolio
+
+    Screen(
+        appState = appState,
+        destination = AppDestination.PORTFOLIO,
+        onRefresh = { scope.launch { appState.refreshPrices() } },
+        refreshing = appState.pricesRefreshing,
+    ) {
+        // Above the early return below, which is the whole reason it is composed this high up: the
+        // filter icon in the page header is there whether or not a single trade has been recorded,
+        // and a sheet that composed only for a record with trades in it would be an icon that
+        // opened nothing. With nothing recorded the dates section drops itself and the sheet is the
+        // order alone. See FilterSheet.
+        //
+        // **Titled `Filter positions`, and that is not decoration.** The date and the order narrow
+        // the Positions card and nothing else: Your record and Overdue are built from the whole
+        // portfolio on purpose, so a date picked here cannot hide a trade that is late. The shelf
+        // this replaced said as much by sitting inside the card it filtered; a sheet opened from
+        // the page header would be claiming the page, so the title is what says it now.
+        PositionFilterSheet(portfolio.groups, appState)
+
+        if (portfolio.isEmpty) {
+            if (!appState.initialDataLoaded) {
+                EmptyState(
+                    icon = Icons.Outlined.AccountBalanceWallet,
+                    title = "Loading…",
+                    detail = "Reading your trades.",
+                )
+                return@Screen
+            }
+            EmptyState(
+                icon = Icons.Outlined.AccountBalanceWallet,
+                title = "No trades recorded yet",
+                detail = "Press Bought on a recommendation - on its card in Results, or in the " +
+                    "sheet a table row opens - and the position appears here with its deadline, " +
+                    "its targets and its running profit.",
+            )
+            return@Screen
+        }
+
+        // Above the record rather than below it: this is the one thing on the screen asking to be
+        // acted on, and the record is reference. Built from the whole portfolio, so a date chosen
+        // in the filter below cannot hide a trade that is late.
+        OverdueCard(
+            overdue = remember(portfolio) { overdueRoster(portfolio.positions) },
+            appState = appState,
+        )
+
+        // Under Overdue and above the record, which is where it belongs in the order those two
+        // already establish: Overdue is the one thing here asking to be acted on, this is what is
+        // still running, and the record underneath is reference. Built off the whole portfolio like
+        // Overdue, so a date chosen in the filter below cannot hide a trade that is open.
+        OpenPositionsCard(
+            positions = remember(portfolio) {
+                portfolio.positions.filter { it.open }.sortedWith(PortfolioOrder.URGENT.positions)
+            },
+            onOpen = appState::openPosition,
+        )
+
+        PortfolioSummary(portfolio.stats)
+
+        PositionSection(groups = portfolio.groups, appState = appState)
+    }
+}
+
+/**
+ * What narrows the Positions card, in the sheet the page header's filter icon opens.
+ *
+ * Separate from [PositionSection] only because that section is drawn below an early return for an
+ * empty record and this cannot be - see the call site. It reads the same `PageState` entries the
+ * section reads, so the two cannot drift.
+ */
+@Composable
+private fun PositionFilterSheet(groups: List<PortfolioGroup>, appState: AppState) {
+    var dateFilter by appState.pages.portfolioDate
+    val allDates = remember(groups) {
+        groups.map { it.recommendationDate.toString() }.distinct().sortedDescending()
+    }
+    FilterSheet(
+        open = appState.pages.portfolioFiltersOpen,
+        // The shell asks the same question to decide what a back press means, so the predicate
+        // lives on PageState and both read it there. See PageState.filtersActive.
+        active = appState.pages.filtersActive(AppDestination.PORTFOLIO),
+        onClearAll = { appState.pages.clearFilters(AppDestination.PORTFOLIO) },
+        title = "Filter positions",
+    ) {
+        DateFilterSection(
+            label = "Dates",
+            dates = allDates,
+            selected = dateFilter,
+            onSelect = { dateFilter = it },
+        )
+        // Below the rule, outside the clear-all, exactly as in Results: an order is not something a
+        // list can be cleared of, and resetting it would look like a filter had gone missing.
+        SortSection(
+            options = PortfolioOrder.entries,
+            selected = appState.appPreferences.portfolioOrder,
+            label = PortfolioOrder::label,
+            onSelect = appState::updatePortfolioOrder,
+        )
+    }
+}
+
+/**
+ * The record as a handful of figures.
+ *
+ * Percentages rather than pounds, and labelled as averages, because no trade size is recorded: a
+ * total in money would be a number the app has no way of knowing. Adding sizes later fills these in
+ * without moving anything on the screen.
+ */
+@Composable
+private fun ColumnScope.PortfolioSummary(stats: PortfolioStats) {
+    SectionCard(title = "Your record", icon = Icons.Outlined.AccountBalanceWallet) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(Space.xl),
+            verticalArrangement = Arrangement.spacedBy(Space.m),
+        ) {
+            StatTile(stats.openCount.toString(), "open", tone = MaterialTheme.colorScheme.primary)
+            // Settled rather than closed: it counts the expired trades too, and the card below this
+            // one now keeps "closed" for the ones that ended somewhere in particular.
+            StatTile(stats.settledCount.toString(), "settled")
+            // No overdue tile. The card above this one names the trades themselves, in the same
+            // view, and a count of the same thing beside it is a figure the reader has to
+            // reconcile against a list that already says more than it does.
+            StatTile(
+                formatPercent(stats.settledReturnPct),
+                "average settled",
+                tone = PriceRole.forReturn(stats.settledReturnPct),
+            )
+            StatTile(
+                formatPercent(stats.openReturnPct),
+                "average open",
+                tone = PriceRole.forReturn(stats.openReturnPct),
+            )
+            StatTile(
+                formatPercent(stats.winRate, signed = false),
+                "win rate",
+                tone = if ((stats.winRate ?: 0.0) >= 50.0) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+            )
+        }
+        stats.best?.let { best ->
+            Text(
+                "Best ${best.ticker} ${formatPercent(best.returnPct)}" +
+                    (stats.worst?.let { " · worst ${it.ticker} ${formatPercent(it.returnPct)}" } ?: ""),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * The trades that ran out of time, said before anything on this screen has been opened.
+ *
+ * Overdue is the only state in the app that asks the user for something, and until now it was only
+ * ever found: a count in the record card, then a scroll through folded sessions looking for the
+ * cards it was counting. Each tile carries what a decision needs - which stock, how late, and when
+ * it was bought - and presses through to the trade itself.
+ *
+ * Absent entirely when nothing is late, exactly as the tile it replaces was. A card reading "no
+ * overdue trades" is a permanent reminder of a state the app is not in.
+ */
+@Composable
+private fun OverdueCard(overdue: List<PositionView>, appState: AppState) {
+    if (overdue.isEmpty()) return
+    SectionCard(
+        title = "Overdue",
+        icon = Icons.Outlined.HourglassEmpty,
+        accent = CardHue.AMBER.color,
+        about = infoNote(
+            "Overdue",
+            "Still running past their deadline because you chose to keep them open.",
+        ),
+    ) {
+        BoxWithConstraints {
+            // Tiles rather than full-width rows, through the same helper the position cards use:
+            // two across on the cover screen, four on the Fold and the tablet. A trade that is late
+            // is not more urgent for being drawn a screen wide.
+            val columns = responsiveColumns(minColumnWidth = OverdueTileMinWidth, maxColumns = 4)
+            Column {
+                ResponsiveRows(overdue, columns, spacing = Space.s) { view, tileModifier ->
+                    OverdueTile(
+                        view = view,
+                        onOpen = { appState.openPosition(view.position.id) },
+                        onRecordSale = { appState.openPositionToSell(view.position.id) },
+                        onFollowDeadline = { appState.setKeepOpen(view.position, keepOpen = false) },
+                        modifier = tileModifier,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One late trade, in three facts and a press.
+ *
+ * The mark and the ticker have the top line to themselves, and everything measured sits under them.
+ * Four things on one row is what the logo made impossible: the ticker was the only one of them that
+ * could give way, so at four tiles across it wrapped a letter to a line. Nothing up there competes
+ * for the width now, and the ticker is held to a single line so it cannot stack again whatever the
+ * screen does.
+ *
+ * The day count carries no word beside it: "6d" in red under a heading that already says Overdue
+ * cannot be read as anything else. Beside it the entry date, which is the one figure saying how
+ * long the trade has actually been held - the session date the card opens into does not - and then
+ * the return, in the same green or red it wears everywhere else in the app.
+ *
+ * Those three sit on one line while one line holds them, and drop the return onto a second when it
+ * does not - which is what the wide screens actually ask for. More room across the window buys more
+ * tiles, not wider ones: at four across a tablet's tile is narrower than a phone's two, and the
+ * figure being ellipsed away there was the return, the one thing on the tile the user cannot work
+ * out from the rest of it. Measured rather than switched on a column count, so a pane width nobody
+ * thought to test gets the same answer as the ones that were.
+ *
+ * The press is the trip a call in Insights already makes: [AppState.openPosition] hands the id to
+ * the arrival effect in [PositionSection], which clears the date filter only if it is what hides
+ * the trade, unfolds the session card, scrolls to it and flashes its edge. No second path to
+ * maintain, and no way for the two entrances to disagree about where a trade is.
+ *
+ * Holding it offers the two things worth doing about a late trade without opening it first:
+ * [onRecordSale], which is the same entrance [AppState.openPositionToSell] gives a trade status
+ * notification's own Record sale action, and [onFollowDeadline], which undoes Keep open in place.
+ * Not "Keep open" itself - a trade on this card is already overdue, which only happens by having
+ * been kept open once already, so offering it again would be offering a decision already made.
+ */
+@Composable
+private fun OverdueTile(
+    view: PositionView,
+    onOpen: () -> Unit,
+    onRecordSale: () -> Unit,
+    onFollowDeadline: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var holding by remember(view.position.id) { mutableStateOf(false) }
+    // Read before the builder rather than inside it: the colour is a composable lookup and the line
+    // it belongs to is plain text.
+    val returnColor = PriceRole.forReturn(view.returnPct)
+    // Built as its three parts rather than one string: the line below joins them or breaks them
+    // depending on what fits, and a joined string cannot be taken apart again without parsing it.
+    val days = buildAnnotatedString {
+        withStyle(SpanStyle(color = extraColors.loss)) {
+            append("${view.overdueDays}d")
+        }
+    }
+    val held = AnnotatedString(shortDate(view.position.entryDate))
+    val ret = buildAnnotatedString {
+        withStyle(SpanStyle(color = returnColor)) {
+            append(formatPercent(view.returnPct))
+        }
+    }
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onOpen,
+                onLongClick = { holding = true },
+            )
+            .semantics { onClick(label = "Open this trade", action = null) },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        border = cardOutline,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        // The measured line takes the tile's own width rather than the column beside the logo. The
+        // logo is one line tall and that column was two, so it left a hole under the mark that the
+        // eye reads before any of the figures; run under it, the line also gets the width back -
+        // at two tiles across on the cover screen the return was being ellipsed away.
+        Column(Modifier.padding(horizontal = Space.m, vertical = Space.xs)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // The ticker is **not** a second target here, and this tile is one of the two
+                // places that is true - see the day's event tiles for the other. Both are the
+                // smallest tiles in the app, two or three across on a cover screen, and the
+                // ticker sits at the leading edge where a thumb reaching for the tile's own press
+                // lands on it: the owner reported missing the trade and getting the stock sheet
+                // instead, repeatedly. Nothing is unreachable, because the trade this opens
+                // carries the ticker press itself. The Row and its weight stay - fill = false is
+                // what sits the arrow against the end of the ticker rather than out at the tile's
+                // edge, where it reads as unrelated to it. See LocalOpenStock.
+                Row(
+                    Modifier.weight(1f, fill = false),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    StockLogo(view.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                    Text(
+                        view.ticker,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Outlined.ArrowForward,
+                    // Named by the press it belongs to, one level up; a reader announcing the
+                    // glyph as well would say it twice.
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = Space.xs).size(IconSize.Hint),
+                )
+            }
+            // Everything measured, on the line that has room for it. No word for the state:
+            // every trade on this card is one the user is keeping open, so saying so would be
+            // the card's own heading repeated on every tile.
+            OverdueMeta(days = days, held = held, ret = ret)
+        }
+    }
+    if (holding) {
+        HoldPrompt(
+            title = view.ticker,
+            actions = listOf(
+                HoldAction("Record sale", primary = true) { holding = false; onRecordSale() },
+                HoldAction("Follow the deadline again") { holding = false; onFollowDeadline() },
+            ),
+            onDismiss = { holding = false },
+        )
+    }
+}
+
+/**
+ * The three measured facts, on one line or two.
+ *
+ * One line while one line holds them, which is every tile on a phone and most of them on a Fold.
+ * When it does not hold them the return drops to a line of its own and the day count keeps the
+ * entry date company above it - the pair that reads as one thing, both of them about time, and
+ * between them short enough to survive any width a tile is ever given.
+ *
+ * Measured rather than wrapped: left to wrap, the break lands wherever the width happens to put it,
+ * so a tablet row of four tiles would break three of them in three different places and leave a
+ * separator dangling at the end of a line. Measured against the tile's own width, every tile that
+ * breaks breaks in the same place, and one that does not is left exactly as it was.
+ */
+@Composable
+private fun OverdueMeta(days: AnnotatedString, held: AnnotatedString, ret: AnnotatedString) {
+    val measurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.labelSmall
+    val separator = AnnotatedString(" · ")
+    val whole = remember(days, held, ret) { days + separator + held + separator + ret }
+    val time = remember(days, held) { days + separator + held }
+    BoxWithConstraints {
+        val available = constraints.maxWidth
+        // Unbounded only in a measuring pass nothing is drawn from; treated as room for the line so
+        // the tile is never measured as the taller of the two shapes and then drawn as the shorter.
+        val fits = remember(whole, style, available) {
+            available == Constraints.Infinity ||
+                measurer.measure(whole, style, softWrap = false).size.width <= available
+        }
+        Column {
+            Text(
+                if (fits) whole else time,
+                style = style,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!fits) {
+                Text(
+                    ret,
+                    style = style,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The trades the card names, in the order it names them.
+ *
+ * Most overdue first, then by ticker, which is [PortfolioOrder.URGENT]s own rule for the positions
+ * inside a section: a card leading with a different one would disagree with the list beneath it.
+ * Read off the whole record rather than the filtered list - a date picked on the screen is a view
+ * of the positions, not a statement about which of them are late, which is the same reason the
+ * filter is kept out of `PortfolioCalculator` for the overdue notification.
+ */
+internal fun overdueRoster(positions: List<PositionView>): List<PositionView> =
+    positions
+        .filter(PositionView::overdue)
+        .sortedWith(compareByDescending<PositionView> { it.overdueDays }.thenBy { it.ticker })
+
+/**
+ * Every trade still running, at a glance - what it is doing rather than what it has just done.
+ *
+ * Replaces the session digest this tab used to carry: a card naming only what changed since the
+ * reader last looked said nothing on the far more common visit where nothing had. This says where
+ * every open position stands, whether or not the session moved it. Absent entirely with nothing
+ * open, the rule [OverdueCard] already follows.
+ */
+@Composable
+private fun OpenPositionsCard(positions: List<PositionView>, onOpen: (String) -> Unit) {
+    if (positions.isEmpty()) return
+    SectionCard(title = "Open positions", icon = Icons.Outlined.AccountBalanceWallet) {
+        BoxWithConstraints {
+            val columns = responsiveColumns(minColumnWidth = OpenPositionTileMinWidth, maxColumns = 3)
+            Column {
+                ResponsiveRows(positions, columns, spacing = Space.s) { view, tileModifier ->
+                    OpenPositionTile(
+                        view = view,
+                        onOpen = { onOpen(view.position.id) },
+                        modifier = tileModifier,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One open trade: ticker, its own status word in the colour that status wears everywhere else, the
+ * return since entry, and - where there is room - the day it was bought. The same three-line shape
+ * [OverdueTile] and the day's event tiles already use, so a reader who has learned one has learned
+ * all of them.
+ */
+@Composable
+private fun OpenPositionTile(view: PositionView, onOpen: () -> Unit, modifier: Modifier = Modifier) {
+    val statusColor = view.status.tone()
+    Card(
+        onClick = onOpen,
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { onClick(label = "Open this trade", action = null) },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        border = cardOutline,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(Modifier.padding(horizontal = Space.m, vertical = Space.xs)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.weight(1f, fill = false),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    StockLogo(view.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                    Text(
+                        view.ticker,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(
+                    Icons.AutoMirrored.Outlined.ArrowForward,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = Space.xs).size(IconSize.Hint),
+                )
+            }
+            Text(
+                view.status.label,
+                style = MaterialTheme.typography.labelSmall,
+                color = statusColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            view.returnPct?.let { pct ->
+                Text(
+                    formatPercent(pct),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = PriceRole.forReturn(pct),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // Only where there is room, the rule the day's event tiles already follow - see
+            // LocalWindowWidth there.
+            if (LocalWindowWidth.current != WindowWidth.COMPACT) {
+                Text(
+                    "bought ${shortDate(view.position.entryDate)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = PriceRole.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** Same shape as [EventTileMinWidth] in TodayCard.kt, for the same three-line tile content. */
+private val OpenPositionTileMinWidth = 170.dp
+
+/**
+ * The trades, one card per session the calls were made for.
+ *
+ * One card rather than the same date appearing under an open heading and a closed one: a day's
+ * trades were a single decision, and reading how it went meant scrolling past everything else to
+ * find its other half. Open, expired and closed are sections inside the card now, and every card
+ * folds away exactly as a settled analysis does in Insights, so the record stays readable however
+ * many sessions have been traded.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: AppState) {
+    // Session-only, deliberately, and for the reason Results gives beside its own: a filter that
+    // survived a restart would hide trades from someone who had forgotten it was on. The order is
+    // kept instead - it hides nothing, so finding it as you left it costs a moment's thought rather
+    // than a search for trades that look as though they have gone.
+    var dateFilter by appState.pages.portfolioDate
+    var stockFilter by appState.pages.portfolioStock
+    val order = appState.appPreferences.portfolioOrder
+    // Which session cards are open, held here rather than inside each card. A card cannot open
+    // itself on someone else's behalf, and arriving from a call on the Insights tab has to open the
+    // one holding that trade. Keyed by session date rather than by position in the list, so
+    // re-sorting no longer moves which card is open onto whichever card took its place.
+    var openGroups by appState.pages.openPortfolioGroups
+    // Every call the record still holds, so a card knows whether it has anywhere to go back to.
+    // Asked once per report: a trade whose analysis was deleted has no call left to open.
+    val scoredCalls = remember(appState.performance) { appState.performance.callIds }
+
+    // One card holding the whole section - its heading and every session card inside. It was a
+    // loose heading, then a filter shelf, then a run of cards, all sitting directly on the page,
+    // and the shelf's fill was close enough to a card's that the two read as one background: the
+    // section had no edge of its own to say where it began or ended. A card gives it one. The
+    // filters themselves have left for the sheet above, which is titled after this card for the
+    // reason written there.
+    // The one card on the tab whose children are cards, so it holds them in by Space.s rather than
+    // the Space.l a card of controls uses. Three frames stood between the page and a trade - this
+    // card, the session card, the trade card - each paying a full inset and each drawing its own
+    // hairline, which left the trade 285dp of a 411dp cover screen. See SectionCard.contentInset.
+    SectionCard(
+        title = "Positions",
+        icon = Icons.Outlined.AccountBalanceWallet,
+        contentInset = Space.s,
+    ) {
+        if (groups.isEmpty()) {
+            Text(
+                "Nothing recorded yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@SectionCard
+        }
+
+        // Filtered here rather than in the calculator. The whole record has other readers - the overdue
+        // worker raises the daily reminder off it - and a date someone picked on this screen must not
+        // silence a notification about a trade they scrolled past.
+        val shown = remember(groups, dateFilter, stockFilter, order) {
+            // Normalized once for the whole record rather than once per trade, through the rule the
+            // other two tabs search by. See StockSearch.
+            val wanted = StockSearch.query(stockFilter)
+            groups
+                .filter { dateFilter.accepts(it.recommendationDate.toString()) }
+                // A search narrows the trades inside a card and then empties the card itself, rather
+                // than leaving a session heading standing over nothing. The summary line is read off
+                // the positions, so it recounts itself around what is left and cannot end up
+                // describing trades the search has taken away.
+                .mapNotNull { group ->
+                    val kept = group.positions.filter { it.matches(wanted) }
+                    if (kept.isEmpty()) null else group.copy(positions = kept.sortedWith(order.positions))
+                }
+                .sortedWith(order.groups)
+        }
+
+        // Arriving from a call pressed on the Insights tab: open the session holding that trade and
+        // scroll to it. Either filter is cleared only when it is what hides the trade, for the reason
+        // Insights gives beside its own - a link that lands on an empty screen is a broken link, and a
+        // filter thrown away on a trip the reader is about to make back is a filter they have to set
+        // again.
+        val pendingPosition = appState.pendingPositionId
+        // The trade a Record sale action named. Read beside the reveal because the two
+        // arrive together: that path sets both, so the card is found, flashed, and asked
+        // for the price in one arrival.
+        val pendingSell = appState.pendingSellPositionId
+        val reveal = remember { BringIntoViewRequester() }
+        val settled = LocalTabsSettled.current
+        LaunchedEffect(pendingPosition, groups, dateFilter, stockFilter) {
+            if (pendingPosition == null) return@LaunchedEffect
+            val target = groups.firstOrNull { group ->
+                group.positions.any { it.position.id == pendingPosition }
+            }
+            if (target == null) {
+                // The trade was deleted - here or on another device - between the press and the
+                // arrival. Dropped rather than left waiting, or recording it again months later would
+                // flash a card for a press nobody remembers making.
+                appState.consumePendingPosition()
+                return@LaunchedEffect
+            }
+            if (!dateFilter.accepts(target.recommendationDate.toString())) {
+                dateFilter = null
+                // The list is about to be rebuilt around the cleared filter; this effect restarts on it.
+                return@LaunchedEffect
+            }
+            // The search goes the same way as the date, and for the same reason: cleared when it is
+            // what hides the trade, kept when the trade answers to it anyway.
+            val held = target.positions.first { it.position.id == pendingPosition }
+            if (!held.matches(StockSearch.query(stockFilter))) {
+                stockFilter = ""
+                return@LaunchedEffect
+            }
+            openGroups = openGroups + target.recommendationDate
+            // The card is unfolding as this runs, and a scroll measured against a height it is about to
+            // leave behind stops short of the trade that was asked for.
+            delay(REVEAL_SETTLE_MS)
+            reveal.revealIfOnScreen(appState, AppDestination.PORTFOLIO, settled)
+        }
+
+        if (shown.isEmpty()) {
+            // The stock is named when it is what emptied the list, as it is in Results: "nothing called
+            // on that date" beside a box holding COMI reads as though the app had not noticed what was
+            // typed.
+            val searching = stockFilter.isNotBlank()
+            EmptyState(
+                icon = Icons.Outlined.AccountBalanceWallet,
+                title = if (searching) {
+                    // The company rather than the code, as Results says it: the filter holds a
+                    // listing the reader picked. See TickerPicker.name.
+                    "No trades in ${TickerPicker.name(stockFilter)}"
+                } else {
+                    "Nothing called ${dateFilter?.describe().orEmpty()}"
+                },
+                detail = if (searching) {
+                    "Nothing you recorded is a holding in that stock. Clear the stock filter to " +
+                        "see the rest of your positions."
+                } else {
+                    "No trade you recorded belongs to that session. Clear the filter to see the " +
+                        "rest of your positions."
+                },
+            )
+            return@SectionCard
+        }
+
+        // Built once for the whole screen rather than per card. A fresh bundle each time would be a new
+        // argument to every section below it, which is a list of positions redrawn on every
+        // recomposition of the page around them.
+        val jump = remember(appState, scoredCalls, pendingPosition, pendingSell, reveal) {
+            PositionJump(
+                scoredCalls = scoredCalls,
+                // The trade being left is what back should come back to, so the press names it.
+                // Both tabs key on ScoredCall.positionId, which is why one id serves as the call
+                // to open and the trade to return to. See NavStop.
+                onOpenCall = { id ->
+                    appState.openCall(id, NavStop(AppDestination.PORTFOLIO, positionId = id))
+                },
+                revealPosition = pendingPosition,
+                onRevealShown = appState::consumePendingPosition,
+                reveal = reveal,
+                sellPosition = pendingSell,
+                onSellShown = appState::consumePendingSell,
+            )
+        }
+        shown.forEach { group ->
+            ExpandableSection(
+                title = group.recommendationDate.toString(),
+                icon = Icons.Outlined.AccountBalanceWallet,
+                summaryContent = { GroupSummary(group) },
+                // A card inside a card takes the step above its parent, exactly as the Overdue and
+                // session-event tiles do. At the page's own `surfaceContainer` it would be the same
+                // fill as the card holding it and would have no edge but its hairline.
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                // Its children are the trade cards, so it holds them in by the same Space.s the
+                // card around it uses, and for the same reason.
+                contentInset = Space.s,
+                // Every card starts folded, a session still running included. Once enough sessions
+                // have been traded, the ones that opened themselves were most of the screen, and the
+                // list of dates is what makes the record readable - the summary line says how each
+                // session went, so nothing is hidden that a fold does not offer back in one tap.
+                expandedState = group.recommendationDate in openGroups,
+                onExpandedChange = { open ->
+                    openGroups = if (open) {
+                        openGroups + group.recommendationDate
+                    } else {
+                        openGroups - group.recommendationDate
+                    }
+                },
+                showAccentEdge = false,
+            ) {
+                // Expired above closed: everything in it is a trade the app stopped tracking without
+                // being told how it ended, which is the only part of a session still asking for
+                // something. Closed is the record and goes last.
+                PositionSubSection("Open", group.open, OpenTone, appState, jump)
+                PositionSubSection("Expired", group.expired, ExpiredTone, appState, jump)
+                PositionSubSection("Closed", group.closed, ClosedTone, appState, jump)
+            }
+        }
+    }
+}
+
+/**
+ * What a position card needs to lead back to the call it was taken on.
+ *
+ * Five parameters that always travel together, through two layers that do nothing with them but
+ * hand them on. Bundled so those two layers say "the jump" rather than repeating the list, and
+ * marked immutable so passing it down does not cost those layers the ability to skip.
+ */
+@Immutable
+private class PositionJump(
+    /** Every call the Insights record still holds, by trade key. */
+    val scoredCalls: Set<String>,
+    val onOpenCall: (String) -> Unit,
+    /** The trade the reader has just pressed their way here from, if this is that arrival. */
+    val revealPosition: String?,
+    val onRevealShown: () -> Unit,
+    val reveal: BringIntoViewRequester,
+    /**
+     * The trade a Record sale action in the shade named, whose dialog should open on arrival.
+     *
+     * Beside the reveal rather than folded into it: the two arrive together on that path - the card
+     * is scrolled to and flashed *and* its dialog opens - but a press inside the app reveals without
+     * selling, and one entrance that always did both would open a price field at every arrival.
+     */
+    val sellPosition: String?,
+    val onSellShown: () -> Unit,
+)
+
+/**
+ * One line naming the states a session's trades are in, so a folded card still informs.
+ *
+ * Every verdict is named and counted rather than the three sections alone: a session that ended on
+ * its targets and one the stops took both read as "closed" from the outside, and telling those two
+ * apart is worth more than the position count and the average that used to stand here. Each count
+ * carries the colour of the chip on the trade itself, so the line and the cards under it say one
+ * thing twice rather than two different things.
+ *
+ * Counted by each trade's own verdict, which is why a partial hit still running is a partial hit
+ * here while still sitting under Open below: the count and the chip agree, and the sections answer
+ * a different question - what can I still do about it - than the counts do.
+ */
+@Composable
+private fun GroupSummary(group: PortfolioGroup) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        SummaryStates.forEach { (status, word) ->
+            val held = group.positions.count { it.status == status }
+            if (held == 0) return@forEach
+            Text(
+                "$held $word",
+                style = MaterialTheme.typography.bodySmall,
+                color = status.tone(),
+            )
+        }
+    }
+}
+
+/**
+ * The verdicts the summary names, in the order the card's own sections run.
+ *
+ * Open and expired lead because those are the two sections standing above the record, and the rest
+ * are the ways a trade actually ended. Sold is here for the same reason the counts exist at all:
+ * leave it out and a hand-sold trade vanishes from the line while still sitting in the card.
+ *
+ * Shorter words than the chips carry - "full hit" rather than "Full target hit" - because six of
+ * these share one line under a date, and every one of them is already coloured as its own chip.
+ */
+private val SummaryStates = listOf(
+    PositionStatus.OPEN to "open",
+    PositionStatus.EXPIRED to "expired",
+    PositionStatus.PARTIAL_TARGET_HIT to "partial hit",
+    PositionStatus.FULL_TARGET_HIT to "full hit",
+    PositionStatus.STOPPED_OUT to "stopped",
+    PositionStatus.CLOSED_MANUALLY to "sold",
+)
+
+/**
+ * One state's trades inside a session's card, under a label saying which state it is.
+ *
+ * Drawn only when it holds something: an empty "Expired" heading on a session that went perfectly
+ * is three words of nothing, on every card, forever.
+ */
+@Composable
+private fun ColumnScope.PositionSubSection(
+    label: String,
+    views: List<PositionView>,
+    tone: Color,
+    appState: AppState,
+    jump: PositionJump,
+) {
+    if (views.isEmpty()) return
+    Text(
+        "$label · ${views.size}".uppercase(),
+        Modifier.padding(top = Space.s),
+        style = MaterialTheme.typography.labelSmall,
+        color = tone,
+    )
+    PositionGrid(views, appState, jump)
+}
+
+/**
+ * A colour per section, borrowed from the status chips rather than invented beside them.
+ *
+ * Open is the primary hue every running figure in the app uses, expired is the amber the palette
+ * gained for exactly this, and closed is the muted one that says finished business. Read as
+ * properties so they resolve against the theme in force, light or dark.
+ */
+private val OpenTone: Color
+    @Composable get() = MaterialTheme.colorScheme.primary
+private val ExpiredTone: Color
+    @Composable get() = extraColors.expired
+private val ClosedTone: Color
+    @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ColumnScope.PositionGrid(
+    views: List<PositionView>,
+    appState: AppState,
+    jump: PositionJump,
+) {
+    // One position card per row, on every width - a two-column grid here used to leave a card,
+    // its two figure panels included, about 300dp to draw itself in once the Fold opened; a
+    // single full-width card spends that width instead, inside PositionCard's own width check.
+    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+        views.forEach { view ->
+            val revealed = view.position.id == jump.revealPosition
+            PositionCard(
+                view = view,
+                appState = appState,
+                // A trade whose analysis has since been deleted leads nowhere, so it does not
+                // answer a press: the call it was taken on is no longer in the record.
+                onOpenCall = if (view.position.id in jump.scoredCalls) {
+                    { jump.onOpenCall(view.position.id) }
+                } else {
+                    null
+                },
+                highlighted = revealed,
+                onHighlightShown = jump.onRevealShown,
+                startSelling = view.position.id == jump.sellPosition,
+                onSellingShown = jump.onSellShown,
+                onSell = { sale -> appState.recordSale(view.position, sale) },
+                onEditTrade = { price, date, window ->
+                    // The dialog cannot confirm with an unparsable window while it is showing
+                    // the field, so the fallback is only ever reached if it stops showing one.
+                    appState.reprice(
+                        view.position,
+                        price,
+                        date,
+                        window ?: view.position.windowSessions,
+                    )
+                },
+                onKeepOpen = { keep, note ->
+                    appState.setKeepOpen(view.position, keep, note)
+                },
+                onRemove = { appState.deletePosition(view.position) },
+                onReopen = { appState.clearSale(view.position) },
+                modifier = if (revealed) {
+                    Modifier.fillMaxWidth().bringIntoViewRequester(jump.reveal)
+                } else {
+                    Modifier.fillMaxWidth()
+                },
+            )
+        }
+    }
+}
+
+/**
+ * Narrow enough for two tiles on the 411dp cover screen, which is the tightest this app is read on.
+ *
+ * The page holds its content in by [Space.l] and the card by another, so two tiles land at about
+ * 165dp there - the same width they take on the Fold, where four fit across instead of two.
+ */
+private val OverdueTileMinWidth = 150.dp

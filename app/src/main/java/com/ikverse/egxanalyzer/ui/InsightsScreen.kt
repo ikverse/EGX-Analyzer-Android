@@ -1,0 +1,2545 @@
+package com.ikverse.egxanalyzer.ui
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.Assessment
+import androidx.compose.material.icons.outlined.HelpOutline
+import androidx.compose.material.icons.outlined.Insights
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.Leaderboard
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.ikverse.egxanalyzer.ui.theme.CardHue
+import com.ikverse.egxanalyzer.ui.theme.color
+import com.ikverse.egxanalyzer.model.PerformanceCalculator
+import com.ikverse.egxanalyzer.model.Ambiguity
+import com.ikverse.egxanalyzer.model.CallOrder
+import com.ikverse.egxanalyzer.model.CallSignal
+import com.ikverse.egxanalyzer.model.CallTally
+import com.ikverse.egxanalyzer.model.ChannelScore
+import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
+import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.LatestPrice
+import com.ikverse.egxanalyzer.model.Outcome
+import com.ikverse.egxanalyzer.model.PerformanceReport
+import com.ikverse.egxanalyzer.model.PositionView
+import com.ikverse.egxanalyzer.model.RecommendationDataPoint
+import com.ikverse.egxanalyzer.model.SavedAnalysis
+import com.ikverse.egxanalyzer.model.ScoredCall
+import com.ikverse.egxanalyzer.model.ScoredSession
+import com.ikverse.egxanalyzer.model.Scoring
+import com.ikverse.egxanalyzer.model.StockOpinion
+import com.ikverse.egxanalyzer.model.believableReturn
+import com.ikverse.egxanalyzer.model.opinionId
+import com.ikverse.egxanalyzer.model.positionId
+import com.ikverse.egxanalyzer.model.reachedTarget1
+import com.ikverse.egxanalyzer.model.riskReward
+import com.ikverse.egxanalyzer.model.sessionFor
+import com.ikverse.egxanalyzer.ui.theme.extraColors
+import com.ikverse.egxanalyzer.ui.theme.pageAccent
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.time.ZoneId
+
+/**
+ * How every saved recommendation actually turned out.
+ *
+ * The point of the screen is one question - was this source right - so the hit rate leads and
+ * everything else explains it. Calls that could not be judged are shown apart from the rate rather
+ * than folded into it: a stock with no price history says nothing about the source that named it.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun InsightsScreen(appState: AppState) {
+    val scope = rememberCoroutineScope()
+    val full = appState.performance
+    // Read once for the page rather than per card: both are one SharedPreferences lookup, and a
+    // card asking on every recomposition would do it a hundred times a scroll. Keyed on the
+    // revision so changing either in Settings reaches a card that is already on screen.
+    val askModel = remember(appState.opinionSettingsRevision, appState.cloudConfiguration) {
+        appState.opinionModel()
+    }
+    val searching = remember(appState.opinionSettingsRevision) { appState.opinionSearchEnabled() }
+    val newsWindow = remember(appState.opinionSettingsRevision) { appState.opinionNewsWindowDays() }
+
+    Screen(
+        appState = appState,
+        destination = AppDestination.INSIGHTS,
+        onRefresh = { scope.launch { appState.refreshPrices() } },
+        refreshing = appState.pricesRefreshing,
+    ) {
+        if (full.tracked == 0) {
+            if (!appState.initialDataLoaded) {
+                EmptyState(
+                    icon = Icons.Outlined.Insights,
+                    title = "Loading…",
+                    detail = "Reading your saved analyses and trades.",
+                )
+                return@Screen
+            }
+            EmptyState(
+                icon = Icons.Outlined.Insights,
+                title = if (full.scoringSince == null) "No prices stored yet" else "Nothing scored yet",
+                detail = if (full.scoringSince == null) {
+                    "Fetch prices to start scoring. Every stock your analyses have named is priced " +
+                        "for the last few trading sessions, and scoring begins at the earliest one."
+                } else {
+                    "Saved analyses name no stock dated on or after ${full.scoringSince}, which " +
+                        "is where scoring starts. Anything called before it is left out on purpose."
+                },
+            )
+            return@Screen
+        }
+
+        // Session-only: a filter that outlived a restart would quietly shrink the record someone
+        // came back to read. On AppState so that folding the phone, which rebuilds this page from
+        // nothing, is not mistaken for a restart. See PageState.
+        var channels by appState.pages.insightsChannels
+        var outcomes by appState.pages.insightsOutcomes
+        var stock by appState.pages.insightsStock
+        // Kept across restarts where the filters above are not, and the difference is what each one
+        // does: an order hides nothing. See AppPreferences.callOrder.
+        val callOrder = appState.appPreferences.callOrder
+        // Read once for the whole page, so every card is judged against one reading of when
+        // the reader last looked. See SessionCard's `seenAt`.
+        val seenAt = appState.insightsSeenAt
+        val everyChannel = remember(full.channels) { full.channels.map(ChannelScore::channel).sorted() }
+
+        // Recomputed, not merely hidden: a rate or a session count still describing calls the
+        // screen is filtering out would be worse than showing no filter at all.
+        //
+        // Worked out above the controls rather than below them, because the hero reads from it and
+        // the hero is the first thing on the page.
+        //
+        // Normalized once for the whole record rather than once per call, and through the same rule
+        // Results and Portfolio search by: this box used to match tickers alone, so typing a company
+        // name on the tab that ranks the sources found nothing. See StockSearch.
+        val wanted = StockSearch.query(stock)
+        val report = remember(full, channels, outcomes, wanted) {
+            if (channels.isEmpty() && outcomes.isEmpty() && wanted.isEmpty()) {
+                full
+            } else {
+                PerformanceCalculator.refine(full) { call ->
+                    (channels.isEmpty() || call.channel in channels) &&
+                        (outcomes.isEmpty() || outcomes.any { OutcomeFilters[it]?.invoke(call) == true }) &&
+                        call.matches(wanted)
+                }
+            }
+        }
+
+        // The answer leads, and the controls that narrow it come after. This tab exists to settle
+        // one argument - which source is worth reading - and it used to open on a filter row.
+        if (report.tracked > 0) InsightsHero(report)
+
+        // Under the hero and above the filters that narrow everything below it. Both are read at
+        // the top of the page and they answer different questions: the hero is the standing verdict
+        // this tab exists for, and this is what changed since the reader last looked. The record
+        // outranks the news because the record is why anyone opens Insights - but the news is
+        // perishable, so it sits above everything that takes scrolling to reach. It is true of the
+        // whole record whatever the filters below say, and it is absent until a session has prices.
+        TodayCard(appState)
+
+        // The sheet is drawn from the page rather than beside the list it narrows - it is modal,
+        // so where it is composed decides nothing about where it appears, only that the page that
+        // owns these controls is the page that states them. Its icon is in the header, and carries
+        // a dot whenever one of these is on, which is what used to be a chip reading "Filters on"
+        // above the empty state.
+        FilterSheet(
+            open = appState.pages.insightsFiltersOpen,
+            // The shell asks the same question to decide what a back press means, so the predicate
+            // lives on PageState and both read it there. See PageState.filtersActive.
+            active = appState.pages.filtersActive(AppDestination.INSIGHTS),
+            onClearAll = { appState.pages.clearFilters(AppDestination.INSIGHTS) },
+        ) {
+            MultiSelectSection(
+                label = "Channels",
+                options = everyChannel,
+                selected = channels,
+                onToggle = { name ->
+                    channels = if (name in channels) channels - name else channels + name
+                },
+                onClear = { channels = emptySet() },
+            )
+            MultiSelectSection(
+                label = "Outcomes",
+                options = OutcomeFilters.keys.toList(),
+                selected = outcomes,
+                onToggle = { name ->
+                    outcomes = if (name in outcomes) outcomes - name else outcomes + name
+                },
+                onClear = { outcomes = emptySet() },
+            )
+            // Below the rule, outside the clear-all, exactly as on Results and the Portfolio: an
+            // order is not something a list can be cleared of, and resetting it would look like a
+            // filter had silently gone missing.
+            SortSection(
+                options = CallOrder.entries,
+                selected = callOrder,
+                label = CallOrder::label,
+                onSelect = appState::updateCallOrder,
+            )
+        }
+
+        // Arriving from a trade pressed on the Portfolio tab. The filters this screen was left on
+        // know nothing about where the reader has just come from, and a link that lands on "nothing
+        // matches these filters" is a broken link. Cleared only when they actually hide the call,
+        // and only when the record still holds it, so pressing back and forth between the two cards
+        // does not throw away a filter that was set on purpose.
+        val pendingCall = appState.pendingCallId
+        LaunchedEffect(pendingCall, report) {
+            if (pendingCall != null &&
+                report.sessionFor(pendingCall) == null &&
+                full.sessionFor(pendingCall) != null
+            ) {
+                channels = emptySet()
+                outcomes = emptySet()
+                stock = ""
+            }
+        }
+
+        if (report.tracked == 0) {
+            // The stock is named when it is what emptied the page, as it is on Results and the
+            // Portfolio: "nothing matches these filters" beside a box naming a company reads as
+            // though the app had not noticed which one was picked. See TickerPicker.name.
+            val searching = stock.isNotBlank()
+            EmptyState(
+                icon = Icons.Outlined.Insights,
+                title = if (searching) {
+                    "No calls on ${TickerPicker.name(stock)}"
+                } else {
+                    "Nothing matches these filters"
+                },
+                detail = if (searching) {
+                    "No source has called that stock in the record. Clear the stock filter to see " +
+                        "the rest of your calls."
+                } else {
+                    "Clear a filter to see the rest of your calls."
+                },
+            )
+            return@Screen
+        }
+
+        // Built once for the page, not once per card: `channels` is every chat this device has
+        // loaded from Telegram, and a card searching it on each recomposition would walk the whole
+        // list a hundred times a scroll. Keyed on the list, so signing in - which is what fills it -
+        // reaches cards already on screen.
+        //
+        // Matched on the name rather than on the chat id, because that is what the record holds: a
+        // ChannelScore is grouped by name so a renamed channel keeps one record, and both sides of
+        // this map have been through `cleanChannelName`. A name with no chat behind it is the
+        // ordinary case rather than a failure - see ChannelAvatar.
+        val channelPhotos = remember(appState.channels) {
+            appState.channels
+                .filter { it.photoPath != null }
+                .associate { it.displayName to it.photoPath }
+        }
+
+        // The ranking leads. It is the question the tab exists to answer - which source is worth
+        // reading - and it used to sit below two summary cards as a collapsed line.
+        ChannelRanking(report.channels) { channel -> channelPhotos[channel] }
+        // What used to sit here and does not any more:
+        //
+        // **Stocks ranked** answered a question this tab is not asking. Which stock the market has
+        // been kind to is not which source is worth reading, and a second ranking under the first
+        // one invited the two to be read as halves of one answer. The record itself is untouched -
+        // `PerformanceReport.stocks` is still measured, and the Ask AI prompt and a card's own
+        // signals still read it - only the section is gone.
+        //
+        // **Price feed** is a diagnostic, and it now lives with the diagnostics, in Settings. It
+        // explains why a figure is missing rather than being one, and every reader of this page had
+        // to scroll past a fault report about four stocks to reach the record of every call.
+        //
+        // **Does it matter?** set two halves of the record beside each other - calls several
+        // sources named for one session, calls a source kept re-posting - and stated no verdict
+        // about either, because at the counts behind them the gap between two means is noise. A
+        // section a reader opens to be told that two figures differ by less than can be read costs
+        // more than it says. The arithmetic went with it, so nothing is computed and left unread;
+        // `alsoCalledBy` and `repostings` stay, and the call cards still say a stock had company
+        // and a call was kept standing.
+
+        // One collapsed card per row wasted most of a wide screen: each held a single line of
+        // text across the full width. The count is derived, so an untested width still behaves.
+        // Collapsed cards share a row; an open one takes the whole width, because its contents are
+        // a table of figures and half a row squeezes every price onto two lines.
+        var openSession by appState.pages.openInsightsSession
+        // How many of the filtered sessions are drawn - the filters and the stock search above
+        // have already run over the whole record, so this only trims what they left.
+        var visibleCount by appState.pages.insightsVisibleCount
+        // Where the call being pointed at sits, so the page can scroll to it inside whichever
+        // session card holds it.
+        val reveal = remember { BringIntoViewRequester() }
+        val settled = LocalTabsSettled.current
+        LaunchedEffect(pendingCall, report) {
+            if (pendingCall == null) return@LaunchedEffect
+            val session = report.sessionFor(pendingCall)
+            if (session == null) {
+                // Hidden by a filter, which the effect above is already clearing - or gone, if the
+                // analysis behind that trade was deleted between the press and the arrival. Gone is
+                // dropped rather than left waiting: a re-run of that session months later would
+                // otherwise flash a card for a press nobody remembers making.
+                if (full.sessionFor(pendingCall) == null) appState.consumePendingCall()
+                return@LaunchedEffect
+            }
+            // Expand the window first if this session is not currently shown, so a jump from the
+            // Portfolio tab or a notification can still reach a session paged out of view.
+            val index = report.sessions.indexOf(session)
+            if (index >= visibleCount) {
+                visibleCount = (index / PAGE_SIZE + 1) * PAGE_SIZE
+            }
+            openSession = session.key()
+            // The card is unfolding as this runs, and a scroll measured against a height it is
+            // about to leave behind stops short of the card that was asked for.
+            delay(REVEAL_SETTLE_MS)
+            reveal.revealIfOnScreen(appState, AppDestination.INSIGHTS, settled)
+        }
+        // Built once for the page rather than searched per card. Keyed on the filtered report, so a
+        // channel filter narrows the record a card quotes to the same calls the page is counting -
+        // a card quoting the whole record beside a hero that had been narrowed would be the screen
+        // disagreeing with itself about one source.
+        val scoreByChannel = remember(report.channels) {
+            report.channels.associateBy(ChannelScore::channel)
+        }
+        BoxWithConstraints {
+            val columns = responsiveColumns(minColumnWidth = SessionCardMinWidth, maxColumns = 3)
+            val shownSessions = remember(report.sessions, visibleCount) {
+                report.sessions.take(visibleCount)
+            }
+            // Grouped before rendering rather than while: the open session interrupts the grid, and
+            // where it does so cannot be decided one card at a time.
+            val bands = remember(shownSessions, openSession) {
+                expandableBands(shownSessions) { openSession == it.key() }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                bands.forEach { (band, open) ->
+                    if (open) {
+                        SessionCard(
+                            band.single(),
+                            appState,
+                            expanded = true,
+                            onExpandedChange = { openSession = null },
+                            heldFor = appState::heldFor,
+                            latestFor = { ticker -> report.latestPrices[ticker] },
+                            scoreFor = { channel -> scoreByChannel[channel] },
+                            order = callOrder,
+                            seenAt = seenAt,
+                            opinionFor = appState::opinionFor,
+                            askingFor = { call -> appState.opinionPending == call.opinionKey() },
+                            askModel = askModel,
+                            searching = searching,
+                            newsWindow = newsWindow,
+                            onAsk = { call, again -> appState.askAboutCall(call, again) },
+                            onOpenTrade = { id ->
+                                appState.openPosition(
+                                    id,
+                                    NavStop(AppDestination.INSIGHTS, callId = id),
+                                )
+                            },
+                            revealCall = pendingCall,
+                            onRevealShown = appState::consumePendingCall,
+                            reveal = reveal,
+                        )
+                    } else {
+                        ResponsiveRows(band, columns) { session, cardModifier ->
+                            SessionCard(
+                                session,
+                                appState,
+                                expanded = false,
+                                onExpandedChange = { openSession = session.key() },
+                                heldFor = appState::heldFor,
+                                latestFor = { ticker -> report.latestPrices[ticker] },
+                                scoreFor = { channel -> scoreByChannel[channel] },
+                                order = callOrder,
+                                seenAt = seenAt,
+                                opinionFor = appState::opinionFor,
+                                askingFor = { call -> appState.opinionPending == call.opinionKey() },
+                                askModel = askModel,
+                                searching = searching,
+                                newsWindow = newsWindow,
+                                onAsk = { call, again -> appState.askAboutCall(call, again) },
+                                // The call being left is what back should come back to, so the
+                                // press names it. Both tabs key on ScoredCall.positionId, which
+                                // is why one id serves as the trade to open and the call to
+                                // return to. See NavStop.
+                                onOpenTrade = { id ->
+                                    appState.openPosition(
+                                        id,
+                                        NavStop(AppDestination.INSIGHTS, callId = id),
+                                    )
+                                },
+                                // A folded card draws none of its calls, so the highlight only ever
+                                // lands on the one this arrival opened.
+                                revealCall = pendingCall,
+                                onRevealShown = appState::consumePendingCall,
+                                reveal = reveal,
+                                modifier = cardModifier,
+                            )
+                        }
+                    }
+                }
+                if (report.sessions.size > visibleCount) {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        TextButton(onClick = { visibleCount += PAGE_SIZE }) {
+                            Text("Show older")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OutcomeLabel(call: ScoredCall) {
+    // Every label explains itself, not just the puzzling one: a chip that is sometimes tappable
+    // teaches nobody that it can be tapped.
+    var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    OutlinePill(
+        call.outcome.label,
+        outline = call.outcome.outlineTone(),
+        textColor = call.outcome.onContainer(),
+        onClick = { showing = true },
+    )
+    if (showing) {
+        // Built from the call rather than passed to `infoNote`: that helper's callers are checked
+        // by InfoNoteTest for static prose, and a call's reason is the one explanation in the app
+        // that is different on every card - so it is `InfoNote`'s own constructor, not the checked
+        // factory function, on purpose.
+        InfoSheet(InfoNote("${call.ticker} · ${call.outcome.label}", listOf(call.reason()))) {
+            showing = false
+        }
+    }
+}
+
+/**
+ * The one line that says why this call ended up where it did.
+ *
+ * Names the session it settled on rather than speaking generally, because "reached target 1" and
+ * "reached target 1 on 3 Aug" answer different questions, and the second is the one being asked.
+ * How long it took is said beside the date for the same reason: a source reaching its target is
+ * one fact and reaching it in three sessions rather than nineteen is another, and the record is
+ * being read to find out which kind of source this is.
+ */
+private fun ScoredCall.reason(): String {
+    val on = settledOn?.format(AppDates.DayMonth)
+    val took = "$sessionsElapsed ${sessionsElapsed.sessionWord()}"
+    return when (outcome) {
+        Outcome.FULL_HIT -> "Reached target 2 on $on, in $took."
+        Outcome.PARTIAL_HIT -> when {
+            // Two dates, because they are two sessions. This used to name the target's date as the
+            // day the stop broke, for want of any other date to name - the call is scored on the
+            // session it reached the target, and the stop that undid it came later.
+            stoppedAfterPartial -> when (val stop = stoppedOn?.format(AppDates.DayMonth)) {
+                // Scored before the stop's own date was recorded, so only the fact survives.
+                null -> "Reached target 1 on $on, then fell back to the stop."
+                on -> "Reached target 1 and fell back to the stop on $on."
+                else -> "Reached target 1 on $on, then fell back to the stop on $stop."
+            }
+            // Not final yet: target 2 is still in reach, and a card that said only "reached
+            // target 1" would read as the verdict.
+            !windowComplete -> "Reached target 1 on $on, in $took. Target 2 is still in reach."
+            else -> "Reached target 1 on $on, in $took."
+        }
+        Outcome.STOPPED -> "Broke the stop by more than 2% on $on, $took in."
+        // The horizon, named only here - on the one call it actually caught. It is a backstop and
+        // not a deadline anybody set, so putting it on the page would invite every other figure to
+        // be read against it. A T+1 card is the exception twice over: two sessions is short enough
+        // that expiring is ordinary, and it is the call's own deadline rather than the backstop.
+        Outcome.EXPIRED -> if (isTPlusOne) {
+            "The T+1 trade was over after $windowSessions sessions with neither a target nor the " +
+                "stop reached."
+        } else {
+            "Reached neither a target nor the stop in $windowSessions sessions, which is as long " +
+                "as a call is followed for."
+        }
+        // Both of a T+1's sessions, since the band is on offer for the whole of the trade the card
+        // described. It said "the session this call was made for" while the entry closed after one.
+        Outcome.ENTRY_NOT_REACHED -> if (isTPlusOne) {
+            "The buy zone never traded in either session of this T+1, so there was no trade to " +
+                "take. Not counted for or against."
+        } else {
+            "The buy zone never traded."
+        }
+        Outcome.OPEN -> "Nothing settled yet: $took so far, and neither a target nor the stop " +
+            "has been reached."
+        Outcome.UNPRICED -> "No stored prices for this stock yet."
+        // Named as the company's doing rather than the feed's, because that is what it usually is,
+        // and because a line blaming the data would read as the app apologising for itself when the
+        // stock has simply split.
+        Outcome.PRICE_BREAK ->
+            "The share price changed scale while this call was running - a split or a bonus " +
+                "issue - so the levels and the prices are in different money. Not counted for or " +
+                "against."
+        Outcome.AMBIGUOUS -> when (ambiguity) {
+            Ambiguity.ENTRY_AND_TARGET ->
+                "Opened above the buy zone, target hit that day. Five-minute bars would settle it, " +
+                    "and the feed keeps only 60 days of them - so a session older than that stays " +
+                    "unordered for good."
+            Ambiguity.SAME_INTRADAY_BAR ->
+                "The buy zone and the target were both reached inside the same five-minute bar. " +
+                    "This is as fine as the feed goes, so nothing further will separate them."
+            // Scored before the reason was recorded, so only the fact survives.
+            null -> "Two levels were reached in one session and cannot be ordered."
+        }
+    }
+}
+
+/**
+ * The source with the best record, and what that record is actually made of.
+ *
+ * The page opens on this rather than on a filter row, because the tab exists to settle one argument.
+ * The bar is the argument: a rate on its own hides how the calls behind it divided, and the bar
+ * under it does not. How much evidence that rests on is the line of counts beside it.
+ *
+ * **In a card, and it did not used to be.** Loose on the page it was the only thing on Insights
+ * without an edge round it, which read as an unfinished heading rather than as the page's own
+ * answer - and with a card beneath it carrying the session's news, a bare column above one was two
+ * different kinds of thing stacked with nothing to say which was which. [SectionCard] and not
+ * [ExpandableSection]: this is the one thing on the tab nobody should have to open, so it takes the
+ * background and none of the behaviour. No title either - the card's heading row would sit above
+ * the hero's own `BEST RECORD` overline and say the same thing twice in two type styles.
+ */
+@Composable
+private fun ColumnScope.InsightsHero(report: PerformanceReport) {
+    val ranked = report.channels
+    // The floor decides who leads, exactly as PerformanceCalculator's own ordering does. A source
+    // with three settled calls at 100% is not the best record in the file, and naming it as one -
+    // beside its own card that greys the figure as too thin to rank - is the screen contradicting
+    // itself in two places at once.
+    val best = ranked.firstOrNull { it.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK }
+
+    // The children go straight in rather than into a Column of their own: SectionCard already pads
+    // its contents by Space.l and spaces them by Space.s, which is exactly what the hand-rolled
+    // column did. Its own PageTextInset goes with it - that inset exists to line loose text up with
+    // a card's contents, and inside a card it would simply be that padding applied twice.
+    SectionCard {
+        Text(
+            if (best == null) "NOT ENOUGH SETTLED YET" else "BEST RECORD",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (best == null) {
+            // Honest rather than empty. Every source is still being measured; none has the
+            // MINIMUM_JUDGED_TO_RANK settled calls it takes to lead, and saying which is furthest
+            // along would be the ranking this rule exists to prevent.
+            Text(
+                "No source has ${PerformanceCalculator.MINIMUM_JUDGED_TO_RANK} settled calls yet, " +
+                    "so none of them leads. The rates below are measured exactly; they are just " +
+                    "resting on too little to rank.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            // The name is Arabic and the figures are not, so a first-strong isolate keeps each in
+            // its own direction rather than letting a digit drift into the name.
+            Text(
+                "⁨${best.channel}⁩",
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // The ground the softened "reached target 2" segment is mixed onto, and it has to name
+            // the surface actually behind the bar. It said `background` while the hero was loose on
+            // the page; inside a card that is the wrong ground and the segment comes out a colour
+            // the card never shows.
+            OutcomeBar(best, on = MaterialTheme.colorScheme.surfaceContainer)
+            // The figure and the line that says what it is, kept tight to each other: at the
+            // column's own spacing they read as two separate things rather than as a caption.
+            Column(verticalArrangement = Arrangement.spacedBy(HeroLabelBaseline)) {
+                // How often following this source worked, split at the two levels it printed. The
+                // average return used to stand here and stands under it now: what one call was
+                // worth is the other half of the answer, and neither figure is readable alone - a
+                // source printing its target 2% above the entry reaches it nearly every time and
+                // hands it all back on the call that goes wrong.
+                Text(
+                    best.winRateSplit(HeroRateSecondary),
+                    style = MaterialTheme.typography.headlineLarge.copy(fontFamily = TabularFigures),
+                    color = best.anyTargetRate.rateTone(),
+                )
+                // Under the figure rather than beside it. Set in a row it began wherever a
+                // four-digit rate happened to end, which put the one wrapping line on the hero at
+                // an indent nothing else on the page shares - and every other line here starts at
+                // the same left edge.
+                Text(
+                    listOfNotNull(
+                        // The same wording the cards use, and for the same reason: the rate above
+                        // counts a call that ran to target 2 inside both figures, and the bar above
+                        // that cannot. See the caption on ChannelCard.
+                        "${best.reachedTarget1} reached target 1, " +
+                            "${best.fullHits} ran on to target 2",
+                        "${best.averageReturn.signedPercent()} per call",
+                        // How long being right takes this source. A rate says whether to follow a
+                        // channel and this says what following it costs in patience - and it is
+                        // only sayable now that a call runs to its settlement rather than to a
+                        // deadline that cut every slow winner off at ten sessions.
+                        best.medianSessionsToHit?.let {
+                            val word = if (it == 1.0) "session" else "sessions"
+                            "typically ${formatPrice(it)} $word to target 1"
+                        },
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        // What the figures above rest on. It used to end with the scoring window and where to
+        // change it; there is no window to change now - a call is followed until it resolves - so
+        // the line says what was counted and how current it is, and nothing about a deadline.
+        Text(
+            listOfNotNull(
+                "${report.tracked} scored",
+                ranked.size.takeIf { it > 0 }?.let { "$it ${if (it == 1) "source" else "sources"}" },
+                // How current every price on this page is, in one place rather than repeated on
+                // each card. Read off the prices themselves, so a refresh that ran and came back
+                // with nothing cannot make the page look fresher than it is.
+                report.pricesTo?.let { "prices to $it" },
+            ).joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Holds the label against the figure above it, which is four times its size. */
+private val HeroLabelBaseline = 4.dp
+
+@Composable
+private fun ColumnScope.ChannelRanking(
+    channels: List<ChannelScore>,
+    photoFor: (String) -> String?,
+) {
+    if (channels.isEmpty()) return
+    // The order PerformanceCalculator already produced, which puts the MINIMUM_JUDGED_TO_RANK floor
+    // first and the rate second. This used to re-sort on the rate alone, which floated a source with
+    // three settled calls to the top of the list and into the summary line as "Best".
+    val best = channels.firstOrNull { it.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK }
+    // Numbered over the sources that clear the floor, not over the list. A card below it already
+    // says "too few judged to rank" in as many words, and a position printed on that same card
+    // would be the screen ranking what it has just said it cannot - the fault the hero's own `best`
+    // rule exists to prevent. They keep their place in the order and simply carry no number.
+    val places = remember(channels) {
+        var place = 0
+        channels.associate { score ->
+            score.channel to if (score.judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK) {
+                place += 1
+                place
+            } else {
+                null
+            }
+        }
+    }
+    ExpandableSection(
+        title = "Sources ranked",
+        icon = Icons.Outlined.Leaderboard,
+        // Open by default: this is the question the tab exists to answer, not a detail to go
+        // looking for.
+        initiallyExpanded = true,
+        summary = best?.let {
+            "${channels.size} ${if (channels.size == 1) "source" else "sources"} · " +
+                "led by ⁨${it.channel}⁩"
+        } ?: "${channels.size} sources, none settled enough to rank",
+    ) {
+        // The key to every bar below, drawn once. Four names repeated on each card would be most of
+        // the card, and the order never changes.
+        OutcomeLegend(Modifier.padding(bottom = Space.xs))
+        BoxWithConstraints {
+            val columns = responsiveColumns(minColumnWidth = ChannelCardMinWidth, maxColumns = 2)
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                ResponsiveRows(channels, columns) { channel, cardModifier ->
+                    ChannelCard(
+                        channel,
+                        place = places[channel.channel],
+                        photoPath = photoFor(channel.channel),
+                        modifier = cardModifier,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One source, and everything known about how it has done.
+ *
+ * Pressable, and it opens the method behind every figure on it - see [ChannelScoreSheet]. This card
+ * is where the reader decides whether to follow a channel, and until now it showed a verdict and no
+ * way to ask how the verdict was reached.
+ */
+@Composable
+private fun ChannelCard(
+    channel: ChannelScore,
+    /** Where this source comes in the ranking, or null where it has too little record to rank. */
+    place: Int?,
+    /** Telegram's picture of this chat on this device, where there is one. See [ChannelAvatar]. */
+    photoPath: String?,
+    modifier: Modifier = Modifier,
+) {
+    var explaining by remember(channel.channel) { mutableStateOf(false) }
+    if (explaining) ChannelScoreSheet(channel) { explaining = false }
+    Card(
+        onClick = { explaining = true },
+        // Material's pressable card announces itself as "activate" and nothing more, which says
+        // nothing about where the press goes.
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { onClick(label = "Explain how this source is scored", action = null) },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            // A fixed height so a long Arabic channel name does not make its card taller than the
+            // one beside it.
+            // A figure resting on two settled calls is still measured exactly, and still worth
+            // nothing as a verdict. It keeps its figure and loses its colour.
+            val thin = channel.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
+            Row(
+                Modifier.heightIn(min = ChannelHeaderHeight),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+            ) {
+                // Top-aligned with everything else on this row, so a name that wraps to two lines
+                // grows downward away from the mark rather than pushing it off the first line.
+                if (place != null) PlaceChip(place)
+                ChannelAvatar(channel.channel, photoPath, LogoSize.Row)
+                Text(
+                    channel.channel,
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // How often this source worked, split at the two levels it printed. What one call
+                // was worth moved down into the figures, where it is still what the cards are
+                // ordered on - the two answer different questions and neither is the whole verdict.
+                Text(
+                    channel.winRateSplit(ChannelRateSecondary),
+                    style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
+                    fontWeight = FontWeight.Bold,
+                    color = if (thin) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        channel.anyTargetRate.rateTone()
+                    },
+                )
+            }
+            Text(
+                listOfNotNull(
+                    // The counts in words, because the two figures above and the bar below divide
+                    // the same calls in different ways and both are right. The rate is cumulative -
+                    // a call that ran to target 2 reached target 1 on the way and is inside both
+                    // figures. The bar cannot be: each call has to land in exactly one segment, so
+                    // its first segment is target 1 *only*. Saying "reached ... ran on to" once
+                    // here is what stops the bar reading as a contradiction of the rate.
+                    if (thin) {
+                        "too few judged to rank"
+                    } else {
+                        "${channel.reachedTarget1} reached target 1, " +
+                            "${channel.fullHits} ran on to target 2"
+                    },
+                    // The rate the evidence will bear, under the rate that was measured. Six of six
+                    // is a true 100% and a floor of 61%; a long record at 80% floors above that,
+                    // which is why the order is not the rate. It qualifies the first figure only -
+                    // target 2 is a rate this line does not bound, and saying which is the point.
+                    channel.anyTargetRateFloor?.let {
+                        "target 1 at least ${formatPercent(it, signed = false)}"
+                    },
+                    "${channel.judged} of ${channel.calls} calls judged",
+                    // Said out loud rather than left as a smaller number of calls than the sessions
+                    // below plainly show. The same call posted again is the same bet, and a channel
+                    // re-posting every morning would otherwise carry one idea several times over.
+                    channel.repeats.takeIf { it > 0 }?.let { "$it re-posted, counted once" },
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            // The four counts these figures used to print are inside the bar. They partition the
+            // judged calls, so they were always a division of one quantity rather than four
+            // separate ones - and printed apart, nothing said so and nothing said how the failures
+            // divided. The bar says both. How much record is behind them is the line above it.
+            OutcomeBar(channel, height = OutcomeBarCompact)
+            FigureGroup(
+                "The record behind it",
+                listOf(
+                    {
+                        // Still what the list is ordered on, so the card has to keep saying it.
+                        // A rate cannot answer whether following a source pays: reach for +2%
+                        // against a -10% stop and nine calls in ten get there, and the tenth takes
+                        // back more than the nine made.
+                        Figure(
+                            "Per judged call", channel.averageReturn.signedPercent(),
+                            Modifier.weight(1f),
+                            tone = if (thin) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                PriceRole.forReturn(channel.averageReturn)
+                            },
+                            caption = "what one call was worth",
+                        )
+                    },
+                    {
+                        Figure(
+                            "Risk : reward", channel.averageRiskReward.asRatio(),
+                            Modifier.weight(1f),
+                            // Without this the rate above cannot be read at all: reaching a target
+                            // nine times in ten at 0.3 to 1 gives it all back on the tenth.
+                            caption = "target 1 against the stop",
+                        )
+                    },
+                    // How long the source takes to be right, beside how long it takes to be
+                    // wrong. The pair is the point and neither half is worth much alone: stops in
+                    // two sessions against targets in fifteen is a source asking the reader to sit
+                    // through every loss quickly and every gain slowly, and no rate on this card
+                    // says so. Both were capped at the scoring window until a call was allowed to
+                    // run to its own settlement, which is what made them worth printing.
+                    {
+                        Figure(
+                            "Sessions to a target", formatPrice(channel.medianSessionsToHit),
+                            Modifier.weight(1f), tone = PriceRole.target,
+                            caption = "median, to target 1",
+                        )
+                    },
+                    {
+                        Figure(
+                            "Sessions to a stop", formatPrice(channel.medianSessionsToStop),
+                            Modifier.weight(1f), tone = PriceRole.stop,
+                            // The calls a target rescued are in the figure beside this one, not in
+                            // this one, or a call would be describing both halves at once.
+                            caption = "median, stopped out",
+                        )
+                    },
+                    {
+                        Figure(
+                            "Not tradable", channel.notTradable.toString(),
+                            Modifier.weight(1f), tone = PriceRole.muted,
+                        )
+                    },
+                    // Whether to bank the whole position at target 1 or let half of it run, which
+                    // no figure on this card could answer before. The rate first, because it is the
+                    // one the decision actually turns on, then what each rule was worth.
+                    {
+                        Figure(
+                            "Ran on to target 2",
+                            formatPercent(channel.continuationRate, signed = false),
+                            Modifier.weight(1f),
+                            tone = PriceRole.target,
+                            caption = "of the ${channel.reachedTarget1} that reached target 1",
+                        )
+                    },
+                    {
+                        Figure(
+                            "All out at target 1",
+                            channel.sellAtTarget1Return.signedPercent(),
+                            Modifier.weight(1f),
+                            tone = PriceRole.forReturn(channel.sellAtTarget1Return),
+                            caption = "per call, over ${channel.policyCalls} priced both ways",
+                        )
+                    },
+                    {
+                        Figure(
+                            "Half out, half runs",
+                            channel.splitReturn.signedPercent(),
+                            Modifier.weight(1f),
+                            tone = PriceRole.forReturn(channel.splitReturn),
+                            caption = "per call, over the same ${channel.policyCalls}",
+                        )
+                    },
+                ),
+            )
+            // The one hint that the card leads somewhere. A whole card being pressable is invisible
+            // otherwise - the same problem the held line on a call card solves with an arrow.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.HelpOutline,
+                    // The press is described where it is declared, on the card.
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(IconSize.Inline),
+                )
+                Text(
+                    "How this is scored",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Identifies a session across recompositions, so the layout knows which card is open.
+ *
+ * A string rather than the date or the instant itself, so which card is open is something a
+ * `Bundle` can carry and the card can still be open after the page is rebuilt. Both `toString`
+ * forms are unambiguous and cannot be mistaken for each other.
+ */
+/** The call an opinion is filed under, which is the ticker, the session and the channel. */
+private fun ScoredCall.opinionKey(): String = opinionId(ticker, openedOn, channel)
+
+private fun ScoredSession.key(): String = (targetDate ?: lastRunAt).toString()
+
+/** Two lines of channel name, so a row of source cards stays level. */
+private val ChannelHeaderHeight = 44.dp
+
+/**
+ * Where a source comes in the ranking, said on the card rather than left to reading order.
+ *
+ * The cards have always been in ranked order and nothing on one said so - which reads as an order
+ * on a phone, where they are a column, and as nothing at all on the Fold, where they are a grid two
+ * wide and the eye has no reason to prefer left-then-right.
+ *
+ * **Only the leader is coloured.** A column of accented chips would be five equal claims about
+ * which source leads, and the hue is already spoken for by the rate beside it; neutral for the rest
+ * makes the one that leads readable without any of them competing with the figure the card is for.
+ *
+ * [FilledPill] rather than a chip of its own, so it is the app's one pill shape at the app's one
+ * label height - a single digit in it comes out very nearly square, which is what a place wants to
+ * look like.
+ */
+@Composable
+private fun PlaceChip(place: Int) {
+    val leads = place == 1
+    FilledPill(
+        place.toString(),
+        container = if (leads) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        content = if (leads) {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+    )
+}
+
+/**
+ * How a session went, under its own date, so a folded card still says something.
+ *
+ * The same shape the Portfolio's session cards have carried for months: every verdict named,
+ * counted, and drawn in the colour the outcome wears everywhere else in the app. It replaces a run
+ * of grey text that read `19 calls · 3 partial · 1 full · 2 stopped` in one colour, where the
+ * reader had to parse the words to find out whether the day had gone well.
+ *
+ * A partial hit and a full one share the target's green, exactly as they do on a trade's chip: they
+ * are the same kind of event at two depths, and the words beside them are what separate them. Out
+ * of time is amber rather than red for the reason the Portfolio gives - a call that ran out of time
+ * can be up 5%, and red would report a loss it never made.
+ *
+ * Under the counts, what a call from that session was actually worth. It is the figure the whole
+ * page is ordered on, and until now a session card could show four counts and never say whether
+ * they added up to a good day.
+ */
+@Composable
+private fun SessionSummary(run: ScoredSession, tally: CallTally, isNew: Boolean = false) {
+    val counts = listOf(
+        // Target 1 before target 2, the same order the outcome bars read in and the same order the
+        // levels are printed in on every card. Fixed, so it can be learned once.
+        Triple(tally.partialHits, "partial", PriceRole.target),
+        Triple(tally.fullHits, "full", PriceRole.target),
+        Triple(tally.stopped, "stopped", PriceRole.stop),
+        Triple(tally.expired, "out of time", extraColors.expired),
+        // Everything the market has not answered yet, in the colour of something with nothing to
+        // say. Counted here rather than taken off the tally, which reports what was judged - and
+        // counted over the same calls the tally counts, or a re-posted call still running would be
+        // pending on a line that had already left it out of the total beside it.
+        Triple(
+            run.calls.count { it.repeatOf == null && !it.outcome.judged },
+            "pending",
+            MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+            verticalArrangement = Arrangement.spacedBy(Space.xs),
+        ) {
+            // First on the line, before any count. It is the only thing here that is about the
+            // reader rather than about the market, and what it answers - "is there anything I have
+            // not seen" - is the question they arrive at this page with.
+            if (isNew) {
+                Text(
+                    "New",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            counts.forEach { (count, word, tone) ->
+                if (count == 0) return@forEach
+                Text(
+                    "$count $word",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = tone,
+                )
+            }
+        }
+        Text(
+            listOfNotNull(
+                "${tally.calls} ${if (tally.calls == 1) "call" else "calls"}",
+                run.calls.map(ScoredCall::channel).distinct().size.let {
+                    "$it ${if (it == 1) "source" else "sources"}"
+                },
+                // Absent rather than a dash on a session nothing has settled on. The counts above
+                // already say so, and a blank figure beside them says it twice.
+                tally.averageReturn?.let { "${it.signedPercent()} per judged call" },
+                // Said here for the reason the channel card says it: the same call posted again is
+                // the same bet, and a session showing fewer counted calls than cards needs to
+                // explain the difference on the line where the difference shows.
+                tally.repeats.takeIf { it > 0 }?.let { "$it re-posted, counted once" },
+            ).joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SessionCard(
+    run: ScoredSession,
+    /** For a call card's own chart, once it is wide enough to draw one. Nothing else here reads it. */
+    appState: AppState,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    /** The position taken on a call, so a stock actually held is marked as such. */
+    heldFor: (String, java.time.LocalDate?) -> PositionView?,
+    /** Where a stock stands as of the last refresh, by ticker. */
+    latestFor: (String) -> LatestPrice?,
+    /** The record of the source that made a call, by channel name. */
+    scoreFor: (String) -> ChannelScore?,
+    /** How the calls inside this card are laid out. Orders them; never hides one. */
+    order: CallOrder,
+    /**
+     * When the reader last had this tab open, for the New chip.
+     *
+     * Passed down rather than read from `AppState` in here, so every card on one page is judged
+     * against one reading: taking the mark while a page of cards is composing would leave the ones
+     * composed after it unflagged and the ones before it flagged.
+     */
+    seenAt: Long,
+    /** What Ask AI has said about a call, if anything. */
+    opinionFor: (ScoredCall) -> StockOpinion?,
+    /** Whether that call's own request is currently out. */
+    askingFor: (ScoredCall) -> Boolean,
+    askModel: String,
+    searching: Boolean,
+    /** How far back a searched request would look, which the confirmation names. */
+    newsWindow: Int,
+    onAsk: (ScoredCall, Boolean) -> Unit,
+    /** Opens a held call's trade on the Portfolio tab, by the id the two share. */
+    onOpenTrade: (String) -> Unit,
+    /** The trade the reader has just pressed their way here from, if this is that arrival. */
+    revealCall: String?,
+    onRevealShown: () -> Unit,
+    reveal: BringIntoViewRequester,
+    modifier: Modifier = Modifier,
+) {
+    val ranAt = remember(run.lastRunAt) {
+        AppDates.Stamp
+            .withZone(ZoneId.systemDefault())
+            .format(run.lastRunAt)
+    }
+    // One piece of arithmetic for the icon's colour and the line under the title, and the same one
+    // every rate in the app is built from - repeats out, judged calls only. A second count assembled
+    // here would be a second set of rules about what a session is worth.
+    val tally = remember(run.calls) { PerformanceCalculator.tally(run.calls) }
+    // Analysed since the reader last had this tab open. `lastRunAt` is when the session was last
+    // read rather than when it traded, which is the right clock: a session re-run this morning has
+    // something new on it however old the trading day was.
+    //
+    // Nothing is new on a reader who has never opened the tab. A fresh install would otherwise
+    // flag every session at once, which says exactly what flagging none of them says and takes a
+    // page of chips to say it.
+    val isNew = seenAt > 0L && run.lastRunAt.toEpochMilli() > seenAt
+    // Holding the header offers the one thing a session card cannot otherwise reach: the report
+    // this reading actually came from. Absent on a session with no report behind it, which is
+    // every test fixture and nothing on a device.
+    var holdingSession by remember(run.reportId) { mutableStateOf(false) }
+    // Closed by default: a run is a summary line until asked for, so a page of them stays
+    // readable however many analyses have been saved.
+    ExpandableSection(
+        // The weekday, because a run is aimed at a trading session and Sunday is one here. A bare
+        // 2026-08-18 is the same date with the one part a reader actually orients by removed.
+        title = run.targetDate?.format(AppDates.WeekdaySession) ?: "Target not recorded",
+        icon = Icons.Outlined.Assessment,
+        // The icon says how the session went before a word of it is read: the app's own rule for
+        // colouring a return, on the figure the line underneath prints. Grey where nothing has
+        // settled yet, which is what a session with nothing to say should look like.
+        iconTone = PriceRole.forReturn(tally.averageReturn),
+        summaryContent = { SessionSummary(run, tally, isNew) },
+        expandedState = expanded,
+        onExpandedChange = onExpandedChange,
+        onHeaderLongClick = run.reportId?.let { { holdingSession = true } },
+        modifier = modifier,
+    ) {
+        // Where the card's contents came from. Built from more than one run it is not a single
+        // analysis, and reading it as one would misplace the responsibility for a call.
+        Text(
+            if (run.runCount > 1) {
+                "${run.channelsTotal} chats · ${run.channelsFromLatest} from the run at $ranAt · " +
+                    "the rest from ${run.runCount - 1} earlier " +
+                    (if (run.runCount == 2) "run" else "runs")
+            } else {
+                "${run.channelsTotal} ${if (run.channelsTotal == 1) "chat" else "chats"} · " +
+                    "run $ranAt · ${run.model}"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // One call card per row, on every width. A two-column grid here used to leave a call
+        // card - a header, a price chart and two figure panels - about 300dp to draw itself in on
+        // an unfolded screen; a single full-width card spends that width instead, inside
+        // ScoredCallRow's own width check.
+        //
+        // Two channels naming one stock for one session are two cards and one holding, so both of
+        // them flash - each really is a call behind that trade. Only the first is scrolled to,
+        // because a requester pointed at two places would travel to one and then the other.
+        val scrollTo = remember(run.calls, revealCall) {
+            revealCall?.let { id -> run.calls.firstOrNull { it.positionId == id } }
+        }
+        // Sorted on every composition rather than remembered: the key would have to include the
+        // channel records the order reads, and a `remember` holding a stale one would lay the
+        // cards out by a ranking the page no longer agrees with. Forty items is nothing beside
+        // composing forty cards.
+        val ordered = order.sort(run.calls, scoreFor)
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            ordered.forEach { call ->
+                val held = heldFor(call.ticker, call.openedOn)
+                ScoredCallRow(
+                    call,
+                    appState,
+                    latestFor(call.ticker),
+                    scoreFor(call.channel),
+                    opinionFor(call),
+                    asking = askingFor(call),
+                    askModel = askModel,
+                    searching = searching,
+                    newsWindow = newsWindow,
+                    onAsk = { again -> onAsk(call, again) },
+                    held = held,
+                    // Only a call the user is actually in leads anywhere: there is no trade to
+                    // open for one they read and left alone.
+                    onOpenTrade = held?.let { { onOpenTrade(it.position.id) } },
+                    highlighted = revealCall != null && call.positionId == revealCall,
+                    onHighlightShown = onRevealShown,
+                    modifier = if (call === scrollTo) {
+                        Modifier.fillMaxWidth().bringIntoViewRequester(reveal)
+                    } else {
+                        Modifier.fillMaxWidth()
+                    },
+                )
+            }
+        }
+    }
+    if (holdingSession) {
+        HoldPrompt(
+            title = run.targetDate?.format(AppDates.WeekdaySession) ?: "Target not recorded",
+            actions = listOf(
+                HoldAction("Open this session's report", primary = true) {
+                    holdingSession = false
+                    run.reportId?.let { appState.openSavedResult(it) }
+                },
+            ),
+            onDismiss = { holdingSession = false },
+        )
+    }
+}
+
+@Composable
+private fun ScoredCallRow(
+    call: ScoredCall,
+    /** For the chart's own price history, once the card is wide enough to draw one. */
+    appState: AppState,
+    /** Where this stock stands as of the last refresh. Absent for a stock with no prices at all. */
+    latest: LatestPrice?,
+    /**
+     * What the source that made this call has delivered elsewhere.
+     *
+     * The record was measured for every channel and reached only the ranking, which is a page the
+     * reader has to go and read separately - so the one screen where a call is actually weighed
+     * knew nothing about who made it.
+     */
+    channelScore: ChannelScore?,
+    /** What Ask AI has already said about this call, if it has been asked. */
+    opinion: StockOpinion?,
+    /** True while this card's own request is out. */
+    asking: Boolean,
+    /** Named in the confirmation, because it is what the request will be billed against. */
+    askModel: String,
+    /** Whether a live search would be attached, which the confirmation also has to say. */
+    searching: Boolean,
+    /** The news lookback that search would be given, in days. Named in the confirmation too. */
+    newsWindow: Int,
+    /** Sends the question. The flag is a deliberate re-ask, the only way to pay for one twice. */
+    onAsk: (askAgain: Boolean) -> Unit,
+    held: PositionView?,
+    /** Opens the trade taken on this call. Absent where none was, which is most cards. */
+    onOpenTrade: (() -> Unit)?,
+    highlighted: Boolean,
+    onHighlightShown: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    // Chrome, so a `remember` is the right home for all three: a fold closes the sheet, and the
+    // answer behind it is on disk rather than in the composition. See PageState.
+    var confirming by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    // Set while this card's own request is out, so the answer opens itself when it lands. Without
+    // it every card already holding an opinion would spring open the moment any request finished.
+    var awaiting by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    // Holding the card offers what a card cannot otherwise reach without opening something first.
+    var holding by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    var viewingImage by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    var buying by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    // Resolved once per card rather than per action: View screenshot needs it to find the image
+    // and Copy call/Bought/Open its report do not, but all four are decided together for the one
+    // hold prompt the card offers.
+    val occurrence = remember(call, appState.savedResults) { appState.occurrenceFor(call) }
+    LaunchedEffect(opinion) {
+        if (awaiting && opinion != null) {
+            awaiting = false
+            showing = true
+        }
+    }
+    if (confirming) {
+        AskAiDialog(
+            call = call,
+            model = askModel,
+            searching = searching,
+            newsWindowDays = newsWindow,
+            onConfirm = {
+                confirming = false
+                awaiting = true
+                onAsk(false)
+            },
+            onDismiss = { confirming = false },
+        )
+    }
+    if (showing && opinion != null) {
+        StockOpinionSheet(
+            call = call,
+            opinion = opinion,
+            onAskAgain = if (asking) {
+                null
+            } else {
+                {
+                    showing = false
+                    awaiting = true
+                    onAsk(true)
+                }
+            },
+            onDismiss = { showing = false },
+        )
+    }
+    val colors = CardDefaults.cardColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    )
+    // The arrival flash takes the edge for as long as it runs, then the held outline has it back.
+    // Outlined where the user is actually in the trade, in the colour of where that stands: the
+    // figures on this card judge the channel, and the outline says what it cost or made you.
+    val border = arrivalFlash(highlighted, onHighlightShown, held?.status?.tone()) ?: heldBorder(held)
+    val body: @Composable ColumnScope.() -> Unit = {
+        // Measured once, at the top: a two-column grid never splits this card any more (see
+        // SessionCard), so a card's own width is the container's - ~380-411dp on a phone, 614dp
+        // or more once the Fold opens or on a tablet. `wide` decides three things below: whether
+        // the header runs as one column or two panes side by side, whether PriceLadder or the full
+        // PriceChart draws under it, and whether the two figure panels stack or sit side by side.
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val wide = maxWidth >= WideCardMinWidth
+            Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                // The stock and the verdict on it - logo, ticker, badge, the Arabic name, the
+                // outcome/timing pills.
+                val identityBlock: @Composable ColumnScope.() -> Unit = {
+                    // The logo and the ticker press together as one target rather than the text
+                    // alone, exactly as they do on the recommendation card: a 12sp glyph beside a
+                    // title is two touch targets where the reader sees one thing. The card's own
+                    // press, where it has one, opens the trade taken on this call - so this is a
+                    // second target on a card that already had one, and the smaller of the two is
+                    // the one that leads to the stock. See LocalOpenStock.
+                    val nameBlock: @Composable () -> Unit = {
+                        val openStock = LocalOpenStock.current
+                        var filteringTicker by remember(call.ticker) { mutableStateOf(false) }
+                        // The logo sits beside the ticker-and-name pair rather than the ticker
+                        // alone, and CenterVertically is what centers it against both lines
+                        // rather than just the first - which is also what puts the name flush
+                        // under the ticker with no padding hack: it is simply the next line in
+                        // the same column.
+                        Row(
+                            Modifier.combinedClickable(
+                                onClick = { openStock(call.ticker) },
+                                onLongClick = { filteringTicker = true },
+                            ),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(call.ticker, style = MaterialTheme.typography.titleSmall)
+                                    Egx33Badge(call.ticker, Modifier.padding(start = Space.s))
+                                }
+                                // Arabic only - the English name read as a second, redundant
+                                // label beside a ticker that already says the stock in Latin
+                                // letters.
+                                call.companyArabic?.takeIf(String::isNotBlank)?.let {
+                                    Text(
+                                        it,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                        if (filteringTicker) {
+                            HoldPrompt(
+                                title = call.ticker,
+                                actions = listOf(
+                                    HoldAction("Filter this page to ${call.ticker}", primary = true) {
+                                        filteringTicker = false
+                                        appState.pages.insightsStock.value = call.ticker
+                                    },
+                                ),
+                                onDismiss = { filteringTicker = false },
+                            )
+                        }
+                    }
+                    if (wide) {
+                        // Wrapped rather than stacked in the top-right corner: a fixed vertical
+                        // stack there forced the header's height to the taller of the name block
+                        // and the two pills, which left empty air under whichever was shorter -
+                        // most often the name. Flowed here, left-aligned like everything else in
+                        // the header, the row costs only the height it actually needs and grows
+                        // sideways before it grows down. Kept on the unfolded/wide layout only -
+                        // the top-right column below is the narrow case's own. Asked for on
+                        // 2026-09-20.
+                        nameBlock()
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+                            OutcomeLabel(call)
+                            TimingLabel(call)
+                        }
+                    } else {
+                        // Top-aligned, and the pills sit in a column of their own on the right -
+                        // the same place and the same shape the recommendation card puts its own
+                        // Timing and Edited chips, so a call read on one tab and again on the
+                        // other has its verdict in the same corner both times. The cover screen's
+                        // own case: narrow enough that a name block and a pill column are already
+                        // reading as two separate things rather than one crowded header. Asked
+                        // for on 2026-09-20.
+                        Row(verticalAlignment = Alignment.Top) {
+                            Box(Modifier.weight(1f)) { nameBlock() }
+                            Spacer(Modifier.width(Space.s))
+                            // Each pill is an OutlinePill Surface(onClick = ...), and Material3's
+                            // clickable Surface silently pads itself out to a 48dp touch target,
+                            // centering the small pill inside that invisible box. Stacked tightly
+                            // here, that padding - not the 4dp spacedBy below - was the real gap
+                            // between "Still open" and "T+1", and it was also what pushed the
+                            // narrower T+1 pill off the left edge the Column already asks for.
+                            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                                Column(
+                                    Modifier.padding(top = Space.s, end = Space.s),
+                                    horizontalAlignment = Alignment.Start,
+                                    verticalArrangement = Arrangement.spacedBy(Space.xs),
+                                ) {
+                                    OutcomeLabel(call)
+                                    TimingLabel(call)
+                                }
+                            }
+                        }
+                    }
+                }
+                // Who made the call, when, and what they're worth - a fact about the source, not
+                // about the stock, so on a narrow card it starts at the card's own edge rather
+                // than falling in under the name block above it, and on a wide one it gets a pane
+                // of its own rather than sharing the identity's.
+                val sourceBlock: @Composable ColumnScope.() -> Unit = {
+                    // "called <date>" rides on the channel's own line now rather than opening the
+                    // row below - it is the one fact about a call's dating that every card has, so
+                    // it reads as part of naming the source rather than as the first of a list.
+                    FlowRow(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                        Text(
+                            call.channel,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            "·",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = Space.xs),
+                        )
+                        Text(
+                            "called ${call.openedOn.format(AppDates.DayMonthYear)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // Pieces rather than one joined string, so the middot between them can carry
+                    // real dp padding - Space.s each side - instead of riding on a couple of
+                    // characters of the string's own spacing. A FlowRow rather than a Row: both
+                    // can be present at once, and the single Text this replaced used to wrap onto
+                    // a second line rather than run off the card. Guarded on there being anything
+                    // to say: "called" moved up onto the channel's line above, so most calls have
+                    // neither a settled date nor a repeat, and an empty FlowRow would still claim
+                    // the gap that used to be "called"'s.
+                    val segments = listOfNotNull(
+                        call.settledOn?.let { "settled ${it.format(AppDates.DayMonthYear)}" },
+                        // The channel did post it that day, so the card stays; it is the same
+                        // bet as the call it repeats, so no rate counts it twice.
+                        call.repeatOf?.let {
+                            "repeat of ${it.format(AppDates.DayMonthYear)}, counted once"
+                        },
+                    )
+                    if (segments.isNotEmpty()) {
+                        FlowRow(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                            segments.forEachIndexed { index, segment ->
+                                Text(
+                                    segment,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (index != segments.lastIndex) {
+                                    Text(
+                                        "·",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = Space.s),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    // The source's own record and what the other channels around this call are
+                    // doing - both are about who made the call rather than about the call's own
+                    // numbers, so they read with the rest of the header instead of falling below
+                    // the rule with the figures the app measured.
+                    SourceRecord(channelScore)
+                    CallContext(call)
+                }
+                if (wide) {
+                    // Two panes rather than one wide column: the identity and the source are two
+                    // different questions ("what, and what does it look like" against "who, and
+                    // are they worth reading"), and a phone reads them stacked only because there
+                    // is nowhere else to put the second one.
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.xl)) {
+                        Column(
+                            Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(Space.xs),
+                            content = identityBlock,
+                        )
+                        Column(
+                            Modifier.weight(1.6f),
+                            verticalArrangement = Arrangement.spacedBy(Space.xs),
+                            content = sourceBlock,
+                        )
+                    }
+                } else {
+                    // sourceBlock is a flat ColumnScope lambda - its four lines land as direct
+                    // siblings of identityBlock in this one Column, so a wider arrangement here
+                    // would space every line of the source info apart, not just the one gap that
+                    // was asked to widen. The arrangement stays .xs, matching every other gap in
+                    // both blocks, and the one extra step - a 2dp spacer standing only between
+                    // the two blocks, on top of the two Space.xs gaps arrangement already puts
+                    // around it - takes that one gap to 10dp: the Arabic name and the channel
+                    // name below it read as one run-on block at .xs alone, where the wide layout
+                    // already keeps them apart in separate panes. Asked for on 2026-09-20.
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                        identityBlock()
+                        Spacer(Modifier.height(2.dp))
+                        sourceBlock()
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ExtractionWarning(call, appState)
+                // What the outline means, in one line. Everything else on this card judges the
+                // channel on the levels it printed; this is the only figure here measured from
+                // what was paid.
+                held?.let { position ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "${position.status.label} · bought at " +
+                                "${formatPrice(position.position.entryPrice)} · " +
+                                formatPercent(position.returnPct),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = position.status.tone(),
+                            // fill = false so the arrow sits against the end of the line rather than
+                            // out at the card's edge, where it would read as unrelated to it.
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        // The one hint that the card leads somewhere. A whole card being pressable is
+                        // invisible otherwise, and this is the line the trade is named on.
+                        if (onOpenTrade != null) {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.ArrowForward,
+                                // The press is described where it is declared; a reader announcing the
+                                // glyph as well would say it twice.
+                                contentDescription = null,
+                                tint = position.status.tone(),
+                                modifier = Modifier.size(IconSize.Inline),
+                            )
+                        }
+                    }
+                }
+                // The shape of the call, which four prices in a column cannot show: whether it
+                // risked a little for a lot or the reverse, and how far up that scale the stock
+                // actually got. The same drawing the Results tab has always used for the same five
+                // levels, so a call read on one tab and again on the other is the same picture in
+                // both places. Named once so the wide fallback below can draw it too, and wrapped
+                // in the same neutral tile "The call" is tinted with - neither the ladder nor the
+                // chart is a verdict the app is drawing attention to, unlike "What happened"'s own
+                // rose wash.
+                val ladder: @Composable () -> Unit = {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
+                            .padding(Space.m),
+                    ) {
+                        PriceLadder(
+                            stopLoss = call.stopLoss,
+                            entryLow = call.entryLow,
+                            entryHigh = call.entryHigh,
+                            target1 = call.target1,
+                            target2 = call.target2,
+                            // The extreme inside the judged window, which the figure below it says too.
+                            reached = call.peakHigh,
+                        )
+                    }
+                }
+                if (wide) {
+                    // Fetched eagerly, because whether to fall back to the ladder is a decision
+                    // this card has to make before it knows whether there is a line to draw - a
+                    // wide card shows one or the other, never an empty chart.
+                    val history = rememberPriceHistory(appState, call.ticker)
+                    if (history.count { it.close != null } > 1) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
+                                .padding(Space.m),
+                        ) {
+                            // The full chart in the ladder's place: there's finally width to spend
+                            // on how the stock actually got from the entry to wherever it settled,
+                            // not only where the five levels sit.
+                            CallChartSection(call, history)
+                        }
+                    } else {
+                        ladder()
+                    }
+                } else {
+                    ladder()
+                }
+                // Two groups rather than eight loose figures: what the channel asked for, and what
+                // the market did about it. Each in its own tinted panel now rather than ruled apart
+                // by a hairline - a boundary the eye lost once a group wrapped onto three rows -
+                // and the heading takes the page's own accent, so the two read as the card's
+                // structure rather than another muted caption. Taken as `Modifier ->` lambdas
+                // rather than drawn in place, so the wide branch below can weight them side by
+                // side instead of wrapping each in a second Box just to size it.
+                val theCallPanel: @Composable (Modifier) -> Unit = { panelModifier ->
+                    Box(
+                        panelModifier
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
+                            .padding(Space.m),
+                    ) {
+                        FigureGroup(
+                            "The call",
+                            listOfNotNull(
+                                // Paid and risked first, aimed at second: wrapped two-up this keeps the targets
+                                // side by side in reading order rather than splitting them across rows.
+                                {
+                                    Figure(
+                                        "Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry,
+                                        // The base the three percentages below are measured from, said once
+                                        // where they can all be read against it.
+                                        caption = call.entryMidCaption(),
+                                    )
+                                },
+                                // A price on its own says nothing across stocks: 59.80 is a wide stop on one
+                                // share and a tight one on another, and the distance is the half that compares.
+                                {
+                                    Figure(
+                                        "Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f),
+                                        tone = PriceRole.stop, caption = call.fromEntry(call.stopLoss).distance(),
+                                    )
+                                },
+                                {
+                                    Figure(
+                                        "Target 1", formatPrice(call.target1), Modifier.weight(1f),
+                                        tone = PriceRole.target, caption = call.fromEntry(call.target1).distance(),
+                                    )
+                                },
+                                {
+                                    Figure(
+                                        "Target 2", formatPrice(call.target2), Modifier.weight(1f),
+                                        tone = PriceRole.target, caption = call.fromEntry(call.target2).distance(),
+                                    )
+                                },
+                                // What the four figures above come to, as a figure of its own rather than a
+                                // caption underneath - absent rather than blank for a call missing a level it
+                                // needs. The market's own blue: it is read off the four prices above it, not
+                                // printed by the channel, the same reason Peak/Trough/Latest close wear it.
+                                call.riskReward?.let { ratio ->
+                                    {
+                                        Figure(
+                                            "Risk : reward", ratio.asRatio(), Modifier.weight(1f),
+                                            tone = PriceRole.market,
+                                        )
+                                    }
+                                },
+                            ),
+                            titleColor = pageAccent.ink,
+                        )
+                    }
+                }
+                // The market's own hue, not the neutral tile above: it is the one group on this
+                // card measured from what actually happened rather than what the channel asked for.
+                val whatHappenedPanel: @Composable (Modifier) -> Unit = { panelModifier ->
+                    Box(
+                        panelModifier
+                            .background(pageAccent.soft, SectionPanelShape)
+                            .padding(Space.m),
+                    ) {
+                        FigureGroup(
+                            "What happened",
+                            listOf(
+                                // Bare, with the session that set each underneath. Neither "in window" nor
+                                // "since call" is true any more: there is no window to be in, and the scorer
+                                // stops at the session a call settles on, so on a call settled three weeks ago
+                                // these are the extremes up to that day and not up to today - while a partial
+                                // hit goes on collecting them after its own settlement. One label cannot say
+                                // all three, and the date under the figure says the only part that matters.
+                                {
+                                    Figure(
+                                        "Peak", formatPrice(call.peakHigh), Modifier.weight(1f),
+                                        tone = PriceRole.market, on = call.peakOn,
+                                    )
+                                },
+                                {
+                                    Figure(
+                                        "Trough", formatPrice(call.troughLow), Modifier.weight(1f),
+                                        tone = PriceRole.market, on = call.troughOn,
+                                    )
+                                },
+                                {
+                                    Figure(
+                                        // Two different facts under one label: sessions to settlement on a call
+                                        // that settled, sessions so far on one still running. Said, rather than
+                                        // left to the reader to infer from the outcome chip.
+                                        if (call.settledOn != null) "Sessions to settle" else "Sessions elapsed",
+                                        // The bare count, where it used to be read against a denominator. There
+                                        // is no deadline to be twelve-of-twelve against any more: a call runs
+                                        // until the market settles it, so how long that took is the whole of
+                                        // the figure and the fraction only invited it to be read as progress
+                                        // toward expiring.
+                                        call.sessionsElapsed.toString(),
+                                        Modifier.weight(1f),
+                                        // The one call that does have a deadline, printed by the channel on the
+                                        // card itself. Without it a T+1 call reading "2" looks like a fast
+                                        // settlement rather than the only two sessions it was ever given. The
+                                        // chip above names it as T+1; this says how many sessions that was.
+                                        caption = "${call.windowSessions} in all"
+                                            .takeIf { call.isTPlusOne },
+                                    )
+                                },
+                                {
+                                    Figure(
+                                        "Return",
+                                        // Withheld, not corrected, where the level it was measured at is one
+                                        // the fault chip above already says cannot be right - a dash beside
+                                        // "Stop sits above the buy zone" is the honest pair. See
+                                        // CallSanity.invalidatesReturn.
+                                        call.believableReturn.signedPercent(),
+                                        Modifier.weight(1f),
+                                        // Amber, not green. The figure is the return to target 1 and it is
+                                        // correct, but the trade gave it back - and drawn in the target's own
+                                        // colour it read as a win on a card whose only other word for it was
+                                        // hidden behind the chip.
+                                        tone = if (call.stoppedAfterPartial) {
+                                            extraColors.expired
+                                        } else {
+                                            PriceRole.forReturn(call.believableReturn)
+                                        },
+                                        // A call that ran out of time reached no level it named, so its return
+                                        // is measured to wherever the horizon left it. Said on the card,
+                                        // because that is a different kind of figure from a return to a target
+                                        // the market actually got to.
+                                        caption = when {
+                                            call.believableReturn == null -> "not measurable from these levels"
+                                            call.stoppedAfterPartial -> "to target 1, then stopped"
+                                            call.outcome == Outcome.EXPIRED -> "to the last close"
+                                            else -> null
+                                        },
+                                    )
+                                },
+                                // Where the stock actually is, which every other figure here stops short of
+                                // saying: peak and trough are the extremes of the window and the return is
+                                // measured to wherever the call settled, so a card could report a target hit
+                                // three weeks ago and give no clue what the price has done since.
+                                {
+                                    Figure(
+                                        "Latest close",
+                                        formatPrice(latest?.session?.close),
+                                        Modifier.weight(1f),
+                                        tone = PriceRole.market,
+                                        caption = latest?.let { price ->
+                                            listOfNotNull(
+                                                price.session.date.format(AppDates.DayMonth),
+                                                call.fromEntry(price.session.close).distance(),
+                                                // Named as what it is rather than as a warning: the session has
+                                                // not closed, so the figure beside it is going to move.
+                                                if (price.provisional) "still trading" else null,
+                                            ).joinToString(" · ")
+                                        },
+                                    )
+                                },
+                            ),
+                            titleColor = pageAccent.ink,
+                        )
+                    }
+                }
+                // A pair of equals - AdaptivePanes with mainWeight 1f, its own house rule for
+                // exactly this - rather than a bespoke Row: two panels of equal standing ending at
+                // two different heights reads as one of them having failed to load, and a second
+                // hand-rolled height tracker would be a second thing this app measures panes with.
+                // `minWidth` matches `wide` exactly, so the panels never disagree with the header
+                // and the chart about when there is room to stand side by side.
+                AdaptivePanes(
+                    minWidth = WideCardMinWidth,
+                    mainWeight = 1f,
+                    alignHeights = true,
+                    // fillMaxHeight, because alignHeights stretches the two *columns* and the
+                    // tinted Box inside each panel keeps its own height regardless - so the
+                    // shorter panel's stretch was invisible empty space under it, which is the
+                    // exact mismatch alignHeights exists to remove. See AnalyzeScreen's own pair
+                    // for the same fix, hit first.
+                    main = { theCallPanel(Modifier.fillMaxWidth().fillMaxHeight()) },
+                    side = { whatHappenedPanel(Modifier.fillMaxWidth().fillMaxHeight()) },
+                )
+                // Separates the figures, read together above it, from what this footer answers -
+                // the same rule the recommendation card's own footer divider already follows.
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                // Wrapped rather than laid in a row: at 280dp the two labels together are wider than
+                // the card, and a button pushed off the edge is a button nobody can press.
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    AskAiButton(
+                        label = when {
+                            asking -> "Asking\u2026"
+                            // Named for what it holds once there is something to open. The button that
+                            // spends money and the button that reopens a saved answer must not read
+                            // alike, or the free press looks like the paid one - which is why the saved
+                            // one is drawn as a ring rather than a filled pill, not only worded apart.
+                            opinion != null -> "AI Response"
+                            else -> "Ask AI"
+                        },
+                        onClick = { if (opinion == null) confirming = true else showing = true },
+                        look = if (opinion != null && !asking) AiLook.Outlined else AiLook.Filled,
+                        // A second request while the first is still out would be paid for twice and
+                        // answer the same question.
+                        enabled = !asking,
+                        working = asking,
+                        // Stable per card, so the halo does not restart its cycle on every scroll.
+                        phaseKey = call.ticker,
+                    )
+                    if (call.sessions.isNotEmpty()) {
+                        PriceFeedButton(expanded) { expanded = !expanded }
+                    }
+                }
+                if (call.sessions.isNotEmpty()) {
+                    AnimatedVisibility(expanded) { SessionTable(call.sessions) }
+                }
+            }
+        }
+    }
+
+    // Two overloads over one body rather than a clickable wrapped round the card: Material's own
+    // pressable card is what keeps the ripple inside the corners, and an unheld call must not
+    // answer a *tap* at all - there is nothing to open. A hold is offered either way - see
+    // [HoldPrompt] - so the unheld branch still listens for one, through a plain pointer detector
+    // rather than `combinedClickable`, which cannot offer a long click without also drawing a tap
+    // ripple over a press that would otherwise do nothing.
+    if (onOpenTrade == null) {
+        Card(
+            modifier
+                .fillMaxWidth()
+                .pointerInput(Unit) { detectTapGestures(onLongPress = { holding = true }) },
+            colors = colors,
+            border = border,
+            shape = MaterialTheme.shapes.medium,
+            content = body,
+        )
+    } else {
+        Card(
+            // A pressable card announces itself as "activate" and nothing more, which says nothing
+            // about where the press goes. The action itself is Material's; only its name is ours.
+            modifier = modifier.fillMaxWidth()
+                .combinedClickable(onClick = onOpenTrade, onLongClick = { holding = true })
+                .semantics { onClick(label = "Open this trade in the Portfolio", action = null) },
+            colors = colors,
+            border = border,
+            shape = MaterialTheme.shapes.medium,
+            content = body,
+        )
+    }
+    if (holding) {
+        val imagePath = occurrence?.let { it.saved.result.imagePathFor(it.point.sourceImageRef) }
+        val clipboard = LocalClipboardManager.current
+        val actions = buildList {
+            if (imagePath != null) {
+                add(HoldAction("View screenshot") { holding = false; viewingImage = true })
+            }
+            add(
+                HoldAction("Copy call") {
+                    holding = false
+                    clipboard.setText(AnnotatedString(call.asCopyText()))
+                },
+            )
+            call.reportId?.let { reportId ->
+                add(
+                    HoldAction("Open its report") {
+                        holding = false
+                        appState.openSavedResult(reportId)
+                    },
+                )
+            }
+            if (held == null) {
+                add(HoldAction("Bought", primary = true) { holding = false; buying = true })
+            }
+        }
+        if (actions.isNotEmpty()) {
+            HoldPrompt(title = call.ticker, actions = actions, onDismiss = { holding = false })
+        }
+    }
+    if (viewingImage && occurrence != null) {
+        SourceImageViewer(
+            occurrence.saved.result.imagePathFor(occurrence.point.sourceImageRef),
+            occurrence.point.sourceImageRef,
+            onDismiss = { viewingImage = false },
+        )
+    }
+    if (buying) {
+        val offeredWindow = if (call.isTPlusOne) {
+            call.windowSessions
+        } else {
+            appState.appPreferences.defaultTradeWindowSessions
+        }
+        TradeDialog(
+            title = "Record the purchase",
+            explanation = "The price you actually paid, which is what every figure for this " +
+                "position is measured from. The deadline still runs from the session the call " +
+                "was made for - buying late does not buy extra time - but how many sessions it " +
+                "runs for is yours to set.",
+            priceLabel = "Entry price",
+            dateLabel = "Entry date",
+            confirmLabel = "Save",
+            initialPrice = call.entryMidpoint(),
+            initialWindow = offeredWindow,
+            windowHelp = if (call.isTPlusOne) {
+                "This call is T+1: the session it was made for, and the next one. Change it to " +
+                    "give this trade longer."
+            } else {
+                "Your default, from Settings. Change it to give this trade its own deadline - " +
+                    "it decides when this trade expires and nothing else."
+            },
+            onDismiss = { buying = false },
+            onConfirm = { price, date, window ->
+                buying = false
+                appState.recordPurchase(
+                    ticker = call.ticker,
+                    companyEnglish = call.companyEnglish,
+                    companyArabic = call.companyArabic,
+                    channel = call.channel,
+                    recommendationDate = call.openedOn,
+                    entryPrice = price,
+                    entryDate = date,
+                    entryLow = call.entryLow,
+                    entryHigh = call.entryHigh,
+                    target1 = call.target1,
+                    target2 = call.target2,
+                    stopLoss = call.stopLoss,
+                    windowSessions = window ?: offeredWindow,
+                    offeredWindow = offeredWindow,
+                    isTPlusOne = call.isTPlusOne,
+                )
+            },
+        )
+    }
+}
+
+/** The middle of the buy band, which is what a fill is usually nearest - offered as the default. */
+private fun ScoredCall.entryMidpoint(): Double? {
+    val low = entryLow
+    val high = entryHigh
+    return when {
+        low != null && high != null -> (low + high) / 2
+        else -> low ?: high
+    }
+}
+
+/** A call as plain text, for Copy call - the same shape [CallText.of] gives a report's own card. */
+private fun ScoredCall.asCopyText(): String = buildList {
+    add(listOfNotNull(ticker, companyArabic).joinToString(" · "))
+    val entry = when {
+        entryLow != null && entryHigh != null && entryLow != entryHigh ->
+            "${formatPrice(entryLow)} – ${formatPrice(entryHigh)}"
+        else -> (entryLow ?: entryHigh)?.let(::formatPrice)
+    }
+    entry?.let { add("Entry $it") }
+    target1?.let { add("Target 1 ${formatPrice(it)}") }
+    target2?.let { add("Target 2 ${formatPrice(it)}") }
+    stopLoss?.let { add("Stop ${formatPrice(it)}") }
+    channel.takeIf(String::isNotBlank)?.let { add("Source $it") }
+    add("For ${AppDates.DayMonth.format(openedOn)}")
+}.joinToString("\n")
+
+/**
+ * Opens the session table, and says which way it is about to go.
+ *
+ * The label used to carry the count - "12 sessions from the price feed" - which made the widest
+ * control on the card the one with the least to say: the number is in the first column of the
+ * table it opens, and it changed the button's width on every card. The arrow carries the state
+ * instead, so the label can stay still and stay short.
+ */
+/**
+ * What the source has delivered on its other calls, in one line under the channel's name.
+ *
+ * Every other figure on this card judges this one call. This is the only thing on it that says
+ * anything about who made it - and the record behind it was already measured for every channel and
+ * reached only the ranking, which is a separate page a reader has to think to go and read. The
+ * decision is made here.
+ *
+ * The average per judged call rather than the hit rate, for the same reason the ranking is ordered
+ * on it: a rate is bought by moving the target closer to the entry, so what one of this source's
+ * calls has been worth is the figure that answers "is this worth reading".
+ *
+ * Below [PerformanceCalculator.MINIMUM_JUDGED_TO_RANK] the figure **keeps its number and loses its
+ * colour**, which is the rule the channel card already follows - a mean off three calls is measured
+ * exactly and is worth nothing as a verdict. The words are added here and not there because a card
+ * in a session has no ranking around it to say so.
+ *
+ * Absent, not blank, for a source with nothing judged: a line reading "no record yet" on every card
+ * of a fresh install is a line on every card.
+ */
+@Composable
+private fun SourceRecord(score: ChannelScore?) {
+    if (score == null || score.judged == 0) return
+    val thin = score.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
+    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+    val tone = if (thin) quiet else PriceRole.forReturn(score.averageReturn)
+    Text(
+        buildAnnotatedString {
+            append("This source: ")
+            withStyle(SpanStyle(color = tone, fontWeight = FontWeight.Medium)) {
+                append(score.averageReturn.signedPercent())
+            }
+            append(" per call over ${score.judged} judged")
+            if (thin) append(" · too few to rank")
+        },
+        style = MaterialTheme.typography.labelSmall,
+        color = quiet,
+    )
+}
+
+/**
+ * The two things about a call that only the calls around it can say, and its local signals.
+ *
+ * **Crowding, not confirmation**, and the wording is the point: several channels reading one chart
+ * on one morning is one idea going round, not three independent readings of it. Whether it is worth
+ * anything is a question for the record and not a claim a card makes. The app has detected this
+ * since the two cards learned to press through to each other, and counted it nowhere.
+ *
+ * **Kept standing** is the other side of `repeatOf`, which exists to stop a daily table outweighing
+ * a source that posts when it has something to say. Correct, and it threw the information away: a
+ * call re-posted five mornings running is a different claim from one posted once.
+ *
+ * The signals are named rather than scored - see [CallSignal]. A bare number here would be a
+ * recommendation wearing a statistic's clothes, and nothing else on this page does that.
+ */
+@Composable
+private fun CallContext(call: ScoredCall) {
+    val parts = listOfNotNull(
+        call.alsoCalledBy.takeIf { it > 0 }?.let {
+            "also called by $it other ${if (it == 1) "source" else "sources"}"
+        },
+        call.repostings.takeIf { it > 0 }?.let {
+            "kept standing over $it more ${it.sessionWord()}"
+        },
+        call.signals.takeIf(Set<CallSignal>::isNotEmpty)
+            ?.joinToString(", ", transform = CallSignal::label),
+    )
+    if (parts.isEmpty()) return
+    Text(
+        parts.joinToString(" · "),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * The one call that came with a deadline, said out loud.
+ *
+ * A T+1 card is not a call to hold and see: the channel printed it as buy on this session and out
+ * on the next, and the app judges it over exactly those two sessions rather than the thirty every
+ * other call gets. That was the single most consequential thing about a card that the card never
+ * said - it reached the screen only as a caption under a figure and inside the outcome sentence
+ * behind the chip, so a two-session call and a thirty-session one looked identical until one of
+ * them expired.
+ *
+ * Tappable and outlined like the outcome chip it sits under, for the reason [OutcomeLabel] gives:
+ * a chip that is only sometimes tappable teaches nobody that it can be tapped. Neutral since
+ * 2026-09-11: it was `primary` on the reasoning that it is neither a verdict nor a warning, which
+ * is true and is not a reason to be the one differently coloured ring in a row of them.
+ */
+@Composable
+private fun TimingLabel(call: ScoredCall) {
+    if (!call.isTPlusOne) return
+    var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    // Neutral, like every other note pill on this card. It was `primary` - the app's own voice,
+    // on the reasoning that a T+1 changes what the reader has to do - and that made one pill in
+    // the app a different colour from its neighbours for a reason none of them showed. The
+    // wording is what says this call names its own deadline; the hue was saying it twice, in a
+    // language the card spends on prices everywhere else. Asked for on 2026-09-11.
+    OutlinePill(
+        "T+1",
+        outline = MaterialTheme.colorScheme.outline,
+        textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        onClick = { showing = true },
+    )
+    if (showing) {
+        InfoSheet(
+            infoNote(
+                "${call.ticker} · a T+1 trade",
+                "${call.channel} printed this as a T+1 call: buy on the session it was made " +
+                    "for, and be out on the next one. So it is judged over those " +
+                    "${call.windowSessions} sessions and no more, where every other call runs " +
+                    "up to ${Scoring.JUDGING_HORIZON_SESSIONS} sessions before it counts as " +
+                    "expired with neither a target nor the stop reached. The buy zone counts " +
+                    "on both sessions - if the price never traded into it in either one, " +
+                    "there was no trade to take, and the call is counted neither for nor " +
+                    "against the channel.",
+            ),
+        ) { showing = false }
+    }
+}
+
+/**
+ * What does not add up about the levels this call was read out of a screenshot with.
+ *
+ * `PriceSanity` has guarded the price feed since the beginning; nothing has ever guarded the
+ * **extraction**, which is the other half of every judgement on this page. A stop read into the
+ * target row scores perfectly plausibly and counts against whichever channel happened to be
+ * misread.
+ *
+ * A caption and not a subtraction. The outcome above it, the return beside it and every rate on the
+ * page are untouched - see `CallSanity` for why a heuristic may caption a card and not move a
+ * published figure. So it is drawn in **amber rather than error red**: red on this card already
+ * means the stop took the call out, and a second red saying something quite different is one the
+ * reader has to stop and disambiguate.
+ *
+ * Tappable, and it says so by looking the same as [OutcomeLabel] - a chip that is only sometimes
+ * tappable teaches nobody that it can be tapped.
+ *
+ * The sheet also offers View screenshot and Edit call, where [AppState.occurrenceFor] can still
+ * resolve the report this call was read out of - absent once that report is gone, which a scored
+ * call otherwise has no way to notice.
+ */
+@Composable
+private fun ExtractionWarning(call: ScoredCall, appState: AppState) {
+    if (call.faults.isEmpty()) return
+    var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    var viewingImage by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    var editing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
+    val amber = extraColors.expired
+    OutlinePill(
+        if (call.faults.size == 1) {
+            call.faults.first().label
+        } else {
+            "${call.faults.size} levels look misread"
+        },
+        outline = amber,
+        textColor = amber,
+        onClick = { showing = true },
+    )
+    val occurrence = remember(call, appState.savedResults) { appState.occurrenceFor(call) }
+    if (showing) {
+        InfoSheet(
+            note = infoNote(
+                "${call.ticker} · levels to check",
+                "This call was read out of a screenshot, and these levels do not hang together " +
+                    "the way a printed card would. Nothing about the record has been changed: the " +
+                    "call is still scored, and every rate still counts it. Worth reading the " +
+                    "original card against.",
+            ),
+            content = {
+                call.faults.forEach { fault ->
+                    Column {
+                        Text(fault.label, style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            fault.detail,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (occurrence != null) {
+                    Spacer(Modifier.height(Space.xs))
+                    val imagePath =
+                        occurrence.saved.result.imagePathFor(occurrence.point.sourceImageRef)
+                    if (imagePath != null) {
+                        OutlinedButton(
+                            onClick = { showing = false; viewingImage = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("View screenshot") }
+                    }
+                    OutlinedButton(
+                        onClick = { showing = false; editing = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Edit call") }
+                }
+            },
+            onDismiss = { showing = false },
+        )
+    }
+    if (viewingImage && occurrence != null) {
+        SourceImageViewer(
+            occurrence.saved.result.imagePathFor(occurrence.point.sourceImageRef),
+            occurrence.point.sourceImageRef,
+            onDismiss = { viewingImage = false },
+        )
+    }
+    if (editing && occurrence != null) {
+        val editor = remember(appState, occurrence.saved.id, occurrence.saved.result.editRevision) {
+            CallEditor(appState, occurrence.saved)
+        }
+        EditCallSheet(occurrence.stock, occurrence.point, editor, onDismiss = { editing = false })
+    }
+}
+
+/** One call's parsed occurrence, resolved back from a [ScoredCall] - see [AppState.occurrenceFor]. */
+private data class CallOccurrence(
+    val saved: SavedAnalysis,
+    val stock: ConsolidatedRecommendation,
+    val point: RecommendationDataPoint,
+)
+
+/**
+ * The exact report and occurrence a scored call was read out of, or null once that report is gone.
+ *
+ * A [ScoredCall] is a reading of the record, not the record itself: it holds no image path, no
+ * editable levels, no report id to jump to directly by its own type. [ScoredCall.reportId],
+ * [ScoredCall.originalStockCode] and [ScoredCall.pointIndex] are exactly the identity a correction
+ * is already anchored by - see [EditCallSheet] - so this is the one place that walk back to the
+ * report is made, rather than every call site that needs it making its own.
+ */
+private fun AppState.occurrenceFor(call: ScoredCall): CallOccurrence? {
+    val reportId = call.reportId ?: return null
+    val saved = savedResults.firstOrNull { it.id == reportId } ?: return null
+    val stock = saved.result.consolidated
+        .firstOrNull { it.originalStockCode == call.originalStockCode }
+        ?: return null
+    val point = stock.dataPoints.firstOrNull { it.parseIndex == call.pointIndex } ?: return null
+    return CallOccurrence(saved, stock, point)
+}
+
+/**
+ * The chart [PriceLadder]'s five ticks cannot draw: how the stock actually got from the entry to
+ * wherever it settled, rather than only where the five levels sit. Drawn in the ladder's place once
+ * a card has the width for it - see the wide check in `ScoredCallRow`, which also decides whether
+ * there is enough of [history] to draw a line from at all before calling this.
+ *
+ * Reads the same widest-range price history the position card's own chart does - [history] is
+ * fetched once by the caller, not here, so a card that ends up drawing the ladder instead never
+ * pays for the query. No Levels toggle and no "you paid" line, unlike the same chart on a
+ * position: every level here is the call's own, drawn or not at all.
+ */
+@Composable
+private fun CallChartSection(call: ScoredCall, history: List<DailySession>) {
+    // Local to this card, exactly as the position card's own chart range is: every call card on
+    // the page needs its own range and its own toggle, not one shared by all of them at once.
+    var range by remember(call.ticker, call.openedOn) { mutableStateOf(ChartRange.Default) }
+    // Measured back from the newest session on record, exactly as the stock sheet does it - a
+    // feed running behind should shorten the line, not draw an empty box.
+    val visible = remember(history, range) {
+        val anchor = history.lastOrNull()?.date ?: return@remember history
+        history.filter { !it.date.isBefore(range.since(anchor)) }
+    }
+    val move = remember(visible) { visible.rangeMove() }
+    val levels = remember(call) {
+        ChartLevels(
+            source = call.channel,
+            stopLoss = call.stopLoss,
+            entryLow = call.entryLow,
+            entryHigh = call.entryHigh,
+            target1 = call.target1,
+            target2 = call.target2,
+            paid = null,
+        )
+    }
+    var touched by remember(visible) { mutableStateOf<DailySession?>(null) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            SheetSectionLabel("Price chart")
+            // What the visible line adds up to, which is the one thing its shape cannot say.
+            if (move != null) {
+                Text(
+                    formatPercent(move),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                    color = PriceRole.forReturn(move),
+                )
+            }
+        }
+        if (visible.count { it.close != null } > 1) {
+            PriceChart(
+                sessions = visible,
+                levels = levels,
+                // The one date this section is about is the call itself, ringed the same way the
+                // stock sheet rings every call on a stock.
+                calls = setOf(call.openedOn),
+                // The panel's own tint, not the card's - the ring and the touch dot are punched
+                // through whatever surface the chart is actually sitting on, which since the
+                // neutral tile wrap is one shade lighter than the card underneath it.
+                on = MaterialTheme.colorScheme.surfaceContainerHighest,
+                selected = touched,
+                onSelect = { touched = it },
+                height = CallChartHeight,
+            )
+            // The readout takes the dates' own line rather than appearing above it, exactly as it
+            // does in the sheet: a caption that arrived on touch would push the chart up under the
+            // finger that asked for it.
+            val reading = touched
+            if (reading?.close != null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    Text(
+                        shortDate(reading.date) + " · " + formatPrice(reading.close),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    visible.moveTo(reading)?.let {
+                        ChartCaption(formatPercent(it) + " since " + shortDate(visible.first().date))
+                    }
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    ChartCaption(shortDate(visible.first().date))
+                    ChartCaption(shortDate(visible.last().date))
+                }
+            }
+        } else {
+            // Absent rather than an empty box, which reads as a chart that failed to load.
+            ChartCaption("No sessions stored in this range.")
+        }
+        // No Levels chip: unlike the position card, there's nothing to toggle off - the call's own
+        // levels are the reason this card exists.
+        ChartControls(range = range, onRange = { range = it }, levels = null, onLevels = {})
+    }
+}
+
+@Composable
+private fun PriceFeedButton(expanded: Boolean, onClick: () -> Unit) {
+    // Turned rather than swapped for an up arrow: the rotation is what shows which of the two
+    // states the press moved between, where two glyphs only show where it landed.
+    val turn by animateFloatAsState(if (expanded) 180f else 0f, label = "priceFeed")
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        Modifier
+            .minimumInteractiveComponentSize()
+            .height(PillHeight)
+            // The card's own hairline, not a heavier one. Beside a filled pill that spends money
+            // this is the quiet half of the row, and it should read as an outline of a control
+            // rather than a second call to press something.
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, PillShape)
+            .clip(PillShape)
+            .clickable(onClick = onClick)
+            .semantics {
+                onClick(label = if (expanded) "Hide the price feed" else "Show the price feed", action = null)
+            }
+            .padding(start = Space.m, end = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        Text("Price feed", style = MaterialTheme.typography.labelMedium, color = ink)
+        Icon(
+            Icons.Outlined.KeyboardArrowDown,
+            contentDescription = null,
+            modifier = Modifier.size(IconSize.Inline).graphicsLayer { rotationZ = turn },
+            tint = ink,
+        )
+    }
+}
+
+/** Exactly what the price feed reported for each session the call was judged on. */
+@Composable
+private fun SessionTable(sessions: List<DailySession>) {
+    val scroll = rememberScrollState()
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fadingScrollbar(scroll, horizontal = true).horizontalScroll(scroll)) {
+            Column {
+                SessionRow("Date", "Open", "High", "Low", "Close", "Volume", header = true)
+                sessions.forEach {
+                    SessionRow(
+                        it.date.toString(),
+                        it.open.orDash(),
+                        it.high.orDash(),
+                        it.low.orDash(),
+                        it.close.orDash(),
+                        it.volume?.toLong()?.toString() ?: Dash,
+                    )
+                }
+            }
+        }
+        // Said here rather than marked per row, which would cost the table a seventh column and
+        // shift every figure in it. A derived session is a real session - a day's bars carry its
+        // extremes and its two ends exactly - but it is one the app built rather than read, and
+        // this app says so everywhere it does that.
+        val rebuilt = sessions.count(DailySession::derived)
+        if (rebuilt > 0) {
+            Text(
+                "$rebuilt of these ${sessions.size} sessions were rebuilt from hourly bars: no " +
+                    "daily feed carries this stock, so without them it would have no history to " +
+                    "be judged against at all.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = Space.xs),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SessionRow(
+    date: String,
+    open: String,
+    high: String,
+    low: String,
+    close: String,
+    volume: String,
+    header: Boolean = false,
+) {
+    val style = if (header) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall
+    val tone = if (header) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+    Row(Modifier.padding(vertical = 3.dp)) {
+        listOf(date to 96.dp, open to 68.dp, high to 68.dp, low to 68.dp, close to 68.dp, volume to 88.dp)
+            .forEach { (value, width) ->
+                Text(
+                    value,
+                    style = style,
+                    color = tone,
+                    modifier = Modifier.width(width),
+                    textAlign = if (value === date) TextAlign.Start else TextAlign.End,
+                )
+            }
+    }
+}
+
+/*
+ * Column thresholds, set against the narrowest screen meant to show two of something.
+ *
+ * A Fold unfolded is 750dp, not the 851dp an emulator's inner display reports. After the rail and
+ * the page padding that leaves 638dp, and less again inside a card - so a 320dp minimum, which
+ * looks generous, silently gives one column on the device it was written for.
+ */
+private val ChannelCardMinWidth = 280.dp
+private val SessionCardMinWidth = 290.dp
+
+/**
+ * Expired takes the amber the palette gained for exactly this, not the purple it used to.
+ *
+ * A call that ran out of time is the same fact here as it is on a trade in the Portfolio, which has
+ * drawn it amber since the colour was added - and `secondary` is a hue that means nothing in this
+ * app, which is the reason amber was added rather than borrowed in the first place. Two tabs
+ * disagreeing about the colour of one outcome is the reader's problem, not the palette's.
+ */
+@Composable
+private fun Outcome.outlineTone(): Color = when (this) {
+    Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> MaterialTheme.colorScheme.tertiary
+    Outcome.STOPPED -> extraColors.loss
+    Outcome.EXPIRED -> extraColors.expired
+    // The unjudged outcomes say nothing about the channel, so their ring says nothing either.
+    else -> MaterialTheme.colorScheme.outline
+}
+
+@Composable
+private fun Outcome.onContainer(): Color = when (this) {
+    Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> MaterialTheme.colorScheme.onTertiaryContainer
+    Outcome.STOPPED -> extraColors.onLossContainer
+    Outcome.EXPIRED -> extraColors.onExpiredContainer
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+@Composable
+/**
+ * A hit rate is a finding, not a fault.
+ *
+ * The error colour is reserved for the app failing at something - a rejected key, prices that
+ * would not load. A source reaching its targets half the time is highlighted; below that the
+ * number speaks for itself in the ordinary text colour.
+ */
+internal fun Double?.rateTone(): Color = when {
+    this == null -> MaterialTheme.colorScheme.onSurfaceVariant
+    this >= 50.0 -> MaterialTheme.colorScheme.primary
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+/** The target-2 figure beside a channel card's `headlineSmall` target-1 rate. */
+private val ChannelRateSecondary = 16.sp
+
+/** The same, beside the hero's `headlineLarge`. */
+private val HeroRateSecondary = 22.sp
+
+/**
+ * The win rate, divided at the two levels the source printed: how often a call reached target 1,
+ * and how often it went all the way to target 2.
+ *
+ * **Nested, not disjoint.** The second figure is a subset of the first, so "62% / 35%" reads as
+ * "reached a target on 62% of judged calls, and ran the whole way on 35%". Slicing them apart into
+ * target-1-only and target-2 would make them sum to the win rate and would print a first number
+ * *lower* than the rate the channel actually achieved - a source that keeps reaching target 2 would
+ * show a shrinking target-1 figure for doing better, which is the wrong way round.
+ *
+ * The second is drawn smaller and quieter because it is the deeper cut of the same rate rather than
+ * a rival to it - and because two full-size numbers beside a two-line Arabic name do not fit a card
+ * at [ChannelCardMinWidth]. The colour of the first is the caller's, so a thin record loses its
+ * highlight; this one is fixed, because the quiet colour is what makes it read as the sub-figure.
+ */
+@Composable
+internal fun ChannelScore.winRateSplit(secondary: TextUnit): AnnotatedString {
+    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+    return buildAnnotatedString {
+        append(formatPercent(anyTargetRate, signed = false))
+        withStyle(SpanStyle(fontSize = secondary, color = quiet)) {
+            append(" / ")
+            append(formatPercent(fullHitRate, signed = false))
+        }
+    }
+}
+
+/**
+ * The middle of the buy zone: the one place every percentage on a call card is measured from.
+ *
+ * The same base the scored return uses, so the figures on one card differ only in their end points.
+ */
+private fun ScoredCall.entryMid(): Double? = if (entryLow != null && entryHigh != null) {
+    (entryLow + entryHigh) / 2
+} else {
+    entryLow ?: entryHigh
+}
+
+/**
+ * Where a price sits against [entryMid], as a percentage.
+ *
+ * One rule for the levels the call named and for where the stock has since got to: a stop 4% below
+ * the entry and a close 7% below it are then two figures on one scale, and the card can be read
+ * down rather than worked out.
+ */
+private fun ScoredCall.fromEntry(price: Double?): Double? {
+    val entry = entryMid() ?: return null
+    if (entry == 0.0 || price == null) return null
+    return (price - entry) / entry * 100
+}
+
+/** The midpoint, where the zone is a range. A single price is its own middle and says so already. */
+private fun ScoredCall.entryMidCaption(): String? =
+    entryMid()
+        ?.takeIf { entryLow != null && entryHigh != null && entryLow != entryHigh }
+        ?.let { "mid ${formatPrice(it)}" }
+
+private fun ScoredCall.entryRange(): String = when {
+    entryLow == null && entryHigh == null -> Dash
+    entryHigh != null && entryLow != null && entryHigh != entryLow ->
+        "${formatPrice(entryLow)} – ${formatPrice(entryHigh)}"
+    else -> formatPrice(entryLow ?: entryHigh)
+}
+
+private fun Double?.signedPercent(): String = formatPercent(this)
+
+private fun Double?.orDash(): String = formatPrice(this)
+
+
+/** [PriceChart]'s height inside [CallChartSection] - shorter than the stock sheet's own 220dp, since
+ *  this card still has the two figure panels to show underneath it. */
+private val CallChartHeight = 160.dp
+
+/**
+ * The outcome groups worth filtering by, in the order they are worth asking about.
+ *
+ * Coarser than the outcomes themselves: "reached a target" is one question, not two, and the
+ * several ways a call can end up unjudged are one answer - nothing is known yet.
+ */
+private val OutcomeFilters: Map<String, (ScoredCall) -> Boolean> = linkedMapOf(
+    "Reached a target" to { call -> call.outcome.reachedATarget },
+    "Stopped" to { call -> call.outcome == Outcome.STOPPED },
+    "Expired" to { call -> call.outcome == Outcome.EXPIRED },
+    "Not judged" to { call -> !call.outcome.judged },
+)
