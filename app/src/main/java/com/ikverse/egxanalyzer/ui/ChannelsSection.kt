@@ -4,6 +4,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -280,10 +283,21 @@ private fun TelegramChats(appState: AppState) {
             // of reach.
             BoxWithConstraints {
                 val columns = responsiveColumns(minColumnWidth = 300.dp, maxColumns = 3)
+                // Its own scroll state read for the fade, which is why this builds the state itself
+                // rather than taking `scrollableColumn`'s: the foot fades while there is more under
+                // it, so a row cut in half by the box reads as "more below" and not as a cut.
+                val listScroll = rememberScrollState()
+                val fadeBand = with(LocalDensity.current) { ListEdgeFade.toPx() }
                 Column(
                     Modifier
                         .heightIn(max = ChatListMaxHeight)
-                        .scrollableColumn(),
+                        .fadeEdges(
+                            fade = ListEdgeFade,
+                            top = { listScroll.value / fadeBand },
+                            bottom = { (listScroll.maxValue - listScroll.value) / fadeBand },
+                        )
+                        .fadingScrollbar(listScroll)
+                        .verticalScroll(listScroll),
                     verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     ResponsiveRows(chats, columns, spacing = Space.s) { chat, cardModifier ->
@@ -618,3 +632,6 @@ private fun ChannelSelection.baseName(): String =
 
 /** Tall enough to browse, short enough that the run stays on screen. */
 private val ChatListMaxHeight = 320.dp
+
+/** How deep the chat list's foot fades while there is more under it. */
+private val ListEdgeFade = 24.dp

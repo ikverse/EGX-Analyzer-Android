@@ -1048,7 +1048,7 @@ private fun SessionSummary(run: ScoredSession, tally: CallTally, isNew: Boolean 
                 },
                 // Absent rather than a dash on a session nothing has settled on. The counts above
                 // already say so, and a blank figure beside them says it twice.
-                tally.averageReturn?.let { "${it.signedPercent()} per judged call" },
+                tally.averageReturn?.let { "${it.signedPercent()} per call" },
                 // Said here for the reason the channel card says it: the same call posted again is
                 // the same bet, and a session showing fewer counted calls than cards needs to
                 // explain the difference on the line where the difference shows.
@@ -1817,7 +1817,7 @@ private fun ScoredCallRow(
                     }
                 }
                 if (call.sessions.isNotEmpty()) {
-                    AnimatedVisibility(expanded) { SessionTable(call.sessions) }
+                    AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) { SessionTable(call.sessions) }
                 }
             }
         }

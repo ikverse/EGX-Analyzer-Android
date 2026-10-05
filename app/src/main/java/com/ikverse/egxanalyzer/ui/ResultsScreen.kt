@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.animation.core.Spring
@@ -219,15 +220,6 @@ internal fun ResultsScreen(appState: AppState) {
             // Not seeded from pendingResultId any more. The effect below opens a run arriving from a
             // notification and runs on first composition, so the seed only ever repeated it.
             var openRun by appState.pages.openResultId
-            // The newest run held for each session, so a card can tell whether it is the current
-            // reading of its session or an earlier one a re-run has since covered - and, since
-            // 2026-09-24, can open that newer run directly rather than only naming that it exists.
-            val newestRunFor = remember(appState.savedResults) {
-                appState.savedResults
-                    .filter { it.result.recommendationTargetDate != null }
-                    .groupBy { it.result.recommendationTargetDate }
-                    .mapValues { (_, runs) -> runs.maxBy { it.result.completedAt } }
-            }
             // How many of the filtered day-groups are drawn - the filters and the stock search
             // above have already run over the whole record, so this only trims what they left.
             var visibleCount by appState.pages.resultsVisibleCount
@@ -291,15 +283,6 @@ internal fun ResultsScreen(appState: AppState) {
                         },
                         highlighted = saved.id == appState.pendingResultId,
                         onHighlightShown = { appState.consumePendingResult() },
-                        onOpenNewerRun = saved.result.recommendationTargetDate
-                            ?.let { newestRunFor[it] }
-                            ?.takeIf { it.result.completedAt.isAfter(saved.result.completedAt) }
-                            ?.let { newer ->
-                                {
-                                    openRun = newer.id
-                                    appState.selectResult(newer)
-                                }
-                            },
                         onShare = { appState.shareReport(saved) },
                         onSaveLocally = { scope.launch { appState.saveReportToDownloads(saved) } },
                         onExport = { scope.launch { appState.exportReport(saved) } },
@@ -913,11 +896,6 @@ private fun SavedAnalysisCard(
     /** Opened from a notification: its edge flashes briefly. */
     highlighted: Boolean = false,
     onHighlightShown: () -> Unit = {},
-    /**
-     * Opens the later run that covered this session, which makes this report the older reading.
-     * Null where none exists.
-     */
-    onOpenNewerRun: (() -> Unit)? = null,
     onShare: () -> Unit,
     /** The same table as a spreadsheet, written to the phone's own Downloads folder. */
     onSaveLocally: () -> Unit,
@@ -958,6 +936,7 @@ private fun SavedAnalysisCard(
         .distinct()
         .size
 
+    val press = remember { MutableInteractionSource() }
     Card(
         // The whole card opens the run, and the same whole card closes it again once it is open -
         // one press path, whichever direction it means. A tap landing in a gap between the report's
@@ -968,7 +947,10 @@ private fun SavedAnalysisCard(
         // Behind another reading in its deck, the same press means come forward rather than toggle:
         // one press path, so a card cannot be pressable in one place and dead in another.
         onClick = onBringForward ?: { onExpandedChange(!expanded) },
-        modifier = modifier.fillMaxWidth(),
+        // Gives under a finger only while it is shut. Open, the card is a screenful of other
+        // controls and the whole of it shrinking for a press in a gap would be the page flinching.
+        modifier = modifier.fillMaxWidth().then(if (expanded) Modifier else Modifier.pressScale(press)),
+        interactionSource = press,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
@@ -1007,45 +989,27 @@ private fun SavedAnalysisCard(
                             maxLines = 1,
                         )
                     }
-                    // Both dates on one line and each labelled. The run time used to sit four rows
-                    // below the target session with nothing to say which was which.
+                    // Two lines, each one line, rather than one line that gave up its tail. The model's
+                    // version date is the part that tells two runs of the same model apart, and the
+                    // single line ended exactly there (`...-07-1...`, `ran 5 Oct...`; seen
+                    // 2026-10-05 at both widths). Split, the run time always has a line of its own
+                    // and the model name loses its middle when it must lose something, which keeps
+                    // its version suffix. Each is still one line, so nothing wraps mid-word.
                     Text(
-                        "${saved.provider.displayName} · ${saved.model} · ran " +
-                            saved.result.completedAt.atZone(ZoneId.systemDefault())
-                                .format(COMPLETED_FORMAT),
+                        "${saved.provider.displayName} · ${saved.model}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        // One line, always. Wrapped, it took a second line to show three more
-                        // characters of a model name and snapped the run date mid-word - two lines
-                        // of small print that said less than the one line does. Whatever will not
-                        // fit is the tail of the timestamp, which the reader has the target date
-                        // above for anyway.
+                        maxLines = 1,
+                        overflow = TextOverflow.MiddleEllipsis,
+                    )
+                    Text(
+                        "ran " + saved.result.completedAt.atZone(ZoneId.systemDefault())
+                            .format(COMPLETED_FORMAT),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    // Only where a later run covered the same session. A re-run leaves an older
-                    // report looking exactly as current as the newest one, which is the same trap
-                    // the unreadable notice exists for. Worded as a fact rather than "superseded":
-                    // an older run keeps the chats the newer one never read, which is how the
-                    // scoring treats it too.
-                    if (onOpenNewerRun != null) {
-                        // Space.s, the same air the table's timing pill stands on. A 20dp ring
-                        // set 4dp under a line of small print reads as hanging off it rather
-                        // than as a mark beside it, and the two are one object.
-                        //
-                        // Tappable since 2026-09-24, and distinct from every other note pill's
-                        // press: this one opens the newer run itself rather than explaining
-                        // itself, since "read the current one instead" is a more useful answer
-                        // than a sentence saying that a current one exists.
-                        Box(Modifier.padding(top = Space.s)) {
-                            OutlinePill(
-                                "Newer run exists",
-                                outline = MaterialTheme.colorScheme.outline,
-                                textColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                onClick = onOpenNewerRun,
-                            )
-                        }
-                    }
                 }
                 Box {
                     MoreButton(onClick = { menuOpen = true })
@@ -1218,11 +1182,11 @@ private fun SavedAnalysisCard(
                 // out taller than every other reading pushes the floor up to meet it.
                 var topHeightPx by remember { mutableIntStateOf(0) }
                 var footerHeightPx by remember { mutableIntStateOf(0) }
-                val gap = with(LocalDensity.current) {
-                    ((stack?.floor?.roundToPx() ?: 0) - topHeightPx - footerHeightPx)
-                        .coerceAtLeast(0)
-                        .toDp()
-                }
+                // No longer stretched up to the deck's floor (2026-10-05). The surplus used to land
+                // here, so a run in a deck of six sat above a footer with a block of nothing between
+                // them. Each card is its own height now and the footer stays under its figures; the
+                // deck still reads every card's height through `reportHeight` below.
+                val gap = 0.dp
                 Column(
                     Modifier
                         .fillMaxWidth()
@@ -1252,7 +1216,7 @@ private fun SavedAnalysisCard(
                 }
             }
 
-            AnimatedVisibility(expanded) {
+            AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {
                 ResultDetail(
                     saved,
                     peakFor,
@@ -1504,6 +1468,7 @@ private fun ResultDetail(
                             FilterChip(
                                 selected = narrowed,
                                 onClick = { filtersOpen = !filtersOpen },
+                                shape = PillShape,
                                 label = { Text(if (narrowed) "Filters on" else "Filters") },
                                 trailingIcon = {
                                     Icon(
@@ -1528,6 +1493,7 @@ private fun ResultDetail(
                     FilterChip(
                         selected = showContext,
                         onClick = { showContext = !showContext },
+                        shape = PillShape,
                         label = { Text("Context") },
                         modifier = Modifier.height(FilterControlHeight),
                     )
@@ -1539,12 +1505,13 @@ private fun ResultDetail(
                 // way down a long table, so every pixel it takes is one the controls lose.
                 OutlinedButton(
                     onClick = onHide,
+                    shape = PillShape,
                     contentPadding = PaddingValues(horizontal = Space.m),
                     modifier = Modifier.height(FilterControlHeight),
                 ) { Text("Hide") }
             }
             if (compact) {
-                AnimatedVisibility(filtersOpen) {
+                AnimatedVisibility(filtersOpen, enter = ExpandIn, exit = CollapseOut) {
                     FilterRow(active = narrowed, onClearAll = clearFilters) { Controls() }
                 }
             }
@@ -1603,7 +1570,7 @@ private fun ResultDetail(
             if (showTrace) "Hide source trace" else "Source trace and diagnostics",
             expanded = showTrace,
         ) { showTrace = !showTrace }
-        AnimatedVisibility(showTrace) { TraceAndDiagnostics(saved, traceRoot) }
+        AnimatedVisibility(showTrace, enter = ExpandIn, exit = CollapseOut) { TraceAndDiagnostics(saved, traceRoot) }
     }
 
 

@@ -458,7 +458,7 @@ private fun EvidenceSection(draft: CallDraft) {
             if (open) "Hide notes and evidence" else "Notes and evidence",
             expanded = open,
         ) { open = !open }
-        AnimatedVisibility(open) {
+        AnimatedVisibility(open, enter = ExpandIn, exit = CollapseOut) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 DraftTextField(draft.recommendationType, "Recommendation type")
                 DraftTextField(draft.notesArabic, "Notes")

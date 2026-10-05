@@ -372,6 +372,7 @@ private fun Reveal(index: Int, content: @Composable () -> Unit) {
         targetValue = if (shown) 1f else 0f,
         animationSpec = tween(
             durationMillis = RevealMs,
+            easing = UiEase,
             delayMillis = (index * StaggerMs).coerceAtMost(MaxStaggerMs),
         ),
         label = "bullet",

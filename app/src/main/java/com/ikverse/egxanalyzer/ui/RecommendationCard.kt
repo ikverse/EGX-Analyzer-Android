@@ -270,7 +270,7 @@ private fun RecommendationCard(
                 DisclosureButton("Source", expanded) { expanded = !expanded }
             }
 
-            AnimatedVisibility(expanded) {
+            AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {
                 Column(
                     Modifier.padding(top = Space.m),
                     verticalArrangement = Arrangement.spacedBy(Space.s),
@@ -560,7 +560,9 @@ internal fun timingExplanation(point: RecommendationDataPoint): String = when {
 internal fun LevelGrid(point: RecommendationDataPoint) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
         LevelPair(
-            { Level("Entry", entryText(point), PriceRole.entry, it) },
+            // Words where the source gave no entry at all: a lone dash cannot tell "not given" from
+            // "not loaded" (2026-10-05). The table keeps its dash, where there is no room for words.
+            { Level("Entry", entryText(point).takeUnless { it == Dash } ?: "Not given", PriceRole.entry, it) },
             { Level("Stop loss", levelText(point.stopLoss, point.riskPct), PriceRole.stop, it) },
         )
         LevelPair(

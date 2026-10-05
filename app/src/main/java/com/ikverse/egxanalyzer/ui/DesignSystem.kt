@@ -1,8 +1,18 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -38,13 +48,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Shape
@@ -110,7 +124,9 @@ internal fun FloatingSurface(
     // See-through enough that the page carries on behind it, opaque enough that it cannot be read
     // there. At 0.88 a heading passing underneath came through as a second row of words tangled in
     // the labels; what is wanted is the movement, not the content.
-    val tinted = if (painted == null) color.copy(alpha = 0.94f) else Color.Transparent
+    // Solid when the phone has asked for it: see [LocalSolidSurfaces] for which settings that reads.
+    val solid = LocalSolidSurfaces.current
+    val tinted = if (painted == null) color.copy(alpha = if (solid) 1f else 0.94f) else Color.Transparent
     // The tint alone leaves the edge indistinct against a card of a similar colour; the hairline is
     // what draws the shape whatever is behind it.
     val hairline = BorderStroke(
@@ -122,7 +138,11 @@ internal fun FloatingSurface(
     val body: @Composable () -> Unit = if (painted == null) {
         content
     } else {
-        { Box(painted, propagateMinConstraints = true) { content() } }
+        // Clipped to the shape ahead of the paint, so every layer the caller draws - the frost, the
+        // fill, the lights - is cut to the corners itself and does not lean on the surface's own
+        // clip. Light theme showed a lighter square inside the blocked action's rounded outline
+        // (2026-10-05); this is what makes that impossible whatever the caller paints.
+        { Box(Modifier.clip(shape).then(painted), propagateMinConstraints = true) { content() } }
     }
     if (onClick == null) {
         Surface(modifier, shape = shape, color = tinted, border = hairline, shadowElevation = FloatingElevation) {
@@ -700,7 +720,7 @@ fun Modifier.fadingScrollbar(
     }
     val alpha by animateFloatAsState(
         targetValue = if (scrolling) 0.5f else 0f,
-        animationSpec = tween(if (scrolling) 120 else 400),
+        animationSpec = tween(if (scrolling) 120 else 400, easing = UiEase),
         label = "scrollbar",
     )
     drawWithContent {
@@ -975,3 +995,117 @@ internal fun Double?.asRatio(): String =
  * A bare percentage under a price is read as the day's move, which is the one thing it is not.
  */
 internal fun Double?.distance(): String? = this?.let { "${formatPercent(it)} from entry" }
+
+/**
+ * The one curve every enter, exit and settle in the app runs on.
+ *
+ * Compose's default is `FastOutSlowIn`, which starts gently: a card that opens on it spends the
+ * first frames barely moving, which is exactly when a finger is watching. This one starts at speed
+ * and settles, so a 200ms expand reads as quick rather than as slightly late. It was chosen on
+ * 2026-10-05 from an audit against the Emil Kowalski and Apple motion notes; a new tween should name
+ * it rather than fall back to the default.
+ */
+internal val UiEase: Easing = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
+
+/** Entering and expanding. Under 250ms, the point past which a response starts to feel late. */
+internal const val EnterMs = 200
+
+/** Leaving and collapsing. Quicker than the way in: the reader has already moved on. */
+internal const val ExitMs = 140
+
+/**
+ * How a section opens: the height grows from its top edge while it fades in.
+ *
+ * Named once so every disclosure in the app opens the same way. The defaults grew from the centre on
+ * a spring, which is two different motions in one control; this is one, on [UiEase], that starts at
+ * once.
+ */
+internal val ExpandIn: EnterTransition =
+    expandVertically(tween(EnterMs, easing = UiEase), expandFrom = Alignment.Top) +
+        fadeIn(tween(EnterMs, easing = UiEase))
+
+/** How a section closes: quicker than it opened, for the reason [ExitMs] is. */
+internal val CollapseOut: ExitTransition =
+    shrinkVertically(tween(ExitMs, easing = UiEase), shrinkTowards = Alignment.Top) +
+        fadeOut(tween(ExitMs, easing = UiEase))
+
+private const val PressedScale = 0.97f
+private const val PressInMs = 100
+private const val PressOutMs = 160
+
+/**
+ * The thing every pressable in the app does the moment a finger lands: it gives a little.
+ *
+ * Read from the press itself rather than the release, so the answer arrives with the touch and not
+ * after it. The scale is read in the layer's lambda, which makes the frame a repaint and nothing
+ * else - a button pressed in a list of forty does not recompose the list. Held back to nothing when
+ * the system has animation switched off, where a scale is movement all the same.
+ *
+ * The caller owns the [InteractionSource] and hands the same one to its `clickable`, `Surface` or
+ * button, because the press is only visible to whoever the pointer was given to.
+ */
+@Composable
+internal fun Modifier.pressScale(source: InteractionSource): Modifier {
+    val pressed by source.collectIsPressedAsState()
+    val still = LocalReduceMotion.current
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && !still) PressedScale else 1f,
+        animationSpec = tween(if (pressed) PressInMs else PressOutMs, easing = UiEase),
+        label = "press",
+    )
+    return graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+    }
+}
+
+/**
+ * A page's content fading out where it meets floating chrome, instead of being sliced by it.
+ *
+ * Without it a card scrolling under the header, or up to the gesture strip, is cut along a straight
+ * line mid-word. [top] and [bottom] are how much of each edge is drawn faded, in pixels, read
+ * inside the draw lambda so a scroll moves them without recomposing anything: 0 where there is
+ * nothing hidden past that edge, so a page at rest keeps its first card at full strength.
+ *
+ * Offscreen, because the fade is a mask over what has already been drawn, and a mask needs a layer
+ * of its own to be applied to.
+ */
+internal fun Modifier.fadeEdges(
+    fade: Dp,
+    top: () -> Float,
+    bottom: () -> Float,
+): Modifier = this
+    .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+    .drawWithContent {
+        drawContent()
+        val band = fade.toPx().coerceAtMost(size.height / 2f)
+        val head = top().coerceIn(0f, 1f)
+        val foot = bottom().coerceIn(0f, 1f)
+        if (head > 0f) {
+            // Straight to transparent at the very edge, back to the content's own strength a band
+            // in. Blended into a mask rather than painted, so what is under it is not recoloured.
+            drawRect(
+                Brush.verticalGradient(
+                    0f to Color.Black.copy(alpha = 1f - head),
+                    1f to Color.Black,
+                    startY = 0f,
+                    endY = band,
+                ),
+                size = Size(size.width, band),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+        if (foot > 0f) {
+            drawRect(
+                Brush.verticalGradient(
+                    0f to Color.Black,
+                    1f to Color.Black.copy(alpha = 1f - foot),
+                    startY = size.height - band,
+                    endY = size.height,
+                ),
+                topLeft = Offset(0f, size.height - band),
+                size = Size(size.width, band),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+    }

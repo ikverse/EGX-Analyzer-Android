@@ -208,7 +208,10 @@ internal fun PageHeader(
             // answered. Both ends of that are fixed here - the field is full width from its first
             // frame, and the focus waits for the transition to finish - because either alone would
             // leave the trap armed for the next person who animates this row.
-            transitionSpec = { fadeIn(tween(SearchSwapMillis)) togetherWith fadeOut(tween(SearchSwapMillis)) },
+            transitionSpec = {
+                fadeIn(tween(SearchSwapMillis, easing = UiEase)) togetherWith
+                    fadeOut(tween(SearchSwapMillis, easing = UiEase))
+            },
             label = "header search",
         ) { open ->
             // Both halves fill the row, so this only ever reports "has the fade finished".

@@ -49,7 +49,6 @@ import java.util.UUID
 @Composable
 internal fun AnalysisRulesSection(appState: AppState) {
     var editing by remember { mutableStateOf<WordingRule?>(null) }
-    var confirmDelete by remember { mutableStateOf<WordingRule?>(null) }
     val rules = appState.ruleSet.all
 
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
@@ -59,7 +58,7 @@ internal fun AnalysisRulesSection(appState: AppState) {
                 rules = rules.filter { it.kind == kind },
                 onAdd = { editing = blank(kind) },
                 onEdit = { editing = it },
-                onDelete = { confirmDelete = it },
+                onDelete = { appState.deleteWordingRule(it) },
                 onToggle = { rule, on -> appState.setWordingRuleEnabled(rule, on) },
             )
         }
@@ -71,30 +70,6 @@ internal fun AnalysisRulesSection(appState: AppState) {
             existing = appState.wordingRules.any { it.id == rule.id },
             onSave = { appState.saveWordingRule(it) },
             onDismiss = { editing = null },
-        )
-    }
-
-    confirmDelete?.let { rule ->
-        AlertDialog(
-            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-            onDismissRequest = { confirmDelete = null },
-            title = { Text("Delete \"${rule.phrase}\"?") },
-            text = {
-                Text(
-                    if (rule.kind == RuleKind.INCLUDE) {
-                        "Messages containing it stop being kept, here and in the prompt."
-                    } else {
-                        "Messages containing it stop being dropped, here and in the prompt."
-                    },
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    appState.deleteWordingRule(rule)
-                    confirmDelete = null
-                }) { Text("Delete") }
-            },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Keep") } },
         )
     }
 }
@@ -192,7 +167,7 @@ private fun WordingList(
                     },
                 )
             }
-            AnimatedVisibility(showShipped) {
+            AnimatedVisibility(showShipped, enter = ExpandIn, exit = CollapseOut) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                     // One reason per group of shipped wording, printed once rather than under every
                     // row, where it buried the phrases it was meant to explain.
