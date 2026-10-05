@@ -4,6 +4,11 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.1.0] — 2026-10-06
+
+- **Expanded chart.** "Expand", beside the move % on a stock's sheet, opens its price chart on the whole screen: candles or a line, volume underneath, and the stop, entry and target lines drawn at their real prices. Drag the price axis up or down to zoom the scale in or out, and double-tap it to fit the chart again.
+- Motion, press feedback, edge fades, undo and the Results cards were tidied across the app.
+
 ## [4.0.1] — 2026-09-25
 
 - The app now ships a startup profile recorded from what it actually does when it opens and while you first scroll, so it should feel a bit faster to open. No other change.
