@@ -232,6 +232,10 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `ui/StockTrend.kt` — `PriceChart` and `DayRange`, the two drawings on that sheet: where a stock
   has been over the chosen range with the levels it is judged against drawn across it, and where its
   close sits inside its own day. `ChartRange` is the 1W/1M/2M/3M/6M row under the chart.
+- `ui/ExpandedChart.kt` + `assets/chart/` — the stock sheet's chart on the whole screen, opened by
+  Expand beside the move% in "Where it stands": KLineChart in one web view, candles or a line, a
+  volume pane, the sheet's levels, and a price axis a finger can scale. The only web view in the
+  app, and deliberately the only chart that is one — see **The expanded chart** under Gotchas.
 - `model/ApproachAlerts.kt` + `data/ApproachNotifier.kt` — a trade closing on its stop or target 2,
   said while there is still something to decide.
 - `data/SessionDigestNotifier.kt` — what the whole session did, once, after the close.
@@ -317,6 +321,28 @@ Detailed documentation lives in [`docs/`](docs/):
 - [`docs/ui.md`](docs/ui.md) — Back/stock sheet, page header, filters, status line, settings, colors
 
 ## Gotchas
+
+- **The expanded chart is a web view, on one screen, and nothing else in the app is.** KLineChart
+  has no native Android build, and `PriceChart` stays the chart on the sheet and on the call and
+  position cards: a web view per card in a scrolling list is the wrong trade, one on a screen opened
+  on purpose is the right one. `ExpandedChart.kt` draws the controls (range, Candles/Line, Levels —
+  the range and levels are the sheet's own `PageState`, so pressing 6M in one is 6M in the other)
+  and `assets/chart/chart.html` draws the chart; the app sends one JSON payload per change through
+  `egxChart.setData`. Only the bundled page loads: `shouldInterceptRequest` answers anything outside
+  `file:///android_asset/` with nothing, and `blockNetworkLoads` is on, so the page never touches the
+  network the app holds a permission for. R8 needs no rule for it, there being no JavaScript
+  interface. The library is Apache 2.0 and its notice is in `THIRD-PARTY-NOTICES.md`.
+- **The price axis scales by finger, and the library only does that for a mouse.** Dragging along
+  the axis rescales it in KLineChart (up and down, like TradingView), but its touch handler for the
+  axis does nothing, so `chart.html` hands a finger on the axis strip to the library as the same
+  mouse drag. A double tap on the axis, or any change of range, mode or levels, returns to the
+  auto-fit; the library's own double click does the same for a mouse. The auto-fit grows the axis to
+  take the levels in by up to 2.5x the candles' span (`ExpandedChartJson.ScaleGrowth`, the figure
+  `PriceChart`'s `MaxScaleGrowth` holds — they are two constants and must be moved together), by
+  carrying their prices in an invisible indicator, since the library has no public call to set the
+  range. A level past the cap, or off the screen after a drag, is pinned to the edge with an arrow.
+  **Touch is untested on a device**: the page was checked in a desktop browser with synthetic touch
+  events, which exercise the forwarding but not a real WebView on the Fold.
 
 - `local.properties` holds `telegramApiId` / `telegramApiHash` and is gitignored. Absent, the app
   falls back to asking for them, so a fresh checkout still builds.
