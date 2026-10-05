@@ -19,7 +19,7 @@ import androidx.compose.material.icons.outlined.Rule
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.NotificationsNone
-import androidx.compose.material.icons.outlined.QuestionAnswer
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Delete
@@ -514,7 +514,7 @@ internal fun SettingsScreen(appState: AppState) {
         // a run - not the prompt, the model, or the wording rules.
         ExpandableSection(
             "Ask AI",
-            icon = Icons.Outlined.QuestionAnswer,
+            icon = Icons.Outlined.AutoAwesome,
             summary = askAiSummary,
             contentMaxWidth = FormWidth,
             about = infoNote(

@@ -476,8 +476,8 @@ internal fun AppStatusLine(
         // Height as well as opacity. The line has a row of its own, so without this the page jumps
         // a line the instant a message lands and again when it clears - which reads as the content
         // twitching rather than as an announcement.
-        enter = fadeIn() + expandVertically(),
-        exit = fadeOut() + shrinkVertically(),
+        enter = ExpandIn,
+        exit = CollapseOut,
         modifier = modifier,
     ) {
         // Held from the last non-null pair so the line fades out reading what it read, rather than

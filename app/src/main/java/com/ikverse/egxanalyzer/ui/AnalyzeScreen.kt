@@ -158,17 +158,22 @@ internal fun AnalyzeScreen(appState: AppState) {
             // one place in the app where a frost is worth its frame: the page scrolls under this
             // button the whole time it is on screen, so there is something behind it to soften.
             // See frostedBackdrop - and ActionFrost for why the fills above it had to come down.
-            val frost = Modifier.frostedBackdrop()
+            //
+            // Not at all when the phone has asked for solid surfaces: the frost is the see-through,
+            // and a ground drawn at full strength over it would only be paying for a blur nobody sees.
+            val solid = LocalSolidSurfaces.current
+            val frost = if (solid) Modifier else Modifier.frostedBackdrop()
+            val solidGround = remember(accent.actionAuroraBase) { accent.actionAuroraBase.copy(alpha = 1f) }
             // Ready wears the same ground running does, held on one frame rather than in motion -
             // the button no longer changes what it is made of the moment a run starts, only how fast
             // it moves. No halo either state: it was the one piece of chrome answering "is this
             // pressable" with a glow, and the ground itself answers that now.
             val fill = frost.drawBehind {
                 drawActionAurora(
-                    accent.actionAuroraBase,
+                    if (solid) solidGround else accent.actionAuroraBase,
                     accent.actionAurora,
                     if (running) motion.lights(size.width, size.height) else restLights(size.width, size.height),
-                    alpha = ActionFrost,
+                    alpha = if (solid) 1f else ActionFrost,
                 )
             }
             if (running) {
@@ -204,6 +209,8 @@ internal fun AnalyzeScreen(appState: AppState) {
                 // pressed, which is the one thing it must not be able to mean.
                 val ready = blocker == null
                 val blocked = MaterialTheme.colorScheme.surfaceContainerHigh
+                // Read out here: `Glass.solid` is composable and the draw lambda below is not.
+                val blockedGround = Glass.solid(blocked)
                 AnalyzeAction(
                     onClick = {
                         // Asked here rather than at first launch: a permission prompt before the
@@ -230,7 +237,9 @@ internal fun AnalyzeScreen(appState: AppState) {
                         fill
                     } else {
                         frost.drawBehind {
-                            drawRect(blocked, alpha = ActionFrost)
+                            // Opaque colour either way: the theme's own surface colour is see-through, so drawn as it
+                            // is the blocked button let the page through however high the alpha went.
+                            drawRect(blockedGround, alpha = if (solid) 1f else ActionFrost)
                         }
                     },
                     stretch = !big,
@@ -1050,11 +1059,14 @@ private val ActionPadding = 20.dp
  * rather than restated in the theme, so the hues stay the one list `PageAccent` publishes and this
  * number means what it says: what the frost is worth against the colour.
  *
- * Low enough that the page moving underneath is visible, high enough that the label keeps its
- * contrast over whatever happens to pass under it. Below about 0.6 a white heading scrolling past
- * came through the button and fought the button's own words.
+ * **0.92 since 2026-10-05, from 0.66.** At 0.66 the button's fill let a card heading through its
+ * own label on the 411dp cover screen ("Recommendation target date" ran straight through "Analyze"),
+ * and the frost that was meant to blur it away does not show on every device. The button is nearly
+ * solid now; what is left of the glass is the hairline and the blur on the rare device that draws
+ * it. The old note: below about 0.6 a white heading scrolling past came through the button and
+ * fought its words - which is where this started, and 0.66 had not fixed.
  */
-private const val ActionFrost = 0.66f
+private const val ActionFrost = 0.92f
 
 /**
  * The screen's action, wearing the same floating treatment as the navigation bar under it.

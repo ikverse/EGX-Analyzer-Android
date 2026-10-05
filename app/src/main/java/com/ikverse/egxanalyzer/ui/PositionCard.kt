@@ -40,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -104,7 +105,16 @@ internal fun PositionCard(
     var menuOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     var editingSale by remember { mutableStateOf(false) }
-    var confirmRemove by remember { mutableStateOf(false) }
+    // Set by the menu's Remove. The card closes up first and the trade is removed when it has, so
+    // the rows below slide into the gap rather than snapping into it - and there is no question,
+    // because the status line offers Undo for the next ten seconds (see `deletePosition`).
+    var leaving by remember { mutableStateOf(false) }
+    LaunchedEffect(leaving) {
+        if (leaving) {
+            delay(ExitMs.toLong())
+            onRemove()
+        }
+    }
 
     // A **second-level** surface: it sits inside the session card, so it takes the container role's
     // own alpha - see GlassSection - and none of the lighting a card standing on the page gets.
@@ -282,12 +292,12 @@ internal fun PositionCard(
                                     onClick = { menuOpen = false; onReopen() },
                                 )
                             }
-                            // The one press on this card that cannot be undone, and until now the one
-                            // press drawn in exactly the ink of Edit above it.
+                            // Drawn apart from the rest in red because it is the one press on this card that removes
+                            // something - though it can be undone from the status line now, for a while.
                             AppMenuItem(
                                 "Remove",
                                 Icons.Outlined.Delete,
-                                onClick = { menuOpen = false; confirmRemove = true },
+                                onClick = { menuOpen = false; leaving = true },
                                 destructive = true,
                             )
                         }
@@ -343,8 +353,8 @@ internal fun PositionCard(
                 if (view.open) {
                     AnimatedVisibility(
                         visible = chartExpanded,
-                        enter = expandVertically(clip = false) + fadeIn(),
-                        exit = shrinkVertically(clip = false) + fadeOut(),
+                        enter = ExpandIn,
+                        exit = CollapseOut,
                     ) {
                         // Fetched only once this content is actually composing, so a card left
                         // collapsed never pays for the query - and whether to fall back to the
@@ -662,26 +672,29 @@ internal fun PositionCard(
     // Two overloads over one body rather than a clickable wrapped round the card: Material's own
     // pressable card is what keeps the ripple inside the corners, and a trade whose call is gone
     // must not answer a press at all. The menu, Sold and Keep Open take their own taps as before.
-    if (onOpenCall == null) {
-        Card(
-            modifier.fillMaxWidth(),
-            colors = colors,
-            border = border,
-            shape = MaterialTheme.shapes.medium,
-            content = body,
-        )
-    } else {
-        Card(
-            onClick = onOpenCall,
-            // A pressable card announces itself as "activate" and nothing more, which says nothing
-            // about where the press goes. The action itself is Material's; only its name is ours.
-            modifier = modifier.fillMaxWidth()
-                .semantics { onClick(label = "Open this call in Insights", action = null) },
-            colors = colors,
-            border = border,
-            shape = MaterialTheme.shapes.medium,
-            content = body,
-        )
+    AnimatedVisibility(visible = !leaving, exit = CollapseOut) {
+        if (onOpenCall == null) {
+            Card(
+                modifier.fillMaxWidth(),
+                colors = colors,
+                border = border,
+                shape = MaterialTheme.shapes.medium,
+                content = body,
+            )
+        } else {
+            Card(
+                onClick = onOpenCall,
+                // A pressable card announces itself as "activate" and nothing more, which says
+                // nothing about where the press goes. The action itself is Material's; only its
+                // name is ours.
+                modifier = modifier.fillMaxWidth()
+                    .semantics { onClick(label = "Open this call in Insights", action = null) },
+                colors = colors,
+                border = border,
+                shape = MaterialTheme.shapes.medium,
+                content = body,
+            )
+        }
     }
 
     if (editing) {
@@ -715,29 +728,6 @@ internal fun PositionCard(
                 editingSale = false
                 onSell(sale)
             },
-        )
-    }
-    if (confirmRemove) {
-        AlertDialog(
-            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-            onDismissRequest = { confirmRemove = false },
-            title = { Text("Remove this position?") },
-            text = {
-                Text(
-                    "It stops being counted in your portfolio, here and on every device that " +
-                        "syncs with this one. The analysis it came from is not touched, so the " +
-                        "recommendation itself stays where it is.",
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmRemove = false
-                        onRemove()
-                    },
-                ) { Text("Remove") }
-            },
-            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Keep") } },
         )
     }
 }

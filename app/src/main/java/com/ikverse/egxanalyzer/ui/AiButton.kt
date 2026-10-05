@@ -8,7 +8,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
@@ -23,7 +25,11 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,6 +38,9 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -102,7 +111,12 @@ private fun FilledPill(
     // announcing itself is the same every time, and where it was asked from is not. See
     // `PageAccent.aiFill`.
     val accent = pageAccent
-    val motion = rememberAiMotion(accent.aiFill, phaseKey)
+    // Whether any of the pill is inside the window. A page of twenty cards runs twenty breaths, and
+    // the nineteen nobody can see were keeping the frame clock awake for nothing; off screen the
+    // pill draws its resting self and starts breathing again as it scrolls back in.
+    val view = LocalWindowInfo.current
+    var onScreen by remember { mutableStateOf(true) }
+    val motion = rememberAiMotion(accent.aiFill, phaseKey, active = onScreen)
 
     Pill(
         label = label,
@@ -122,7 +136,11 @@ private fun FilledPill(
             drawAiHalo(ai.aiGlow, corner, motion.breath(working))
             drawRoundRect(motion.fill(size.width, working), cornerRadius = CornerRadius(corner))
         },
-        modifier = modifier,
+        modifier = modifier.onGloballyPositioned { coordinates ->
+            val bounds = coordinates.boundsInWindow()
+            onScreen = coordinates.isAttached &&
+                bounds.bottom > 0f && bounds.top < view.containerSize.height
+        },
     )
 }
 
@@ -153,8 +171,10 @@ private fun Pill(
     modifier: Modifier = Modifier,
     inset: Dp = AiPadding,
 ) {
+    val press = remember { MutableInteractionSource() }
     Row(
         modifier
+            .pressScale(press)
             // The pill is shorter than a fingertip. This keeps the target the full 48dp without
             // making the button look like one.
             .minimumInteractiveComponentSize()
@@ -163,7 +183,12 @@ private fun Pill(
             // After the paint, so the ripple is bounded by the pill while the halo drawn above is
             // free to fall outside it.
             .clip(PillShape)
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(
+                interactionSource = press,
+                indication = LocalIndication.current,
+                enabled = enabled,
+                onClick = onClick,
+            )
             .padding(horizontal = inset),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(AiGap),
@@ -217,7 +242,16 @@ internal fun Spark(gold: List<Color>, size: Dp = SparkSize, modifier: Modifier =
  *   per card - the ticker - so the cycle does not restart on every recomposition.
  */
 @Composable
-internal fun rememberAiMotion(stops: List<Color>, phaseKey: Any? = null): AiMotion {
+internal fun rememberAiMotion(stops: List<Color>, phaseKey: Any? = null, active: Boolean = true): AiMotion {
+    // Held still rather than not built: the caller reads the same methods either way, and a pill
+    // that is off screen or on a phone with animation switched off simply draws its resting self.
+    // The clocks below are not created at all in that case, so a still pill costs no frames.
+    if (!active || LocalReduceMotion.current) {
+        val resting = remember(stops) { Brush.horizontalGradient(stops) }
+        return remember(stops, resting) {
+            AiMotion(stops, resting, mutableFloatStateOf(1f), mutableFloatStateOf(0f))
+        }
+    }
     val pulse = rememberInfiniteTransition(label = "ai")
 
     // Derived from the key rather than drawn at random, so a card returns to the same phase after a
@@ -317,6 +351,17 @@ internal fun DrawScope.drawAiHalo(color: Color, cornerPx: Float, breath: Float) 
  */
 @Composable
 internal fun rememberActionMotion(): ActionMotion {
+    // Still when the phone has animation off: the lights hold mid-drift and the mark stops turning.
+    // What reports a run is the label's own elapsed time, which keeps counting.
+    if (LocalReduceMotion.current) {
+        return remember {
+            ActionMotion(
+                mutableFloatStateOf(1f),
+                List(DriftMs.size) { mutableFloatStateOf(0.5f) },
+                mutableFloatStateOf(0f),
+            )
+        }
+    }
     val pulse = rememberInfiniteTransition(label = "action")
 
     val glow = pulse.animateFloat(

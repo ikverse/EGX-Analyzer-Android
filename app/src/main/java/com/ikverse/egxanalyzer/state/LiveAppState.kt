@@ -821,11 +821,25 @@ class LiveAppState(
     override fun deleteWordingRule(rule: WordingRule) {
         if (rule.origin == RuleOrigin.BUILT_IN) {
             saveWordingRule(rule.copy(enabled = false))
+            offerRuleBack(rule, "Switched off \"${rule.phrase}\"")
             return
         }
         localDataStore.buryWordingRule(rule.id, System.currentTimeMillis(), deviceName)
         wordingRules = localDataStore.wordingRules()
         regeneratePrompt("Deleted \"${rule.phrase}\"")
+        offerRuleBack(rule, "Deleted \"${rule.phrase}\"")
+    }
+
+    /**
+     * Says what happened to a rule and offers it back. The delete no longer asks first, so this is
+     * the way out of a slip. Saved again as it was - newer than the burial - so every device agrees.
+     */
+    private fun offerRuleBack(rule: WordingRule, said: String) {
+        statusMessage = StatusMessage(
+            said,
+            succeeded = true,
+            undo = StatusUndo("Undo") { saveWordingRule(rule) },
+        )
     }
 
     override fun setWordingRuleEnabled(rule: WordingRule, enabled: Boolean) {
@@ -1657,8 +1671,26 @@ class LiveAppState(
         val at = System.currentTimeMillis()
         writePositions(write = { localDataStore.buryPosition(position.id, at, deviceName) }) { updated ->
             positions = updated
-            statusMessage = StatusMessage("${position.ticker} removed", succeeded = true)
+            statusMessage = StatusMessage(
+                "${position.ticker} removed",
+                succeeded = true,
+                // Offered because the press no longer asks first. The marker left by the removal is
+                // an older revision than the one written back, so every other device takes the
+                // restored trade rather than the burial.
+                undo = StatusUndo("Undo") { restorePosition(position) },
+            )
             publishPosition(position.copy(updatedAt = at, updatedBy = deviceName), deleted = true)
+            requestRebuild(portfolio = true)
+        }
+    }
+
+    /** Puts a removed trade back, newer than the burial so the sync channel agrees with it. */
+    private fun restorePosition(position: Position) {
+        val restored = position.copy(updatedAt = System.currentTimeMillis(), updatedBy = deviceName)
+        writePositions(write = { localDataStore.savePosition(restored) }) { updated ->
+            positions = updated
+            statusMessage = StatusMessage("${position.ticker} is back", succeeded = true)
+            publishPosition(restored, deleted = false)
             requestRebuild(portfolio = true)
         }
     }

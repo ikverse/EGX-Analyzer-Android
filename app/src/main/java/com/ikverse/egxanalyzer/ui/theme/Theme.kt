@@ -364,12 +364,12 @@ data class PageAccent(
     /**
      * The screen's own action, in the page's hue.
      *
-     * Every stop carries alpha **0.84** in the colour itself, ten points under the navigation bar's
-     * own 0.94 - and the gap is deliberate. The bar tidies itself away while a page is read; the
-     * action does not, so it is a permanent object over a page still being scrolled, and at the
-     * bar's opacity it read as a slab parked on the page rather than as a control floating above
-     * it. [actionAuroraBase] carries the same figure, so the button does not change weight the
-     * moment a run starts.
+     * Every stop carries alpha **0.94** in the colour itself, the navigation bar's own figure.
+     * It was 0.84, ten points under the bar, so that a permanent object over a scrolling page read
+     * as a control floating above it rather than a slab parked on it. On the 411dp cover screen
+     * that was too thin: the heading of the card behind it ran straight through the label
+     * (reported 2026-10-05 from a screenshot). [actionAuroraBase] carries the same figure, so the
+     * button does not change weight the moment a run starts.
      *
      * Baked into the colour rather than passed to the draw call, so the fill cannot be painted at
      * full strength by a caller that forgets.
@@ -383,7 +383,7 @@ data class PageAccent(
      * the fill's colours is a line against itself and disappears. What it has to read against is the
      * page scrolling behind the button.
      *
-     * **Lighter-handed than the ground it surrounds**: 0.74 against [actionFill]'s 0.84. It shipped
+     * **Lighter-handed than the ground it surrounds**: 0.74 against [actionFill]'s 0.94. It shipped
      * opaque once and read as a bright wire around the button, loudest thing on a dark page and
      * competing with the label it was supposed to frame. The shape still holds because what draws
      * it is the *contrast* with the page rather than the weight of the line.
@@ -406,7 +406,7 @@ data class PageAccent(
      *
      * [actionAurora] is drawn as three soft circles over [actionAuroraBase] on cycles that do not
      * divide into one another, so the movement never visibly repeats. Their alphas are low on
-     * purpose: they land over a ground at 0.84, and anything stronger would make the busy parts of
+     * purpose: they land over a ground at 0.94, and anything stronger would make the busy parts of
      * the sweep read as more solid than the bar beneath it.
      */
     val actionAuroraBase: Color,
@@ -416,7 +416,7 @@ data class PageAccent(
      * The same aurora, painted through the app's own mark in the header and the rail.
      *
      * **Opaque, where [actionAurora] is not**, and that is the one difference. Those stops are three
-     * soft circles drifting over a ground at 0.84, so they are kept low. These are painted *through*
+     * soft circles drifting over a ground at 0.94, so they are kept low. These are painted *through*
      * a 24dp glyph with `SrcIn`: there is nothing behind them to show through, and a mark at two
      * thirds strength is simply a dimmer mark. `ActionPaletteTest` pins both halves of that.
      */
@@ -549,7 +549,7 @@ private val lightSeeds = mapOf(
 private const val EdgeDim = 0.66f
 
 /** The ground the action floats at, and the figure [PageAccent.actionAuroraBase] matches. */
-private const val ActionAlpha = 0.84f
+private const val ActionAlpha = 0.94f
 
 /** A step lighter-handed than the ground it surrounds. See [PageAccent.actionLine]. */
 private const val EdgeAlpha = 0.74f

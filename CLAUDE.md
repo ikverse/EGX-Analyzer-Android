@@ -16,9 +16,10 @@ Release history from 3.6 onwards is in [`CHANGELOG.md`](CHANGELOG.md). Update it
   to the provider. Build, install, open the app to the right screen, and hand over. This now covers
   a second way to start one: **never switch on paid schedules**, and never create an analysis job
   on the owner's device. Arming the clock to spend money later is the same act as spending it.
-- **No on-screen verification unless asked.** Build plus unit tests is the loop. Screenshots are
-  expensive twice over: once when taken, then again on every later turn of the session. Worth it
-  when a layout complaint cannot be diagnosed any other way; not for confirming an install.
+- **Ask approval before opening the emulator or taking a screenshot.** Build plus unit tests is the
+  loop. Screenshots are expensive twice over: once when taken, then again on every later turn of
+  the session. When one would help, say what it would show and which device or width, then wait
+  for the literal word "approve". Not for confirming an install.
 
 ## Commands
 
@@ -488,11 +489,15 @@ Detailed documentation lives in [`docs/`](docs/):
   line lives in the header now and that clearance is gone with it, so the action is the only
   floating chrome left that has to follow the bar at all. The wide layout draws it unconditionally with no bar to follow, so all of this is
   the compact branch only.
-- **The action's ground is 0.84 in both states, against the bar's 0.94.** `actionFill` and
-  `actionAuroraBase` carry the same figure deliberately. The bar tidies itself away while a page is
-  read and the action does not, so the action is a permanent object over a page still being
-  scrolled — and at the bar's opacity it reads as a slab parked on the page rather than as a control
-  floating above it. The two states match because the transparency is a property of the button, not
+- **The action's ground is 0.94 in both states, the bar's own figure.** It was 0.84 until
+  2026-10-05, ten points under the bar, on the argument that a permanent object over a scrolling
+  page read as a slab parked on it at the bar's opacity. On the 411dp cover screen that was too
+  thin — a card heading ran straight through the button's label — so it was raised to the bar's.
+  **That is the base colour only:** `ActionFrost` is multiplied over it where the button is drawn,
+  and was 0.66, which left the button about 0.62 opaque and a heading still readable through it.
+  It is **0.92** now (2026-10-05), so the button is close to solid; blocked and solid-surfaces
+  states draw `Glass.solid` of their colour, because the theme's own surface colour is see-through. `actionFill` and
+  `actionAuroraBase` carry the same figure deliberately. The two states match because the transparency is a property of the button, not
   of one of its states: a button that changed weight the moment a run started would report the run
   twice, once in a way nobody could name. Only the grounds carry it — `onAction` stays opaque so the
   label survives whatever scrolls behind, and the `actionAurora` circles are the light *inside* the
@@ -508,7 +513,7 @@ Detailed documentation lives in [`docs/`](docs/):
   aurora's own order, rather than a fourth set invented for the edge — derived per page from the
   seed table rather than written out five times, so the relationship between a page's fill, edge and
   aurora is stated once.
-- **The edge is 0.74 against the ground's 0.84, and its hues run about a third under the aurora's.**
+- **The edge is 0.74 against the ground's 0.94, and its hues run about a third under the aurora's.**
   It shipped opaque and full-strength on the argument that an edge letting the page through stops
   holding the shape — which was wrong on the device: it read as a bright cyan wire around the button,
   the loudest thing on a dark page and competing with the label it was meant to frame. The shape
@@ -530,6 +535,39 @@ Detailed documentation lives in [`docs/`](docs/):
   floating edge in the app, gradient or not — the bar sits directly under the action on a compact
   screen, and an edge thicker on one of them would read as the two not matching rather than as one
   of them being the control. The colour is what separates them.
+- **Motion has one curve, one press, and a switch.** Written 2026-10-05 from an audit against the
+  Emil Kowalski and Apple motion notes. `UiEase` in `DesignSystem.kt` is the curve every tween names
+  (Compose's `FastOutSlowIn` starts gently, which is exactly when a finger is watching);
+  `ExpandIn` / `CollapseOut` are how every disclosure opens and closes (200ms in, 140ms out), and the
+  status line uses the same pair. `pressScale` is what every pressable does the moment a finger
+  lands — 0.97, about 100ms — read in the layer's lambda so a press recomposes nothing; the caller
+  owns the `InteractionSource` and hands the same one to its `clickable` or `Surface`. A new button
+  uses it. `LocalReduceMotion` is the system's animation scale read at `AppRoot` (and again on every
+  resume, because the setting lives in another app): the model's breathing, the action's drifting
+  light and the press all hold still when it is on, because Compose's own transitions follow the
+  system scale but loops this app draws itself do not. `LocalSolidSurfaces` is the same plus
+  high-contrast text, and makes the frosted bar and the action solid — Android has no public
+  "reduce transparency" flag, so this is a best-effort reading of the two settings that ask for the
+  same thing. A pill off screen draws its resting self (`onGloballyPositioned` against the window),
+  so a page of twenty cards is not running twenty clocks. **Predictive back is on** in the manifest.
+- **A removal says so after the fact instead of asking first, where it can be undone.** Removing a
+  position (`deletePosition`) and deleting a wording rule offer Undo on the status line for ten
+  seconds, using the existing `StatusUndo`; the position card closes up before the removal runs so
+  the rows below slide into the gap. Both undos save the record again *newer than the burial*, which
+  is what makes the sync channel agree. **Deleting an analysis keeps its dialog**, and so do delete
+  all, restore from a backup and removing the API key: deleting a report also deletes its messages
+  from the Telegram sync channel, so there is nothing local to put back.
+- **The page fades where it meets the header and the gesture strip, and holds a revealed card clear
+  of the bar.** `fadeEdges` in `DesignSystem.kt` masks the edges of a scrolling column — nothing at
+  rest, the top only once something has scrolled past it, the foot only while there is more under
+  it. `Screen` also installs a `BringIntoViewResponder` that adds the bar's footprint to the bottom
+  of any rect asked to be shown, so a trade revealed from a notification does not end with its Sold
+  button under the bar. The accent edge of a `SectionCard` runs the card's whole height, not its
+  content's, so a card stretched to match its neighbour keeps its stripe to the foot.
+- **The model line on a report card is two lines, each one line.** It was one, "always", because
+  wrapped it snapped mid-word. Split into the model (middle-ellipsised, so its version suffix
+  survives) and the run time (its own line), nothing wraps and the date that tells two runs apart is
+  never the part cut off.
 - **Every pill in the app is one shape and one of two heights**, `PillShape` and `LabelPillHeight`
   / `PillHeight` in `DesignSystem.kt`. Before 2026-09-11 they were all `CircleShape` at whatever
   height their own padding produced, which is what the owner reported as pills "too rounded" and

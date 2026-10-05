@@ -614,6 +614,7 @@ internal fun ChartControls(
                 label = "Levels",
                 selected = levels,
                 onClick = { onLevels(!levels) },
+                toggle = true,
             )
         }
     }

@@ -424,14 +424,51 @@ private fun ColumnHeader() {
  */
 @Composable
 private fun HeaderLabel(label: String, modifier: Modifier, align: TextAlign) {
-    AutoSizeText(
-        label,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        textAlign = align,
-        modifier = modifier.fillMaxWidth().padding(horizontal = Space.xs),
-    )
+    // At a large system font the shrink reaches its floor and "Target 1" and "Target 2" both end
+    // in the same `Targe…`, which is two columns the reader can no longer tell apart (seen at 1.6x,
+    // 2026-10-05). Above that scale a name made of two words is stacked, one word to a line, each
+    // still shrinking on its own; at ordinary sizes it stays the single line it always was.
+    val large = LocalDensity.current.fontScale > StackHeadersAbove
+    val words = label.split(' ')
+    // A single long word cannot be stacked, so at a large font it is abbreviated instead of cut
+    // to `Supp…` / `Resis…`, which left two columns still guessed at from their figures.
+    val label = if (large) {
+        when (label) {
+            "Support" -> "Sup."
+            "Resistance" -> "Res."
+            else -> label
+        }
+    } else {
+        label
+    }
+    if (large && words.size > 1) {
+        Column(
+            modifier.fillMaxWidth().padding(horizontal = Space.xs),
+            horizontalAlignment = if (align == TextAlign.Start) Alignment.Start else Alignment.End,
+        ) {
+            words.forEach { word ->
+                AutoSizeText(
+                    word,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = align,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    } else {
+        AutoSizeText(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = align,
+            modifier = modifier.fillMaxWidth().padding(horizontal = Space.xs),
+        )
+    }
 }
+
+/** The system font scale past which a two-word column name is stacked on two lines. */
+private const val StackHeadersAbove = 1.15f
 
 @Composable
 private fun CallRow(
@@ -701,7 +738,9 @@ private fun ContextLine(point: RecommendationDataPoint) {
 
 /** Entry midpoint to target 1, over the distance to the stop. Null where the levels do not say. */
 private fun riskReward(point: RecommendationDataPoint): String? =
-    point.riskRewardRatio()?.let { "R:R  1 : ${"%.1f".format(it)}" }
+    // "R:R 1:1.6" and not "R:R  1 : 1.6": the spaces were four characters of a line that has to fit
+    // under a price in a column, and at a large font they were what pushed the ratio into `1 : …`.
+    point.riskRewardRatio()?.let { "R:R 1:${"%.1f".format(it)}" }
 
 private fun entry(point: RecommendationDataPoint): String {
     val low = point.buyPriceLow

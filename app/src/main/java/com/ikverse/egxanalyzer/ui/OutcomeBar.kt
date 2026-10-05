@@ -3,6 +3,9 @@ package com.ikverse.egxanalyzer.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -109,17 +112,43 @@ private fun OutcomeBar(
 ) {
     if (verdicts.judged <= 0) return
     val parts = verdicts.segments(on)
-    Box(
-        modifier
-            .fillMaxWidth()
-            .height(height)
-            .clip(RoundedCornerShape(OutcomeBarCorner))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            // The bar is a picture of the counts, so a reader that cannot see it is told them.
-            .semantics { contentDescription = verdicts.spoken() },
-    ) {
-        Row(Modifier.fillMaxWidth().fillMaxHeight()) {
-            parts.forEach { part -> Segment(part, height) }
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        // A segment too narrow to hold its count is a number that is simply missing from the bar -
+        // 31 calls "out of time" sat as an unlabelled orange sliver beside 127 stopped (seen
+        // 2026-10-05). The same width test the segment applies to itself, run here once so the
+        // counts it could not draw are said underneath instead. Only where counts are drawn at all:
+        // a bar too short to carry any is a shape, and a caption under every one would be noise.
+        val total = parts.sumOf { it.count }.coerceAtLeast(1)
+        val unlabelled = if (height >= MinCountHeight) {
+            parts.filter { maxWidth * (it.count.toFloat() / total) < MinCountWidth }
+        } else {
+            emptyList()
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(height)
+                    .clip(RoundedCornerShape(OutcomeBarCorner))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    // The bar is a picture of the counts, so a reader that cannot see it is told them.
+                    .semantics { contentDescription = verdicts.spoken() },
+            ) {
+                Row(Modifier.fillMaxWidth().fillMaxHeight()) {
+                    parts.forEach { part -> Segment(part, height) }
+                }
+            }
+            if (unlabelled.isNotEmpty()) {
+                Text(
+                    unlabelled.joinToString(" · ") { "${it.count} ${it.label}" },
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    // Hidden from the reader that already has the whole sentence above.
+                    modifier = Modifier.clearAndSetSemantics { },
+                )
+            }
         }
     }
 }

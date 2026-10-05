@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -424,7 +425,17 @@ internal fun PriceChart(
         )
         allLabels.forEachIndexed { index, label ->
             val at = Offset(boxes[index].x, boxes[index].y)
-            drawText(label.layout, color = label.color, topLeft = at)
+            // The surface's own colour drawn as a stroke first, so the dashed line under a label
+            // is cleared behind the letters and nowhere else - a plate would hide the chart.
+            drawText(
+                label.layout,
+                color = on,
+                topLeft = at,
+                drawStyle = Stroke(width = LabelOutline.toPx(), join = StrokeJoin.Round),
+            )
+            // `Fill` said outright: the paragraph keeps the style of its last draw, so without it
+            // this second pass is drawn as an outline too and every label comes out as a blob.
+            drawText(label.layout, color = label.color, topLeft = at, drawStyle = Fill)
         }
     }
 }
@@ -666,6 +677,9 @@ private val LatestDot = 3.5.dp
 
 /** Bigger than the latest dot: it is under a fingertip and has to be found by eye beside it. */
 private val TouchDot = 4.5.dp
+
+/** The outline round a chart label, in the surface's colour. Thin: it clears a line, not a box. */
+private val LabelOutline = 3.dp
 
 private val LabelInset = 2.dp
 

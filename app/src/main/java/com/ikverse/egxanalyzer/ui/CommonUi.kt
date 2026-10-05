@@ -20,7 +20,13 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.foundation.relocation.bringIntoViewResponder
+import androidx.compose.foundation.relocation.BringIntoViewResponder
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +56,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -108,6 +115,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -302,13 +314,37 @@ internal fun Screen(
     // Beside a rail there is no bar over anything and nothing to hold clear of.
     val compact = LocalWindowWidth.current == WindowWidth.COMPACT
     val barClearance = if (compact) NavBarFootprint else 0.dp
+    // What a card scrolled into view is held clear of at the foot: the bar and a gap. Without it
+    // the scroll stops with the card's bottom edge on the viewport's, which is *under* the bar, and
+    // the button at the foot of a revealed trade - Sold - was the thing hidden (seen 2026-10-05).
+    val revealClearance = with(LocalDensity.current) { (barClearance + Space.m).toPx() }
+    val clearBar = remember(revealClearance) {
+        object : BringIntoViewResponder {
+            override fun calculateRectForParent(localRect: Rect): Rect =
+                localRect.copy(bottom = localRect.bottom + revealClearance)
+
+            // Nothing to scroll here: the page's own scroll, one level up, does that with the
+            // taller rect this hands it.
+            override suspend fun bringChildIntoView(localRect: () -> Rect?) = Unit
+        }
+    }
+    val fadeBand = with(LocalDensity.current) { PageEdgeFade.toPx() }
     val page = @Composable {
         Column(
             Modifier
                 .fillMaxSize()
                 .onGloballyPositioned { viewportTop = it.positionInWindow().y }
+                // Soft where the page meets the header above and the gesture strip below, rather
+                // than sliced mid-line. Nothing is drawn faded at rest: the top fades only once
+                // something has scrolled past it, the foot only while there is more underneath.
+                .fadeEdges(
+                    fade = PageEdgeFade,
+                    top = { scroll.value / fadeBand },
+                    bottom = { (scroll.maxValue - scroll.value) / fadeBand },
+                )
                 .fadingScrollbar(scroll)
                 .verticalScroll(scroll)
+                .bringIntoViewResponder(clearBar)
                 .padding(horizontal = Space.l)
                 .padding(
                     top = Space.l,
@@ -490,6 +526,30 @@ internal val LocalTabsSettled = staticCompositionLocalOf { mutableStateOf(true) 
 internal val LocalScrollToTop = compositionLocalOf { 0 }
 
 /**
+ * Whether the system has animation switched off.
+ *
+ * Read from the animator duration scale at the root, which is where Android puts "Remove
+ * animations" - Compose's own transitions already follow it, but the loops this app draws itself do
+ * not. Anything that moves for its own sake, the model's breathing and the action's drifting light,
+ * holds still when this is true; so does a press, which is a scale all the same. Colour and opacity
+ * changes that carry meaning are left alone. Provided by [AppRoot]; false in a preview.
+ */
+internal val LocalReduceMotion = staticCompositionLocalOf { false }
+
+/** How deep the page's edges fade where content passes under the header and the gesture strip. */
+private val PageEdgeFade = 20.dp
+
+/**
+ * Whether the frosted chrome should be drawn solid.
+ *
+ * Android has no public "reduce transparency" switch, so this is a best-effort reading of the two
+ * settings that ask for the same thing: animations removed, and high-contrast text. Either one is
+ * somebody telling the phone to stop making the screen harder to read, and a bar the page shows
+ * through is the first thing that does. Provided by [AppRoot]; false in a preview.
+ */
+internal val LocalSolidSurfaces = staticCompositionLocalOf { false }
+
+/**
  * How far text sitting loose on a page is set in from the page's own edge.
  *
  * A card holds its outline at the page edge and its contents [Space.l] inside that, so every
@@ -556,7 +616,7 @@ internal fun SubSection(
                 modifier = Modifier.size(IconSize.Inline),
             )
         }
-        AnimatedVisibility(expanded) {
+        AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {
             Column(
                 Modifier.padding(bottom = Space.m),
                 verticalArrangement = Arrangement.spacedBy(Space.m),
@@ -621,8 +681,14 @@ internal fun SectionCard(
         // of the card, which is not known until everything inside it has been laid out, and a column
         // that had to reserve width for it would hold that width open on every card in the app.
         // Clipped by the card's own shape, so it takes the corner radius with it.
+        //
+        // **Full height of the card, not of what is inside it.** A card stretched to match its
+        // neighbour (Analyze's two settings cards, a row of session cards) is taller than its own
+        // content, and an edge drawn on the content stopped where the words did - halfway down the
+        // card it was meant to run the whole length of (seen 2026-10-05). Under an unbounded height,
+        // where nothing stretches, this is simply the content's height as it always was.
         Box(
-            Modifier.drawBehind {
+            Modifier.fillMaxHeight().drawBehind {
                 drawRect(hue, size = Size(AccentEdgeWidth.toPx(), size.height))
             },
         ) {
@@ -897,7 +963,7 @@ internal fun ExpandableSection(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            AnimatedVisibility(expanded) {
+            AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {
                 Column {
                     // Inside the reveal rather than above it: a closed card would otherwise carry a
                     // rule along its bottom edge with nothing under it.
@@ -1207,14 +1273,21 @@ internal fun ActionPill(
     enabled: Boolean = true,
 ) {
     val ink = MaterialTheme.colorScheme.primary
+    val press = remember { MutableInteractionSource() }
     Row(
         modifier
+            .pressScale(press)
             .minimumInteractiveComponentSize()
             .height(PillHeight)
             .border(ActionRing, ink.copy(alpha = ActionRingAlpha), PillShape)
             // After the edge, so the ripple is bounded by the pill rather than by the row.
             .clip(PillShape)
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(
+                interactionSource = press,
+                indication = LocalIndication.current,
+                enabled = enabled,
+                onClick = onClick,
+            )
             // A step under [Space.m]. The ring is tighter on its label than a capsule was, and the
             // side padding is what a pill's own edge is read against.
             .padding(horizontal = Space.s),
@@ -1283,7 +1356,8 @@ internal fun SettingsButton(
     // Ahead of Material's own `defaultMinSize`, which raises a minimum only where nothing has set
     // one - so this wins by being applied first, and the button is not fighting a 40dp floor it can
     // never get under.
-    val sized = modifier.heightIn(min = PillHeight)
+    val press = remember { MutableInteractionSource() }
+    val sized = modifier.pressScale(press).heightIn(min = PillHeight)
     val padding = PaddingValues(horizontal = Space.m)
     // The row is held rather than passed through: `ProvideTextStyle` takes a plain composable, so
     // inside it the button's own `RowScope` is out of scope and an icon's `align` would not resolve.
@@ -1292,9 +1366,15 @@ internal fun SettingsButton(
         ProvideTextStyle(MaterialTheme.typography.labelMedium) { row.content() }
     }
     if (filled) {
-        Button(onClick, sized, enabled, shape = PillShape, contentPadding = padding, content = label)
+        Button(
+            onClick, sized, enabled,
+            shape = PillShape, contentPadding = padding, interactionSource = press, content = label,
+        )
     } else {
-        OutlinedButton(onClick, sized, enabled, shape = PillShape, contentPadding = padding, content = label)
+        OutlinedButton(
+            onClick, sized, enabled,
+            shape = PillShape, contentPadding = padding, interactionSource = press, content = label,
+        )
     }
 }
 
@@ -1313,12 +1393,14 @@ internal fun DisclosureButton(
     onClick: () -> Unit,
 ) {
     val ink = MaterialTheme.colorScheme.primary
+    val press = remember { MutableInteractionSource() }
     Row(
         modifier
+            .pressScale(press)
             .minimumInteractiveComponentSize()
             .height(PillHeight)
             .clip(PillShape)
-            .clickable(onClick = onClick)
+            .clickable(interactionSource = press, indication = LocalIndication.current, onClick = onClick)
             .padding(horizontal = Space.s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.xs),
@@ -1388,12 +1470,15 @@ internal fun OutlinePill(
             content = label,
         )
     } else {
+        val press = remember { MutableInteractionSource() }
         Surface(
             onClick = onClick,
+            modifier = Modifier.pressScale(press),
             color = Color.Transparent,
             contentColor = textColor,
             shape = PillShape,
             border = ring,
+            interactionSource = press,
             content = label,
         )
     }
@@ -1424,7 +1509,15 @@ internal fun FilledPill(
             PillLabel(text)
         }
     } else {
-        Surface(onClick = onClick, color = container, contentColor = content, shape = PillShape) {
+        val press = remember { MutableInteractionSource() }
+        Surface(
+            onClick = onClick,
+            modifier = Modifier.pressScale(press),
+            color = container,
+            contentColor = content,
+            shape = PillShape,
+            interactionSource = press,
+        ) {
             PillLabel(text)
         }
     }
@@ -1447,19 +1540,31 @@ internal fun CompactFilterChip(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * A switch rather than one of a set: drawn outlined in the page's own colour with a tick when
+     * on, so it cannot be mistaken for the range that is chosen beside it. Two chips filled alike
+     * said the same thing about two different kinds of choice.
+     */
+    toggle: Boolean = false,
 ) {
-    val ink = if (selected) {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
+    val ink = when {
+        toggle && selected -> MaterialTheme.colorScheme.primary
+        selected -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
+    val press = remember { MutableInteractionSource() }
     Surface(
         onClick = onClick,
-        modifier = modifier.minimumInteractiveComponentSize(),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        modifier = modifier.pressScale(press).minimumInteractiveComponentSize(),
+        color = if (selected && !toggle) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
         contentColor = ink,
-        border = if (selected) null else BorderStroke(ChipOutline, MaterialTheme.colorScheme.outline),
+        border = when {
+            toggle && selected -> BorderStroke(ChipOutline, MaterialTheme.colorScheme.primary)
+            selected -> null
+            else -> BorderStroke(ChipOutline, MaterialTheme.colorScheme.outline)
+        },
         shape = PillShape,
+        interactionSource = press,
     ) {
         Box(
             // PillPaddingH, not Space.s: the same tight ring every label pill in the app already
@@ -1468,12 +1573,24 @@ internal fun CompactFilterChip(
             Modifier.height(PillHeight).padding(horizontal = PillPaddingH),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
+                if (toggle && selected) {
+                    Icon(
+                        Icons.Outlined.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(IconSize.Hint),
+                    )
+                }
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -1719,7 +1836,7 @@ internal fun Figure(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(value, style = valueStyle, color = tone, textAlign = TextAlign.Start)
+        Text(tightPoint(value), style = valueStyle, color = tone, textAlign = TextAlign.Start)
         val note = caption ?: on?.let(AppDates.DayMonth::format)
         if (note != null) {
             Text(
@@ -1727,6 +1844,28 @@ internal fun Figure(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/**
+ * A figure with its decimal point drawn closer to its digits.
+ *
+ * The figures face is monospaced, which gives the point a whole digit's width of its own: 52.3
+ * reads as "52 . 3" and the eye takes it for two numbers. The point and the digit before it each
+ * give back a little advance, so the figure holds together while every digit keeps its column.
+ * Applied to [Figure] only - the hero figures are drawn elsewhere and are left as they were.
+ */
+internal fun tightPoint(text: String): AnnotatedString = buildAnnotatedString {
+    text.forEachIndexed { index, char ->
+        val digitBeforePoint = char.isDigit() && text.getOrNull(index + 1) == '.' &&
+            text.getOrNull(index + 2)?.isDigit() == true
+        val point = char == '.' && text.getOrNull(index - 1)?.isDigit() == true &&
+            text.getOrNull(index + 1)?.isDigit() == true
+        if (digitBeforePoint || point) {
+            withStyle(SpanStyle(letterSpacing = (-0.12).em)) { append(char) }
+        } else {
+            append(char)
         }
     }
 }
@@ -1958,10 +2097,10 @@ internal fun HoldPrompt(title: String, actions: List<HoldAction>, onDismiss: () 
         ) {
             AnimatedVisibility(
                 visible = visible,
-                enter = fadeIn(tween(HoldPromptEnterMs)) +
-                    scaleIn(initialScale = 0.85f, animationSpec = tween(HoldPromptEnterMs)),
-                exit = fadeOut(tween(HoldPromptExitMs)) +
-                    scaleOut(targetScale = 0.85f, animationSpec = tween(HoldPromptExitMs)),
+                enter = fadeIn(tween(HoldPromptEnterMs, easing = UiEase)) +
+                    scaleIn(initialScale = 0.85f, animationSpec = tween(HoldPromptEnterMs, easing = UiEase)),
+                exit = fadeOut(tween(HoldPromptExitMs, easing = UiEase)) +
+                    scaleOut(targetScale = 0.85f, animationSpec = tween(HoldPromptExitMs, easing = UiEase)),
             ) {
                 Column(
                     Modifier
