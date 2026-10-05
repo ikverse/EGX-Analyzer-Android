@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>EGX chart</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; -webkit-tap-highlight-color: transparent; }
+  #chart { position: absolute; inset: 0; touch-action: none; }
+  #empty { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font: 14px Roboto, sans-serif; color: #868993; display: none; }
+</style>
+</head>
+<body>
+<div id="chart"></div>
+<div id="empty">No sessions stored in this range.</div>
+<script src="klinecharts.min.js"></script>
+<script>
+  // The app draws the controls and owns the data; this page only draws. Everything it is told arrives through egxChart.setData.
+  var PANE = 'candle_pane';
+  var FONT = 'Roboto, "Helvetica Neue", Arial, sans-serif';
+  var theme = null, lineMode = false, manual = false, lastRows = [], lastLevels = [], showLevels = true, lastCalls = [], lastKey = null;
+  var chart = klinecharts.init('chart', { locale: 'en-US' });
+  try { chart.setTimezone('UTC'); } catch (e) { /* the app sends each session at noon UTC, so the day is the same in every timezone anyway */ }
+
+  // A session is a day, so the crosshair and the tooltip say the day and not the hour the library would append.
+  chart.setCustomApi({
+    formatDate: function (dtf, timestamp, format, type) {
+      var p = {};
+      dtf.formatToParts(new Date(timestamp)).forEach(function (x) { p[x.type] = x.value; });
+      var tokens = { YYYY: p.year, MM: p.month, DD: p.day, HH: p.hour, mm: p.minute };
+      if (type !== klinecharts.FormatDateType.XAxis) format = format.replace(' HH:mm', '');
+      return format.replace(/YYYY|MM|DD|HH|mm/g, function (t) { return tokens[t]; });
+    }
+  });
+
+  // Carries the level prices to the price axis so the scale fits them. Drawn in no colour and listed nowhere: the lines themselves are overlays.
+  var KEYS = ['v0', 'v1', 'v2', 'v3', 'v4', 'v5'];
+  var fit = [];
+  klinecharts.registerIndicator({
+    name: 'FIT', shortName: '', series: 'price', calcParams: [],
+    figures: KEYS.map(function (k) { return { key: k, title: '', type: 'line', styles: function () { return { color: 'rgba(0,0,0,0)', size: 0 }; } }; }),
+    calc: function (list) {
+      return list.map(function () {
+        var row = {};
+        fit.forEach(function (v, i) { row[KEYS[i]] = v; });
+        return row;
+      });
+    },
+    createTooltipDataSource: function () { return { name: '', calcParamsText: '', legends: [], features: [] }; }
+  });
+  chart.createIndicator('FIT', true, { id: PANE });
+  chart.createIndicator({ name: 'VOL', calcParams: [] }, false, { height: 70, minHeight: 40 });
+
+  // A ring where a call was made.
+  klinecharts.registerOverlay({
+    name: 'callMark', totalStep: 2, lock: true, needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: false,
+    createPointFigures: function (o) {
+      var c = o.coordinates[0];
+      return [{ type: 'circle', attrs: { x: c.x, y: c.y - 10, r: 5 }, styles: { style: 'stroke_fill', color: theme ? theme.bg : '#000', borderColor: theme ? theme.muted : '#868993', borderSize: 1.5 } }];
+    }
+  });
+
+  function applyTheme(t) {
+    theme = t;
+    document.body.style.background = t.bg;
+    var LINE = { style: 'solid', smooth: false, size: 1, dashedValue: [2, 2] };
+    chart.setStyles({
+      grid: { horizontal: { color: t.rule }, vertical: { color: t.rule } },
+      candle: {
+        type: lineMode ? 'area' : 'candle_solid',
+        bar: { upColor: t.up, downColor: t.down, noChangeColor: t.muted, upBorderColor: t.up, downBorderColor: t.down, noChangeBorderColor: t.muted, upWickColor: t.up, downWickColor: t.down, noChangeWickColor: t.muted },
+        area: { lineSize: 2, lineColor: t.line, smooth: false, backgroundColor: [{ offset: 0, color: 'rgba(0,0,0,0)' }, { offset: 1, color: 'rgba(0,0,0,0)' }] },
+        priceMark: {
+          high: { color: t.muted, textFamily: FONT }, low: { color: t.muted, textFamily: FONT },
+          last: { upColor: t.up, downColor: t.down, noChangeColor: t.muted, line: { style: 'dashed' }, text: { family: FONT } }
+        },
+        tooltip: { text: { color: t.muted, family: FONT } }
+      },
+      indicator: {
+        bars: [{ upColor: t.up + '80', downColor: t.down + '80', noChangeColor: t.muted }],
+        lines: [Object.assign({ color: t.line }, LINE)],
+        tooltip: { text: { color: t.muted, family: FONT } }
+      },
+      xAxis: { axisLine: { color: t.rule }, tickLine: { color: t.rule }, tickText: { color: t.muted, family: FONT } },
+      yAxis: { axisLine: { color: t.rule }, tickLine: { color: t.rule }, tickText: { color: t.muted, family: FONT } },
+      separator: { color: t.rule },
+      crosshair: {
+        horizontal: { line: { color: t.muted }, text: { backgroundColor: t.rule, color: t.text, borderColor: t.rule, family: FONT } },
+        vertical: { line: { color: t.muted }, text: { backgroundColor: t.rule, color: t.text, borderColor: t.rule, family: FONT } }
+      }
+    });
+  }
+
+  function clear(group) { try { chart.removeOverlay({ groupId: group }); } catch (e) {} }
+
+  function levelColor(kind) {
+    return { stop: theme.stop, target: theme.target, entry: theme.entry, paid: theme.paid }[kind] || theme.muted;
+  }
+
+  // Draws every level where it really is. One the scale does not reach - past the cap in the auto-fit, or off the screen after the axis
+  // has been dragged - is pinned to the edge it passed and marked with an arrow, which is what the native chart does too.
+  function drawLevels() {
+    clear('levels');
+    if (!showLevels || !lastRows.length) return;
+    var size = null;
+    try { size = chart.getSize(PANE, 'main'); } catch (e) {}
+    if (!size) return;
+    var ts = lastRows[lastRows.length - 1].timestamp;
+    var edge = 14;
+    lastLevels.forEach(function (l) {
+      var value = l.price, label = l.label;
+      try {
+        var y = chart.convertToPixel({ value: l.price }, { paneId: PANE }).y;
+        if (y < edge) { value = chart.convertFromPixel({ y: edge }, { paneId: PANE }).value; label = '↑ ' + label; }
+        else if (y > size.height - edge) { value = chart.convertFromPixel({ y: size.height - edge }, { paneId: PANE }).value; label = '↓ ' + label; }
+      } catch (e) {}
+      var color = levelColor(l.kind);
+      var solid = l.kind === 'paid';
+      chart.createOverlay({
+        name: 'horizontalStraightLine', groupId: 'levels', lock: true, points: [{ timestamp: ts, value: value }],
+        styles: { line: { color: color, size: 1, style: solid ? 'solid' : 'dashed', dashedValue: [4, 4] } }
+      });
+      chart.createOverlay({
+        name: 'simpleTag', groupId: 'levels', lock: true, extendData: label, points: [{ timestamp: ts, value: value }],
+        styles: { text: { color: '#ffffff', backgroundColor: color, borderColor: color }, line: { color: color } }
+      });
+    });
+  }
+
+  function drawCalls() {
+    clear('calls');
+    var wanted = {};
+    lastCalls.forEach(function (t) { wanted[t] = true; });
+    lastRows.forEach(function (r) {
+      if (wanted[r.timestamp]) chart.createOverlay({ name: 'callMark', groupId: 'calls', lock: true, points: [{ timestamp: r.timestamp, value: lineMode ? r.close : r.high }] });
+    });
+  }
+
+  var queued = false;
+  function redrawSoon() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () { queued = false; drawLevels(); });
+  }
+
+  // The scale may grow to fit the levels, but only so far: honouring a target the stock has been nowhere near would squash the candles
+  // into a line. Past the cap a level is left out of the fit and pinned instead.
+  function fitValues(rows, levels, growth) {
+    var lo = Infinity, hi = -Infinity;
+    rows.forEach(function (r) { if (r.low < lo) lo = r.low; if (r.high > hi) hi = r.high; });
+    var span = (hi - lo) || hi * 0.02 || 1, room = span * (growth - 1) / 2;
+    return levels.map(function (l) { return l.price; }).filter(function (p) { return p >= lo - room && p <= hi + room; }).slice(0, KEYS.length);
+  }
+
+  function setData(d) {
+    applyTheme(d.theme);
+    var rows = (d.candles || []).map(function (c) { return { timestamp: c[0], open: c[1], high: c[2], low: c[3], close: c[4], volume: c[5] }; });
+    document.getElementById('empty').style.display = rows.length ? 'none' : 'block';
+    lineMode = !!d.line; showLevels = !!d.showLevels; lastRows = rows; lastCalls = d.calls || []; lastLevels = d.levels || [];
+    // Another range, another mode or another stock starts on the auto-fit again; the same chart redrawn keeps the reader's own scale.
+    var another = d.key !== lastKey;
+    lastKey = d.key;
+    fit = showLevels ? fitValues(rows, lastLevels, d.growth || 2.5) : [];
+    chart.setStyles({ candle: { type: lineMode ? 'area' : 'candle_solid' } });
+    chart.overrideIndicator({ name: 'FIT', calcParams: [] }); // forces the carried prices to be taken again
+    chart.applyNewData(rows);
+    if (another) autoScale();
+    drawCalls();
+    drawLevels();
+    redrawSoon();
+  }
+
+  // Back to the auto-fit. The library keeps a scale the reader dragged to until it is told to calculate again, and stating the axis type is
+  // what tells it (the same thing its own double click on the axis does).
+  function autoScale() {
+    manual = false;
+    try { chart.setStyles({ yAxis: { type: 'normal' } }); } catch (e) {}
+  }
+
+  // What a double tap on the axis does in TradingView.
+  function refit() {
+    autoScale();
+    drawCalls();
+    drawLevels();
+    redrawSoon();
+  }
+
+  window.egxChart = { setData: setData, refit: refit, isManual: function () { return manual; } };
+
+  try { chart.subscribeAction('onVisibleRangeChange', redrawSoon); } catch (e) {}
+  var box = document.getElementById('chart');
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(function () { try { chart.resize(); } catch (e) {} redrawSoon(); }).observe(box);
+
+  // --- The price axis, by finger. The library scales it for a mouse dragged up or down along it, but not for a touch, so a finger on the
+  // axis is handed to it as the same drag. Touching the axis switches to the reader's own scale; a double tap goes back to the auto-fit.
+  var axisWidth = function () { try { return chart.getSize(PANE, 'yAxis').width || 60; } catch (e) { return 60; } };
+  var drag = null, lastTap = 0;
+  function mouse(type, target, t) {
+    target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: t.clientX, clientY: t.clientY, screenX: t.screenX, screenY: t.screenY, button: 0, buttons: type === 'mouseup' ? 0 : 1 }));
+  }
+  box.addEventListener('touchstart', function (e) {
+    var t = e.touches[0], r = box.getBoundingClientRect();
+    if (e.touches.length !== 1 || t.clientX < r.right - axisWidth() || t.clientY > r.top + chart.getSize(PANE, 'main').height) { drag = null; return; }
+    e.preventDefault(); e.stopPropagation();
+    var now = Date.now();
+    if (now - lastTap < 300) { lastTap = 0; drag = null; refit(); return; }
+    lastTap = now;
+    var target = document.elementFromPoint(t.clientX, t.clientY);
+    if (!target) return;
+    drag = { target: target, moved: false };
+    mouse('mousedown', target, t);
+  }, { capture: true, passive: false });
+  box.addEventListener('touchmove', function (e) {
+    if (!drag) return;
+    e.preventDefault(); e.stopPropagation();
+    drag.moved = true; manual = true;
+    mouse('mousemove', drag.target, e.touches[0]);
+    redrawSoon();
+  }, { capture: true, passive: false });
+  function endDrag(e) {
+    if (!drag) return;
+    e.preventDefault(); e.stopPropagation();
+    var t = (e.changedTouches && e.changedTouches[0]) || { clientX: 0, clientY: 0, screenX: 0, screenY: 0 };
+    mouse('mouseup', drag.target, t);
+    drag = null;
+    redrawSoon();
+  }
+  box.addEventListener('touchend', endDrag, { capture: true, passive: false });
+  box.addEventListener('touchcancel', endDrag, { capture: true, passive: false });
+  // The same on a desktop, for trying the page in a browser: dragging the axis is the library's own, a double click goes back to the auto-fit, which the library does itself.
+  box.addEventListener('mousemove', function (e) { if (e.buttons === 1) { var r = box.getBoundingClientRect(); if (e.clientX >= r.right - axisWidth()) { manual = true; redrawSoon(); } } }, true);
+  box.addEventListener('dblclick', function (e) { var r = box.getBoundingClientRect(); if (e.clientX >= r.right - axisWidth()) { manual = false; redrawSoon(); } }, true);
+</script>
+</body>
+</html>

@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -196,7 +197,7 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
                 .padding(top = Space.s, bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            StockSheetPrice(latest, history, chartLevels, callDates, appState.pages)
+            StockSheetPrice(key, latest, history, chartLevels, callDates, appState.pages)
             if (score != null) StockSheetRecord(score)
             if (trades.isNotEmpty()) {
                 StockSheetTrades(trades) { id ->
@@ -467,6 +468,7 @@ private fun StockChip(label: String, container: Color, content: Color) {
  */
 @Composable
 private fun StockSheetPrice(
+    ticker: String,
     latest: LatestPrice?,
     history: List<DailySession>,
     levels: ChartLevels?,
@@ -492,19 +494,55 @@ private fun StockSheetPrice(
     // on what is drawn rather than a rule anybody had to write. A reading the reader took on
     // purpose is theirs until they ask a different question.
     var touched by remember(visible) { mutableStateOf<DailySession?>(null) }
+    var expanded by remember { mutableStateOf(false) }
     SheetSection {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             SheetSectionLabel("Where it stands")
-            // What the visible line adds up to, which is the one thing its shape cannot say: the
-            // same climb is three percent or forty depending on a scale the chart deliberately
-            // does not print.
-            if (move != null) {
-                Text(
-                    formatPercent(move),
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-                    color = PriceRole.forReturn(move),
-                )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // What the visible line adds up to, which is the one thing its shape cannot say: the
+                // same climb is three percent or forty depending on a scale the chart deliberately
+                // does not print.
+                if (move != null) {
+                    Text(
+                        formatPercent(move),
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                        color = PriceRole.forReturn(move),
+                    )
+                }
+                // The same chart on the whole screen, with candles and a scale the reader can drag.
+                // Offered only where there is a line to expand.
+                if (history.count { it.close != null } > 1) {
+                    Text(
+                        "Expand",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .clip(PillShape)
+                            .clickable { expanded = true }
+                            .padding(horizontal = Space.s, vertical = Space.xs),
+                    )
+                }
             }
+        }
+        if (expanded) {
+            ExpandedChart(
+                ticker = ticker,
+                history = history,
+                levels = levels,
+                calls = calls.keys,
+                range = range,
+                onRange = { range = it },
+                showLevels = showLevels,
+                onLevels = { showLevels = it },
+                onClose = { expanded = false },
+            )
         }
         if (visible.count { it.close != null } > 1) {
             // An extra `Space.xs` on top of the section's own gap - 8dp total rather than 4 - so

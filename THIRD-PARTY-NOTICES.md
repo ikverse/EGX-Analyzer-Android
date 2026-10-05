@@ -66,3 +66,12 @@ under the same name.
 
 `ARVA` (Arab Valves) has no logo published by any of these sources. It draws the monogram fallback
 in `StockLogo.kt`, as does any ticker a later catalog refresh introduces.
+
+## KLineChart
+
+The expanded chart on the stock sheet is drawn by [KLineChart](https://github.com/klinecharts/KLineChart)
+9.8.12, bundled unchanged as `app/src/main/assets/chart/klinecharts.min.js`. It is licensed under the
+**Apache License, Version 2.0** (<https://www.apache.org/licenses/LICENSE-2.0>), which permits
+bundling and redistribution and asks that the licence and the copyright notice travel with it. The
+notice (© 2019 lihu) is the header comment at the top of that file, which is left in place for that
+reason. The same file, at the same version, is bundled by Signal Lab.
