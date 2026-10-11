@@ -31,8 +31,8 @@ import java.time.format.DateTimeFormatter
  */
 internal val GeneratedPromptNote = infoNote(
     "Prompt",
-    "Generated from the prompt this app version ships, plus the wording you switched on in " +
-        "Analysis rules.",
+    "Generated from the prompt this app version ships, plus the wording you switched on under " +
+        "Wording.",
     "Editing a rule generates a new version; the old ones stay readable.",
 )
 

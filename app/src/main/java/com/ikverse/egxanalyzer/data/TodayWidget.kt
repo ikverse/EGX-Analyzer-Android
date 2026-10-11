@@ -28,6 +28,7 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.ikverse.egxanalyzer.MainActivity
+import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.SessionDigest
 import com.ikverse.egxanalyzer.ui.AppDates
 import java.time.LocalDate
@@ -57,7 +58,7 @@ class TodayWidget : GlanceAppWidget() {
         val store = LocalDataStore(context)
         // Thirty days back, which is what `session_events` keeps. The newest row is the answer; the
         // range only has to be wide enough to contain it on a phone that has been shut for a while.
-        val today = LocalDate.now()
+        val today = LocalDate.now(ScheduleClock.ZONE)
         val digest = runCatching {
             store.sessionEvents(today.minusDays(30), today).maxByOrNull(SessionDigest::date)
         }.getOrNull()

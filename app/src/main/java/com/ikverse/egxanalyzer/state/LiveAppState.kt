@@ -7,6 +7,7 @@ import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import com.ikverse.egxanalyzer.data.JobScheduler
 import com.ikverse.egxanalyzer.data.RequestTrace
 import com.ikverse.egxanalyzer.data.saveToDownloads
+import com.ikverse.egxanalyzer.data.saveRankingToDownloads
 import com.ikverse.egxanalyzer.data.stageExport
 import com.ikverse.egxanalyzer.data.exportIntent
 import com.ikverse.egxanalyzer.data.CrashLog
@@ -21,13 +22,13 @@ import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppState
 import com.ikverse.egxanalyzer.ui.AppUpdates
 import com.ikverse.egxanalyzer.ui.CallText
-import com.ikverse.egxanalyzer.ui.EGX_ZONE
 import com.ikverse.egxanalyzer.ui.NavStack
 import com.ikverse.egxanalyzer.ui.NavStop
 import com.ikverse.egxanalyzer.ui.PageState
 import com.ikverse.egxanalyzer.ui.PriceRefreshOutcome
 import com.ikverse.egxanalyzer.ui.StatusMessage
 import com.ikverse.egxanalyzer.ui.StatusStage
+import com.ikverse.egxanalyzer.ui.TelegramSourceLoad
 import com.ikverse.egxanalyzer.ui.StatusUndo
 import com.ikverse.egxanalyzer.ui.dayWord
 import com.ikverse.egxanalyzer.ui.formatPercent
@@ -153,6 +154,9 @@ import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import com.ikverse.egxanalyzer.model.ThemeMode
 import com.ikverse.egxanalyzer.model.TradeAlerts
 import com.ikverse.egxanalyzer.model.TradeChange
+import com.ikverse.egxanalyzer.model.WatchAlert
+import com.ikverse.egxanalyzer.model.WatchAlertFired
+import com.ikverse.egxanalyzer.model.WatchAlerts
 import com.ikverse.egxanalyzer.model.UpdateState
 import com.ikverse.egxanalyzer.model.WordingRule
 import com.ikverse.egxanalyzer.model.egxTargetSession
@@ -162,7 +166,6 @@ import com.ikverse.egxanalyzer.model.resolveAnalysisWindow
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -174,6 +177,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -210,6 +214,7 @@ private data class InitialLoad(
     val positions: List<Position>,
     val opinions: Map<String, StockOpinion>,
     val promptVersions: List<PromptVersion>,
+    val rules: List<WordingRule>,
 )
 
 class LiveAppState(
@@ -307,6 +312,8 @@ class LiveAppState(
         { _, _, _ -> },
     /** Says the daily backup cannot reach its folder; supplied like the rest. */
     private val backupFailing: () -> Unit = {},
+    /** Says a watched stock reached a level the reader named; supplied like the rest. */
+    private val watchAlertsFired: (List<WatchAlertFired>) -> Unit = {},
     /**
      * How many trades are overdue, for the launcher shortcut that counts them.
      *
@@ -547,6 +554,19 @@ class LiveAppState(
             .onFailure { statusMessage = spreadsheetFailure("write", it) }
     }
 
+    override suspend fun saveRankingToDownloads() {
+        // The whole record, not the filtered view: a file is the answer the page gives before any
+        // filter narrows it, and `performance` is that answer.
+        val channels = performance.channels
+        if (channels.isEmpty()) {
+            statusMessage = StatusMessage("Nothing is ranked yet, so there is nothing to export", succeeded = false)
+            return
+        }
+        runCatching { withContext(Dispatchers.IO) { saveRankingToDownloads(context, channels) } }
+            .onSuccess { statusMessage = StatusMessage("Saved to Downloads/$it", succeeded = true) }
+            .onFailure { statusMessage = spreadsheetFailure("save", it) }
+    }
+
     /**
      * Whether there is a table to export at all, and the toast when there is not.
      *
@@ -695,6 +715,66 @@ class LiveAppState(
             busyAnnounced = true
         }
     }
+
+    override fun startAction(block: suspend () -> Unit) {
+        appScope.launch {
+            try {
+                block()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                // Everything routed through runAction has already said its failure; this is for
+                // the actions that announce for themselves and still throw - a Telegram error out
+                // of a chat refresh used to be uncaught here and took the process with it.
+                statusMessage = StatusMessage(
+                    error.message?.takeIf(String::isNotBlank) ?: "That did not work",
+                    succeeded = false,
+                )
+            }
+        }
+    }
+
+    /**
+     * The day's backup, into the chosen folder, if one is due.
+     *
+     * Moved here from the activity on 2026-10-11 so a fold mid-write cannot be read as a failure:
+     * the activity's own scope was cancelled with it, `runCatching` caught the cancellation, and
+     * the folder was then reported unreachable with a notification to say so.
+     *
+     * Only into a chosen folder, never into Downloads - the manual button falls back there, which
+     * is right for something somebody pressed; daily, it would pile a file per day into Downloads
+     * forever. The day is recorded only on success, so a failed write is tried again on the next
+     * resume rather than counted as done. Nothing is announced on success.
+     */
+    override fun backUpIfDue() {
+        val folder = backupFolderUri ?: return
+        if (!backupDue()) return
+        if (!holdsBackupFolder(context, folder)) {
+            recordBackupOutcome(succeeded = false)
+            return
+        }
+        appScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    writeBackupTo(
+                        context = context,
+                        folder = folder,
+                        database = databaseFile(),
+                        settings = settingsDocument(),
+                        device = backupDevice(),
+                        checkpoint = ::checkpointDatabase,
+                    )
+                }
+                recordBackupDay()
+                recordBackupOutcome(succeeded = true)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                recordBackupOutcome(succeeded = false)
+            }
+        }
+    }
+
     override var inputs by mutableStateOf<List<AnalysisInput>>(emptyList())
         private set
     override var activeSourceChannelId by mutableStateOf(channels.firstOrNull { it.selected }?.id)
@@ -730,7 +810,10 @@ class LiveAppState(
      * at the same set - the filter and the prompt disagreeing about which rules are on would be
      * invisible until a report came out wrong.
      */
-    override var wordingRules by mutableStateOf(localDataStore.wordingRules())
+    // Empty until [initialDataLoaded], like the reports and the trades. Read here it was the first
+    // touch of the database in the process, which put every migration - including the sweep over
+    // a year of price rows - on the thread drawing the first frame.
+    override var wordingRules by mutableStateOf(emptyList<WordingRule>())
         private set
 
     override val ruleSet: RuleSet get() = RuleSet(wordingRules)
@@ -918,6 +1001,12 @@ class LiveAppState(
      */
     override var initialDataLoaded by mutableStateOf(false)
         private set
+
+    override suspend fun awaitInitialData() {
+        if (initialDataLoaded) return
+        snapshotFlow { initialDataLoaded }.filter { it }.first()
+    }
+
     override var analysisStatus by mutableStateOf(AnalysisStatus.IDLE)
         private set
 
@@ -1059,6 +1148,64 @@ class LiveAppState(
         private set
 
     /** Opens the sheet on one stock, from wherever its ticker was pressed. */
+    override var watchlist by mutableStateOf(settingsRepository.watchlist())
+        private set
+
+    override fun toggleWatch(ticker: String) {
+        val key = Scoring.normalizeTicker(ticker)
+        if (key.isBlank()) return
+        val next = if (key in watchlist) watchlist - key else watchlist + key
+        settingsRepository.saveWatchlist(next)
+        watchlist = next
+        statusMessage = StatusMessage(
+            if (key in next) "Watching $key" else "No longer watching $key",
+            succeeded = true,
+        )
+        // A stock just added may have no stored history at all; fetched now rather than at the
+        // next slot, the same courtesy a newly recorded trade gets.
+        if (key in next) appScope.launch { priceStocksWithNoHistory(listOf(key)) }
+    }
+
+    override var watchAlerts by mutableStateOf(settingsRepository.watchAlerts())
+        private set
+
+    override fun addWatchAlert(ticker: String, level: Double, above: Boolean) {
+        val key = Scoring.normalizeTicker(ticker)
+        if (key.isBlank() || level <= 0.0 || !level.isFinite()) return
+        val alert = WatchAlert(key, level, above)
+        val next = watchAlerts.filterNot { it == alert } + alert
+        settingsRepository.saveWatchAlerts(next)
+        watchAlerts = next
+        statusMessage = StatusMessage("$key: ${alert.label.lowercase()}", succeeded = true)
+        // Judged against the prices already in hand, so an alert set below today's close fires now
+        // rather than at the next fetch.
+        reviewWatchAlerts(performance.latestPrices)
+    }
+
+    override fun removeWatchAlert(alert: WatchAlert) {
+        val next = watchAlerts.filterNot { it == alert }
+        if (next.size == watchAlerts.size) return
+        settingsRepository.saveWatchAlerts(next)
+        watchAlerts = next
+        statusMessage = StatusMessage("Alert removed", succeeded = true)
+    }
+
+    /**
+     * Fires and forgets the alerts the latest prices have crossed.
+     *
+     * Off every recompute, which is every price fetch: the 15-minute refresh, the close sweep, the
+     * first-open fetch. One shot, like every announcement here - a fired alert is removed, so a
+     * price sitting past a level is said once rather than every quarter of an hour.
+     */
+    private fun reviewWatchAlerts(latest: Map<String, LatestPrice>) {
+        if (watchAlerts.isEmpty()) return
+        val swept = WatchAlerts.sweep(watchAlerts, latest)
+        if (swept.fired.isEmpty()) return
+        settingsRepository.saveWatchAlerts(swept.remaining)
+        watchAlerts = swept.remaining
+        watchAlertsFired(swept.fired)
+    }
+
     override fun openStock(ticker: String) {
         openStockTicker = ticker.trim().takeIf(String::isNotBlank)
     }
@@ -1262,8 +1409,9 @@ class LiveAppState(
             val searched = settingsRepository.opinionSearchEnabled()
             val windowDays = settingsRepository.opinionNewsWindowDays()
             // One date for the whole press. Read twice, a request started either side of midnight
-            // would search one window and file the answer against another.
-            val today = LocalDate.now()
+            // would search one window and file the answer against another. The exchange's day,
+            // like every other date the record is filed under.
+            val today = LocalDate.now(ScheduleClock.ZONE)
             try {
                 runAction(
                     label = "Asking about ${call.ticker}",
@@ -1815,7 +1963,7 @@ class LiveAppState(
         val held = positions
         // The exchange's own calendar, not the phone's: a user abroad must not see a trade fall
         // a day further behind simply for having crossed a time zone.
-        val today = LocalDate.now(ZoneId.of(EGX_ZONE))
+        val today = LocalDate.now(ScheduleClock.ZONE)
         // And the exchange's own close, which is a different question from the date: a window whose
         // last session ended at 14:30 is spent this afternoon, while the trade it retires only
         // starts counting days overdue tomorrow. Read once for the whole rebuild, like the date.
@@ -2071,6 +2219,7 @@ class LiveAppState(
                     positions = localDataStore.positions(),
                     opinions = localDataStore.stockOpinions(),
                     promptVersions = localDataStore.promptVersions(),
+                    rules = localDataStore.wordingRules(),
                 )
             }
             savedResults = loaded.results
@@ -2078,6 +2227,12 @@ class LiveAppState(
             positions = loaded.positions
             opinions = loaded.opinions
             promptVersions = loaded.promptVersions
+            wordingRules = loaded.rules
+            // Recomposed with the rules in hand before anything is recorded about it, so the
+            // "First run" check below compares the same prompt it always did - the one with the
+            // rules - and a launch does not write a version for the rule-less prompt the state was
+            // built with a moment ago.
+            activePrompt = composePrompt()
             selectedResult = savedResults.firstOrNull()
             initialDataLoaded = true
             // Recorded on first launch too, so the very first run has a version to name rather
@@ -2101,7 +2256,7 @@ class LiveAppState(
             }
         }
         appScope.launch {
-            val stored = localDataStore.stocks()
+            val stored = withContext(Dispatchers.IO) { localDataStore.stocks() }
             EgxCatalog.restore(stored)
             catalogMessage = "${EgxCatalog.size()} stocks available offline."
             // Only when nothing has been downloaded yet, so a launch never waits on the network.
@@ -2182,7 +2337,7 @@ class LiveAppState(
                 // Read fresh on every update rather than carried in `channels`: a toggle writes
                 // through immediately, so this is the same source whether the chat list changed
                 // because a refresh landed or because the app just started.
-                val selectedIds = localDataStore.selectedChannelIds()
+                val selectedIds = withContext(Dispatchers.IO) { localDataStore.selectedChannelIds() }
                 channels = telegramChats
                     // Private chats are conversations, not published sources: the service account
                     // and one-to-one threads can only add noise to a recommendation run.
@@ -2392,7 +2547,12 @@ class LiveAppState(
 
     /** Stores the endpoint and model without touching the credential or its verified state. */
     override fun persistModelChoice() {
-        settingsRepository.save(cloudConfiguration, null)
+        // The endpoint field writes through on every keystroke, so what is in memory when a model
+        // is picked may be half-typed. Only an endpoint the policy accepts is saved; otherwise the
+        // one already stored stands, exactly as Save and verify would have refused the typed one.
+        val stored = settingsRepository.load().endpoint
+        val endpoint = cloudConfiguration.endpoint.takeIf { EndpointPolicy.validate(it) == null } ?: stored
+        settingsRepository.save(cloudConfiguration.copy(endpoint = endpoint), null)
         cloudConfiguration = settingsRepository.load()
         publishSettings()
     }
@@ -2752,6 +2912,12 @@ class LiveAppState(
      * a quarter of an hour must not hold up a fetch the market is moving underneath.
      */
     override suspend fun runDueScheduledJobs() {
+        // A process the alarm woke is built a moment before this runs, and its reports and trades
+        // are still being read off disk on another thread. Every job below reads them - the tickers
+        // to price, the trades to re-score, the stocks to copy - and read too early they are empty:
+        // "No stocks to price" was recorded for the slot, and the harvest stamped its fire as
+        // served having copied nothing, every day, on a phone that is only ever woken at the close.
+        awaitInitialData()
         runDueMarketRefresh()
         runDueCloseSweep()
         runDueSeriesHarvest()
@@ -2941,11 +3107,12 @@ class LiveAppState(
      * and never blocks the app: a failure leaves yesterday's prices in place.
      */
     private suspend fun refreshPricesIfStale() {
-        val today = LocalDate.now(ZoneId.of(EGX_ZONE)).toString()
+        val today = LocalDate.now(ScheduleClock.ZONE).toString()
         if (settingsRepository.lastPriceRefreshDay() == today) return
         if (pricedStocks().isEmpty()) return
+        // The day is recorded inside the refresh, and only by a refresh that reached the feed.
+        // Recording it here as well counted a phone opened in a tunnel as done for the day.
         refreshPrices(announce = false)
-        settingsRepository.recordPriceRefreshDay(today)
     }
 
     /**
@@ -2994,10 +3161,10 @@ class LiveAppState(
      * and push five real days out of the seven a folder keeps.
      */
     override fun backupDue(): Boolean =
-        settingsRepository.lastBackupDay() != LocalDate.now(ZoneId.of(EGX_ZONE)).toString()
+        settingsRepository.lastBackupDay() != LocalDate.now(ScheduleClock.ZONE).toString()
 
     override fun recordBackupDay() {
-        settingsRepository.recordBackupDay(LocalDate.now(ZoneId.of(EGX_ZONE)).toString())
+        settingsRepository.recordBackupDay(LocalDate.now(ScheduleClock.ZONE).toString())
     }
 
     /**
@@ -3017,7 +3184,7 @@ class LiveAppState(
 
     /** Every stock worth a request: the ones analyses name, plus the ones actually held. */
     private fun pricedStocks(): Set<String> =
-        savedResults.recommendedTickers() + positions.map(Position::ticker)
+        savedResults.recommendedTickers() + positions.map(Position::ticker) + watchlist
 
     /**
      * The oldest session a stock still needs on disk, which is the oldest open trade in it.
@@ -3105,8 +3272,17 @@ class LiveAppState(
             // and a gap left by a phone that was not opened for a fortnight is filled rather than
             // stepped over, which is what an open trade needs to reach its deadline at all.
             val refresh = priceRepository.refresh(tickers, ::oldestOpenCall)
+            if (!refresh.reachedFeed) {
+                // Nothing answered. Not "Priced 0/120 · 120 unpriced", which reads as a feed that
+                // has never heard of 120 stocks, and not a day's work done: the day and the moment
+                // stay unrecorded, so the next slot, the close sweep and the first-open fetch all
+                // still owe this one.
+                val outcome = PriceRefreshOutcome("Could not reach the price feed", succeeded = false)
+                if (announce) statusMessage = StatusMessage(outcome.summary, succeeded = false)
+                return outcome
+            }
             settingsRepository.recordPriceRefreshDay(
-                LocalDate.now(ZoneId.of(EGX_ZONE)).toString(),
+                LocalDate.now(ScheduleClock.ZONE).toString(),
             )
             recomputePerformance()
             recomputePortfolio(announceChanges = true)
@@ -3128,6 +3304,9 @@ class LiveAppState(
                 if (refresh.rebuilt.isNotEmpty()) {
                     add("${refresh.rebuilt.size} rebuilt from hourly bars")
                 }
+                // Stocks the connection dropped before the feed could say anything. They keep
+                // their old rows and the incremental fetch asks for them again at the next slot.
+                if (refresh.unreachable.isNotEmpty()) add("${refresh.unreachable.size} unreachable")
             }
             // Composed whether or not anyone is listening, because a scheduled run has to write
             // down what it did and there is no screen to read it off.
@@ -3185,7 +3364,7 @@ class LiveAppState(
             .toList()
         if (unordered.isEmpty()) return false
         return runCatching {
-            intradayRepository.fetchMissing(unordered, LocalDate.now(ZoneId.of(EGX_ZONE)))
+            intradayRepository.fetchMissing(unordered, LocalDate.now(ScheduleClock.ZONE))
         }.getOrDefault(0) > 0
     }
 
@@ -3204,7 +3383,7 @@ class LiveAppState(
             // Beside it and not instead of it: how many days old a stock's newest price is, which
             // is what [PriceHealth] reports below, is a question about the calendar and not about
             // whether this afternoon's session has closed.
-            val today = LocalDate.now(ZoneId.of(EGX_ZONE))
+            val today = LocalDate.now(ScheduleClock.ZONE)
             val latest = localDataStore.latestSessions().mapValues { (_, session) ->
                 LatestPrice(
                     session = session,
@@ -3248,6 +3427,7 @@ class LiveAppState(
         performance = computed.first
         priceHealth = computed.second
         reviewFeedHealth(computed.second)
+        reviewWatchAlerts(computed.first.latestPrices)
         markTPlusOneTrades()
     }
 
@@ -3710,11 +3890,11 @@ class LiveAppState(
         dropLoadedTelegramSources()
     }
 
-    override suspend fun syncTelegramSources() {
+    override suspend fun syncTelegramSources(): TelegramSourceLoad {
         val selectedChannels = channels.filter(ChannelSelection::selected)
         if (selectedChannels.isEmpty()) {
             telegramSyncMessage = "Select at least one Telegram chat."
-            return
+            return TelegramSourceLoad("Select at least one Telegram chat.", succeeded = false)
         }
         val window = resolveAnalysisWindow(analysisMode, recommendationTargetDate)
         recommendationTargetDate = window.targetDate
@@ -3743,8 +3923,17 @@ class LiveAppState(
                         "Try again in a moment."
                 else -> "The selected chats have no messages."
             }
+            // A load that reached Telegram is a success whatever it found: zero messages in the
+            // window is an answer, not a fault. Only a load where nothing came back and some chat
+            // would not answer is one.
+            return TelegramSourceLoad(
+                telegramSyncMessage.orEmpty(),
+                succeeded = batch.traces.isNotEmpty() || batch.silentChats == 0,
+            )
         } catch (error: Exception) {
-            telegramSyncMessage = error.message ?: "Telegram synchronization failed."
+            val message = error.message ?: "Telegram synchronization failed."
+            telegramSyncMessage = message
+            return TelegramSourceLoad(message, succeeded = false)
         }
     }
 
@@ -3842,7 +4031,7 @@ class LiveAppState(
             recommendationTargetDate = egxTargetSession()
         }
         if (analysisMode == AnalysisMode.SPECIFIC_DATE &&
-            recommendationTargetDate.isAfter(LocalDate.now(ZoneId.of(EGX_ZONE)))
+            recommendationTargetDate.isAfter(LocalDate.now(ScheduleClock.ZONE))
         ) {
             analysisMessage = "Historical analysis can only use today or an earlier Cairo date."
             return

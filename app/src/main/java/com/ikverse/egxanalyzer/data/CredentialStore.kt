@@ -5,6 +5,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.ikverse.egxanalyzer.model.CloudProvider
+import java.security.GeneralSecurityException
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -64,19 +65,32 @@ class AndroidKeystoreCredentialStore(context: Context) : CredentialStore, NamedS
     }
 
     override fun readSecret(key: String): CharArray? {
-        val packed = preferences.getString(key, null)
-            ?.let { Base64.decode(it, Base64.NO_WRAP) }
-            ?: return null
-        if (packed.size <= IV_BYTES) return null
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(
-            Cipher.DECRYPT_MODE,
-            secretKey(),
-            GCMParameterSpec(GCM_TAG_BITS, packed.copyOfRange(0, IV_BYTES)),
-        )
-        return cipher.doFinal(packed.copyOfRange(IV_BYTES, packed.size))
-            .toString(Charsets.UTF_8)
-            .toCharArray()
+        val stored = preferences.getString(key, null) ?: return null
+        return try {
+            val packed = Base64.decode(stored, Base64.NO_WRAP)
+            if (packed.size <= IV_BYTES) return null
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                secretKey(),
+                GCMParameterSpec(GCM_TAG_BITS, packed.copyOfRange(0, IV_BYTES)),
+            )
+            cipher.doFinal(packed.copyOfRange(IV_BYTES, packed.size))
+                .toString(Charsets.UTF_8)
+                .toCharArray()
+        } catch (unreadable: GeneralSecurityException) {
+            // The Keystore key this was sealed with is gone - replaced by a fresh one in
+            // `secretKey()` after a reset, or invalidated by the system - and nothing on the
+            // device will ever open this entry again. Treated as absent rather than thrown: the
+            // caller's question was "is there a usable secret", and the answer is no. Removed so
+            // `contains` stops claiming otherwise and the user is asked to save it again.
+            removeSecret(key)
+            null
+        } catch (unreadable: IllegalArgumentException) {
+            // Not Base64. Same answer, same reason.
+            removeSecret(key)
+            null
+        }
     }
 
     override fun removeSecret(key: String) {

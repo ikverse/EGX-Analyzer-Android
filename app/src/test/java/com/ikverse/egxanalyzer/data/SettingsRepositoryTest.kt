@@ -103,6 +103,78 @@ class SettingsRepositoryTest {
         assertEquals("tablet", repository().snapshot().updatedBy)
     }
 
+    @Test
+    fun `a synced endpoint the settings field would refuse is not adopted`() {
+        val before = repository().load().endpoint
+
+        repository().adopt(
+            SettingsSnapshot(
+                preferences = repository().loadPreferences(),
+                provider = CloudProvider.QWEN,
+                providers = listOf(
+                    ProviderSettings(CloudProvider.QWEN, "https://192.168.1.5/v1", "qwen-vl-max"),
+                ),
+                useDefaultPromptOnly = false,
+                updatedAt = 5L,
+                updatedBy = "tablet",
+            ),
+        )
+
+        // The host stays what it was; the model, which carries no key anywhere, is taken.
+        assertEquals(before, repository().load().endpoint)
+        assertEquals("qwen-vl-max", repository().load().model)
+    }
+
+    @Test
+    fun `a synced endpoint the settings field would accept is adopted`() {
+        repository().adopt(
+            SettingsSnapshot(
+                preferences = repository().loadPreferences(),
+                provider = CloudProvider.QWEN,
+                providers = listOf(
+                    ProviderSettings(
+                        CloudProvider.QWEN,
+                        "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+                        "qwen-vl-max",
+                    ),
+                ),
+                useDefaultPromptOnly = false,
+                updatedAt = 5L,
+                updatedBy = "tablet",
+            ),
+        )
+
+        assertEquals("https://dashscope-us.aliyuncs.com/compatible-mode/v1", repository().load().endpoint)
+    }
+
+    @Test
+    fun `the watch list is kept across a restart and starts empty`() {
+        assertTrue(repository().watchlist().isEmpty())
+
+        repository().saveWatchlist(setOf("COMI", "AMOC"))
+
+        assertEquals(setOf("COMI", "AMOC"), repository().watchlist())
+    }
+
+    @Test
+    fun `price alerts are kept across a restart and a bad row is skipped`() {
+        repository().saveWatchAlerts(
+            listOf(
+                com.ikverse.egxanalyzer.model.WatchAlert("COMI", 12.5, above = true),
+                com.ikverse.egxanalyzer.model.WatchAlert("AMOC", 9.8, above = false),
+            ),
+        )
+        assertEquals(2, repository().watchAlerts().size)
+        assertEquals("COMI", repository().watchAlerts()[0].ticker)
+
+        context.getSharedPreferences("egx_android_settings", Context.MODE_PRIVATE)
+            .edit()
+            .putString("watch_alerts", """[{"ticker":"COMI","level":"abc"},{"ticker":"AMOC","level":9.8,"above":false}]""")
+            .commit()
+
+        assertEquals(listOf("AMOC"), repository().watchAlerts().map { it.ticker })
+    }
+
     private class NoCredentials : CredentialStore {
         override fun contains(provider: CloudProvider) = false
         override fun save(provider: CloudProvider, credential: CharArray) = Unit

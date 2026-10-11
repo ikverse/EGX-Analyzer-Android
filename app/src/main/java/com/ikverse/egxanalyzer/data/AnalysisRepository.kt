@@ -19,6 +19,7 @@ import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.UnaccountedImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -27,6 +28,7 @@ import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
 import java.io.FileInputStream
+import java.io.IOException
 import java.io.InputStream
 import java.time.Instant
 import java.time.LocalDate
@@ -141,10 +143,10 @@ class CloudAnalysisRepository(
         val startedAt = System.nanoTime()
         val config = configuration()
         val appPreferences = preferences()
-        require(config.endpoint.startsWith("https://")) { "Cloud endpoint must use HTTPS." }
+        EndpointPolicy.validate(config.endpoint)?.let { error(it) }
         require(config.model.isNotBlank()) { "Choose a cloud model." }
         val credential = credentialStore.read(config.provider)
-            ?: error("No credential is saved for ${config.provider.displayName}.")
+            ?: error("No usable API key is saved for ${config.provider.displayName}. Save it again in Settings.")
         val trace = traceFor?.invoke(request.requestId)
         try {
             val harvest = extract(request, config, appPreferences, credential, trace, onProgress)
@@ -164,9 +166,20 @@ class CloudAnalysisRepository(
                         correction = attempt,
                     ),
                 )
-                val document = consolidate(
-                    request, harvest, config, appPreferences, credential, correctionInstructions, trace,
-                )
+                val document = try {
+                    consolidate(
+                        request, harvest, config, appPreferences, credential, correctionInstructions, trace,
+                    )
+                } catch (refused: TransientProviderFailure) {
+                    // The provider refused for a moment rather than for a reason, and a refusal is
+                    // not billed. Once more after a pause; a second refusal is the run's failure,
+                    // in the provider's own words. A timeout here is deliberately not retried: it
+                    // is the longest wait in the run and the user set it.
+                    delay(retryDelayMillis(refused))
+                    consolidate(
+                        request, harvest, config, appPreferences, credential, correctionInstructions, trace,
+                    )
+                }
                 // Kept apart from the validation warnings below: these describe the answer for the
                 // record, and are not worth paying for a correction request over.
                 val notes = mutableListOf<String>()
@@ -275,6 +288,24 @@ class CloudAnalysisRepository(
     /** One answer from the provider, with what it cost. Null usage means it did not say. */
     private class CompletionResponse(val body: String, val usage: TokenUsage?)
 
+    /** Why a batch was given up on, in the words the report's diagnostics carry. */
+    private fun droppedChunkWarning(
+        chunk: Int,
+        failure: IOException,
+        preferences: AppPreferences,
+    ): String = when (failure) {
+        is SocketTimeoutException ->
+            "Chunk $chunk was dropped: the model did not answer within " +
+                "${preferences.responseTimeoutSeconds}s, twice. Raise the timeout in Settings, " +
+                "Analysis, Validation."
+        is TransientProviderFailure ->
+            "Chunk $chunk was dropped: the provider answered HTTP ${failure.status} twice. " +
+                failure.message.orEmpty()
+        else ->
+            "Chunk $chunk was dropped: the connection failed twice " +
+                "(${failure.message ?: failure.javaClass.simpleName})."
+    }
+
     private suspend fun extract(
         request: AnalysisRequest,
         config: CloudConfiguration,
@@ -338,17 +369,21 @@ class CloudAnalysisRepository(
                     request, chunk, globalRefs, harvest, config, appPreferences, credential, null,
                     trace, "chunk-$chunkNumber",
                 )
-            } catch (timeout: SocketTimeoutException) {
+            } catch (failure: IOException) {
+                // A timeout, a dropped connection, or the provider answering 429/5xx: moments
+                // rather than verdicts, and none of them billed. One more try after a pause - a
+                // chunk that fails twice is dropped and the run keeps what the others returned,
+                // which is what this loop was already written to do for a timeout alone.
                 harvest.retried = true
+                delay(retryDelayMillis(failure))
                 runCatching {
                     readChunk(
                         request, chunk, globalRefs, harvest, config, appPreferences, credential, null,
-                        trace, "chunk-$chunkNumber-timeout-retry",
+                        trace, "chunk-$chunkNumber-failure-retry",
                     )
-                }.getOrElse {
-                    harvest.warnings += "Chunk $chunkNumber was dropped: the model did not answer " +
-                        "within ${appPreferences.responseTimeoutSeconds}s, twice. Raise the timeout " +
-                        "in Settings, Analysis, Validation."
+                }.getOrElse { again ->
+                    if (again is CancellationException) throw again
+                    harvest.warnings += droppedChunkWarning(chunkNumber, failure, appPreferences)
                     null
                 }
             } ?: run {
@@ -374,25 +409,37 @@ class CloudAnalysisRepository(
                 val unread = missing.mapNotNullTo(mutableSetOf()) { plan.sourceOf[it] }
                 val again = sending.positions.filter { request.inputs[it].sourceId in unread }
                 val againRefs = again.mapNotNull(plan.referenceOf::get)
-                val second = readChunk(
-                    request, again.map(request.inputs::get), againRefs, harvest,
-                    config, appPreferences, credential,
-                    "A previous request left ${againRefs.size} of these images out of both " +
-                        "`extracted` and `excluded`. Read them again, accounting for every " +
-                        "IMAGE_REF supplied here.",
-                    trace, "chunk-$chunkNumber-retry",
-                )
+                // Guarded like the first reading: this request can time out or be refused too,
+                // and unguarded it took the run - and every chunk already paid for - with it. The
+                // first reading stands, and the cards it missed are named unaccounted below.
+                val second = runCatching {
+                    readChunk(
+                        request, again.map(request.inputs::get), againRefs, harvest,
+                        config, appPreferences, credential,
+                        "A previous request left ${againRefs.size} of these images out of both " +
+                            "`extracted` and `excluded`. Read them again, accounting for every " +
+                            "IMAGE_REF supplied here.",
+                        trace, "chunk-$chunkNumber-retry",
+                    )
+                }.getOrElse { failure ->
+                    if (failure is CancellationException) throw failure
+                    harvest.warnings += "Re-reading ${againRefs.size} missed image(s) in chunk " +
+                        "$chunkNumber failed: ${failure.message ?: "no answer"}."
+                    null
+                }
                 // The second reading replaces the first for those messages alone rather than
                 // joining it, or a chunk that merely forgot one image would contribute every other
                 // card twice. And only where it did better by them: an answer that came back
                 // worse must not take with it the cards the first one did read.
-                val before = againRefs.count(answer.cited::contains)
-                if (againRefs.count(second.cited::contains) > before) {
-                    answer.replace(
-                        unread.mapTo(mutableSetOf()) { request.telegramIdFor(it) },
-                        againRefs,
-                        second,
-                    )
+                if (second != null) {
+                    val before = againRefs.count(answer.cited::contains)
+                    if (againRefs.count(second.cited::contains) > before) {
+                        answer.replace(
+                            unread.mapTo(mutableSetOf()) { request.telegramIdFor(it) },
+                            againRefs,
+                            second,
+                        )
+                    }
                 }
             }
             harvest.adopt(answer)
@@ -682,6 +729,9 @@ class CloudAnalysisRepository(
                     JSONObject(response).optJSONObject("error")?.optString("message")
                 }.getOrNull().takeUnless { it.isNullOrBlank() }
                     ?: "Cloud request failed (HTTP $status)."
+                // A refusal the provider may withdraw in a moment is its own kind of failure, so
+                // the callers that can afford one more try know to make it.
+                if (isTransientStatus(status)) throw TransientProviderFailure(status, message)
                 error(message)
             }
             val usage = parseUsage(response)
@@ -704,10 +754,10 @@ class CloudAnalysisRepository(
      */
     override suspend fun ask(request: OpinionRequest): String = withContext(Dispatchers.IO) {
         val config = configuration()
-        require(config.endpoint.startsWith("https://")) { "Cloud endpoint must use HTTPS." }
+        EndpointPolicy.validate(config.endpoint)?.let { error(it) }
         require(request.model.isNotBlank()) { "Choose a model for Ask AI in Settings." }
         val credential = credentialStore.read(config.provider)
-            ?: error("No credential is saved for ${config.provider.displayName}.")
+            ?: error("No usable API key is saved for ${config.provider.displayName}. Save it again in Settings.")
         try {
             val deep = request.deepSearch &&
                 request.search &&
@@ -817,9 +867,9 @@ class CloudAnalysisRepository(
 
     override suspend fun listModels(): List<CloudModelInfo> = withContext(Dispatchers.IO) {
         val config = configuration()
-        require(config.endpoint.startsWith("https://")) { "Cloud endpoint must use HTTPS." }
+        EndpointPolicy.validate(config.endpoint)?.let { error(it) }
         val credential = credentialStore.read(config.provider)
-            ?: error("Save a credential for ${config.provider.displayName} first.")
+            ?: error("No usable API key is saved for ${config.provider.displayName}. Save it again in Settings.")
         var connection: HttpURLConnection? = null
         try {
             coroutineContext.ensureActive()
@@ -1251,3 +1301,33 @@ internal fun parseUsage(response: String): TokenUsage? {
 
 private fun JSONObject.firstLong(vararg names: String): Long =
     names.firstNotNullOfOrNull { name -> optLong(name).takeIf { it > 0 } } ?: 0L
+
+/**
+ * A provider answer that is a refusal for now rather than for a reason.
+ *
+ * An [IOException] so that the one `catch` around a batch covers it beside a timeout and a dropped
+ * connection: all three are moments, none is billed, and all three deserve the same single retry.
+ */
+class TransientProviderFailure(val status: Int, message: String) : IOException(message)
+
+/**
+ * Whether an HTTP status is one the provider may stop sending in a moment.
+ *
+ * 408 and 425 are the server asking for the request again, 429 is a rate limit, 5xx is the
+ * provider's own trouble. Every other 4xx is about this request - a bad key, a model that does not
+ * exist, a body it will not accept - and asking again changes nothing.
+ */
+internal fun isTransientStatus(status: Int): Boolean =
+    status == 408 || status == 425 || status == 429 || status in 500..599
+
+/**
+ * How long to wait before the one retry.
+ *
+ * Longer for a rate limit, which is counted per minute at every provider this app names, than for
+ * a connection that dropped or a server that stumbled.
+ */
+internal fun retryDelayMillis(failure: Throwable): Long =
+    if (failure is TransientProviderFailure && failure.status == 429) RATE_LIMIT_RETRY_MS else TRANSIENT_RETRY_MS
+
+internal const val RATE_LIMIT_RETRY_MS = 10_000L
+internal const val TRANSIENT_RETRY_MS = 3_000L

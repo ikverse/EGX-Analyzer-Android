@@ -43,7 +43,23 @@ data class PriceRefresh(
      * and every other place it does anything of the kind - a heal, a recorded break - says so.
      */
     val rebuilt: List<String> = emptyList(),
-)
+    /**
+     * Stocks no feed answered for at all: every request failed before an HTTP status came back.
+     *
+     * Kept apart from [unpriced], which is a feed that answered and had nothing. A phone with no
+     * signal reports every stock here and none there, and the two call for opposite responses -
+     * one is retried at the next slot, the other is a stock the feed does not carry.
+     */
+    val unreachable: List<String> = emptyList(),
+) {
+    /**
+     * Whether the feed answered for at least one stock.
+     *
+     * False means this run said nothing about prices and must not be recorded as the day's fetch.
+     * A run that asked for nothing reached the feed trivially.
+     */
+    val reachedFeed: Boolean get() = requested == 0 || unreachable.size < requested
+}
 
 /**
  * Daily highs and lows for EGX stocks.
@@ -143,13 +159,17 @@ class PriceRepository(
             priced = fetched.count { it.sessions.isNotEmpty() },
             sessionsStored = stored.size,
             // A ticker that fails is skipped rather than aborting the run: one delisted symbol
-            // should not cost the rest of the list.
-            unpriced = fetched.filter { it.sessions.isEmpty() }.map(Fetched::ticker),
+            // should not cost the rest of the list. Unpriced is a feed that answered and had
+            // nothing; a feed that never answered is reported under its own name below.
+            unpriced = fetched.filter { it.answered && it.sessions.isEmpty() }.map(Fetched::ticker),
             suspect = fetched.filter { it.breaks.isNotEmpty() }.map(Fetched::ticker),
-            stale = fetched.filter(Fetched::stale).map(Fetched::ticker),
+            // Only a feed that answered can be called stale: a phone with no signal says nothing
+            // about how old the feed's newest session is.
+            stale = fetched.filter { it.answered && it.stale }.map(Fetched::ticker),
             rebuilt = fetched
                 .filter { result -> result.sessions.any(DailySession::derived) }
                 .map(Fetched::ticker),
+            unreachable = fetched.filterNot(Fetched::answered).map(Fetched::ticker),
         )
     }
 
@@ -164,7 +184,12 @@ class PriceRepository(
          */
         val healed: Boolean,
         val stale: Boolean,
+        /** At least one feed request for this stock came back with an HTTP status. */
+        val answered: Boolean,
     )
+
+    /** What every feed for one stock returned, and whether any of them answered at all. */
+    private class FeedAnswer(val sessions: List<DailySession>, val answered: Boolean)
 
     /**
      * Fetches one stock and checks that the result is all in the same money.
@@ -186,7 +211,8 @@ class PriceRepository(
         from: LocalDate?,
         today: LocalDate,
     ): Fetched {
-        val reported = fetchAllFeeds(ticker, from, today)
+        val answer = fetchAllFeeds(ticker, from, today)
+        val reported = answer.sessions
         // The whole stored series rather than its last session alone. The boundary between disk and
         // this fetch is where a break usually falls, but it is not the only place one can be: a
         // split that happened while an earlier version of this app was storing prices is already
@@ -216,14 +242,20 @@ class PriceRepository(
         // Nothing to heal, or nothing a refetch could heal: with no stored history this fetch was
         // already the whole of it, so asking again would return the same series and cost a request.
         if (found.isEmpty() || from == null) {
-            return Fetched(ticker, days, found, healed = false, isStale(previous, days, today))
+            return Fetched(
+                ticker, days, found, healed = false, isStale(previous, days, today),
+                answered = answer.answered,
+            )
         }
 
-        val full = fetchAllFeeds(ticker, null, today)
+        val full = fetchAllFeeds(ticker, null, today).sessions
         // The refetch failed. Keep what was fetched and let the break stand: reporting a stock as
         // suspect is recoverable, and the next refresh tries again.
         if (full.isEmpty()) {
-            return Fetched(ticker, days, found, healed = false, isStale(previous, days, today))
+            return Fetched(
+                ticker, days, found, healed = false, isStale(previous, days, today),
+                answered = answer.answered,
+            )
         }
 
         return Fetched(
@@ -232,6 +264,7 @@ class PriceRepository(
             breaks = PriceSanity.breaks(ticker, full),
             healed = true,
             stale = isStale(null, full, today),
+            answered = true,
         )
     }
 
@@ -285,14 +318,15 @@ class PriceRepository(
         ticker: String,
         from: LocalDate?,
         today: LocalDate,
-    ): List<DailySession> {
+    ): FeedAnswer {
         val merged = LinkedHashMap<java.time.LocalDate, DailySession>()
+        var answered = false
         // Reversed so the live feed, listed first, overwrites the legacy rows rather than the
         // other way round.
         for (symbol in symbolMap.feedsFor(ticker).asReversed()) {
-            for (session in fetch(symbol, ticker, window(from, today))) {
-                merged[session.date] = session
-            }
+            val reply = fetch(symbol, ticker, window(from, today)) ?: continue
+            answered = true
+            for (session in reply) merged[session.date] = session
         }
         // A dated window that comes back with nothing, on a stock that has history, is the one way
         // this can be worse than the fixed range it replaced - so it falls back to that range and
@@ -300,15 +334,23 @@ class PriceRepository(
         // monthly buckets, and an explicit period is not obliged to behave any better.
         if (merged.isEmpty() && from != null) {
             for (symbol in symbolMap.feedsFor(ticker).asReversed()) {
-                for (session in fetch(symbol, ticker, "range=$FULL_RANGE")) {
-                    merged[session.date] = session
-                }
+                val reply = fetch(symbol, ticker, "range=$FULL_RANGE") ?: continue
+                answered = true
+                for (session in reply) merged[session.date] = session
             }
         }
-        return merged.values.sortedBy(DailySession::date)
+        return FeedAnswer(merged.values.sortedBy(DailySession::date), answered)
     }
 
-    private suspend fun fetch(symbol: String, ticker: String, query: String): List<DailySession> =
+    /**
+     * One feed's sessions, empty where the feed answered and had none, or **null where it never
+     * answered** - no connection, a timeout, a body that was not JSON.
+     *
+     * The distinction is the whole reason this is nullable. Collapsing the two into an empty list
+     * filed a phone with no signal under "unpriced" for every stock and recorded its fetch as done.
+     * A non-2xx status is an answer: a 404 is the feed saying it does not carry the symbol.
+     */
+    private suspend fun fetch(symbol: String, ticker: String, query: String): List<DailySession>? =
         withContext(Dispatchers.IO) {
             runCatching {
                 val url = URL("${endpointTemplate.format(symbol)}?interval=1d&$query")
@@ -325,7 +367,7 @@ class PriceRepository(
                 } finally {
                     connection.disconnect()
                 }
-            }.getOrDefault(emptyList())
+            }.getOrNull()
         }
 
     private fun parseChart(ticker: String, payload: String): List<DailySession> {

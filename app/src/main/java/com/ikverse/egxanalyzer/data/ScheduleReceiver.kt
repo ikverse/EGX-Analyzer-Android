@@ -50,6 +50,10 @@ class ScheduleReceiver : BroadcastReceiver() {
                 if (marketRefresh || closeSweep || priceSeries) {
                     ScheduledJobWorker.sweep(application)
                 }
+            } catch (error: Exception) {
+                // A Keystore that will not open, a preference that will not read: nothing here is
+                // worth taking the process down for on a boot, and there is nobody to tell. The next
+                // launch re-books from scratch.
             } finally {
                 finish.finish()
             }

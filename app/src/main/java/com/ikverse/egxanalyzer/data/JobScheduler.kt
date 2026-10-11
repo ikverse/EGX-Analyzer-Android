@@ -78,9 +78,13 @@ class JobScheduler(private val context: Context) {
         }
         // RTC and not elapsed-realtime: a schedule is a wall-clock promise, so it has to follow the
         // clock across a reboot or a time-zone change rather than count seconds from a boot.
-        if (canScheduleExact()) {
+        // The permission can be taken away between the check and the call - the receiver that
+        // hears about that is this app's own, and it re-books. An inexact alarm is the answer
+        // the check would have given a moment later, not a reason to fail the launch.
+        val exact = canScheduleExact() && runCatching {
             alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at.toEpochMilli(), pending)
-        } else {
+        }.isSuccess
+        if (!exact) {
             alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at.toEpochMilli(), pending)
         }
     }

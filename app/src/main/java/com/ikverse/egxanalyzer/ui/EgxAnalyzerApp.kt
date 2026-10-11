@@ -108,7 +108,10 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -521,7 +524,11 @@ internal fun AppStatusLine(
                 overflow = TextOverflow.Ellipsis,
                 // fill = false, or a three-word confirmation is padded out to the full width and
                 // the glyph beside it ends up a long way from the words it qualifies.
-                modifier = Modifier.weight(1f, fill = false),
+                // Announced as it changes: this line is how the app says what it just did, and a
+                // screen reader never heard it.
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
             )
             if (undo != null) {
                 // A plain text button in the app's own accent, which is the one thing on this line

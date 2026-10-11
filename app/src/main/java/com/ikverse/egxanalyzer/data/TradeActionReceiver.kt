@@ -5,6 +5,10 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationManagerCompat
 import com.ikverse.egxanalyzer.EgxApplication
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Answers the one notification action that needs no screen: **Keep open**.
@@ -34,14 +38,28 @@ class TradeActionReceiver : BroadcastReceiver() {
         val id = intent.getStringExtra(EXTRA_POSITION_ID)?.takeIf(String::isNotBlank) ?: return
         val application = context.applicationContext as? EgxApplication ?: return
         val appState = application.appState
-        // Silently ignored where the trade has gone - deleted on this device, or buried by another
-        // and pulled down since. A notification outlives the thing it is about, and an action that
-        // failed loudly about a trade the reader has already dealt with would be worse than one
-        // that simply takes the notification away.
-        appState.positionFor(id)?.let { position -> appState.setKeepOpen(position, keepOpen = true) }
-        // Whether or not the trade was found: the notification has been acted on, and one that
-        // stayed in the shade would invite the same press again.
-        NotificationManagerCompat.from(context).cancel(intent.getIntExtra(EXTRA_NOTIFICATION_ID, 0))
+        // Held open while the record loads. With the app closed this broadcast is what builds the
+        // state, and the trades are read off disk on another thread a moment later - asked before
+        // they arrive, `positionFor` answered null for every trade and the press was thrown away.
+        val finish = goAsync()
+        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
+            try {
+                appState.awaitInitialData()
+                // Silently ignored where the trade has really gone - deleted on this device, or
+                // buried by another and pulled down since. A notification outlives the thing it is
+                // about, and an action that failed loudly about a trade the reader has already
+                // dealt with would be worse than one that simply takes the notification away.
+                appState.positionFor(id)?.let { position ->
+                    appState.setKeepOpen(position, keepOpen = true)
+                }
+                // Whether or not the trade was found: the notification has been acted on, and one
+                // that stayed in the shade would invite the same press again.
+                NotificationManagerCompat.from(context)
+                    .cancel(intent.getIntExtra(EXTRA_NOTIFICATION_ID, 0))
+            } finally {
+                finish.finish()
+            }
+        }
     }
 
     companion object {

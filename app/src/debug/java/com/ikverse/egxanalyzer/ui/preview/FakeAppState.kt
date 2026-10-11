@@ -110,6 +110,8 @@ class FakeAppState(
 
     override suspend fun exportReport(saved: SavedAnalysis) = Unit
 
+    override suspend fun saveRankingToDownloads() = Unit
+
     override suspend fun saveDiagnosticsToDownloads(): List<String> = emptyList()
 
     override fun lastCrash(): String? = null
@@ -178,7 +180,19 @@ class FakeAppState(
 
     override fun positionFor(id: String): Position? = null
 
+    override suspend fun awaitInitialData() = Unit
+
     override fun openStock(ticker: String) = Unit
+
+    override val watchlist: Set<String> = emptySet()
+
+    override fun toggleWatch(ticker: String) = Unit
+
+    override val watchAlerts: List<WatchAlert> = emptyList()
+
+    override fun addWatchAlert(ticker: String, level: Double, above: Boolean) = Unit
+
+    override fun removeWatchAlert(alert: WatchAlert) = Unit
 
     override fun closeStock() = Unit
 
@@ -373,6 +387,10 @@ class FakeAppState(
 
     override fun backupDue(): Boolean = false
 
+    override fun backUpIfDue() = Unit
+
+    override fun startAction(block: suspend () -> Unit) = Unit
+
     override fun recordBackupDay() = Unit
 
     override fun recordBackupOutcome(succeeded: Boolean) = Unit
@@ -413,7 +431,7 @@ class FakeAppState(
 
     override fun updateRecommendationTargetDate(date: LocalDate) = Unit
 
-    override suspend fun syncTelegramSources() = Unit
+    override suspend fun syncTelegramSources() = TelegramSourceLoad("", succeeded = true)
 
     override fun toggleChannel(channel: ChannelSelection) = Unit
 

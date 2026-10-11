@@ -15,11 +15,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -38,7 +36,6 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 fun BackupControls(appState: AppState) {
-    val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var pendingRestore by remember { mutableStateOf<Uri?>(null) }
     // Bumped after a manual backup actually writes, which is the one change below that does not
@@ -93,7 +90,7 @@ fun BackupControls(appState: AppState) {
                 SettingsButton(
                     enabled = !busy,
                     onClick = {
-                        scope.launch {
+                        appState.startAction {
                             busy = true
                             runCatching { appState.writeBackup() }
                                 .onSuccess {
@@ -165,7 +162,7 @@ fun BackupControls(appState: AppState) {
             confirmButton = {
                 TextButton(onClick = {
                     pendingRestore = null
-                    scope.launch {
+                    appState.startAction {
                         busy = true
                         appState.runAction(
                             label = "Restoring from a backup",

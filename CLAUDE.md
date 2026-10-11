@@ -362,8 +362,8 @@ Detailed documentation lives in [`docs/`](docs/):
   enough of Android for a real SQLite database in a plain unit test. It writes the version-9 table
   by hand and upgrades it, deliberately: a test that builds its "old" schema from today's code
   tests nothing, because both sides move together. Add a case there for every version bump —
-  version 14 has its own in `ScheduledJobStoreTest`, which writes the version-13 `positions` table
-  and checks that gaining `scheduled_jobs` did not cost the trades already on the phone, and
+  version 14's case (the version-13 `positions` table gaining `scheduled_jobs`) went with the
+  scheduled-analysis feature it tested and no longer exists; versions 15 onward are below, and
   version 15 has the same case in `StockOpinionStoreTest` for `stock_opinions`, version 16
   has one beside it for the findings columns, version 18 has one in `TradeStatusStoreTest` for
   `position_status_seen`, version 19 has one in `CallAlertStoreTest` for `call_alert_seen`,
@@ -696,10 +696,10 @@ Detailed documentation lives in [`docs/`](docs/):
   version of the thing that was pressed, which is what `StockSheet` and `InfoSheet` are — and a
   panel over a scrolling page would have to re-solve, in a second place, the pinning the shelf was
   written to solve. The width is the rest of it: the choices are **shown open**, as chips under a
-  heading, where the shelf had room only for a chip that opened a menu. `MultiSelectSection`,
-  `SingleSelectSection` and `SortSection` are that; `MultiSelectFilter` and its siblings stay in the
-  file because the in-report toolbar still uses them, inside a card where there is no room for
-  anything else.
+  heading, where the shelf had room only for a chip that opened a menu. `MultiSelectSection` and
+  `SortSection` are that; the in-report toolbar uses `CheckedSetFilter` and `StockFilterField`, and
+  the menu-style `MultiSelectFilter`, `SingleSelectFilter`, `SortFilter` and `SingleSelectSection`
+  were deleted on 2026-10-11 as unused.
 - **The `All` chip leads every section and is selected while nothing else is.** "Untouched means
   everything" is the rule the menus had to state in words; on a surface with room for it, it is just
   the first chip.
