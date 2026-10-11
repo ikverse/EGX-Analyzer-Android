@@ -658,12 +658,15 @@ Detailed documentation lives in [`docs/`](docs/):
   at one end and 32 at the other reads as a layout fault rather than as emphasis. Which button is
   filled did not change; only how tall the row is. `AlertDialog` buttons stay Material's, the same
   exception the card pills make.
-- **A report card opens on a press anywhere, and only while it is shut.** `Card(onClick = …,
-  enabled = !expanded)` in `SavedAnalysisCard`, with `disabledContainerColor` pinned to the same
-  fill so "disabled" does not read as greyed out. Open, that card holds the report's own toolbar,
-  its call cards and the source trace, so a card-wide toggle would close the whole report on a tap
-  landing in the gap between any two of them. The footer row — a `DisclosureButton`, which replaced
-  a full-width filled button doing the same job as the card under it — is what closes it again.
+- **A report card toggles on a press, open or shut.** `Card(onClick = { onExpandedChange(!expanded) })`
+  in `SavedAnalysisCard`; release 3.8.4 dropped the earlier `enabled = !expanded`, so a press on the
+  card's own area closes an open report as well as opening a shut one. That means any region inside
+  an open report that answers no tap of its own closes it. **The wide-screen table is the case that
+  bit**: a stock block's heading (names, latest price, padding) and its column titles are plain
+  rows, so tapping them fell through and closed the report. `ResultDetail` now hands the table
+  `Modifier.pointerInput(Unit) { detectTapGestures { } }`, which swallows taps nothing in the table
+  answers; rows, the ticker, the toolbar and Hide take theirs first. The narrow layout's cards and
+  the source trace are not covered by that.
 - **Nothing inside the `NavigationRail` may fill its width, and one `fillMaxWidth()` took the whole
   unfolded layout out.** Material sizes a rail with `widthIn(min = ContainerWidth)` — a floor, not a
   width — so a child that fills the width stretches the rail to whatever it is measured against.
