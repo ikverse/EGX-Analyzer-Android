@@ -89,6 +89,7 @@ import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SavedAnalysis
 import com.ikverse.egxanalyzer.model.Scoring
+import com.ikverse.egxanalyzer.model.callSlot
 import java.io.File
 import java.time.LocalDate
 import java.time.ZoneId
@@ -1536,7 +1537,7 @@ private fun ResultDetail(
                         channelFor = { messageId -> channelNames[messageId] },
                         latestFor = latestFor,
                         onSelectPoint = { stock, point ->
-                            detail = stock.originalStockCode to point.parseIndex
+                            detail = stock.anchorOf(point) to point.parseIndex
                         },
                         imagePathFor = { ref -> saved.result.imagePathFor(ref) },
                         showContext = showContext,
@@ -1577,14 +1578,15 @@ private fun ResultDetail(
     detail?.let { (code, slot) ->
         // Resolved against the whole report rather than the filtered list, so a filter cannot close
         // a sheet the reader has open - and re-resolved on every recomposition, which is what makes
-        // a correction visible in the sheet it was made from.
-        val stock = saved.result.consolidated.firstOrNull { it.originalStockCode == code }
-        val point = stock?.dataPoints?.firstOrNull { it.parseIndex == slot }
-        if (stock == null || point == null) {
+        // a correction visible in the sheet it was made from. Searched across every entry, since a
+        // corrected ticker carries the occurrence into whichever entry holds that code now.
+        val found = saved.result.callSlot(code, slot)
+        if (found == null) {
             // The occurrence has gone - the only way that happens is a correction being undone
             // while its sheet is open. Closing is the honest answer; there is nothing left to draw.
             LaunchedEffect(code, slot) { detail = null }
         } else {
+            val (stock, point) = found
             OccurrenceSheet(
                 stock = stock,
                 point = point,

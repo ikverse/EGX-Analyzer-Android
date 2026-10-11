@@ -179,6 +179,16 @@ data class RecommendationDataPoint(
      * about the filter rather than about the call. -1 on anything not built by the parse.
      */
     val parseIndex: Int = -1,
+    /**
+     * The code the model filed this occurrence under, when it now sits in another stock's entry.
+     *
+     * Null on every occurrence still in the entry it was read into, which is nearly all of them:
+     * that entry's own [ConsolidatedRecommendation.originalStockCode] says the same thing. It is set
+     * only when a corrected ticker has carried the occurrence into a different entry, because from
+     * then on the entry's code and the occurrence's are two different facts - and the occurrence's
+     * is the one an edit is filed under. Read it through `ConsolidatedRecommendation.anchorOf`.
+     */
+    val originalStockCode: String? = null,
 ) {
     val isWatching: Boolean get() = effectiveDateBasis == "watching"
 
@@ -196,14 +206,24 @@ data class ConsolidatedRecommendation(
     val notesSummary: String?,
     val dataPoints: List<RecommendationDataPoint> = emptyList(),
     /**
-     * The code the model read, before any correction, which is what an edit is filed under.
+     * The code the model read for the entry this was built from, before any correction.
      *
      * Not the corrected code: that is the thing being changed, so filing an edit under it would
      * mean the edit could never be found again to be undone. Defaults to [stockCode], which is what
      * it is on every stock nobody has touched.
+     *
+     * **An entry is not one code's worth of occurrences any more.** A corrected ticker moves only
+     * the occurrence it was made on, into the entry already holding that code, so one entry can
+     * hold occurrences the model filed under several codes. Each of those carries its own in
+     * `RecommendationDataPoint.originalStockCode`; anything looking an occurrence up goes through
+     * [anchorOf] rather than reading this.
      */
     val originalStockCode: String = stockCode,
-)
+) {
+    /** The code the model filed [point] under, whichever entry it sits in now. */
+    fun anchorOf(point: RecommendationDataPoint): String =
+        point.originalStockCode ?: originalStockCode
+}
 
 data class ExcludedSource(
     val sourceId: String,
@@ -288,6 +308,17 @@ data class AnalysisResult(
     val recommendations: List<RecommendationResult>,
     /** Full consolidated extraction; `recommendations` is a flattened view of the same data. */
     val consolidated: List<ConsolidatedRecommendation> = emptyList(),
+    /**
+     * [consolidated] as the model read it, before [edits] were laid over it.
+     *
+     * Kept because correcting a call twice has to start from what the model read, not from the
+     * first correction: an edit's fingerprint is checked against this reading, and a sheet that
+     * built its edit from the corrected figures produced one that never fitted and silently threw
+     * away every correction on that call. Not stored - rebuilt from [rawResponse] on every read,
+     * exactly as [consolidated] is. Empty on a result nothing has read back yet, which is a result
+     * with no corrections, where the two are the same list.
+     */
+    val modelReading: List<ConsolidatedRecommendation> = emptyList(),
     /**
      * Image sources in the order they were sent, so index + 1 is the IMAGE_REF the model cites.
      * Paths point into Telegram's own storage and may disappear when it prunes its cache.

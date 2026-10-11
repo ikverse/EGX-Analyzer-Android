@@ -92,6 +92,7 @@ import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.StockOpinion
 import com.ikverse.egxanalyzer.model.believableReturn
+import com.ikverse.egxanalyzer.model.callSlot
 import com.ikverse.egxanalyzer.model.opinionId
 import com.ikverse.egxanalyzer.model.positionId
 import com.ikverse.egxanalyzer.model.reachedTarget1
@@ -2205,11 +2206,9 @@ private data class CallOccurrence(
 private fun AppState.occurrenceFor(call: ScoredCall): CallOccurrence? {
     val reportId = call.reportId ?: return null
     val saved = savedResults.firstOrNull { it.id == reportId } ?: return null
-    val stock = saved.result.consolidated
-        .firstOrNull { it.originalStockCode == call.originalStockCode }
-        ?: return null
-    val point = stock.dataPoints.firstOrNull { it.parseIndex == call.pointIndex } ?: return null
-    return CallOccurrence(saved, stock, point)
+    val code = call.originalStockCode ?: return null
+    val slot = saved.result.callSlot(code, call.pointIndex ?: return null) ?: return null
+    return CallOccurrence(saved, slot.stock, slot.point)
 }
 
 /**

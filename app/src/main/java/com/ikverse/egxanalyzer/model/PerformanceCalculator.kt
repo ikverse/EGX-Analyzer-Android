@@ -487,7 +487,9 @@ object PerformanceCalculator {
             isTPlusOne = isTPlusOne,
             requestId = requestId,
             reportId = reportId,
-            originalStockCode = stock.originalStockCode,
+            // The occurrence's own, not the entry's: a corrected ticker can carry it into an entry
+            // the model filed under a different code.
+            originalStockCode = stock.anchorOf(this),
             pointIndex = parseIndex,
         )
     }

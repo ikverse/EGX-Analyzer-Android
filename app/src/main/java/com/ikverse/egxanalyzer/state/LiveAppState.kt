@@ -132,6 +132,9 @@ import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.CallIdentity
 import com.ikverse.egxanalyzer.model.callDate
 import com.ikverse.egxanalyzer.model.callSlot
+import com.ikverse.egxanalyzer.model.EditUndo
+import com.ikverse.egxanalyzer.model.TradeFollow
+import com.ikverse.egxanalyzer.model.tradeFollow
 import com.ikverse.egxanalyzer.model.identity
 import com.ikverse.egxanalyzer.model.sourceIdsFor
 import com.ikverse.egxanalyzer.ui.CatalogStock
@@ -4090,7 +4093,8 @@ class LiveAppState(
      *   ticker and the session, so a corrected ticker cannot leave the trade where it is; the new
      *   row is written and the old one buried, which is how a removal already travels between
      *   devices. Behind an explicit choice because it is the one thing here that touches money, and
-     *   the reader may have bought the stock the model named rather than the one on the card.
+     *   the reader may have bought the stock the model named rather than the one on the card. Never
+     *   over a trade already filed under the corrected call - see [correctTradeOn].
      * - **The stored reading is dropped.** This is the root rather than a symptom: a run writes down
      *   what it read of each message so the next one need not pay to read it again, and that
      *   reading still carries the wrong ticker. Left alone, tomorrow's run would adopt the same
@@ -4108,40 +4112,75 @@ class LiveAppState(
         edit: RecommendationEdit,
         correctTrade: Boolean,
     ) {
-        val before = saved.result.callSlot(edit.originalStockCode, edit.pointIndex) ?: return
-        val stamped = edit.copy(editedAt = System.currentTimeMillis(), editedBy = deviceName)
-        val updated = localDataStore.saveResultEdit(saved.id, stamped) ?: return
-        val after = updated.callSlot(edit.originalStockCode, edit.pointIndex)
+        // The report as it stands now rather than as the sheet was handed it, so the edit this one
+        // replaces - which is what its Undo puts back - is the one actually on file.
+        val current = savedResults.firstOrNull { it.id == saved.id } ?: saved
+        val before = current.result.callSlot(edit.originalStockCode, edit.pointIndex) ?: return
 
         // Read before anything else is rewritten: both are derived from the values being changed,
         // and the old pair is what every stale key was filed under. Null on an occurrence the model
         // left undated, which nothing can have been filed against - so the correction is still
         // recorded and there is simply nothing to follow it with.
-        val was = before.identity(saved.result)
+        val was = before.identity(current.result)
+        // Whether this save carries the trade, decided before anything moves: the reader asked
+        // for it, and there is a trade under the call to carry. Stored on the edit, so undoing it
+        // later carries the trade back only if this is what moved it.
+        val carries = correctTrade && was != null &&
+            localDataStore.positions().any { it.id == positionId(was.ticker, was.openedOn) }
+        val undo = EditUndo.of(current.result, edit, carriedTrade = carries)
+        val stamped = edit.copy(
+            movedTrade = carries || undo.previous?.movedTrade == true,
+            editedAt = System.currentTimeMillis(),
+            editedBy = deviceName,
+        )
+        val updated = localDataStore.saveResultEdit(saved.id, stamped) ?: return
+        val after = updated.callSlot(edit.originalStockCode, edit.pointIndex)
         val now = after?.identity(updated)
         val movedCall = was != null && now != null &&
             (now.ticker != was.ticker || now.openedOn != was.openedOn)
 
-        followIdentityChange(was, now, after?.point, correctTrade)
+        val trade = followIdentityChange(was, now, after?.point, correctTrade)
+        // A trade that could not be carried was not carried, and the edit must not say otherwise:
+        // undoing it would then go looking for a trade to move back and find the reader's other one.
+        val reversal = if (trade is TradeFollow.Blocked) {
+            localDataStore.saveResultEdit(
+                saved.id,
+                stamped.copy(movedTrade = undo.previous?.movedTrade == true),
+            )
+            undo.copy(carriedTrade = false)
+        } else {
+            undo
+        }
 
         // Only the message this occurrence was read out of. The rest of the run's reading is about
         // other cards and was not wrong.
-        val reads = saved.result.sourceIdsFor(before.point.sourceMessageId)
-        if (reads.isNotEmpty()) localDataStore.forgetSourceReads(saved.result.requestId, reads)
+        val reads = current.result.sourceIdsFor(before.point.sourceMessageId)
+        if (reads.isNotEmpty()) localDataStore.forgetSourceReads(current.result.requestId, reads)
 
         reloadResults(saved.id)
         val named = now?.ticker ?: was?.ticker ?: before.stock.stockCode
+        val said = if (movedCall && was != null && now != null) {
+            "${was.ticker} corrected to ${now.ticker}"
+        } else {
+            "$named updated"
+        }
         statusMessage = StatusMessage(
-            if (movedCall && was != null && now != null) {
-                "${was.ticker} corrected to ${now.ticker}"
-            } else {
-                "$named updated"
-            },
+            said + trade.note(),
             succeeded = true,
-            // Reverses only this edit, not every correction in the report - a second call fixed
-            // five minutes ago must not be thrown away because this one's Undo is still on screen.
+            // Reverses only this save, not every correction in the report - a second call fixed
+            // five minutes ago must not be thrown away because this one's Undo is still on screen -
+            // and not the corrections made to this call before it either.
             undo = StatusUndo("Undo") {
-                undoRecommendationEdit(saved, edit.originalStockCode, edit.pointIndex)
+                savedResults.firstOrNull { it.id == saved.id }?.let { live ->
+                    replaceEdit(
+                        live,
+                        reversal.originalStockCode,
+                        reversal.pointIndex,
+                        reversal.restore,
+                        correctTrade = reversal.carriedTrade,
+                        done = { ticker -> "$ticker's last edit undone" },
+                    )
+                }
             },
         )
         publishReport(saved.id)
@@ -4162,20 +4201,29 @@ class LiveAppState(
      * behind.
      *
      * Shared between making a correction and undoing one - see [editRecommendation] and
-     * [undoRecommendationEdit] - because both change what a call is filed as, or restore what it
-     * was, and the two must stay in step or one of them will silently orphan less than the other.
+     * [replaceEdit] - because both change what a call is filed as, or restore what it was, and
+     * the two must stay in step or one of them will silently orphan less than the other.
      * [correctTradeOn] is itself direction-agnostic - it moves whatever it finds at [was] to [now]
      * - so undoing a correction that moved a trade is the same call with the two identities the
-     * other way round, and undoing one that never moved a trade is a safe no-op: there is nothing
-     * sitting at [was] to find.
+     * other way round.
+     *
+     * The channel counts as well as the ticker and the session. An opinion and an alert mark are
+     * filed under all three, so a correction that only changed which message a call came from left
+     * both filed under a channel no call is in any more.
+     *
+     * @return what became of the trade, for the status line.
      */
     private fun followIdentityChange(
         was: CallIdentity?,
         now: CallIdentity?,
         after: RecommendationDataPoint?,
         correctTrade: Boolean,
-    ) {
-        if (was != null && (now == null || now.ticker != was.ticker || now.openedOn != was.openedOn)) {
+    ): TradeFollow {
+        val moved = was != null && (
+            now == null || now.ticker != was.ticker ||
+                now.openedOn != was.openedOn || now.channel != was.channel
+            )
+        if (was != null && moved) {
             // Keyed on the call the opinion was given about, which no longer exists.
             val orphaned = opinionId(was.ticker, was.openedOn, was.channel)
             localDataStore.deleteStockOpinion(orphaned)
@@ -4185,44 +4233,72 @@ class LiveAppState(
             // crossing at the identity it is filed under now.
             localDataStore.saveCallAlertSeen(emptyMap(), forgotten = setOf(orphaned))
         }
-        if (correctTrade && was != null) correctTradeOn(was, now, after)
+        return if (correctTrade && was != null) correctTradeOn(was, now, after) else TradeFollow.Nothing
+    }
+
+    /** What the status line adds when a trade could not be carried along. */
+    private fun TradeFollow.note(): String = when (this) {
+        is TradeFollow.Blocked -> " · trade left as it was: ${to.substringBefore('@')} " +
+            "is already held for that session"
+        else -> ""
     }
 
     /**
      * Puts one call back to what the model read, and moves its trade back if the edit standing on
      * it had moved one.
      *
-     * The general form of "undo": [editRecommendation]'s own message-line Undo reaches here with
-     * the edit it just made, and "Undo this call's edits" reaches here with whichever edit is
-     * standing on the call at the time it is pressed - removing an edit is removing an edit whether
-     * it was made a moment ago or a week ago, so both go through the one function rather than one
-     * of them being a smaller copy of the other.
+     * "Undo this call's edits" reaches here with whichever edit is standing on the call at the
+     * time it is pressed, a moment or a week after it was made. The status line's own Undo does
+     * not: it puts back the edit its save replaced, which on a second correction is the first one
+     * rather than nothing - see [EditUndo].
      *
-     * No source reads are forgotten here, unlike [editRecommendation]: that step exists so a future
-     * run does not adopt a wrong reading for free, and undoing a correction goes back to the
-     * model's own reading, which was never the thing being guarded against.
+     * The trade goes back only if the edit standing on the call is what moved it. It used to go
+     * back always, which took a trade the reader had chosen to leave where it was - or one bought
+     * on another channel's call for the same stock - and moved it to the ticker the model misread.
      */
     override fun undoRecommendationEdit(saved: SavedAnalysis, originalStockCode: String, pointIndex: Int) {
-        if (saved.result.edits.none { it.originalStockCode == originalStockCode && it.pointIndex == pointIndex }) {
-            return
-        }
-        val before = saved.result.callSlot(originalStockCode, pointIndex) ?: return
-        val was = before.identity(saved.result)
-        val cleared = RecommendationEdit(
-            originalStockCode = originalStockCode,
-            pointIndex = pointIndex,
-            fingerprint = "",
+        val current = savedResults.firstOrNull { it.id == saved.id } ?: saved
+        val standing = current.result.edits
+            .firstOrNull { it.originalStockCode == originalStockCode && it.pointIndex == pointIndex }
+            ?: return
+        replaceEdit(
+            current,
+            originalStockCode,
+            pointIndex,
+            RecommendationEdit(originalStockCode, pointIndex, fingerprint = ""),
+            correctTrade = standing.movedTrade,
+            done = { ticker -> "$ticker's edits undone" },
         )
-        val updated = localDataStore.saveResultEdit(saved.id, cleared) ?: return
+    }
+
+    /**
+     * Writes [replacement] over whatever edit stands on one call, and follows the call wherever
+     * that takes it. An empty [replacement] removes the edit.
+     *
+     * No source reads are forgotten here, unlike [editRecommendation]: that step exists so a future
+     * run does not adopt a wrong reading for free, and going back towards the model's own reading
+     * was never the thing being guarded against.
+     */
+    private fun replaceEdit(
+        current: SavedAnalysis,
+        originalStockCode: String,
+        pointIndex: Int,
+        replacement: RecommendationEdit,
+        correctTrade: Boolean,
+        done: (String) -> String,
+    ) {
+        val before = current.result.callSlot(originalStockCode, pointIndex) ?: return
+        val was = before.identity(current.result)
+        val updated = localDataStore.saveResultEdit(current.id, replacement) ?: return
         val after = updated.callSlot(originalStockCode, pointIndex)
         val now = after?.identity(updated)
 
-        followIdentityChange(was, now, after?.point, correctTrade = true)
+        val trade = followIdentityChange(was, now, after?.point, correctTrade)
 
-        reloadResults(saved.id)
+        reloadResults(current.id)
         val named = now?.ticker ?: was?.ticker ?: before.stock.stockCode
-        statusMessage = StatusMessage("$named's edits undone", succeeded = true)
-        publishReport(saved.id)
+        statusMessage = StatusMessage(done(named) + trade.note(), succeeded = true)
+        publishReport(current.id)
         appScope.launch {
             recomputePerformance()
             recomputePortfolio()
@@ -4231,15 +4307,40 @@ class LiveAppState(
         }
     }
 
-    /** Puts a report back to what the model read. Offered on the report's own menu. */
+    /**
+     * Puts a report back to what the model read. Offered on the report's own menu.
+     *
+     * Each correction is followed back out exactly as undoing it on its own would follow it: the
+     * opinions and alert marks it orphaned, and the trade it carried. Clearing the edits alone left
+     * a trade moved to the corrected ticker belonging to no call in the report, and an opinion
+     * filed under a call that no longer existed.
+     */
     override fun clearRecommendationEdits(saved: SavedAnalysis) {
-        if (localDataStore.clearResultEdits(saved.id) == null) return
+        val current = savedResults.firstOrNull { it.id == saved.id } ?: saved
+        // Every call's identity read before anything moves, for the same reason a single
+        // correction reads it first.
+        val standing = current.result.edits.map { edit ->
+            edit to current.result.callSlot(edit.originalStockCode, edit.pointIndex)
+                ?.identity(current.result)
+        }
+        val updated = localDataStore.clearResultEdits(saved.id) ?: return
+        val blocked = standing.count { (edit, was) ->
+            val after = updated.callSlot(edit.originalStockCode, edit.pointIndex)
+            followIdentityChange(was, after?.identity(updated), after?.point, edit.movedTrade) is
+                TradeFollow.Blocked
+        }
         reloadResults(saved.id)
-        statusMessage = StatusMessage("Report back to what the model read", succeeded = true)
+        statusMessage = StatusMessage(
+            "Report back to what the model read" +
+                if (blocked > 0) " · $blocked trade(s) left as they were: already held" else "",
+            succeeded = true,
+        )
         publishReport(saved.id)
         appScope.launch {
             recomputePerformance()
             recomputePortfolio()
+            runCatching { refreshPrices(announce = false) }
+            recomputePerformance()
         }
     }
 
@@ -4280,15 +4381,21 @@ class LiveAppState(
      * re-running an analysis can never move a trade already taken. A **correction** is the one case
      * that rule was not written for: the levels it snapshotted were misread, and leaving them is
      * leaving the trade permanently describing a call nobody made.
+     *
+     * **Never over a trade already held.** A position is one stock on one session, so the id the
+     * corrected call files under can already hold a trade - bought on another channel's call for
+     * the corrected stock. Saving this one there wrote over it. It is left where it is instead, and
+     * [TradeFollow.Blocked] says so; the sheet has already warned the reader before the press.
      */
     private fun correctTradeOn(
         was: CallIdentity,
         now: CallIdentity?,
         after: RecommendationDataPoint?,
-    ) {
-        val held = localDataStore.positions()
-            .firstOrNull { it.id == positionId(was.ticker, was.openedOn) }
-            ?: return
+    ): TradeFollow {
+        val stored = localDataStore.positions()
+        val follow = tradeFollow(stored.map { it.id }.toSet(), was, now)
+        if (follow !is TradeFollow.Carry) return follow
+        val held = stored.first { it.id == follow.from }
         val at = System.currentTimeMillis()
         val ticker = now?.ticker ?: held.ticker
         val openedOn = now?.openedOn ?: held.recommendationDate
@@ -4326,6 +4433,7 @@ class LiveAppState(
             )
         }
         positions = localDataStore.positions()
+        return follow
     }
 
     /**

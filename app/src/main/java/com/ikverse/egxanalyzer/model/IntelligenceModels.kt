@@ -154,7 +154,10 @@ data class ScoredCall(
      * nothing on a device.
      */
     val reportId: Long? = null,
-    /** The stock's own [ConsolidatedRecommendation.originalStockCode], for the lookup above. */
+    /**
+     * The code the model filed the occurrence under - `ConsolidatedRecommendation.anchorOf` - for
+     * the lookup above. The occurrence's, not its entry's: a corrected ticker can move it.
+     */
     val originalStockCode: String? = null,
     /** The occurrence's own [RecommendationDataPoint.parseIndex], for the lookup above. */
     val pointIndex: Int? = null,

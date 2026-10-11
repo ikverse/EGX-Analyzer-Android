@@ -2128,12 +2128,29 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
 
     private fun JSONObject.toAnalysisResult(): AnalysisResult {
         val edits = storedEdits()
+        val targetDate = nullableString("recommendationTargetDate")
+            ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        val modelReading = runCatching {
+            ConsolidatedParser.parse(optString("rawResponse"), targetDate)
+        }.getOrDefault(emptyList())
+        // Rebuilt from the stored response rather than persisted separately, so the nested
+        // occurrences can never drift from the response they came from - and analyses saved before
+        // this existed still gain them. Responses predating the consolidated contract yield none.
+        //
+        // The reader's own corrections go on last, over the parse rather than into it: that is what
+        // lets the model's answer stay untouched while every screen reading this list - the cards,
+        // the table, the spreadsheet, the scorer, the alerts, the price fetching - sees the
+        // corrected figures with no change of its own. See `RecommendationEdit`.
+        val consolidated = runCatching {
+            RecommendationEdits.apply(modelReading, edits) { code, english, arabic ->
+                EgxCatalog.namesFor(code, english, arabic).let { it.english to it.arabic }
+            }
+        }.getOrDefault(emptyList())
         // What every ticker in this report was corrected to, so the flat list below can be brought
         // along. It is what `recommendedTickers` reads, and a stale code left in it would go on
-        // asking the price feed for a stock nobody ever recommended.
-        val renamed = edits.mapNotNull { edit ->
-            edit.stockCode?.let { edit.originalStockCode to it }
-        }.toMap()
+        // asking the price feed for a stock nobody ever recommended. Read off the corrected report
+        // rather than the edits, so an edit that no longer fits renames nothing here either.
+        val renamed = RecommendationEdits.renamedCodes(consolidated)
         return AnalysisResult(
             requestId = getString("requestId"),
             inquiryReplyCount = optInt("inquiryReplyCount"),
@@ -2180,26 +2197,8 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
             } ?: AnalysisDiagnostics(),
             imagePaths = optJSONArray("imagePaths")?.strings().orEmpty(),
             rawResponse = optString("rawResponse"),
-            // Rebuilt from the stored response rather than persisted separately, so the nested
-            // occurrences can never drift from the response they came from - and analyses saved before
-            // this existed still gain them. Responses predating the consolidated contract yield none.
-            //
-            // The reader's own corrections go on last, over the parse rather than into it: that is what
-            // lets the model's answer stay untouched while every screen reading this list - the cards,
-            // the table, the spreadsheet, the scorer, the alerts, the price fetching - sees the
-            // corrected figures with no change of its own. See `RecommendationEdit`.
-            consolidated = runCatching {
-                RecommendationEdits.apply(
-                    ConsolidatedParser.parse(
-                        optString("rawResponse"),
-                        nullableString("recommendationTargetDate")
-                            ?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
-                    ),
-                    edits,
-                ) { code, english, arabic ->
-                    EgxCatalog.namesFor(code, english, arabic).let { it.english to it.arabic }
-                }
-            }.getOrDefault(emptyList()),
+            consolidated = consolidated,
+            modelReading = modelReading,
             edits = edits,
             editRevision = optLong("editRevision", 0),
             completedAt = Instant.parse(getString("completedAt")),
@@ -2290,6 +2289,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         putIfSet("resistance", resistance)
         putIfSet("notesArabic", notesArabic)
         if (cleared.isNotEmpty()) put("cleared", JSONArray(cleared.map { it.name }))
+        if (movedTrade) put("movedTrade", true)
         put("editedAt", editedAt)
         put("editedBy", editedBy)
     }
@@ -2344,6 +2344,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
                         .mapNotNull { name ->
                             runCatching { EditField.valueOf(name) }.getOrNull()
                         }.toSet(),
+                    movedTrade = item.optBoolean("movedTrade"),
                     editedAt = item.optLong("editedAt"),
                     editedBy = item.optString("editedBy"),
                 )
