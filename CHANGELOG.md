@@ -4,6 +4,20 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.2.0] — 2026-10-11
+
+- **Watch list.** A Watch button on a stock's sheet follows it. A "Watching" card at the top of Insights shows its last close. Watched stocks are included in every price fetch.
+- **Price alerts.** An Alert button on the stock sheet notifies you once when a stock rises or falls to a price you choose. It is checked whenever prices are fetched, and a still-trading price counts.
+- **Save the source ranking as Excel** from "Sources ranked" in Insights.
+- A price fetch with no connection now says "Could not reach the price feed" and tries again at the next slot, instead of counting the day as done. Partial failures show "N unreachable".
+- A momentary provider refusal (429/5xx) or a dropped connection on one analysis batch is retried once instead of failing the whole run.
+- Scheduled price fetches and the five-minute archive now wait for the saved record to load, so a cold alarm wake no longer sees an empty one. "Keep open" from a notification now works with the app closed.
+- "Refresh chats" no longer closes the app on a Telegram error. Fetches, backups, restores, syncs and exports now finish after folding or unfolding the phone, and the daily backup no longer reports a false failure.
+- Today's earlier backup copy is kept until the new one is complete.
+- A provider address that Settings would refuse is now also refused when it arrives from sync, a restored backup, or a model pick.
+- A saved key the phone can no longer decrypt is treated as missing, with "Save it again in Settings".
+- "Use the next EGX session" returns from a historical date. "Preview messages" shows the real outcome. Setting rows toggle by tapping their words and are read properly by screen readers. A few wording fixes, a faster start, and some unused code removed.
+
 ## [4.1.1] — 2026-10-11
 
 - Correcting a call's ticker now moves only that call, and it joins the other calls for that stock in the report instead of showing the stock twice.
