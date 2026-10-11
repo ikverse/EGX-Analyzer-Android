@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.2.1] — 2026-10-11
+
+- Tapping a stock's heading or the column titles in a report's table no longer closes the report on wide screens.
+
 ## [4.2.0] — 2026-10-11
 
 - **Watch list.** A Watch button on a stock's sheet follows it. A "Watching" card at the top of Insights shows its last close. Watched stocks are included in every price fetch.

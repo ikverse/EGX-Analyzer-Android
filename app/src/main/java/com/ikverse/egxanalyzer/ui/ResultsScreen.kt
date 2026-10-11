@@ -30,9 +30,11 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.material.icons.Icons
@@ -1533,6 +1535,11 @@ private fun ResultDetail(
             BoxWithConstraints {
                 if (maxWidth >= TableMinWidth) {
                     RecommendationTable(
+                        // Taps on the table that nothing in it answers - a stock's name or price
+                        // area, the column titles, the padding - stop here. Left alone they fall
+                        // through to the report card's own press and close the whole report.
+                        // Rows, the ticker, the toolbar and Hide answer their own taps first.
+                        modifier = Modifier.pointerInput(Unit) { detectTapGestures { } },
                         stocks = stocks,
                         channelFor = { messageId -> channelNames[messageId] },
                         latestFor = latestFor,
