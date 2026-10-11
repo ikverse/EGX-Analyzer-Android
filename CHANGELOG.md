@@ -4,6 +4,16 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.1.1] — 2026-10-11
+
+- Correcting a call's ticker now moves only that call, and it joins the other calls for that stock in the report instead of showing the stock twice.
+- Editing a corrected call again no longer throws away the earlier correction. "Was …" under a field now shows what the model read.
+- Undo on the message line now works after a first correction, and after a later one it brings back the previous correction instead of erasing all of them.
+- A trade is never moved onto one you already hold for that stock and session. "Also correct the trade" starts unticked when the trade was recorded from a different channel, and undoing a correction moves a trade back only if that correction moved it.
+- Company names you type stick, including for tickers the catalog doesn't know.
+- Save is disabled while a price, date or image number can't be read. A decimal comma and Arabic digits are accepted, and unticking the timing chip now counts as a change.
+- "Undo all" now also moves trades back and clears the AI opinions left on corrected calls.
+
 ## [4.1.0] — 2026-10-06
 
 - **Expanded chart.** "Expand", beside the move % on a stock's sheet, opens its price chart on the whole screen: candles or a line, volume underneath, and the stop, entry and target lines drawn at their real prices. Drag the price axis up or down to zoom the scale in or out, and double-tap it to fit the chart again.
