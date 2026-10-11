@@ -61,6 +61,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import java.util.Collections
 import java.security.SecureRandom
 import java.time.Instant
 import java.time.LocalDate
@@ -76,7 +77,19 @@ class TelegramRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var client = TdlClient.create()
     private val clientJobs = mutableListOf<Job>()
-    private val chatCache = linkedMapOf<Long, Chat>()
+
+    /**
+     * Every chat TDLib has told this process about, by id.
+     *
+     * Written by the `newChatUpdates` collector on one IO thread and read on others, so it is
+     * guarded: a `LinkedHashMap` iterated while another thread puts into it throws, and that is
+     * an uncaught crash under a `SupervisorJob`. Readers take a copy through [chatsSnapshot]
+     * rather than iterating the live map.
+     */
+    private val chatCache: MutableMap<Long, Chat> = Collections.synchronizedMap(linkedMapOf())
+
+    /** A copy of every cached chat, taken under the map's own lock. */
+    private fun chatsSnapshot(): List<Chat> = synchronized(chatCache) { chatCache.values.toList() }
 
     /**
      * Where each fetched profile photo landed, keyed by Telegram's file id.
@@ -434,7 +447,7 @@ class TelegramRepository(
         // silently read as "none exist", so every attempt created another channel. Three of them
         // before this was caught. The list the app already holds cannot lie in that direction.
         if (chatCache.isEmpty()) runCatching { refreshChats() }
-        return chatCache.values
+        return chatsSnapshot()
             .filter { it.title == SYNC_CHAT_TITLE }
             .map(Chat::id)
     }
@@ -974,7 +987,7 @@ class TelegramRepository(
         systemLanguageCode = context.resources.configuration.locales[0].toLanguageTag(),
         deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
         systemVersion = "Android ${Build.VERSION.RELEASE}",
-        applicationVersion = "0.1.0",
+        applicationVersion = BuildConfig.VERSION_NAME,
     )
 
     private fun tdlibDirectory() = File(context.filesDir, "tdlib")
@@ -1021,7 +1034,7 @@ class TelegramRepository(
     }
 
     private fun publishChats() {
-        _chats.value = chatCache.values
+        _chats.value = chatsSnapshot()
             // TDLib caches chats the client no longer shows - ones left, archived, or hidden like a
             // channel's linked discussion group. Only a non-zero order in the main list means the
             // chat is really there, which is the same list the user sees in Telegram.
@@ -1081,8 +1094,7 @@ class TelegramRepository(
     private fun refreshChatPhotos() {
         photoJob?.cancel()
         photoJob = scope.launch {
-            val missing = chatCache.values
-                .toList()
+            val missing = chatsSnapshot()
                 .filter { mainListOrder(it) != null }
                 .mapNotNull { it.photo?.small }
                 // The disk check belongs here rather than in [storedPhoto]: this is the one pass

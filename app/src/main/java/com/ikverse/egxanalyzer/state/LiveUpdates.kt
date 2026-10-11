@@ -160,7 +160,7 @@ class LiveUpdates(
                         file.delete()
                         UpdateState.Failed(
                             "The download of version ${update.versionName} arrived damaged. " +
-                                "Press Download to fetch it again.",
+                                "Press Check again, then Download, to fetch it again.",
                         )
                     }
                 }

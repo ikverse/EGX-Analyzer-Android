@@ -949,7 +949,7 @@ private fun KeptOpenChip() {
                 "Keep open · sell to close",
                 "You chose to follow this trade past its own deadline rather than close it there. " +
                     "It stays open, and every figure on this card keeps measuring it, until you " +
-                    "record a sale or undo Keep open from the card's own menu.",
+                    "record a sale or choose Follow the deadline again from the card's menu.",
             ),
         ) { showing = false }
     }

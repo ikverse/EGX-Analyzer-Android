@@ -15,6 +15,7 @@ import com.ikverse.egxanalyzer.model.ModelModality
 import com.ikverse.egxanalyzer.model.PortfolioOrder
 import com.ikverse.egxanalyzer.model.ThemeMode
 import com.ikverse.egxanalyzer.model.Scoring
+import com.ikverse.egxanalyzer.model.WatchAlert
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -374,6 +375,47 @@ class SettingsRepository(
     fun lastPriceRefreshAt(): Long = preferences.getLong(KEY_LAST_PRICE_REFRESH_AT, 0L)
 
     /**
+     * The stocks this phone follows without a call or a trade on them.
+     *
+     * Device-local, like [backupFolder]: a list of what this reader is looking at, not part of the
+     * record the devices share. Normalized tickers, so COMI and COMI.CA are one entry.
+     */
+    fun watchlist(): Set<String> = preferences.getStringSet(KEY_WATCHLIST, emptySet()).orEmpty()
+
+    fun saveWatchlist(tickers: Set<String>) {
+        // A fresh set: SharedPreferences hands back the live instance and documents that mutating
+        // it is undefined.
+        preferences.edit().putStringSet(KEY_WATCHLIST, tickers.toSet()).apply()
+    }
+
+    /** The price alerts this phone holds, as JSON rows. A row this build cannot read is skipped. */
+    fun watchAlerts(): List<WatchAlert> {
+        val rows = runCatching { JSONArray(preferences.getString(KEY_WATCH_ALERTS, "[]")) }
+            .getOrDefault(JSONArray())
+        return buildList {
+            for (index in 0 until rows.length()) {
+                val row = rows.optJSONObject(index) ?: continue
+                val ticker = row.optString("ticker").takeIf(String::isNotBlank) ?: continue
+                val level = row.optDouble("level").takeIf { !it.isNaN() && it > 0.0 } ?: continue
+                add(WatchAlert(ticker, level, row.optBoolean("above", true)))
+            }
+        }
+    }
+
+    fun saveWatchAlerts(alerts: List<WatchAlert>) {
+        val rows = JSONArray()
+        alerts.forEach { alert ->
+            rows.put(
+                JSONObject()
+                    .put("ticker", alert.ticker)
+                    .put("level", alert.level)
+                    .put("above", alert.above),
+            )
+        }
+        preferences.edit().putString(KEY_WATCH_ALERTS, rows.toString()).apply()
+    }
+
+    /**
      * The folder the user picked for backups, as the tree URI they granted.
      *
      * Device-local and never published, for the reason [marketRefreshEnabled] is not in
@@ -575,8 +617,15 @@ class SettingsRepository(
         savePreferences(snapshot.preferences)
         saveUseDefaultPromptOnly(snapshot.useDefaultPromptOnly)
         snapshot.providers.forEach { entry ->
+            // The same rule the Settings field applies, because the saved API key is sent as a
+            // bearer token to whatever is stored here - and this document arrives from a chat or
+            // a backup file, not from a field the owner typed into. An endpoint the policy refuses
+            // is not adopted: the one already on this device stands, and the model and the model
+            // list are taken as usual.
+            val endpoint = entry.endpoint.takeIf { EndpointPolicy.validate(it) == null }
+                ?: (preferences.getString(entry.provider.endpointKey(), null) ?: entry.provider.defaultEndpoint)
             preferences.edit()
-                .putString(entry.provider.endpointKey(), entry.endpoint)
+                .putString(entry.provider.endpointKey(), endpoint)
                 .putString(entry.provider.modelKey(), entry.model)
                 // The catalogue that described the list this replaces cannot describe the new one,
                 // and a stale one would win over the ids that just arrived.
@@ -631,6 +680,8 @@ class SettingsRepository(
         const val KEY_LAST_PRICE_REFRESH = "last_price_refresh_day"
         const val KEY_LAST_PRICE_REFRESH_AT = "last_price_refresh_at"
         const val KEY_BACKUP_FOLDER = "backup_folder"
+        const val KEY_WATCHLIST = "watchlist_tickers"
+        const val KEY_WATCH_ALERTS = "watch_alerts"
         const val KEY_LAST_BACKUP_DAY = "last_backup_day"
         const val KEY_BACKUP_FAILING_REPORTED = "backup_failing_reported"
         const val KEY_MARKET_REFRESH = "market_refresh_enabled"

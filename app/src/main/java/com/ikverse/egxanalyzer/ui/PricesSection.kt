@@ -38,7 +38,6 @@ import java.util.Locale
  */
 @Composable
 internal fun PricesSubSection(appState: AppState) {
-    val scope = rememberCoroutineScope()
     val health = appState.priceHealth
     val held = health.callsHeld
     SubSection(
@@ -144,7 +143,7 @@ internal fun PricesSubSection(appState: AppState) {
             ),
         ) {
             SettingsButton(
-                onClick = { scope.launch { appState.refreshCatalogPrices() } },
+                onClick = { appState.startAction { appState.refreshCatalogPrices() } },
                 enabled = !appState.pricesRefreshing,
             ) {
                 Text(if (appState.pricesRefreshing) "Fetching…" else "Fetch prices now")

@@ -27,6 +27,7 @@ import com.ikverse.egxanalyzer.data.SettingsRepository
 import com.ikverse.egxanalyzer.data.TelegramRepository
 import com.ikverse.egxanalyzer.data.TradeStatusNotifier
 import com.ikverse.egxanalyzer.data.UpdateRepository
+import com.ikverse.egxanalyzer.data.WatchlistNotifier
 import com.ikverse.egxanalyzer.data.refreshTodayWidget
 import com.ikverse.egxanalyzer.state.LiveAppState
 import com.ikverse.egxanalyzer.ui.AppState
@@ -177,6 +178,12 @@ class EgxApplication : Application() {
             },
             backupFailing = {
                 runCatching { AttentionNotifier(this).backupFailing() }
+            },
+            // Wrapped like the rest: the alert has already been removed from the record by the time
+            // this is called, and losing that to an exception about a notification would fire it
+            // again on the next fetch.
+            watchAlertsFired = { fired ->
+                runCatching { WatchlistNotifier(this).announce(fired) }
             },
             // Already swallows its own failures - a launcher that refuses a shortcut is not
             // something the reader asked about - so it needs no wrapper here.

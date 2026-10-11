@@ -104,18 +104,6 @@
                 android:resource="@xml/today_widget_info" />
         </receiver>
 
-        <!-- Shares a run's trace. Traces hold prompts, source labels and the model's answer, never
-             image bytes or credentials, but they still leave the device only when asked. -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.traces"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/trace_paths" />
-        </provider>
-
         <!-- What became of an install. The APK is written into a session the system owns rather
              than shared as a URI, so there is no provider for updates: handing the installer a
              content:// URI failed for three releases on a grant that does not outlive the handoff

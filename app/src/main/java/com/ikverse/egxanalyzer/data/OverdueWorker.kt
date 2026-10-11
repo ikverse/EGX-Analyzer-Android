@@ -11,7 +11,6 @@ import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.TradeAlerts
 import java.time.LocalDate
-import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 
 /**
@@ -61,7 +60,7 @@ class OverdueWorker(
             latestQuoteFor = store::latestQuote,
             // The exchange's calendar, matching what the Portfolio tab counts with, so a
             // notification never disagrees with the screen it is pointing at.
-            today = LocalDate.now(ZoneId.of(EGX_ZONE)),
+            today = LocalDate.now(ScheduleClock.ZONE),
             // And its close, for the same reason: this worker is the backstop behind the sweep at
             // the close, and a backstop that judged a window by a different rule would announce a
             // trade as ending on a different afternoon from the one the screen shows.
@@ -92,9 +91,6 @@ class OverdueWorker(
 
     companion object {
         private const val NAME = "overdue-check"
-
-        /** Cairo, because a deadline belongs to the exchange rather than to wherever the phone is. */
-        private const val EGX_ZONE = "Africa/Cairo"
 
         /**
          * Books the daily check, replacing whatever was booked before.

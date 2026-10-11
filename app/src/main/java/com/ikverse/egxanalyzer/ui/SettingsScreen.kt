@@ -44,7 +44,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,7 +69,6 @@ import com.ikverse.egxanalyzer.model.TokenUsage
 import com.ikverse.egxanalyzer.model.formatTokenCount
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
@@ -85,7 +83,6 @@ internal fun SettingsScreen(appState: AppState) {
     var confirmDeleteAll by remember { mutableStateOf(false) }
     var confirmRemoveCredential by remember { mutableStateOf(false) }
     var confirmResetProvider by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
 
     if (confirmRemoveCredential) {
         AlertDialog(
@@ -185,14 +182,20 @@ internal fun SettingsScreen(appState: AppState) {
 
     // Counted here rather than in the summary line so the two cannot disagree about how many
     // switches the card actually holds.
-    val notificationsOn = listOf(
+    val notificationSwitches = listOf(
         appState.appPreferences.overdueRemindersEnabled,
         appState.appPreferences.tradeAlertsEnabled,
         appState.appPreferences.callAlertsEnabled,
         appState.appPreferences.approachAlertsEnabled,
         appState.appPreferences.sessionDigestEnabled,
         appState.appPreferences.feedAlertsEnabled,
-    ).count { it }
+    )
+    // The constant and this list are the same six switches, and the constant exists only so the
+    // summary cannot say "of 7" over a card of six - which it did, for a month.
+    check(notificationSwitches.size == NOTIFICATION_COUNT) {
+        "NOTIFICATION_COUNT is $NOTIFICATION_COUNT but ${notificationSwitches.size} switches are drawn"
+    }
+    val notificationsOn = notificationSwitches.count { it }
 
     // One line per group as well as one for the card. A closed group saying nothing about how much
     // of it is on would put the reader back to opening all three to find the switch they came for,
@@ -322,7 +325,7 @@ internal fun SettingsScreen(appState: AppState) {
                         onClick = {
                             val entered = credential
                             credential = ""
-                            scope.launch { appState.saveSettings(entered) }
+                            appState.startAction { appState.saveSettings(entered) }
                         },
                     ) { Text("Save and verify") }
                     SettingsButton(onClick = { confirmResetProvider = true }) {
@@ -488,7 +491,7 @@ internal fun SettingsScreen(appState: AppState) {
                     onCheckedChange = appState::updateCatalogEnrichment,
                 )
                 SettingsButton(onClick = {
-                    scope.launch { appState.refreshEgxCatalog() }
+                    appState.startAction { appState.refreshEgxCatalog() }
                 }) {
                     // Sized, where it used to take Material's 24dp default: inside a button that
                     // is now 32dp tall the glyph was all but touching both edges.
@@ -659,15 +662,26 @@ internal fun SettingsScreen(appState: AppState) {
                         horizontalArrangement = Arrangement.spacedBy(Space.s),
                         verticalArrangement = Arrangement.spacedBy(Space.s),
                     ) {
-                        SettingsButton(onClick = {
-                            scope.launch { appState.refreshTelegramChats() }
-                        }) { Text("Refresh chats") }
+                        // Through runAction, like Analyze's pull-to-refresh of the same list:
+                        // Telegram answers a failed refresh by throwing, and launched bare on the
+                        // screen's scope that throw closed the app.
+                        SettingsButton(
+                            enabled = appState.busyLabel == null,
+                            onClick = {
+                                appState.startAction {
+                                    appState.runAction(
+                                        label = "Refreshing chats",
+                                        success = { "${appState.channels.size} chats" },
+                                    ) { appState.refreshTelegramChats() }
+                                }
+                            },
+                        ) { Text("Refresh chats") }
                         // Through runAction like everywhere else: signing out tears down the
                         // Telegram client, and without the busy label nothing on screen says so.
                         SettingsButton(
                             enabled = appState.busyLabel == null,
                             onClick = {
-                                scope.launch {
+                                appState.startAction {
                                     appState.runAction(
                                         label = "Signing out",
                                         success = { "Signed out" },
@@ -988,7 +1002,7 @@ internal fun SettingsScreen(appState: AppState) {
                 ),
             ) {
                 SettingsButton(
-                    onClick = { scope.launch { appState.syncReports() } },
+                    onClick = { appState.startAction { appState.syncReports() } },
                     enabled = appState.telegramAuthState.step == TelegramAuthStep.READY &&
                         appState.busyLabel == null,
                     filled = true,
@@ -1136,7 +1150,6 @@ internal fun SettingsScreen(appState: AppState) {
  */
 @Composable
 private fun DiagnosticsControl(appState: AppState) {
-    val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }
     // Read once into state rather than on every recomposition. It is a file read, it changes only
     // when the process dies - which is the one moment nothing is composing - and holding it is what
@@ -1178,7 +1191,7 @@ private fun DiagnosticsControl(appState: AppState) {
         SettingsButton(
             enabled = !saving,
             onClick = {
-                scope.launch {
+                appState.startAction {
                     saving = true
                     runCatching { appState.saveDiagnosticsToDownloads() }
                         .onSuccess { written ->
@@ -1375,7 +1388,7 @@ private val SEARCH_RESULTS = listOf(5, 8, 12, 20)
  * Named rather than written into the summary, because "3 of 7 on" over a card showing eight
  * switches is the kind of wrong nobody notices for months.
  */
-private const val NOTIFICATION_COUNT = 7
+private const val NOTIFICATION_COUNT = 6
 
 /**
  * "2 of 3 on", for a group of switches.

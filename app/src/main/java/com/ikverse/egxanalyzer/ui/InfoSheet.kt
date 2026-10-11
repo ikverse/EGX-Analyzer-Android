@@ -1,6 +1,7 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -251,9 +252,17 @@ internal fun SettingToggle(
     enabled: Boolean = true,
 ) {
     SettingRow(
-        modifier,
+        // The row is the switch: one accessible node that carries the name, the state and the
+        // press, read as "<label>, switch, on". Split across a Text and a bare Switch it was an
+        // unnamed switch beside words that did nothing when pressed.
+        modifier.toggleable(
+            value = checked,
+            enabled = enabled,
+            role = Role.Switch,
+            onValueChange = onCheckedChange,
+        ),
         about,
-        trailing = { Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled) },
+        trailing = { Switch(checked = checked, onCheckedChange = null, enabled = enabled) },
     ) {
         Text(
             label,

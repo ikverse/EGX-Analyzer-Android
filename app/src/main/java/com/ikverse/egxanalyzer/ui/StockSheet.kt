@@ -16,6 +16,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.NotificationsNone
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.window.DialogProperties
+import com.ikverse.egxanalyzer.model.WatchAlert
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -183,7 +192,14 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        StockSheetHeading(key, score, calls.firstOrNull(), latest, history, trades, faults)
+        StockSheetHeading(
+            key, score, calls.firstOrNull(), latest, history, trades, faults,
+            watching = key in appState.watchlist,
+            onToggleWatch = { appState.toggleWatch(key) },
+            alerts = appState.watchAlerts.filter { it.ticker == key },
+            onAddAlert = { level, above -> appState.addWatchAlert(key, level, above) },
+            onRemoveAlert = appState::removeWatchAlert,
+        )
         Column(
             Modifier
                 .fillMaxWidth()
@@ -258,7 +274,26 @@ private fun StockSheetHeading(
     history: List<DailySession>,
     trades: List<PositionView>,
     faults: Set<FeedFault>,
+    /** Whether this phone follows the stock, and the press that flips it. */
+    watching: Boolean,
+    onToggleWatch: () -> Unit,
+    /** The price alerts set on this stock, and how one is added or taken away. */
+    alerts: List<WatchAlert>,
+    onAddAlert: (level: Double, above: Boolean) -> Unit,
+    onRemoveAlert: (WatchAlert) -> Unit,
 ) {
+    var settingAlert by remember { mutableStateOf(false) }
+    if (settingAlert) {
+        WatchAlertDialog(
+            ticker = ticker,
+            suggested = latest?.session?.close,
+            onDismiss = { settingAlert = false },
+            onConfirm = { level, above ->
+                settingAlert = false
+                onAddAlert(level, above)
+            },
+        )
+    }
     val english = score?.companyEnglish ?: newest?.companyEnglish
     val arabic = score?.companyArabic ?: newest?.companyArabic
     Column {
@@ -364,6 +399,42 @@ private fun StockSheetHeading(
                 }
             }
         }
+        // The one thing on this sheet that writes: following the stock. An action pill, like
+        // Bought, because it changes what the phone does from here on - the stock joins every
+        // price refresh.
+        Row(
+            Modifier.padding(horizontal = Space.l).padding(bottom = Space.s),
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            ActionPill(
+                label = if (watching) "Watching" else "Watch",
+                icon = if (watching) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                onClick = onToggleWatch,
+            )
+            ActionPill(
+                label = "Alert",
+                icon = Icons.Outlined.NotificationsNone,
+                onClick = { settingAlert = true },
+            )
+        }
+        if (alerts.isNotEmpty()) {
+            // Each alert as a pill that removes itself: there is nothing to edit on one, only a
+            // level that was asked about and can be unasked.
+            FlowRow(
+                Modifier.padding(horizontal = Space.l).padding(bottom = Space.s),
+                horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
+                alerts.forEach { alert ->
+                    FilledPill(
+                        alert.label + " ×",
+                        MaterialTheme.colorScheme.surfaceContainerHighest,
+                        MaterialTheme.colorScheme.onSurfaceVariant,
+                        onClick = { onRemoveAlert(alert) },
+                    )
+                }
+            }
+        }
         StockSheetChips(
             trades,
             score,
@@ -372,6 +443,69 @@ private fun StockSheetHeading(
         )
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+}
+
+/**
+ * A level and a direction, and nothing else.
+ *
+ * Prefilled with the last close so the reader edits a number rather than types one; the direction
+ * defaults to "rises to", which is the question a watch list is usually asking.
+ */
+@Composable
+private fun WatchAlertDialog(
+    ticker: String,
+    suggested: Double?,
+    onDismiss: () -> Unit,
+    onConfirm: (level: Double, above: Boolean) -> Unit,
+) {
+    var price by remember { mutableStateOf(suggested?.let(::formatPrice).orEmpty()) }
+    var above by remember { mutableStateOf(true) }
+    val parsed = price.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it > 0.0 && it.isFinite() }
+    AlertDialog(
+        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Text("Alert me about $ticker") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                Text(
+                    "Checked whenever prices are fetched. It fires once and then removes itself.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    FilledPill(
+                        "Rises to",
+                        if (above) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                        if (above) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        onClick = { above = true },
+                    )
+                    FilledPill(
+                        "Falls to",
+                        if (!above) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                        if (!above) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        onClick = { above = false },
+                    )
+                }
+                OutlinedTextField(
+                    value = price,
+                    onValueChange = { price = it },
+                    label = { Text("Price") },
+                    singleLine = true,
+                    isError = price.isNotBlank() && parsed == null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = parsed != null,
+                onClick = { parsed?.let { onConfirm(it, above) } },
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /** [MaterialTheme.typography.titleLarge] is 19sp; the heading's ticker is turned down to this. */

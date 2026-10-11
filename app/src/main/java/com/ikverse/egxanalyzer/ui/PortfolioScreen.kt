@@ -28,7 +28,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,7 +52,6 @@ import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.callIds
 import com.ikverse.egxanalyzer.ui.theme.extraColors
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 /**
  * What the user actually bought, and what it has done since.
@@ -66,13 +64,12 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun PortfolioScreen(appState: AppState) {
-    val scope = rememberCoroutineScope()
     val portfolio = appState.portfolio
 
     Screen(
         appState = appState,
         destination = AppDestination.PORTFOLIO,
-        onRefresh = { scope.launch { appState.refreshPrices() } },
+        onRefresh = { appState.startAction { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
     ) {
         // Above the early return below, which is the whole reason it is composed this high up: the

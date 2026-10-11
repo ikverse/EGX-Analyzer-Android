@@ -36,7 +36,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,7 +48,6 @@ import com.ikverse.egxanalyzer.model.CloudModelInfo
 import com.ikverse.egxanalyzer.model.ModelSuitability
 import com.ikverse.egxanalyzer.model.ModelSuitabilityRules
 import com.ikverse.egxanalyzer.model.formatTokenCount
-import kotlinx.coroutines.launch
 
 /**
  * Which model a run will be sent to.
@@ -189,7 +187,6 @@ internal fun ModelPickerSheet(
     onChoose: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var showAll by remember { mutableStateOf(false) }
     val typed = query.trim()
@@ -329,7 +326,7 @@ internal fun ModelPickerSheet(
                 )
             }
             SettingsButton(
-                onClick = { scope.launch { appState.loadCloudModels() } },
+                onClick = { appState.startAction { appState.loadCloudModels() } },
                 enabled = !appState.modelListLoading,
                 modifier = Modifier.fillMaxWidth(),
             ) {

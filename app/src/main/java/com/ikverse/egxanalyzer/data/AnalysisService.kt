@@ -4,7 +4,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.os.Build
 import android.os.IBinder
 
 /**
@@ -22,16 +21,12 @@ class AnalysisService : Service() {
         val sources = intent?.getIntExtra(EXTRA_SOURCES, 0) ?: 0
         val model = intent?.getStringExtra(EXTRA_MODEL).orEmpty()
         val notification = AnalysisNotifier(this).running(sources, model)
-        // The typed overload is required from Android 10 on and does not exist before it.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                AnalysisNotifier.NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-            )
-        } else {
-            startForeground(AnalysisNotifier.NOTIFICATION_ID, notification)
-        }
+        // The typed overload: minSdk is 31, so the untyped one is never the one that runs.
+        startForeground(
+            AnalysisNotifier.NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+        )
         // Not restarted if Android kills the process: the analysis would be gone with it, and
         // silently starting a paid request again is the last thing the user wants.
         return START_NOT_STICKY
@@ -45,19 +40,11 @@ class AnalysisService : Service() {
             val intent = Intent(context, AnalysisService::class.java)
                 .putExtra(EXTRA_SOURCES, sources)
                 .putExtra(EXTRA_MODEL, model)
-            ContextCompat_startForegroundService(context, intent)
+            context.startForegroundService(intent)
         }
 
         fun stop(context: Context) {
             context.stopService(Intent(context, AnalysisService::class.java))
-        }
-
-        private fun ContextCompat_startForegroundService(context: Context, intent: Intent) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
         }
     }
 }

@@ -13,7 +13,7 @@ data class AnalysisWindow(
     val targetDate: LocalDate,
 )
 
-private val cairoZone: ZoneId = ZoneId.of("Africa/Cairo")
+private val cairoZone: ZoneId = ScheduleClock.ZONE
 
 fun nextEgxOpenDay(from: LocalDate): LocalDate {
     var candidate = from.plusDays(1)

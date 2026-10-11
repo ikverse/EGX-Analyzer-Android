@@ -75,6 +75,7 @@ import com.ikverse.egxanalyzer.model.AnalysisChunking
 import com.ikverse.egxanalyzer.model.AnalysisContentType
 import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisMode
+import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.AnalysisProgress
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.SourceTrace
@@ -287,7 +288,7 @@ internal fun AnalyzeScreen(appState: AppState) {
         // nothing would read as the screen being stuck.
         onRefresh = if (appState.telegramAuthState.step == TelegramAuthStep.READY) {
             {
-                scope.launch {
+                appState.startAction {
                     appState.runAction(
                         label = "Refreshing chats",
                         success = { "${appState.channels.size} chats" },
@@ -382,6 +383,7 @@ internal fun AnalyzeScreen(appState: AppState) {
                         mode = appState.analysisMode,
                         date = appState.recommendationTargetDate,
                         onClick = { showRecommendationDatePicker(context, appState) },
+                        onUseNextSession = { appState.selectAnalysisMode(AnalysisMode.NEXT_DAY) },
                     )
                 }
             },
@@ -501,7 +503,15 @@ private fun RecommendationDateRow(
     mode: AnalysisMode,
     date: LocalDate,
     onClick: () -> Unit,
+    /**
+     * Puts the row back into live mode. Offered only while a historical date is set: the picker
+     * could do it on its own only by picking the live date, and after 14:30 Cairo - and all of
+     * Friday and Saturday - that date is tomorrow, which the picker refuses. So the way back was
+     * restarting the app.
+     */
+    onUseNextSession: () -> Unit,
 ) {
+    Column {
     // A plain click rather than `selectable`: there is nothing to choose between any more, only a
     // date to open and change, so this is the same shape ContentTypeToggle's row is - the row is
     // the whole target, not the icon inside it.
@@ -536,10 +546,14 @@ private fun RecommendationDateRow(
             )
         }
     }
+    if (mode == AnalysisMode.SPECIFIC_DATE) {
+        TextButton(onClick = onUseNextSession) { Text("Use the next EGX session") }
+    }
+    }
 }
 
 private fun showRecommendationDatePicker(context: Context, appState: AppState) {
-    val today = LocalDate.now(ZoneId.of("Africa/Cairo"))
+    val today = LocalDate.now(ScheduleClock.ZONE)
     // Never open later than the latest date the picker allows. The target session runs ahead of
     // today on a Friday, a Saturday, or any weekday after the close, and a DatePicker asked to open
     // outside its own range throws rather than clamping. Historical analysis refuses a future date
@@ -562,7 +576,7 @@ private fun showRecommendationDatePicker(context: Context, appState: AppState) {
         opensOn.dayOfMonth,
     ).apply {
         datePicker.maxDate = today
-            .atStartOfDay(ZoneId.of("Africa/Cairo"))
+            .atStartOfDay(ScheduleClock.ZONE)
             .toInstant()
             .toEpochMilli()
     }.show()
@@ -619,6 +633,9 @@ private fun ContentTypeToggle(label: String, type: AnalysisContentType, appState
  * Analysis loads its own sources, so this is not a required step - it is here so the size of a
  * paid request can be seen first, and so the window can be sanity-checked against the chats.
  */
+/** The busy label the preview button raises, and the only one it reacts to. */
+private const val LoadingMessagesLabel = "Loading messages from Telegram"
+
 @Composable
 private fun MessagesPreview(
     appState: AppState,
@@ -631,14 +648,17 @@ private fun MessagesPreview(
 ) {
     val selected = appState.channels.count(ChannelSelection::selected)
     val sources = appState.telegramSources
-    val loading = appState.busyLabel != null
+    // This button's own work and nothing else's: read as "anything is busy" it spun and greyed
+    // during a price fetch and a sign-out, neither of which it could do anything about.
+    val loading = appState.busyLabel == LoadingMessagesLabel
     SectionCard(
         title = "Messages preview",
         icon = Icons.Outlined.Preview,
         about = infoNote(
             "Messages preview",
             "Selected Telegram chats are collected automatically for the resolved source window.",
-            "This is exactly which messages a run will send.",
+            "The messages a run starts from. Wording filters and cards an earlier run already read " +
+                "are taken off before anything is sent.",
         ),
     ) {
         // With messages on screen the standing line only restates the list, so it gives way to the
@@ -646,7 +666,7 @@ private fun MessagesPreview(
         // none fell in the window, Telegram refused - and none of that is anywhere else.
         if (sources.isEmpty()) {
             Text(
-                appState.telegramSyncMessage ?: "See exactly which messages a run will send.",
+                appState.telegramSyncMessage ?: "See which messages a run would start from.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -674,11 +694,17 @@ private fun MessagesPreview(
         }
         OutlinedButton(
             onClick = {
-                scope.launch {
+                appState.startAction {
                     appState.runAction(
-                        label = "Loading messages from Telegram",
-                        success = { "${appState.inputs.size} sources ready" },
-                    ) { appState.syncTelegramSources() }
+                        label = LoadingMessagesLabel,
+                        success = { load -> load.message },
+                    ) {
+                        // A failed load throws here so the status line paints it as the failure it
+                        // is; the card under the button already shows the same sentence.
+                        val load = appState.syncTelegramSources()
+                        if (!load.succeeded) error(load.message)
+                        load
+                    }
                 }
             },
             enabled = selected > 0 && !loading,

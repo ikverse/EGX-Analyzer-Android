@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import com.ikverse.egxanalyzer.model.ModelUsageRecord
 import com.ikverse.egxanalyzer.model.RuleRejection
 import com.ikverse.egxanalyzer.model.RuleSet
+import com.ikverse.egxanalyzer.model.WatchAlert
 import com.ikverse.egxanalyzer.model.WordingRule
 import com.ikverse.egxanalyzer.model.ComposedPrompt
 import com.ikverse.egxanalyzer.model.PromptVersion
@@ -153,6 +154,17 @@ interface AppState : AppUpdates {
      * page reads it to show "Loading..." rather than mistaking that gap for an empty record.
      */
     val initialDataLoaded: Boolean
+
+    /**
+     * Suspends until [initialDataLoaded] is true, and returns at once when it already is.
+     *
+     * For work that reads the record with no screen in front of it - the scheduled jobs, a
+     * notification action. Those run the moment the state is built, which on a process the alarm
+     * woke is a moment before the reports and trades have come back off disk, and read too early
+     * the record is empty: "No stocks to price", a harvest that copied nothing and stamped the fire
+     * served, a Keep open that found no trade.
+     */
+    suspend fun awaitInitialData()
     val wordingRules: List<WordingRule>
     val ruleSet: RuleSet
     val useDefaultPromptOnly: Boolean
@@ -229,6 +241,9 @@ interface AppState : AppUpdates {
     /** Writes the report as a spreadsheet and offers it onward. */
     suspend fun exportReport(saved: SavedAnalysis)
 
+    /** Writes the whole source ranking as a spreadsheet into Downloads, and says so. */
+    suspend fun saveRankingToDownloads()
+
     /**
      * Copies this device's saved record into Downloads, and names what landed there.
      *
@@ -299,6 +314,25 @@ interface AppState : AppUpdates {
         block: suspend () -> T,
     )
 
+    /**
+     * Runs [block] on the app's own scope, so it outlives the screen that pressed the button.
+     *
+     * A screen's `rememberCoroutineScope()` dies with the screen, and a screen dies on a fold and
+     * on a swipe two tabs away - so a catalog fetch, a backup or a restore started from a button
+     * used to stop half-way with nothing said. A failure here lands on the status line in the
+     * failure tone; cancellation of the app scope itself is left alone. Callers that want a working
+     * line call [runAction] inside the block, exactly as they did before.
+     */
+    fun startAction(block: suspend () -> Unit)
+
+    /**
+     * Writes the day's backup into the chosen folder if one is due, on the app's own scope.
+     *
+     * Called by the activity on every resume. Only ever into a chosen folder, never into Downloads,
+     * and the day is recorded only on success - see `LiveAppState.backUpIfDue`.
+     */
+    fun backUpIfDue()
+
     fun usePromptDefaultOnly(value: Boolean)
 
     fun saveWordingRule(rule: WordingRule): RuleRejection?
@@ -326,6 +360,20 @@ interface AppState : AppUpdates {
     fun positionFor(id: String): Position?
 
     fun openStock(ticker: String)
+
+    /** Normalized tickers this phone follows without a call or a trade on them. Device-local. */
+    val watchlist: Set<String>
+
+    /** Adds [ticker] to the watch list, or removes it if it is already there. */
+    fun toggleWatch(ticker: String)
+
+    /** Every price alert this phone holds. Device-local. */
+    val watchAlerts: List<WatchAlert>
+
+    /** Adds an alert; [above] is "when it rises to [level]", false is "when it falls to". */
+    fun addWatchAlert(ticker: String, level: Double, above: Boolean)
+
+    fun removeWatchAlert(alert: WatchAlert)
 
     fun closeStock()
 
@@ -578,7 +626,14 @@ interface AppState : AppUpdates {
 
     fun updateRecommendationTargetDate(date: LocalDate)
 
-    suspend fun syncTelegramSources()
+    /**
+     * Loads the messages a run would send from the selected chats.
+     *
+     * Never throws: `analyze()` calls this on its way to a run and a Telegram error must not take
+     * the process with it. The outcome comes back instead, so the button that asked can paint a
+     * failure as one - it used to read the card text and report "0 sources ready" with a tick.
+     */
+    suspend fun syncTelegramSources(): TelegramSourceLoad
 
     fun toggleChannel(channel: ChannelSelection)
 
@@ -638,10 +693,6 @@ interface AppState : AppUpdates {
     fun reportFor(saved: SavedAnalysis): AnalysisReport
 
 }
-
-/** Cairo, so "today" turns over with the exchange rather than with the device's timezone. */
-/** Shared, so a screen naming a session "today" and the app storing one agree on where today is. */
-internal const val EGX_ZONE = "Africa/Cairo"
 
 /**
  * How a status line reads, which is not the same question as whether an action worked.
@@ -717,6 +768,12 @@ data class PriceRefreshOutcome(
      * error would put a red line on a schedule that behaved perfectly.
      */
     val busy: Boolean = false,
+)
+
+/** What loading the Telegram messages came to: the sentence the card shows, and whether it is a failure. */
+data class TelegramSourceLoad(
+    val message: String,
+    val succeeded: Boolean,
 )
 
 

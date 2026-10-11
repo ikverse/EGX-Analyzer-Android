@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Leaderboard
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -50,7 +51,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -101,7 +101,6 @@ import com.ikverse.egxanalyzer.model.sessionFor
 import com.ikverse.egxanalyzer.ui.theme.extraColors
 import com.ikverse.egxanalyzer.ui.theme.pageAccent
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.time.ZoneId
 
 /**
@@ -114,7 +113,6 @@ import java.time.ZoneId
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun InsightsScreen(appState: AppState) {
-    val scope = rememberCoroutineScope()
     val full = appState.performance
     // Read once for the page rather than per card: both are one SharedPreferences lookup, and a
     // card asking on every recomposition would do it a hundred times a scroll. Keyed on the
@@ -128,9 +126,12 @@ internal fun InsightsScreen(appState: AppState) {
     Screen(
         appState = appState,
         destination = AppDestination.INSIGHTS,
-        onRefresh = { scope.launch { appState.refreshPrices() } },
+        onRefresh = { appState.startAction { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
     ) {
+        // Above the empty state on purpose: a stock worth watching is most often one nobody has
+        // called yet, and that is exactly the record this page otherwise has nothing to say about.
+        WatchlistCard(appState)
         if (full.tracked == 0) {
             if (!appState.initialDataLoaded) {
                 EmptyState(
@@ -299,7 +300,10 @@ internal fun InsightsScreen(appState: AppState) {
 
         // The ranking leads. It is the question the tab exists to answer - which source is worth
         // reading - and it used to sit below two summary cards as a collapsed line.
-        ChannelRanking(report.channels) { channel -> channelPhotos[channel] }
+        ChannelRanking(
+            report.channels,
+            onExport = { appState.startAction { appState.saveRankingToDownloads() } },
+        ) { channel -> channelPhotos[channel] }
         // What used to sit here and does not any more:
         //
         // **Stocks ranked** answered a question this tab is not asking. Which stock the market has
@@ -668,6 +672,8 @@ private val HeroLabelBaseline = 4.dp
 @Composable
 private fun ColumnScope.ChannelRanking(
     channels: List<ChannelScore>,
+    /** Writes the ranking as a spreadsheet; see `AppState.saveRankingToDownloads`. */
+    onExport: () -> Unit,
     photoFor: (String) -> String?,
 ) {
     if (channels.isEmpty()) return
@@ -701,6 +707,9 @@ private fun ColumnScope.ChannelRanking(
                 "led by ⁨${it.channel}⁩"
         } ?: "${channels.size} sources, none settled enough to rank",
     ) {
+        // The way to take the ranking off the phone, which until now was a screenshot. A text
+        // button rather than a pill: it changes nothing in the record.
+        TextButton(onClick = onExport) { Text("Save as Excel") }
         // The key to every bar below, drawn once. Four names repeated on each card would be most of
         // the card, and the order never changes.
         OutcomeLegend(Modifier.padding(bottom = Space.xs))
@@ -1935,6 +1944,59 @@ private fun ScoredCallRow(
                 )
             },
         )
+    }
+}
+
+/**
+ * The stocks this phone follows, with where each stands.
+ *
+ * One row per ticker and nothing derived: the close and its date are the latest the record holds,
+ * read from the same `latestPrices` every card on the page reads, so this card can never disagree
+ * with a call card about the same stock. Absent entirely with nothing watched.
+ */
+@Composable
+private fun WatchlistCard(appState: AppState) {
+    val watched = appState.watchlist.sorted()
+    if (watched.isEmpty()) return
+    val latest = appState.performance.latestPrices
+    SectionCard(title = "Watching", icon = Icons.Outlined.Visibility) {
+        watched.forEach { ticker ->
+            val price = latest[ticker]
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.medium)
+                    .clickable(onClickLabel = "Open $ticker") { appState.openStock(ticker) }
+                    .heightIn(min = 48.dp)
+                    .padding(vertical = Space.xs),
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StockLogo(ticker, LogoSize.Row)
+                Text(
+                    ticker,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        formatPrice(price?.session?.close),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
+                        color = PriceRole.market,
+                    )
+                    Text(
+                        when {
+                            price == null -> "no price yet · fetch prices"
+                            price.provisional -> "still trading"
+                            else -> AppDates.DayMonth.format(price.session.date)
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }
 

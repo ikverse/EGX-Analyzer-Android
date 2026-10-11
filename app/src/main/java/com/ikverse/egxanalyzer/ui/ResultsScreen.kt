@@ -88,6 +88,7 @@ import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SavedAnalysis
+import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.callSlot
 import java.io.File
@@ -101,11 +102,10 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ResultsScreen(appState: AppState) {
-    val scope = rememberCoroutineScope()
     Screen(
         appState = appState,
         destination = AppDestination.RESULTS,
-        onRefresh = { scope.launch { appState.refreshPrices() } },
+        onRefresh = { appState.startAction { appState.refreshPrices() } },
         refreshing = appState.pricesRefreshing,
     ) {
         UnreadableNotice(appState.unreadableResults)
@@ -285,8 +285,8 @@ internal fun ResultsScreen(appState: AppState) {
                         highlighted = saved.id == appState.pendingResultId,
                         onHighlightShown = { appState.consumePendingResult() },
                         onShare = { appState.shareReport(saved) },
-                        onSaveLocally = { scope.launch { appState.saveReportToDownloads(saved) } },
-                        onExport = { scope.launch { appState.exportReport(saved) } },
+                        onSaveLocally = { appState.startAction { appState.saveReportToDownloads(saved) } },
+                        onExport = { appState.startAction { appState.exportReport(saved) } },
                         onDelete = { appState.deleteResult(saved) },
                         peakFor = appState::peakSince,
                         // Normalized, because the record keys prices on the bare ticker and a
@@ -1316,7 +1316,7 @@ private fun ReportFigures(stocks: Int, calls: Int, sources: Int, traded: Int) {
  * and nothing is drawn.
  */
 private fun relativeSession(target: LocalDate): String? {
-    val today = LocalDate.now(ZoneId.of(EGX_ZONE))
+    val today = LocalDate.now(ScheduleClock.ZONE)
     return when (val days = ChronoUnit.DAYS.between(today, target)) {
         0L -> "Today"
         1L -> "Tomorrow"

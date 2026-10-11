@@ -8,6 +8,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.io.OutputStream
+import com.ikverse.egxanalyzer.model.ScheduleClock
 import java.time.LocalDate
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -61,8 +62,14 @@ private const val PART_SUFFIX = ".part"
 /** How many daily backups a folder keeps before the oldest is dropped. */
 internal const val BACKUPS_KEPT = 7
 
-/** `egx-backup-2026-08-25.zip`: sorts by date as text, which is what the pruning below relies on. */
-internal fun backupFileName(date: LocalDate = LocalDate.now()): String = "$BACKUP_PREFIX$date$BACKUP_SUFFIX"
+/**
+ * `egx-backup-2026-08-25.zip`: sorts by date as text, which is what the pruning below relies on.
+ *
+ * The exchange's day, which is the day `backupDue` and `recordBackupDay` count in. Named for the
+ * phone's day it could disagree with them for a traveller, and the prune sorts by this name.
+ */
+internal fun backupFileName(date: LocalDate = LocalDate.now(ScheduleClock.ZONE)): String =
+    "$BACKUP_PREFIX$date$BACKUP_SUFFIX"
 
 private const val BACKUP_PREFIX = "egx-backup-"
 private const val BACKUP_SUFFIX = ".zip"
@@ -157,22 +164,37 @@ internal fun writeBackupToFolder(
     val resolver = context.contentResolver
     val parent = DocumentsContract.buildDocumentUriUsingTree(folder, DocumentsContract.getTreeDocumentId(folder))
     val finalName = backupFileName()
-    // Today's backup replacing today's earlier one, rather than sitting beside it as "(1)". A day
-    // is the unit here: keeping every run of an app that syncs on launch would fill the folder with
-    // copies of an unchanged record and push the older days out of the seven that are kept.
+    val partName = finalName + PART_SUFFIX
+    // Only a part file left by an earlier failed write goes before anything is written: it is not
+    // a backup, and under this name createDocument would hand back "(1)". Today's finished copy is
+    // deliberately left standing - it is what stands between a failed write and having nothing for
+    // today, which is the rule `writeBackupTo` states for the prune and this used to break here.
     existingDocuments(context, folder).forEach { (name, id) ->
-        if (name == finalName || name == finalName + PART_SUFFIX) {
+        if (name == partName) {
             runCatching {
                 DocumentsContract.deleteDocument(resolver, DocumentsContract.buildDocumentUriUsingTree(folder, id))
             }
         }
     }
-    val part = DocumentsContract.createDocument(resolver, parent, BACKUP_MIME_TYPE, finalName + PART_SUFFIX)
+    val part = DocumentsContract.createDocument(resolver, parent, BACKUP_MIME_TYPE, partName)
         ?: throw IOException("The backup folder would not accept a new file")
+    var whole = false
     try {
         resolver.openOutputStream(part)?.use { out ->
             writeBackup(out, database, settings, device, checkpoint)
         } ?: throw IOException("The backup folder would not open the file it had just made")
+        whole = true
+        // Today's backup replacing today's earlier one, rather than sitting beside it as "(1)". A
+        // day is the unit here: keeping every run of an app that syncs on launch would fill the
+        // folder with copies of an unchanged record and push the older days out of the seven that
+        // are kept. Removed only now the new copy is complete.
+        existingDocuments(context, folder).forEach { (name, id) ->
+            if (name == finalName) {
+                runCatching {
+                    DocumentsContract.deleteDocument(resolver, DocumentsContract.buildDocumentUriUsingTree(folder, id))
+                }
+            }
+        }
         // A null from renameDocument does not always mean it failed - several providers rename the
         // document and return nothing - so the folder is asked before this is called a failure.
         // Getting that wrong would delete the backup that had just been written successfully.
@@ -182,11 +204,10 @@ internal fun writeBackupToFolder(
         }
         return renamed?.let { documentName(context, it) } ?: finalName
     } catch (error: Throwable) {
-        // The part file exists from createDocument onwards, so an abandoned one has to go here or
-        // the folder keeps a half-written zip that the next prune would count as a backup. Safe
-        // after a rename that reported nothing: this only runs when the folder confirmed the final
-        // name is absent, so whatever is still sitting under the part URI is the failed write.
-        runCatching { DocumentsContract.deleteDocument(resolver, part) }
+        // A half-written part has to go, or the folder keeps a truncated zip. A whole one stays:
+        // after a failed rename it is the only complete copy of today, `readBackup` reads it by its
+        // first bytes whatever it is called, and the next write removes it before starting.
+        if (!whole) runCatching { DocumentsContract.deleteDocument(resolver, part) }
         throw error
     }
 }

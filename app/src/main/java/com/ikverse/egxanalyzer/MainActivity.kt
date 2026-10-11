@@ -1,12 +1,10 @@
 package com.ikverse.egxanalyzer
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ikverse.egxanalyzer.data.AnalysisNotifier
 import com.ikverse.egxanalyzer.data.OverdueNotifier
@@ -14,15 +12,10 @@ import com.ikverse.egxanalyzer.data.AppShortcuts
 import com.ikverse.egxanalyzer.data.AttentionNotifier
 import com.ikverse.egxanalyzer.data.CallAlertNotifier
 import com.ikverse.egxanalyzer.data.TradeStatusNotifier
-import com.ikverse.egxanalyzer.data.holdsBackupFolder
-import com.ikverse.egxanalyzer.data.writeBackupTo
+import com.ikverse.egxanalyzer.data.WatchlistNotifier
 import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppRoot
 import com.ikverse.egxanalyzer.ui.NavStop
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -42,10 +35,12 @@ class MainActivity : ComponentActivity() {
             // left on the Portfolio tab overnight would otherwise show yesterday's count until
             // something else happened to recompute. Outside the root on purpose: it is app
             // behaviour rather than UI, and no screen should have to own it.
-            val scope = rememberCoroutineScope()
             LifecycleResumeEffect(Unit) {
                 appState.refreshOverdue()
-                backUpIfDue(scope)
+                // On resume rather than on start, so a phone left open across midnight still gets
+                // that day's copy. The write itself runs on the app's scope - see
+                // AppState.backUpIfDue - so a fold mid-write is not recorded as a failure.
+                appState.backUpIfDue()
                 onPauseOrDispose {
                     // The other way a look at Insights ends. The shell takes the same mark when the
                     // reader changes tab; this covers the reader who was still on it when the phone
@@ -56,54 +51,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
             AppRoot(appState = appState)
-        }
-    }
-
-    /**
-     * Writes the day's backup into the folder the user picked, if one is due.
-     *
-     * On resume rather than on start, so a phone left open across midnight still gets that day's
-     * copy, and guarded by day rather than by launch - a phone opened six times before lunch would
-     * otherwise write six copies of an unchanged record and push five real days out of the seven a
-     * folder keeps. Outside the root like the overdue refresh above and for the same reason: it is
-     * app behaviour, and no screen should have to own it.
-     *
-     * **Only into a chosen folder, never into Downloads.** The manual button falls back there, and
-     * that is right for something somebody pressed; doing it daily would pile a file per day into
-     * Downloads forever, because MediaStore appends rather than replaces and nothing prunes it.
-     *
-     * The day is recorded **only on success**, so a write that failed - the phone asleep, the cloud
-     * app offline, the card removed - is tried again on the next resume rather than counted as
-     * done. Nothing is announced on success: a message about a backup nobody asked for, on top of
-     * an app that has just opened, is noise. A failure is different - see
-     * `AppState.recordBackupOutcome` - and the same is true of a folder whose grant is simply gone,
-     * which is as unreachable as one that refused a write and used to return here unremarked.
-     */
-    private fun backUpIfDue(scope: CoroutineScope) {
-        val folder = appState.backupFolder?.let(Uri::parse) ?: return
-        if (!appState.backupDue()) return
-        if (!holdsBackupFolder(this, folder)) {
-            appState.recordBackupOutcome(succeeded = false)
-            return
-        }
-        scope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    writeBackupTo(
-                        context = this@MainActivity,
-                        folder = folder,
-                        database = appState.databaseFile(),
-                        settings = appState.settingsDocument(),
-                        device = appState.backupDevice(),
-                        checkpoint = appState::checkpointDatabase,
-                    )
-                }
-            }.onSuccess {
-                appState.recordBackupDay()
-                appState.recordBackupOutcome(succeeded = true)
-            }.onFailure {
-                appState.recordBackupOutcome(succeeded = false)
-            }
         }
     }
 
@@ -164,5 +111,9 @@ class MainActivity : ComponentActivity() {
         intent?.getStringExtra(CallAlertNotifier.EXTRA_CALL_ID)
             ?.takeIf(String::isNotBlank)
             ?.let { appState.openCall(it, returnTo = null) }
+        // A watch alert names one stock, so it opens that stock's sheet.
+        intent?.getStringExtra(WatchlistNotifier.EXTRA_OPEN_STOCK)
+            ?.takeIf(String::isNotBlank)
+            ?.let(appState::openStock)
     }
 }
