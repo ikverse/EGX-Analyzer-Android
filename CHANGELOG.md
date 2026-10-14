@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.2.2] — 2026-10-14
+
+- Save diagnostics now also saves the request traces (`egx-traces-<date>.zip`), so a run that returns nothing can be read off the phone.
+
 ## [4.2.1] — 2026-10-11
 
 - Tapping a stock's heading or the column titles in a report's table no longer closes the report on wide screens.
