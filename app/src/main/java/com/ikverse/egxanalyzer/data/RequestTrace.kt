@@ -30,6 +30,18 @@ class RequestTrace(private val context: Context, private val requestId: String) 
         }
     }
 
+    /**
+     * A request that never came back, with the reason and how long it waited.
+     *
+     * A failed request has no response to keep, which is exactly when a trace is most wanted: the
+     * seconds in the message say whether a connection was cut at a round number.
+     */
+    fun recordFailure(label: String, failure: Throwable) {
+        runCatching {
+            File(directory, "$label-failure.txt").writeText(failure.message ?: failure.javaClass.name)
+        }
+    }
+
     fun location(): String = directory.path
 
     companion object {

@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.2.3] — 2026-10-14
+
+- A dropped connection or a provider error now fails the run with the cause and how long the request waited, instead of saving a report with no calls. The retry rules from 4.2.0 are back to the 4.1.1 behaviour (timeouts only).
+- An unusable ranking from the model (such as an empty `[]`) is now asked for once more, and if it still fails the calls are ranked on the phone.
+- Failed requests are included in the saved traces.
+
 ## [4.2.2] — 2026-10-14
 
 - Save diagnostics now also saves the request traces (`egx-traces-<date>.zip`), so a run that returns nothing can be read off the phone.
