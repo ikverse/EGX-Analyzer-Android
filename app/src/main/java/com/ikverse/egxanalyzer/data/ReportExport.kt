@@ -134,12 +134,43 @@ internal fun saveDiagnosticsToDownloads(
     }
     // Only when there is one. A second file in Downloads saying nothing happened is a file the
     // reader has to open to learn that, and every save on a healthy phone would write one.
+    val saved = mutableListOf(record)
     val crashes = CrashLog.read(context)
-    if (crashes.isBlank()) return listOf(record)
-    val written = writeToDownloads(context, "egx-crashes-$stamp.txt", TEXT_MIME_TYPE) { out ->
-        out.write(crashes.toByteArray())
+    if (crashes.isNotBlank()) {
+        saved += writeToDownloads(context, "egx-crashes-$stamp.txt", TEXT_MIME_TYPE) { out ->
+            out.write(crashes.toByteArray())
+        }
     }
-    return listOf(record, written)
+    // The traces are the one thing the database cannot say: what the model was sent and what it
+    // answered. A failure here must not cost the record that was already written above.
+    val traces = File(context.filesDir, RequestTrace.TRACE_ROOT)
+    if (traceFiles(traces).isNotEmpty()) {
+        runCatching {
+            writeToDownloads(context, "egx-traces-$stamp.zip", BACKUP_MIME_TYPE) { out ->
+                zipTraces(traces, out)
+            }
+        }.onSuccess { saved += it }
+    }
+    return saved
+}
+
+/** Every file under the traces folder, which is one folder per run. */
+internal fun traceFiles(root: File): List<File> =
+    root.walkTopDown().filter(File::isFile).sortedBy(File::getPath).toList()
+
+/**
+ * Writes the traces folder as a zip, each entry named `<requestId>/<label>-request.json` or
+ * `-response.json` so one run's files stay together. Image bytes were already replaced by a note of
+ * their size when the trace was written, which is why this is kilobytes rather than megabytes.
+ */
+internal fun zipTraces(root: File, out: OutputStream) {
+    val zip = java.util.zip.ZipOutputStream(out)
+    for (file in traceFiles(root)) {
+        zip.putNextEntry(java.util.zip.ZipEntry(file.relativeTo(root).invariantSeparatorsPath))
+        file.inputStream().use { it.copyTo(zip) }
+        zip.closeEntry()
+    }
+    zip.finish()
 }
 
 /**
