@@ -19,7 +19,6 @@ import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.UnaccountedImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -166,20 +165,9 @@ class CloudAnalysisRepository(
                         correction = attempt,
                     ),
                 )
-                val document = try {
-                    consolidate(
-                        request, harvest, config, appPreferences, credential, correctionInstructions, trace,
-                    )
-                } catch (refused: TransientProviderFailure) {
-                    // The provider refused for a moment rather than for a reason, and a refusal is
-                    // not billed. Once more after a pause; a second refusal is the run's failure,
-                    // in the provider's own words. A timeout here is deliberately not retried: it
-                    // is the longest wait in the run and the user set it.
-                    delay(retryDelayMillis(refused))
-                    consolidate(
-                        request, harvest, config, appPreferences, credential, correctionInstructions, trace,
-                    )
-                }
+                val document = consolidate(
+                    request, harvest, config, appPreferences, credential, correctionInstructions, trace,
+                )
                 // Kept apart from the validation warnings below: these describe the answer for the
                 // record, and are not worth paying for a correction request over.
                 val notes = mutableListOf<String>()
@@ -288,24 +276,6 @@ class CloudAnalysisRepository(
     /** One answer from the provider, with what it cost. Null usage means it did not say. */
     private class CompletionResponse(val body: String, val usage: TokenUsage?)
 
-    /** Why a batch was given up on, in the words the report's diagnostics carry. */
-    private fun droppedChunkWarning(
-        chunk: Int,
-        failure: IOException,
-        preferences: AppPreferences,
-    ): String = when (failure) {
-        is SocketTimeoutException ->
-            "Chunk $chunk was dropped: the model did not answer within " +
-                "${preferences.responseTimeoutSeconds}s, twice. Raise the timeout in Settings, " +
-                "Analysis, Validation."
-        is TransientProviderFailure ->
-            "Chunk $chunk was dropped: the provider answered HTTP ${failure.status} twice. " +
-                failure.message.orEmpty()
-        else ->
-            "Chunk $chunk was dropped: the connection failed twice " +
-                "(${failure.message ?: failure.javaClass.simpleName})."
-    }
-
     private suspend fun extract(
         request: AnalysisRequest,
         config: CloudConfiguration,
@@ -369,21 +339,20 @@ class CloudAnalysisRepository(
                     request, chunk, globalRefs, harvest, config, appPreferences, credential, null,
                     trace, "chunk-$chunkNumber",
                 )
-            } catch (failure: IOException) {
-                // A timeout, a dropped connection, or the provider answering 429/5xx: moments
-                // rather than verdicts, and none of them billed. One more try after a pause - a
-                // chunk that fails twice is dropped and the run keeps what the others returned,
-                // which is what this loop was already written to do for a timeout alone.
+            } catch (timeout: SocketTimeoutException) {
+                // Only a timeout is retried and dropped. A dropped connection or a refusal from
+                // the provider fails the run with its own message - see [executeCompletion] - so
+                // that a run that read nothing is never saved as a report with no calls in it.
                 harvest.retried = true
-                delay(retryDelayMillis(failure))
                 runCatching {
                     readChunk(
                         request, chunk, globalRefs, harvest, config, appPreferences, credential, null,
-                        trace, "chunk-$chunkNumber-failure-retry",
+                        trace, "chunk-$chunkNumber-timeout-retry",
                     )
-                }.getOrElse { again ->
-                    if (again is CancellationException) throw again
-                    harvest.warnings += droppedChunkWarning(chunkNumber, failure, appPreferences)
+                }.getOrElse {
+                    harvest.warnings += "Chunk $chunkNumber was dropped: the model did not answer " +
+                        "within ${appPreferences.responseTimeoutSeconds}s, twice. Raise the timeout " +
+                        "in Settings, Analysis, Validation."
                     null
                 }
             } ?: run {
@@ -409,37 +378,25 @@ class CloudAnalysisRepository(
                 val unread = missing.mapNotNullTo(mutableSetOf()) { plan.sourceOf[it] }
                 val again = sending.positions.filter { request.inputs[it].sourceId in unread }
                 val againRefs = again.mapNotNull(plan.referenceOf::get)
-                // Guarded like the first reading: this request can time out or be refused too,
-                // and unguarded it took the run - and every chunk already paid for - with it. The
-                // first reading stands, and the cards it missed are named unaccounted below.
-                val second = runCatching {
-                    readChunk(
-                        request, again.map(request.inputs::get), againRefs, harvest,
-                        config, appPreferences, credential,
-                        "A previous request left ${againRefs.size} of these images out of both " +
-                            "`extracted` and `excluded`. Read them again, accounting for every " +
-                            "IMAGE_REF supplied here.",
-                        trace, "chunk-$chunkNumber-retry",
-                    )
-                }.getOrElse { failure ->
-                    if (failure is CancellationException) throw failure
-                    harvest.warnings += "Re-reading ${againRefs.size} missed image(s) in chunk " +
-                        "$chunkNumber failed: ${failure.message ?: "no answer"}."
-                    null
-                }
+                val second = readChunk(
+                    request, again.map(request.inputs::get), againRefs, harvest,
+                    config, appPreferences, credential,
+                    "A previous request left ${againRefs.size} of these images out of both " +
+                        "`extracted` and `excluded`. Read them again, accounting for every " +
+                        "IMAGE_REF supplied here.",
+                    trace, "chunk-$chunkNumber-retry",
+                )
                 // The second reading replaces the first for those messages alone rather than
                 // joining it, or a chunk that merely forgot one image would contribute every other
                 // card twice. And only where it did better by them: an answer that came back
                 // worse must not take with it the cards the first one did read.
-                if (second != null) {
-                    val before = againRefs.count(answer.cited::contains)
-                    if (againRefs.count(second.cited::contains) > before) {
-                        answer.replace(
-                            unread.mapTo(mutableSetOf()) { request.telegramIdFor(it) },
-                            againRefs,
-                            second,
-                        )
-                    }
+                val before = againRefs.count(answer.cited::contains)
+                if (againRefs.count(second.cited::contains) > before) {
+                    answer.replace(
+                        unread.mapTo(mutableSetOf()) { request.telegramIdFor(it) },
+                        againRefs,
+                        second,
+                    )
                 }
             }
             harvest.adopt(answer)
@@ -593,7 +550,12 @@ class CloudAnalysisRepository(
         label: String,
     ): ChunkAnswer {
         val body = request.extractionBody(chunk, config, appPreferences, correctionInstructions)
-        val completion = executeCompletion(request.requestId, body, config, appPreferences, credential)
+        val completion = try {
+            executeCompletion(request.requestId, body, config, appPreferences, credential)
+        } catch (failure: IOException) {
+            trace?.recordFailure(label, failure)
+            throw failure
+        }
         trace?.record(label, body, completion.body)
         harvest.requestCount += 1
         harvest.add(completion)
@@ -656,16 +618,9 @@ class CloudAnalysisRepository(
         val ranked = if (harvest.extracted.length() == 0) {
             JSONObject().put("top_consolidated_recommendations", JSONArray())
         } else {
-            val body = request.consolidationBody(
-                harvest.extracted, config.model, appPreferences, correctionInstructions,
+            rankExtracted(
+                request, harvest, config, appPreferences, credential, correctionInstructions, trace,
             )
-            val completion = executeCompletion(request.requestId, body, config, appPreferences, credential)
-            trace?.record("consolidation", body, completion.body)
-            harvest.add(completion)
-            runCatching { JSONObject(stripCodeFence(contentOf(completion.body))) }.getOrElse {
-                harvest.warnings += "Consolidation returned no readable JSON."
-                JSONObject().put("top_consolidated_recommendations", JSONArray())
-            }
         }
         return JSONObject().apply {
             put("analysis_period", "${request.sourceWindowStart} through ${request.sourceWindowEnd}")
@@ -677,6 +632,63 @@ class CloudAnalysisRepository(
             put("client_inquiry_responses", harvest.inquiries)
         }.toString()
     }
+
+    /**
+     * The model's ranking of what extraction found, or one built on the phone if it will not give
+     * one.
+     *
+     * Extraction has already been paid for by the time this runs, and the answer here is the only
+     * thing between those calls and an empty report. A model that thinks for minutes and then
+     * answers `[]` - which one did on 14 October, with ten calls supplied - is not a run with no
+     * calls in it. So an answer that is not a JSON object, or that ranks nothing while calls were
+     * supplied, is asked for once more with the fault named; and if that fails too the calls are
+     * ranked here, by how many times each stock was mentioned, so they reach the report.
+     */
+    private suspend fun rankExtracted(
+        request: AnalysisRequest,
+        harvest: Harvest,
+        config: CloudConfiguration,
+        appPreferences: AppPreferences,
+        credential: CharArray,
+        correctionInstructions: String?,
+        trace: RequestTrace?,
+    ): JSONObject {
+        var instructions = correctionInstructions
+        var lastAnswer = ""
+        var lastFinish: String? = null
+        for (attempt in 0..1) {
+            val label = if (attempt == 0) "consolidation" else "consolidation-retry"
+            val body = request.consolidationBody(
+                harvest.extracted, config.model, appPreferences, instructions,
+            )
+            val completion = try {
+                executeCompletion(request.requestId, body, config, appPreferences, credential)
+            } catch (failure: IOException) {
+                trace?.recordFailure(label, failure)
+                throw failure
+            }
+            trace?.record(label, body, completion.body)
+            harvest.add(completion)
+            harvest.requestCount += attempt
+            lastAnswer = runCatching { contentOf(completion.body) }.getOrDefault("")
+            lastFinish = finishReasonOf(completion.body)
+            usableRanking(lastAnswer)?.let { return it }
+            instructions = listOfNotNull(
+                correctionInstructions,
+                "Your previous answer was not usable: " + describeAnswer(lastAnswer) + " Return one " +
+                    "JSON object whose `top_consolidated_recommendations` places every supplied " +
+                    "occurrence under its stock.",
+            ).joinToString(" ")
+        }
+        harvest.warnings += "The model's ranking was unusable twice (finish_reason=" +
+            "${lastFinish ?: "unknown"}; the answer began: ${describeAnswer(lastAnswer)}), so the " +
+            "${harvest.extracted.length()} extracted call(s) were ranked on the phone by mentions."
+        return rankLocally(harvest.extracted)
+    }
+
+    private fun finishReasonOf(response: String): String? = runCatching {
+        JSONObject(response).getJSONArray("choices").getJSONObject(0).optString("finish_reason")
+    }.getOrNull()?.takeIf(String::isNotBlank)
 
     private fun contentOf(response: String): String = JSONObject(response)
         .getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
@@ -716,6 +728,7 @@ class CloudAnalysisRepository(
             setRequestProperty("Authorization", "Bearer ${String(credential)}")
         }
         activeConnections[requestId] = connection
+        val startedAt = System.nanoTime()
         try {
             connection.outputStream.use { it.write(body.toString().toByteArray()) }
             coroutineContext.ensureActive()
@@ -729,9 +742,6 @@ class CloudAnalysisRepository(
                     JSONObject(response).optJSONObject("error")?.optString("message")
                 }.getOrNull().takeUnless { it.isNullOrBlank() }
                     ?: "Cloud request failed (HTTP $status)."
-                // A refusal the provider may withdraw in a moment is its own kind of failure, so
-                // the callers that can afford one more try know to make it.
-                if (isTransientStatus(status)) throw TransientProviderFailure(status, message)
                 error(message)
             }
             val usage = parseUsage(response)
@@ -739,6 +749,19 @@ class CloudAnalysisRepository(
             // OpenRouter's online suffix is taken off before sending.
             usageStore?.record(config.provider, body.optString("model"), usage)
             return CompletionResponse(response, usage)
+        } catch (timeout: SocketTimeoutException) {
+            // Still a SocketTimeoutException, because the batch loop retries that type alone; only
+            // the words change.
+            throw SocketTimeoutException(
+                "${config.provider.displayName} did not answer within " +
+                    "${secondsSince(startedAt)} s (${timeout.message ?: "read timed out"}).",
+            ).apply { initCause(timeout) }
+        } catch (failure: IOException) {
+            throw IOException(
+                "The connection to ${config.provider.displayName} failed after " +
+                    "${secondsSince(startedAt)} s (${failure.message ?: failure.javaClass.simpleName}).",
+                failure,
+            )
         } finally {
             activeConnections.remove(requestId, connection)
             connection.disconnect()
@@ -1302,32 +1325,5 @@ internal fun parseUsage(response: String): TokenUsage? {
 private fun JSONObject.firstLong(vararg names: String): Long =
     names.firstNotNullOfOrNull { name -> optLong(name).takeIf { it > 0 } } ?: 0L
 
-/**
- * A provider answer that is a refusal for now rather than for a reason.
- *
- * An [IOException] so that the one `catch` around a batch covers it beside a timeout and a dropped
- * connection: all three are moments, none is billed, and all three deserve the same single retry.
- */
-class TransientProviderFailure(val status: Int, message: String) : IOException(message)
-
-/**
- * Whether an HTTP status is one the provider may stop sending in a moment.
- *
- * 408 and 425 are the server asking for the request again, 429 is a rate limit, 5xx is the
- * provider's own trouble. Every other 4xx is about this request - a bad key, a model that does not
- * exist, a body it will not accept - and asking again changes nothing.
- */
-internal fun isTransientStatus(status: Int): Boolean =
-    status == 408 || status == 425 || status == 429 || status in 500..599
-
-/**
- * How long to wait before the one retry.
- *
- * Longer for a rate limit, which is counted per minute at every provider this app names, than for
- * a connection that dropped or a server that stumbled.
- */
-internal fun retryDelayMillis(failure: Throwable): Long =
-    if (failure is TransientProviderFailure && failure.status == 429) RATE_LIMIT_RETRY_MS else TRANSIENT_RETRY_MS
-
-internal const val RATE_LIMIT_RETRY_MS = 10_000L
-internal const val TRANSIENT_RETRY_MS = 3_000L
+/** Whole seconds since a [System.nanoTime] reading, for saying how long a request waited. */
+private fun secondsSince(startedAt: Long): Long = (System.nanoTime() - startedAt) / 1_000_000_000L
