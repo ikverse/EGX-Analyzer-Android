@@ -28,7 +28,6 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -270,6 +269,7 @@ internal fun SettingsScreen(appState: AppState) {
                     }
                 }
                 OutlinedTextField(
+                    shape = FieldShape,
                     value = appState.cloudConfiguration.endpoint,
                     onValueChange = appState::updateEndpoint,
                     modifier = Modifier.fillMaxWidth(),
@@ -302,6 +302,7 @@ internal fun SettingsScreen(appState: AppState) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
+                    shape = FieldShape,
                     value = credential,
                     onValueChange = { credential = it },
                     modifier = Modifier.fillMaxWidth(),
@@ -530,6 +531,7 @@ internal fun SettingsScreen(appState: AppState) {
             ),
         ) {
             OutlinedTextField(
+                shape = FieldShape,
                 value = askModel,
                 onValueChange = appState::updateOpinionModel,
                 modifier = Modifier.fillMaxWidth(),
@@ -595,11 +597,7 @@ internal fun SettingsScreen(appState: AppState) {
                 )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     NEWS_WINDOWS.forEach { days ->
-                        FilterChip(
-                            selected = askWindow == days,
-                            onClick = { appState.updateOpinionNewsWindow(days) },
-                            label = { Text("$days days") },
-                        )
+                        ChoiceChip("$days days", askWindow == days) { appState.updateOpinionNewsWindow(days) }
                     }
                 }
                 SettingLabel(
@@ -616,11 +614,7 @@ internal fun SettingsScreen(appState: AppState) {
                 )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     SEARCH_RESULTS.forEach { count ->
-                        FilterChip(
-                            selected = askResults == count,
-                            onClick = { appState.updateOpinionSearchResults(count) },
-                            label = { Text("$count") },
-                        )
+                        ChoiceChip("$count", askResults == count) { appState.updateOpinionSearchResults(count) }
                     }
                 }
                 SettingToggle(
@@ -959,7 +953,7 @@ internal fun SettingsScreen(appState: AppState) {
                     Text(
                         "$window ${if (window == 1) "session" else "sessions"}",
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
                 Slider(
@@ -1106,7 +1100,7 @@ internal fun SettingsScreen(appState: AppState) {
             },
             // The one thing on this card worth opening it for, when there is one.
             summaryTone = when (appState.updateState) {
-                is UpdateState.Available, is UpdateState.Ready -> MaterialTheme.colorScheme.primary
+                is UpdateState.Available, is UpdateState.Ready -> MaterialTheme.colorScheme.onSurface
                 else -> null
             },
             contentMaxWidth = FormWidth,
@@ -1257,7 +1251,7 @@ private fun UpdateControls(appState: AppState) {
                 Text(
                     "Version ${state.update.versionName} · ${state.update.sizeLabel}",
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 if (state.update.notes.isNotBlank()) {
                     // Capped rather than scrolled: this is a settings card, and what does not fit
@@ -1482,7 +1476,7 @@ private fun ModelUsageRow(record: ModelUsageRecord, spent: Long) {
             Text(
                 groupedTokens(record.usage.totalTokens),
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onSurface,
             )
         }
         ShareBar(record.usage.totalTokens, spent, height = ModelShareHeight)

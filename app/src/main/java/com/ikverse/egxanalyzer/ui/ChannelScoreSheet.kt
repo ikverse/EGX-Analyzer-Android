@@ -68,6 +68,9 @@ internal fun ChannelScoreSheet(channel: ChannelScore, onDismiss: () -> Unit) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = SheetShape,
+        containerColor = MaterialTheme.colorScheme.background,
+        dragHandle = { SheetHandle() },
     ) {
         // One counter for the whole sheet, so the reveal runs down the page in one sweep rather
         // than restarting in every section. Read and bumped during composition on purpose: it is

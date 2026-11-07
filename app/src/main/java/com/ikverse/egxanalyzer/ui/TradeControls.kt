@@ -343,6 +343,7 @@ private fun KeepOpenDialog(onDismiss: () -> Unit, onConfirm: (String?) -> Unit) 
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
+                    shape = FieldShape,
                     value = note,
                     onValueChange = { note = it },
                     label = { Text("Why (optional)") },
@@ -506,6 +507,7 @@ internal fun SellDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
+                    shape = FieldShape,
                     value = price1,
                     onValueChange = { price1 = it },
                     label = { Text(if (inTwoParts) "Target 1 price" else "Selling price") },
@@ -522,6 +524,7 @@ internal fun SellDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
+                    shape = FieldShape,
                     value = split,
                     onValueChange = { split = it },
                     label = { Text("Sold at this price (%)") },
@@ -541,6 +544,7 @@ internal fun SellDialog(
                 )
                 if (inTwoParts) {
                     OutlinedTextField(
+                        shape = FieldShape,
                         value = price2,
                         onValueChange = { price2 = it },
                         label = { Text("Target 2 price") },
@@ -605,6 +609,7 @@ private fun DateField(
     var picking by remember { mutableStateOf(false) }
     Box(modifier) {
         OutlinedTextField(
+            shape = FieldShape,
             value = value,
             onValueChange = {},
             readOnly = true,
@@ -712,6 +717,7 @@ internal fun TradeDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
+                    shape = FieldShape,
                     value = price,
                     onValueChange = { price = it },
                     label = { Text(priceLabel) },
@@ -729,6 +735,7 @@ internal fun TradeDialog(
                 )
                 if (initialWindow != null) {
                     OutlinedTextField(
+                        shape = FieldShape,
                         value = window,
                         onValueChange = { window = it },
                         label = { Text("Trade window") },

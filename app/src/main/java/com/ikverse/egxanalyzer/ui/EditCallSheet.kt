@@ -526,6 +526,7 @@ private fun StockSection(draft: CallDraft, catalog: List<CatalogStock>, clash: S
 
     SheetSection("Stock") {
         OutlinedTextField(
+            shape = FieldShape,
             value = draft.ticker,
             onValueChange = {
                 draft.ticker = it
@@ -592,6 +593,7 @@ private fun NameField(
 ) {
     Column {
         OutlinedTextField(
+            shape = FieldShape,
             value = shown,
             onValueChange = onType,
             label = { Text(label) },
@@ -883,6 +885,7 @@ private fun DraftTextField(
 ) {
     Column(modifier) {
         OutlinedTextField(
+            shape = FieldShape,
             value = field.text,
             onValueChange = { field.text = it },
             label = { Text(label) },
@@ -909,6 +912,7 @@ private fun DraftNumberField(
 ) {
     Column(modifier) {
         OutlinedTextField(
+            shape = FieldShape,
             value = field.text,
             onValueChange = { field.text = it },
             label = { Text(label) },

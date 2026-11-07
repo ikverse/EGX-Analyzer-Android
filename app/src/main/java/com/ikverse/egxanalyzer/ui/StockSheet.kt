@@ -495,6 +495,7 @@ private fun WatchAlertDialog(
                     )
                 }
                 OutlinedTextField(
+                    shape = FieldShape,
                     value = price,
                     onValueChange = { price = it },
                     label = { Text("Price") },

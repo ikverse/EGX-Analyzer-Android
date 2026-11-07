@@ -185,6 +185,9 @@ private val HairlineWidth = 1.dp
  */
 internal val SheetShape: Shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
+/** Every text field's corner since the 2026-11 redesign: a soft container, not Material's 4dp box. */
+internal val FieldShape: Shape = RoundedCornerShape(16.dp)
+
 /** A quieter drag handle than Material's: shorter, and in the page's own secondary ink. */
 @Composable
 internal fun SheetHandle() {
