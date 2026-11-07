@@ -4,7 +4,7 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
-## [4.3.0] — unreleased
+## [4.5.0] — 2026-11-08
 
 - **A new look.** Warm paper in light mode and warm ink in dark, one vermilion accent on every tab, and the Inter Tight typeface for names, tickers and figures. Lead figures are much larger, and cards are flat tonal surfaces with no borders.
 - Vermilion is used only on things you can press. Good hit rates and record figures are drawn in ink, and open trades in the market blue. Losses are a deeper crimson so they never look like the accent.
