@@ -1,5 +1,9 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -512,16 +516,16 @@ private fun WatchAlertDialog(
 }
 
 /** [MaterialTheme.typography.titleLarge] is 19sp; the heading's ticker is turned down to this. */
-private val HeadingTickerSize = 16.sp
-private val HeadingTickerLine = 20.sp
+private val HeadingTickerSize = 21.sp
+private val HeadingTickerLine = 26.sp
 
 /** [MaterialTheme.typography.bodySmall] is 13sp; the heading's names are turned down to this. */
 private val HeadingNamesSize = 11.5.sp
 private val HeadingNamesLine = 15.sp
 
 /** [MaterialTheme.typography.titleMedium] is 16sp; the heading's price is turned down to this. */
-private val HeadingPriceSize = 14.sp
-private val HeadingPriceLine = 16.sp
+private val HeadingPriceSize = 21.sp
+private val HeadingPriceLine = 26.sp
 
 /** [MaterialTheme.typography.labelSmall] is 11sp; every small line in the heading shares this. */
 private val HeadingLabelSize = 9.5.sp
@@ -656,14 +660,19 @@ private fun StockSheetPrice(
                 // The same chart on the whole screen, with candles and a scale the reader can drag.
                 // Offered only where there is a line to expand.
                 if (history.count { it.close != null } > 1) {
+                    // A small tonal capsule that squares off under the finger (2026-11 redesign).
+                    val press = remember { MutableInteractionSource() }
+                    val shape = RoundedCornerShape(pressCorner(press, rest = ExpandCorner))
                     Text(
                         "Expand",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier
-                            .clip(PillShape)
-                            .clickable { expanded = true }
-                            .padding(horizontal = Space.s, vertical = Space.xs),
+                            .pressScale(press)
+                            .clip(shape)
+                            .background(MaterialTheme.colorScheme.secondaryContainer)
+                            .clickable(interactionSource = press, indication = LocalIndication.current) { expanded = true }
+                            .padding(horizontal = Space.m, vertical = Space.xs),
                     )
                 }
             }
@@ -691,7 +700,9 @@ private fun StockSheetPrice(
                 visible,
                 shown,
                 calls.keys,
-                on = MaterialTheme.colorScheme.surfaceContainerHigh,
+                // The sheet's own ground since phase 2 of the 2026-11 redesign: the ring and label
+                // outlines knock out to this colour.
+                on = MaterialTheme.colorScheme.background,
                 selected = touched,
                 onSelect = { touched = it },
             )
@@ -844,7 +855,7 @@ private fun StockSheetRecord(score: StockScore) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OutcomeBar(tally, on = MaterialTheme.colorScheme.surfaceContainerHigh)
+        OutcomeBar(tally, on = MaterialTheme.colorScheme.background)
         OutcomeLegend()
         FigureGroup(
             "Across every source",
@@ -1044,3 +1055,5 @@ private fun formatSignedPrice(value: Double): String =
 /** Enough recent calls to see who has been saying what, before the list is asked to open. */
 private const val CallsShown = 5
 
+/** Half the Expand capsule's height. */
+private val ExpandCorner = 12.dp

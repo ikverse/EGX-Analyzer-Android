@@ -1,5 +1,8 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -280,6 +283,15 @@ internal fun PriceChart(
         }
     }
 
+    // The line draws itself from the left on first show and on every new range (2026-11 redesign).
+    // Keyed on the points, so picking 3M after 1M draws the new line in; read only in the draw
+    // lambda, so the half second costs repaints and no recomposition.
+    val still = LocalReduceMotion.current
+    val drawn = remember(points) { Animatable(if (still) 1f else 0f) }
+    LaunchedEffect(drawn) {
+        if (drawn.value < 1f) drawn.animateTo(1f, tween(LineDrawMillis, easing = UiEase))
+    }
+
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
     val chosen = remember(points, selected) {
@@ -367,11 +379,13 @@ internal fun PriceChart(
             val at = Offset(index * step, y(session.close!!))
             if (index == 0) path.moveTo(at.x, at.y) else path.lineTo(at.x, at.y)
         }
-        drawPath(
-            path,
-            color = lineColor,
-            style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round),
-        )
+        clipRect(right = size.width * drawn.value + stroke) {
+            drawPath(
+                path,
+                color = lineColor,
+                style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
+        }
 
         val ring = CallRing.toPx()
         // Kept as a list rather than re-filtered inline, because the label placement below needs
@@ -579,6 +593,11 @@ internal fun DayRange(session: DailySession, modifier: Modifier = Modifier) {
     val openMark = MaterialTheme.colorScheme.outline
     val at = ((close - low) / (high - low)).coerceIn(0.0, 1.0).toFloat()
     val openAt = session.open?.let { ((it - low) / (high - low)).coerceIn(0.0, 1.0).toFloat() }
+    // The close slides to its place from the open (or the low) the first time the bar is drawn
+    // (2026-11 redesign): the day's own move, said once. Read only in the draw.
+    val still = LocalReduceMotion.current
+    val slid = remember(session) { Animatable(if (still) at else (openAt ?: 0f)) }
+    LaunchedEffect(slid, at) { slid.animateTo(at, uiSpring()) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Canvas(
             Modifier
@@ -614,7 +633,7 @@ internal fun DayRange(session: DailySession, modifier: Modifier = Modifier) {
             // context and the close is the price.
             drawRoundRect(
                 color = closeMark,
-                topLeft = Offset(x(at), 0f),
+                topLeft = Offset(x(slid.value.coerceIn(0f, 1f)), 0f),
                 size = Size(markWidth, size.height),
                 cornerRadius = CornerRadius(markWidth / 2),
             )
@@ -698,3 +717,6 @@ private val RangeHeight = 14.dp
 private val RangeBarHeight = 6.dp
 
 private val RangeMarkWidth = 3.dp
+
+/** How long the price line takes to draw itself in. */
+private const val LineDrawMillis = 550
