@@ -242,8 +242,8 @@ private fun StockBlock(
     Surface(
         Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        // Tonal with no edge since the 2026-11 redesign.
         shape = MaterialTheme.shapes.medium,
-        border = cardOutline,
     ) {
         Column {
             StockHeading(stock, latest, onFilterToTicker)
@@ -315,7 +315,9 @@ private fun StockHeading(
             Text(
                 stock.stockCode,
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
+                // Ink since the 2026-11 redesign: a column of vermilion tickers would be the accent
+                // spent as a figure. Still pressable, with the logo, to open the stock sheet.
+                color = MaterialTheme.colorScheme.onSurface,
             )
             // Inside the press target with the logo and the code, as it is on the recommendation
             // card: the badge is a fact about this stock, so it belongs to the thing that opens it.
@@ -371,8 +373,9 @@ private fun StockHeading(
             // families of one thing seen a scroll apart.
             OutlinePill(
                 "Watch list",
-                outline = MaterialTheme.colorScheme.primary.copy(alpha = 0.42f),
-                textColor = MaterialTheme.colorScheme.primary,
+                // Neutral: a label, not a control (2026-11 redesign).
+                outline = MaterialTheme.colorScheme.outline,
+                textColor = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         // Last, so the price closes the row's trailing edge whether or not the pill is there. The
