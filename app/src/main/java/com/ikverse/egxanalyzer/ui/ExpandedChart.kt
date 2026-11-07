@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.material3.IconButtonDefaults
 import android.annotation.SuppressLint
 import android.view.ViewGroup
 import android.webkit.WebResourceRequest
@@ -86,10 +87,18 @@ internal fun ExpandedChart(
                     Modifier.fillMaxWidth().padding(end = Space.l),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = onClose) {
+                    // A round tonal button, as in the page header (2026-11 redesign).
+                    IconButton(
+                        onClick = onClose,
+                        colors = IconButtonDefaults.iconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        modifier = Modifier.padding(Space.xs),
+                    ) {
                         Icon(Icons.Outlined.Close, contentDescription = "Close chart")
                     }
-                    Text(ticker, style = MaterialTheme.typography.titleMedium)
+                    Text(ticker, style = MaterialTheme.typography.titleLarge)
                 }
                 Row(
                     Modifier.fillMaxWidth().scrollableRow().padding(horizontal = Space.m),
