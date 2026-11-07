@@ -82,6 +82,7 @@ class AnalysisNotifier(private val context: Context) {
 
     private fun base() = NotificationCompat.Builder(context, CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_egx_notification)
+        .setColor(NotificationAccent)
         .setPriority(NotificationCompat.PRIORITY_LOW)
         .setOnlyAlertOnce(true)
 

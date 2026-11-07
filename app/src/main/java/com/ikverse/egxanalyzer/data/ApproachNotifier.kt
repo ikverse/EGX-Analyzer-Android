@@ -68,6 +68,7 @@ class ApproachNotifier(private val context: Context) {
                 notificationId(change),
                 NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_egx_notification)
+                    .setColor(NotificationAccent)
                     .setContentTitle("${change.position.ticker} ${change.level.summary}")
                     .setContentText(detail)
                     .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
@@ -88,6 +89,7 @@ class ApproachNotifier(private val context: Context) {
             SUMMARY_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_egx_notification)
+                .setColor(NotificationAccent)
                 .setContentTitle(what)
                 .setContentText(lines.joinToString(" · "))
                 .setStyle(
