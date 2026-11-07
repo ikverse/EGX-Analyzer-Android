@@ -320,6 +320,46 @@ Detailed documentation lives in [`docs/`](docs/):
 - [`docs/features.md`](docs/features.md) — Ask AI, reports, corrections, export, backup, sync, update, scheduling
 - [`docs/ui.md`](docs/ui.md) — Back/stock sheet, page header, filters, status line, settings, colors
 
+## Design language (since 4.3.0, the 2026-11 redesign)
+
+A mix of M3 Expressive and Swiss editorial, chosen by the owner on 2026-11-08 and built in seven
+phases on the `redesign` branch. Where an older note below or in `docs/ui.md` describes glass,
+auroras, washes, per-page hues or 6dp pills, this section is what is true now.
+
+- **Paper and ink, one accent.** Warm paper (`#F5F3EE`) and warm ink (`#111110`, true black in the
+  pure-black mode), with vermilion as the only accent on every page. Every `AccentKey` and every
+  `CardHue` still exists and resolves to the same vermilion, so callers keep naming their place and
+  a later design can give the hues back without touching a screen.
+- **Vermilion is for what can be pressed, never for a figure.** It is a red in an app where red
+  means a loss, so a good hit rate and a stat strip's lead figure are ink and an open trade is the
+  market blue. The loss colour was pushed to crimson to keep its distance;
+  `the accent stays apart from gain and loss` in `ActionPaletteTest` holds 20° of hue between them
+  in both themes.
+- **Information sits flat; anything pressable sits in a container.** Section cards are tonal with no
+  border, stripe or coloured tile. Groups inside a card are `Modifier.flatPanel()` - a hairline and
+  air - not tinted panels. A card keeps a coloured edge only when the edge means something: a held
+  trade's status, or the arrival flash.
+- **Type does the work.** Inter Tight (one variable font, instanced per weight) sets names, tickers
+  and every figure, with tabular digits switched on in every style; IBM Plex Sans Arabic sets the
+  sentences because Inter Tight has no Arabic. Lead figures use `displayLarge`/`Medium`/`Small`
+  (64/44/34sp); a page title is 34sp and shrinks with the header.
+- **Expressive motion, held still by reduce motion.** `pressScale` (0.95, back on `releaseSpring`)
+  and `pressCorner` (a capsule squaring off under the finger) are what a pressable does.
+  `uiSpring` moves expands, the nav indicator and the stock sheet's day-range marker. `staggerIn`
+  fades lists in on first show, `RollingText` rolls a lead figure to a new value, outcome bars spring
+  out, and price lines draw in from the left. Every one of them checks `LocalReduceMotion`.
+- **No glass.** The frost, the page recording behind it, the ground lights, the page wash and the
+  Analyze action's aurora were all deleted in phase 2. The Analyze action is a solid vermilion
+  capsule that fills with batch progress while a run reads and sweeps while the model writes.
+- **Every sheet is one shape**: `SheetShape` (28dp top corners), the page's own ground and
+  `SheetHandle`. A chart or bar drawn on a sheet must be told `background` as its `on` colour, which
+  phase 2 forgot and phase 5 fixed.
+- **Material is kept where it is the convention**: dialogs, switches, checkboxes and the Telegram
+  sign-in buttons. Material's own expressive theme is not used - it is internal in material3 1.4.0
+  and would need an alpha release.
+- **The full-screen chart's text is still Roboto.** The web view may only load the bundled chart
+  assets, and Inter Tight there would mean a second copy of the font or loosening that rule.
+
 ## Gotchas
 
 - **The expanded chart is a web view, on one screen, and nothing else in the app is.** KLineChart
@@ -515,47 +555,8 @@ Detailed documentation lives in [`docs/`](docs/):
   line lives in the header now and that clearance is gone with it, so the action is the only
   floating chrome left that has to follow the bar at all. The wide layout draws it unconditionally with no bar to follow, so all of this is
   the compact branch only.
-- **The action's ground is 0.94 in both states, the bar's own figure.** It was 0.84 until
-  2026-10-05, ten points under the bar, on the argument that a permanent object over a scrolling
-  page read as a slab parked on it at the bar's opacity. On the 411dp cover screen that was too
-  thin — a card heading ran straight through the button's label — so it was raised to the bar's.
-  **That is the base colour only:** `ActionFrost` is multiplied over it where the button is drawn,
-  and was 0.66, which left the button about 0.62 opaque and a heading still readable through it.
-  It is **0.92** now (2026-10-05), so the button is close to solid; blocked and solid-surfaces
-  states draw `Glass.solid` of their colour, because the theme's own surface colour is see-through. `actionFill` and
-  `actionAuroraBase` carry the same figure deliberately. The two states match because the transparency is a property of the button, not
-  of one of its states: a button that changed weight the moment a run started would report the run
-  twice, once in a way nobody could name. Only the grounds carry it — `onAction` stays opaque so the
-  label survives whatever scrolls behind, and the `actionAurora` circles are the light *inside* the
-  ground, so thinning those would dim the one thing saying a model is working.
-- **The action's edge is a gradient in its own colours, and the bar's beside it is not.** Both are
-  `FloatingSurface`, so they are the same material; they are deliberately not the same edge, because
-  two identically outlined slabs at the foot of the screen said nothing about which of them did
-  anything. `PageAccent.actionLine` carries it, and it has **its own stops rather than
-  `actionFill`'s** for the reason `aiLine` has its own beside `aiFill`: the fill sits *inside* the
-  line, so a line in the fill's colours is a line against itself and disappears. What it has to read
-  against is the page scrolling behind the button — dark on one theme, near-white on the other — so
-  the stops invert between the two while the hue does not. The hues are the aurora's own, in the
-  aurora's own order, rather than a fourth set invented for the edge — derived per page from the
-  seed table rather than written out five times, so the relationship between a page's fill, edge and
-  aurora is stated once.
-- **The edge is 0.74 against the ground's 0.94, and its hues run about a third under the aurora's.**
-  It shipped opaque and full-strength on the argument that an edge letting the page through stops
-  holding the shape — which was wrong on the device: it read as a bright cyan wire around the button,
-  the loudest thing on a dark page and competing with the label it was meant to frame. The shape
-  still holds, because what draws it is the contrast with the page rather than the weight of the
-  line. `ActionPaletteTest` pins the properties and not the figures — nothing the action is drawn
-  with is solid, every stop in a ramp shares one alpha (a ramp that fades along its length reads as
-  a mistake), and the edge shares no stop with the fill, which is the slip that produces an invisible
-  edge: reaching for `actionFill` when adding the gradient, because it is right there and already
-  the right family. **Every case sweeps all five accents in both themes**, since the ramps are
-  derived per page now and a property that holds for the one hue somebody looked at is exactly the
-  kind that quietly fails on the other four.
-- **Only the ready state wears it.** Running keeps the red `aiStop` hairline: that is the only state
-  where pressing cancels, and no edge in the action's own colours could say so — the moving fill
-  says a model is working, which is a different sentence. Blocked keeps the neutral outline every
-  other floating thing has, for the reason it does not wear the fill either: a blocked button with
-  the action's own edge round it would be inviting a press that does nothing.
+- **The Analyze action is a solid capsule since 4.3.0** — see **Design language**. The notes on
+  its 0.94 ground, its gradient edge and its aurora described the glass design and went with it.
 - **`FloatingSurface.outline` is a `Brush`, not a `Color`.** One parameter rather than two that can
   both be set and disagree; a flat edge passes `SolidColor(…)`. The width stays 1dp for every
   floating edge in the app, gradient or not — the bar sits directly under the action on a compact
@@ -566,7 +567,7 @@ Detailed documentation lives in [`docs/`](docs/):
   (Compose's `FastOutSlowIn` starts gently, which is exactly when a finger is watching);
   `ExpandIn` / `CollapseOut` are how every disclosure opens and closes (200ms in, 140ms out), and the
   status line uses the same pair. `pressScale` is what every pressable does the moment a finger
-  lands — 0.97, about 100ms — read in the layer's lambda so a press recomposes nothing; the caller
+  lands — 0.95, about 90ms down and back on `releaseSpring` since 4.3.0 — read in the layer's lambda so a press recomposes nothing; the caller
   owns the `InteractionSource` and hands the same one to its `clickable` or `Surface`. A new button
   uses it. `LocalReduceMotion` is the system's animation scale read at `AppRoot` (and again on every
   resume, because the setting lives in another app): the model's breathing, the action's drifting
@@ -588,8 +589,7 @@ Detailed documentation lives in [`docs/`](docs/):
   rest, the top only once something has scrolled past it, the foot only while there is more under
   it. `Screen` also installs a `BringIntoViewResponder` that adds the bar's footprint to the bottom
   of any rect asked to be shown, so a trade revealed from a notification does not end with its Sold
-  button under the bar. The accent edge of a `SectionCard` runs the card's whole height, not its
-  content's, so a card stretched to match its neighbour keeps its stripe to the foot.
+  button under the bar.
 - **The model line on a report card is two lines, each one line.** It was one, "always", because
   wrapped it snapped mid-word. Split into the model (middle-ellipsised, so its version suffix
   survives) and the run time (its own line), nothing wraps and the date that tells two runs apart is

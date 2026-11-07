@@ -73,6 +73,7 @@ class CallAlertNotifier(private val context: Context) {
                 notificationId(change.call.alertId),
                 NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_egx_notification)
+                    .setColor(NotificationAccent)
                     .setContentTitle("${change.call.ticker} is in its buy zone")
                     .setContentText(detail)
                     .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
@@ -92,6 +93,7 @@ class CallAlertNotifier(private val context: Context) {
             SUMMARY_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_egx_notification)
+                .setColor(NotificationAccent)
                 .setContentTitle(
                     if (changes.size == 1) {
                         "1 call is in its buy zone"

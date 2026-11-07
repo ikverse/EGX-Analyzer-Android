@@ -4,6 +4,16 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.3.0] — unreleased
+
+- **A new look.** Warm paper in light mode and warm ink in dark, one vermilion accent on every tab, and the Inter Tight typeface for names, tickers and figures. Lead figures are much larger, and cards are flat tonal surfaces with no borders.
+- Vermilion is used only on things you can press. Good hit rates and record figures are drawn in ink, and open trades in the market blue. Losses are a deeper crimson so they never look like the accent.
+- New motion: buttons change shape when pressed, the navigation highlight springs between tabs, lists fade in, figures roll to new values, outcome bars spring out and price lines draw in. All of it stays still when the phone's reduce-motion setting is on.
+- The Analyze button is a solid capsule that fills with the run's progress.
+- Every sheet now has the same rounded top and handle, and every text field has rounded corners.
+- The launch screen matches the theme instead of flashing navy, notifications carry the accent colour, and the widget's overdue red matches the app.
+- The app is about 600 KB smaller after removing two fonts it no longer draws.
+
 ## [4.2.3] — 2026-10-14
 
 - A dropped connection or a provider error now fails the run with the cause and how long the request waited, instead of saving a report with no calls. The retry rules from 4.2.0 are back to the 4.1.1 behaviour (timeouts only).

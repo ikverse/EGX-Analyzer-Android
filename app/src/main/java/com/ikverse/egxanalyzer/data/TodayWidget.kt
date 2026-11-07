@@ -27,6 +27,7 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
+import androidx.glance.color.ColorProvider
 import com.ikverse.egxanalyzer.MainActivity
 import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.SessionDigest
@@ -107,7 +108,7 @@ class TodayWidget : GlanceAppWidget() {
                         if (overdue == 1) "1 overdue" else "$overdue overdue",
                         // One colour in both themes: the red that means a deadline has passed is the same
                         // red on a light launcher and a dark one, exactly as it is in the app.
-                        style = TextStyle(color = ColorProvider(Red)),
+                        style = TextStyle(color = ColorProvider(day = RedDay, night = Red)),
                     )
                 }
             }
@@ -140,7 +141,10 @@ class TodayWidget : GlanceAppWidget() {
          * written out. It is the same red the Overdue pill wears, and if that ever moves this is
          * the one place that has to move with it.
          */
-        val Red = Color(0xFFE5484D)
+        // The app's crimson loss colour since the 2026-11 redesign (`ExtraColors.loss`, dark).
+        val Red = Color(0xFFF2557F)
+        // The light theme's loss colour, for a widget drawn on a light launcher.
+        val RedDay = Color(0xFFA3123A)
     }
 }
 

@@ -6,5 +6,10 @@
       the splash icon dissolves into, and a mismatch there draws the tile's outline.
     -->
     <color name="ic_launcher_background">#000812</color>
-    <color name="splash_background">#000812</color>
+    <!--
+      The launch screen's ground since the 2026-11 redesign: the app's own paper here and its ink in
+      values-night, so a cold start in light mode no longer flashes the old navy. The splash icon's
+      edge fades to transparency, so on paper it reads as a dark disc with a soft edge.
+    -->
+    <color name="splash_background">#F5F3EE</color>
 </resources>

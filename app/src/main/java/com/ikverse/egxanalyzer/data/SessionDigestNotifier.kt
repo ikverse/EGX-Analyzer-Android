@@ -76,6 +76,7 @@ class SessionDigestNotifier(private val context: Context) {
             NOTIFICATION_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_egx_notification)
+                .setColor(NotificationAccent)
                 .setContentTitle(AppDates.DayMonth.format(digest.date) + " · what the session did")
                 .setContentText(detail)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(detail))

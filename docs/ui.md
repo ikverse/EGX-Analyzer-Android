@@ -549,63 +549,19 @@ Diagnostics.
   irreversible button on the page should not sit at the end of a run of buttons that are not, and its
   note says to take a backup first.
 
-## A hue per page
+## A hue per page — retired in 4.3.0
 
-Every destination speaks in one colour, and the colour reaches four places: the wash at the top of
-the page, the app's mark, the destination's own navigation indicator, and `primary`/`secondary` —
-which is what carries it into the section cards, the chips, the checkboxes and the radios without a
-parameter being threaded anywhere. Added 2026-09-08.
+Every destination used to speak in its own colour (cyan, violet, rose, indigo, bronze), carried
+into the navigation, a wash at the top of the page, the section cards and the controls. The
+2026-11 redesign replaced that with one vermilion accent on every page; see **Design language** in
+`CLAUDE.md`. What survives of the mechanism is the plumbing - `AccentKey`, `PageTheme`,
+`withAccent`, `CardHue` - which now resolves every key to the same seed, so the five pages still
+name themselves and a later design could give the hues back without touching a screen.
 
-- **The whole scheme rests on `market` having been split out of `primary` earlier.** While `primary`
-  meant both "the market got here" and "this is the app speaking", nothing could be done to it
-  without moving a price. `PriceRole` reads `tertiary`, `error`, `ExtraColors.market` and
-  `onSurface`, and `withAccent` touches none of them — so a page may have a hue and a figure still
-  means the same thing on all five screens.
-- **Each hue was chosen against what its own page draws**, not by taste. Analyze is `CYAN` and draws
-  no prices at all; Results is `VIOLET`, because a report is the model speaking and `AiButton` is
-  never drawn on that screen; Insights is `ROSE`, the one family no figure anywhere uses, because it
-  draws every other hue plus the violet pill; Portfolio is `INDIGO`, since it draws no market blue
-  while green, red and amber are busy; Settings is `BRONZE`, which draws no prices at all. The
-  reasoning is on `AccentKey` and the check is `no page accent is one of the signal colours`.
-- **`withAccent` is the mechanism and `DestinationScreen` is the one place it is applied** — the same
-  function both shells build a page through. Not around the whole shell, because a sheet raised over
-  the top is not on a page and must not take the hue of whatever happens to be behind it. The status
-  line **is** on a page since 2026-09-09 and does take it — see **The status line**.
-- **The navigation bar is outside every page's theme, so it asks each destination for its own.**
-  `accentFor(destination.accent, LocalDarkTheme.current)`, in both `PillItem` and `AppRail`. Reading
-  `secondaryContainer` out there would give all five slots Analyze's cyan.
-- **All five destinations wear their hue at rest, not only the selected one** (`RestingIconAlpha`,
-  0.62). The bar is where the mapping between a colour and a page is learned and it can only teach
-  it by showing all five; what says where you are is the filled indicator and a hue at full
-  strength, which is a larger difference than the grey-to-colour one it replaced.
-- **The app's mark is no longer drawn on any page**, so nothing outside the navigation reads an
-  accent from outside a page's theme any more. It took its hues as a parameter for the bar's own
-  reason — drawn over the rail, outside every page's theme, a mark reading the local would have worn
-  cyan on all five pages — and wearing the page's hue is what put it in the lit destination's own
-  colour directly above it. See **What went with the band**.
-- **A card has its own hue on top of the page's**, on the tile behind its icon and the 3px edge down
-  its left side — `SectionCard.accent` and `ExpandableSection.accent`, both defaulting to the page's.
-  The **first card on a page takes the page's hue** by passing nothing, and the rest name a
-  `CardHue`. This reverses `iconTone`'s old note that colouring each icon would be a page of noise:
-  that was true of a page of identical grey headings and is not true of a tile per card in hues the
-  page keeps to. `iconTone` still outranks `accent`, because a card reporting its own state has
-  something to say that its place in a column does not.
-- **A card accent is chrome and never a figure**, exactly as the page's is. What a number means is
-  still said by tertiary/error/market/expired, which is why a card may take any hue at all.
-- **The Ask AI pill runs violet → the page's hue.** The model announcing itself is the same
-  announcement everywhere; where it was asked from is not. It also settles the one collision in the
-  scheme: a violet page and a violet pill cannot be confused when the pill is the only object
-  *travelling out of* violet. Pinned by `the pill begins in violet on every page and ends in the
-  page's own hue`, which fails in both directions — a ramp that followed the accent whole would read
-  as five unrelated buttons, and one pinned whole would undo the feature.
-- **The light theme's hues are not the dark theme's**, for the reason `market` was darkened for the
-  light theme: on a near-white card the dark values come out between 1.5:1 and 2.5:1. Every light
-  accent ink and every `CardHue` clears 4.5:1 on both the page and a card. The saturation pass that
-  came with this took the light `tertiary`, `error` and `expired` **down** rather than up for the
-  same reason — brighter versions measured 3.8–4.4:1, and every one of them is a price.
-- **`PageWash` reads the scroll inside the draw lambda**: read at composition it would recompose
-  the whole page on every frame of a scroll. The header's collapse fraction is passed as a lambda
-  for the same reason, and the wash counts it as scroll so the tint does not sit at full strength
-  through the whole collapse. `AppMark`'s aurora phase was the third reader of this rule until the
-  mark went; the rule is the same one, and the next always-on animation drawn over a page wants it.
+Two rules from that scheme still hold, because they were never about the hues:
 
+- **`market` is split out of `primary`.** `PriceRole` reads `tertiary`, `error`,
+  `ExtraColors.market` and `onSurface`, and `withAccent` touches none of them, so the accent can
+  change without a figure changing meaning.
+- **An accent is chrome and never a figure.** With vermilion that is stricter than before: it is a
+  red in an app where red means a loss, so a good rate is ink and an open trade is market blue.

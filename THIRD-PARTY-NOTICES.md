@@ -2,44 +2,30 @@
 
 ## Fonts
 
-Three families are bundled in `app/src/main/res/font/` and drawn by `ui/theme/Type.kt`. Two further
-weights of IBM Plex Mono sit in `app/src/next/res/font/`, where only the `next` build type picks them
-up — the redesign sets every figure at 600 and a rank number at 700, and the shipping app has no use
-for either, so they are kept out of its APK. All three families
-are licensed under the **SIL Open Font License, Version 1.1**, which permits bundling in an
+Two families are bundled in `app/src/main/res/font/` and drawn by `ui/theme/Type.kt`. Both are
+licensed under the **SIL Open Font License, Version 1.1**, which permits bundling in an
 application, modification, and redistribution, and asks that the licence travel with the fonts —
 which is what this file is for. The full text is at <https://openfontlicense.org>.
 
 | Family | Files | Source |
 |---|---|---|
-| **Cairo** | `cairo_semibold.ttf`, `cairo_bold.ttf` | [google/fonts `ofl/cairo`](https://github.com/google/fonts/tree/main/ofl/cairo) |
-| **IBM Plex Sans Arabic** | `plex_arabic_regular.ttf`, `plex_arabic_medium.ttf`, `plex_arabic_semibold.ttf` | [google/fonts `ofl/ibmplexsansarabic`](https://github.com/google/fonts/tree/main/ofl/ibmplexsansarabic) |
-| **IBM Plex Mono** | `plex_mono_regular.ttf`, `plex_mono_medium.ttf`, `plex_mono_semibold.ttf`†, `plex_mono_bold.ttf`† | [google/fonts `ofl/ibmplexmono`](https://github.com/google/fonts/tree/main/ofl/ibmplexmono) |
 | **Inter Tight** | `inter_tight.ttf` (the upstream variable font, unmodified) | [google/fonts `ofl/intertight`](https://github.com/google/fonts/tree/main/ofl/intertight) |
+| **IBM Plex Sans Arabic** | `plex_arabic_regular.ttf`, `plex_arabic_medium.ttf`, `plex_arabic_semibold.ttf` | [google/fonts `ofl/ibmplexsansarabic`](https://github.com/google/fonts/tree/main/ofl/ibmplexsansarabic) |
 
-Copyright: Cairo — the Cairo Project Authors. IBM Plex Sans Arabic and IBM Plex Mono — IBM Corp. Inter Tight — the Inter Project Authors.
+Copyright: Inter Tight — the Inter Project Authors. IBM Plex Sans Arabic — IBM Corp.
 
-Since the 2026-11 redesign, Inter Tight sets page names, tickers and every figure; Cairo and IBM Plex
-Mono are still bundled but no longer drawn, and can be removed in a later release.
+All four files are upstream, byte for byte. Inter Tight is instanced per weight at runtime through
+its variation axis rather than as separate files, so nothing here is a modified version.
 
-### The one modification
-
-Cairo ships upstream only as a variable font, `Cairo[slnt,wght].ttf`. The two files here were
-**instanced** from it — the weight axis pinned at 600 and 700 and the slant at 0 — using
-`fontTools.varLib.instancer`, so they load as ordinary static fonts. Nothing else about them was
-touched, and no reserved font name is claimed. Instancing is what the OFL calls a modified version;
-the licence is unchanged and travels with them.
-
-The other seven are upstream statics, byte for byte. † marks the two that live under
-`app/src/next/res/font/` rather than `main`.
-
-### Why these three, and not fewer
+### Why these two
 
 A row in this app reads `AMOC · الإسكندرية للزيوت المعدنية · 7.20 – 7.45` — Arabic, Latin and figures
-in one line, with the figures meant to be compared down a column. Cairo sets the names, IBM Plex
-Sans Arabic sets the sentences in both scripts without changing voice mid-line, and IBM Plex Mono
-sets every figure at one digit width. They are bundled rather than fetched because the app is
-sideloaded onto two phones and has to draw its own record with no network.
+in one line, with the figures meant to be compared down a column. Since the 2026-11 redesign, Inter
+Tight sets page names, tickers and every figure, with tabular digits so a column of prices lines up;
+IBM Plex Sans Arabic sets the sentences in both scripts without changing voice mid-line, since Inter
+Tight has no Arabic. Cairo and IBM Plex Mono, bundled before the redesign, were removed in 4.3.0.
+They are bundled rather than fetched because the app is sideloaded onto two phones and has to draw
+its own record with no network.
 
 ## Company logos
 
