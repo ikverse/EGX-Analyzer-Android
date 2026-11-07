@@ -181,7 +181,7 @@ private fun ColumnScope.PortfolioSummary(stats: PortfolioStats) {
             horizontalArrangement = Arrangement.spacedBy(Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            StatTile(stats.openCount.toString(), "open", tone = MaterialTheme.colorScheme.primary)
+            StatTile(stats.openCount.toString(), "open", tone = MaterialTheme.colorScheme.onSurface)
             // Settled rather than closed: it counts the expired trades too, and the card below this
             // one now keeps "closed" for the ones that ended somewhere in particular.
             StatTile(stats.settledCount.toString(), "settled")
@@ -330,7 +330,7 @@ private fun OverdueTile(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
-        border = cardOutline,
+        // Tonal with no edge since the 2026-11 redesign.
         shape = MaterialTheme.shapes.medium,
     ) {
         // The measured line takes the tile's own width rather than the column beside the logo. The
@@ -495,7 +495,7 @@ private fun OpenPositionTile(view: PositionView, onOpen: () -> Unit, modifier: M
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
-        border = cardOutline,
+        // Tonal with no edge since the 2026-11 redesign.
         shape = MaterialTheme.shapes.medium,
     ) {
         Column(Modifier.padding(horizontal = Space.m, vertical = Space.xs)) {

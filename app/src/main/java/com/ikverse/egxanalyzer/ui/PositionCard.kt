@@ -316,8 +316,7 @@ internal fun PositionCard(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
-                            .padding(Space.m),
+                            .flatPanel(),
                     ) {
                         content()
                     }
@@ -459,8 +458,7 @@ internal fun PositionCard(
                 val yourTradePanel: @Composable (Modifier) -> Unit = { panelModifier ->
                     Box(
                         panelModifier
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
-                            .padding(Space.m),
+                            .flatPanel(),
                     ) {
                         FigureGroup(
                             "Your trade",
@@ -524,15 +522,14 @@ internal fun PositionCard(
                                     }
                                 },
                             ),
-                            titleColor = pageAccent.ink,
+                            
                         )
                     }
                 }
                 val whereItStandsPanel: @Composable (Modifier) -> Unit = { panelModifier ->
                     Box(
                         panelModifier
-                            .background(pageAccent.soft, SectionPanelShape)
-                            .padding(Space.m),
+                            .flatPanel(),
                     ) {
                         FigureGroup(
                             "Where it stands",
@@ -602,7 +599,7 @@ internal fun PositionCard(
                                     )
                                 },
                             ),
-                            titleColor = pageAccent.ink,
+                            
                         )
                     }
                 }

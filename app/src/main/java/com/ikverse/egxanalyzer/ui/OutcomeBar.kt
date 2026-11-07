@@ -1,5 +1,10 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -124,18 +129,30 @@ private fun OutcomeBar(
         } else {
             emptyList()
         }
+        // The segments spring out to their widths the first time the bar is drawn (2026-11
+        // redesign), from nothing at the left edge; with reduce motion on they are simply there.
+        val still = LocalReduceMotion.current
+        val grown = remember { Animatable(if (still) 1f else 0f) }
+        LaunchedEffect(Unit) {
+            if (grown.value < 1f) grown.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 220f))
+        }
         Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
             Box(
                 Modifier
                     .fillMaxWidth()
                     .height(height)
-                    .clip(RoundedCornerShape(OutcomeBarCorner))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                     // The bar is a picture of the counts, so a reader that cannot see it is told them.
                     .semantics { contentDescription = verdicts.spoken() },
             ) {
-                Row(Modifier.fillMaxWidth().fillMaxHeight()) {
-                    parts.forEach { part -> Segment(part, height) }
+                // Separate rounded segments with a gap between, rather than one track cut into
+                // pieces: each verdict reads as its own object, the Swiss way of dividing a quantity.
+                Row(
+                    Modifier.fillMaxWidth().fillMaxHeight(),
+                    horizontalArrangement = Arrangement.spacedBy(SegmentGap),
+                ) {
+                    val p = grown.value.coerceIn(0f, 1f)
+                    parts.forEach { part -> Segment(part, height, p) }
+                    if (p < 1f) Spacer(Modifier.weight(total * (1f - p) + 0.0001f))
                 }
             }
             if (unlabelled.isNotEmpty()) {
@@ -154,11 +171,13 @@ private fun OutcomeBar(
 }
 
 @Composable
-private fun RowScope.Segment(part: OutcomeSegment, height: Dp) {
+private fun RowScope.Segment(part: OutcomeSegment, height: Dp, grown: Float) {
+    if (grown <= 0f) return
     Box(
         Modifier
-            .weight(part.count.toFloat())
+            .weight(part.count.toFloat() * grown)
             .fillMaxHeight()
+            .clip(RoundedCornerShape(OutcomeBarCorner))
             .background(part.color),
         contentAlignment = Alignment.Center,
     ) {
@@ -300,7 +319,10 @@ internal val OutcomeBarHeight = 22.dp
 /** On a source card, where the bar is a comparison rather than the headline. */
 internal val OutcomeBarCompact = 16.dp
 
-private val OutcomeBarCorner = 4.dp
+private val OutcomeBarCorner = 6.dp
+
+/** The air between two verdicts. */
+private val SegmentGap = 2.dp
 
 /** Two digits at labelSmall, plus enough either side that the number is not touching an edge. */
 private val MinCountWidth = 26.dp

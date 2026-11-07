@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.expandVertically
@@ -269,6 +270,19 @@ val PillShape: Shape = RoundedCornerShape(PillCorner)
  * so the two families of card cannot drift apart on a number neither of them has a reason to own.
  */
 val SectionPanelShape: Shape = RoundedCornerShape(16.dp)
+
+/**
+ * A group inside a card since the 2026-11 redesign: no fill, a hairline across its top and air
+ * either side of it. The tinted panels it replaces were a second container inside the card; the
+ * Swiss half of the design separates groups with rules, and the label above each says what it is.
+ */
+@Composable
+internal fun Modifier.flatPanel(): Modifier {
+    val rule = MaterialTheme.colorScheme.outlineVariant
+    return this
+        .drawBehind { drawRect(rule, size = Size(size.width, 1.dp.toPx())) }
+        .padding(top = Space.m, bottom = Space.xs)
+}
 
 /**
  * How wide a card has to measure before it draws its wide layout instead of its phone one.
@@ -953,6 +967,34 @@ internal fun <T> releaseSpring() = spring<T>(dampingRatio = 0.55f, stiffness = S
  * list, lively enough to read as physical.
  */
 internal fun <T> uiSpring() = spring<T>(dampingRatio = 0.8f, stiffness = 380f)
+
+/** How far apart two neighbours start arriving in a [staggerIn] group. */
+private const val StaggerStepMs = 45L
+
+/** Past this many, the rest arrive together: a long list should not take seconds to appear. */
+private const val StaggerCap = 8
+
+/**
+ * Fades and lifts an item in on its first composition, [index] steps after the first of its group -
+ * the staggered reveal of the 2026-11 redesign. Drawn in the layer, so it costs no recomposition and
+ * moves nothing around it. With reduce motion on, the item is simply there.
+ */
+@Composable
+internal fun Modifier.staggerIn(index: Int): Modifier {
+    val still = LocalReduceMotion.current
+    val shown = remember { Animatable(if (still) 1f else 0f) }
+    LaunchedEffect(Unit) {
+        if (shown.value >= 1f) return@LaunchedEffect
+        delay(StaggerStepMs * index.coerceIn(0, StaggerCap))
+        shown.animateTo(1f, uiSpring())
+    }
+    val lift = with(LocalDensity.current) { 12.dp.toPx() }
+    return graphicsLayer {
+        val v = shown.value
+        alpha = v.coerceIn(0f, 1f)
+        translationY = (1f - v) * lift
+    }
+}
 
 /**
  * A pressable's corner, squaring off while a finger is down and springing back on release - the
