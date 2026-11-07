@@ -1,5 +1,12 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.AnimatedContent
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -605,7 +612,8 @@ internal fun SectionCard(
     accent: Color? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val hue = accent ?: pageAccent.ink
+    // `accent` is no longer drawn: since the 2026-11 redesign a section is a tonal surface with no
+    // stripe and no coloured tile. The parameter stays so every caller still states its card's place.
     Card(
         modifier = modifier.fillMaxWidth(),
         // The colour is see-through in the theme itself - see GlassSection - so what this adds is
@@ -616,7 +624,6 @@ internal fun SectionCard(
         // that had it: the treatment is the material and the edge, not depth faked under glass.
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = MaterialTheme.shapes.large,
-        border = Glass.outline,
     ) {
         // Drawn behind the content rather than as a `Row` beside it: the edge runs the whole height
         // of the card, which is not known until everything inside it has been laid out, and a column
@@ -628,11 +635,7 @@ internal fun SectionCard(
         // content, and an edge drawn on the content stopped where the words did - halfway down the
         // card it was meant to run the whole length of (seen 2026-10-05). Under an unbounded height,
         // where nothing stretches, this is simply the content's height as it always was.
-        Box(
-            Modifier.fillMaxHeight().drawBehind {
-                drawRect(hue, size = Size(AccentEdgeWidth.toPx(), size.height))
-            },
-        ) {
+        Box(Modifier.fillMaxHeight()) {
         // Vertical only, so the heading band and the content band can be held in by different
         // amounts. Both were one padding on this Column until the nesting above made the two
         // different questions.
@@ -646,23 +649,14 @@ internal fun SectionCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (icon != null) {
-                        // A tile rather than a bare glyph. An icon tinted on its own is a coloured
-                        // mark on a card; the same icon on a field of its own hue is the card's
-                        // heading having a place, which is what lets a column of cards be told
-                        // apart at the speed they are actually scanned.
-                        Box(
-                            Modifier
-                                .size(AccentTileSize)
-                                .background(hue.copy(alpha = AccentTileAlpha), MaterialTheme.shapes.small),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                icon,
-                                contentDescription = null,
-                                tint = hue,
-                                modifier = Modifier.size(IconSize.Inline),
-                            )
-                        }
+                        // A grey glyph since the 2026-11 redesign: the title leads, and the one
+                        // accent is spent on what can be pressed.
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(SectionIconSize),
+                        )
                         Spacer(Modifier.width(Space.s))
                     }
                     Text(
@@ -670,7 +664,7 @@ internal fun SectionCard(
                         // Weighted only when something sits after it, so a card without an
                         // explanation keeps a heading that is as wide as its own words.
                         modifier = if (about == null) Modifier else Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleLarge,
                     )
                     // Dense: the 48dp target on a plain IconButton would make this header band
                     // taller than the cards beside it on the page that carry no explanation.
@@ -695,14 +689,8 @@ internal fun SectionCard(
 }
 
 
-/** A hairline of the card's own hue. Wider and it is a stripe the content has to sit clear of. */
-private val AccentEdgeWidth = 2.dp
-
-/** Room for [IconSize.Inline] with a margin, on the tile behind a section card's icon. */
-private val AccentTileSize = 26.dp
-
-/** Enough that the tile is a field of colour, little enough that the glyph on it stays the figure. */
-private const val AccentTileAlpha = 0.16f
+/** The grey glyph before a section's title: a step under an inline icon, so the title leads. */
+private val SectionIconSize = 18.dp
 
 /**
  * A settings group that starts closed.
@@ -784,23 +772,20 @@ internal fun ExpandableSection(
 ) {
     var localExpanded by remember { mutableStateOf(initiallyExpanded) }
     val expanded = expandedState ?: localExpanded
-    val hue = accent ?: pageAccent.ink
+    // `accent` and `showAccentEdge` are no longer drawn (2026-11 redesign), as on SectionCard.
+    val turn by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = if (LocalReduceMotion.current) snap() else uiSpring(),
+        label = "sectionTurn",
+    )
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = containerColor ?: MaterialTheme.colorScheme.surfaceContainer,
         ),
         shape = MaterialTheme.shapes.large,
-        // A session card stands on the page exactly as a section card does, so it is lit exactly
-        // as one - and casts no shadow, for the reason given there.
-        border = Glass.outline,
     ) {
-        Column(
-            // SectionCard's edge, drawn the same way and for the same reason.
-            if (showAccentEdge) Modifier.drawBehind {
-                drawRect(hue, size = Size(AccentEdgeWidth.toPx(), size.height))
-            } else Modifier,
-        ) {
+        Column {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -820,24 +805,17 @@ internal fun ExpandableSection(
                 if (icon != null) {
                     // SectionCard's tile, so a group heading and a card heading are the same object
                     // at a glance. iconTone wins where a card is reporting its own state.
-                    val ink = iconTone ?: hue
-                    Box(
-                        Modifier
-                            .size(AccentTileSize)
-                            .background(ink.copy(alpha = AccentTileAlpha), MaterialTheme.shapes.small),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            icon,
-                            contentDescription = null,
-                            tint = ink,
-                            modifier = Modifier.size(IconSize.Inline),
-                        )
-                    }
+                    // A colour here only when it is a verdict on the card's own state.
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = iconTone ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(SectionIconSize),
+                    )
                     Spacer(Modifier.width(Space.s))
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    Text(title, style = MaterialTheme.typography.titleLarge)
                     when {
                         summaryContent != null -> summaryContent()
                         summary != null -> Text(
@@ -849,9 +827,10 @@ internal fun ExpandableSection(
                 }
                 about?.let { InfoButton(it) }
                 Icon(
-                    if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    Icons.Outlined.ExpandMore,
                     contentDescription = if (expanded) "Collapse $title" else "Expand $title",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.graphicsLayer { rotationZ = turn },
                 )
             }
             AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {
@@ -1006,8 +985,8 @@ internal fun StatTile(
     ) {
         // The role sets the size; the figure sets its own face. Everything a tile ever holds is a
         // number, and the display face is for names.
-        Text(
-            value,
+        RollingText(
+            AnnotatedString(value),
             style = if (dense) {
                 MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures)
             } else {
@@ -1026,6 +1005,36 @@ internal fun StatTile(
 
 /** Tighter than [Space.xs], which read as two facts where a dense tile is meant to read as one. */
 private val DenseFigureGap = 2.dp
+
+/**
+ * A figure that rolls to its new value instead of jumping, when it changes while on screen (2026-11
+ * redesign): the old value slides up and out as the new one slides up and in. The first value is
+ * simply drawn, and with reduce motion on every change is instant.
+ */
+@Composable
+internal fun RollingText(
+    text: AnnotatedString,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val still = LocalReduceMotion.current
+    AnimatedContent(
+        targetState = text,
+        modifier = modifier,
+        transitionSpec = {
+            if (still) {
+                EnterTransition.None togetherWith ExitTransition.None
+            } else {
+                (slideInVertically(uiSpring()) { it / 2 } + fadeIn(tween(EnterMs, easing = UiEase))) togetherWith
+                    (slideOutVertically(uiSpring()) { -it / 2 } + fadeOut(tween(ExitMs, easing = UiEase)))
+            }.using(SizeTransform(clip = true))
+        },
+        label = "rollingText",
+    ) { shown ->
+        Text(shown, style = style, color = color)
+    }
+}
 
 /**
  * A handful of counts as one instrument rather than as loose numbers.
@@ -1048,7 +1057,8 @@ private val DenseFigureGap = 2.dp
 internal fun StatStrip(
     figures: List<Pair<String, String>>,
     modifier: Modifier = Modifier,
-    leadTone: Color = MaterialTheme.colorScheme.primary,
+    // Ink rather than the accent since the 2026-11 redesign: a figure is never chrome.
+    leadTone: Color = MaterialTheme.colorScheme.onSurface,
 ) {
     if (figures.isEmpty()) return
     // The width comes from the Row inside rather than from the surface, which is how the report

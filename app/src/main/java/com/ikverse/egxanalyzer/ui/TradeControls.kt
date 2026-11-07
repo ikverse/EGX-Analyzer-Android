@@ -843,7 +843,9 @@ private val HeldOutline = 0.5.dp
  */
 @Composable
 internal fun PositionStatus.tone(): Color = when (this) {
-    PositionStatus.OPEN -> MaterialTheme.colorScheme.primary
+    // The market's blue since the 2026-11 redesign: the accent is vermilion now, and an open trade
+    // drawn in it would read as one losing.
+    PositionStatus.OPEN -> extraColors.market
     PositionStatus.PARTIAL_TARGET_HIT, PositionStatus.FULL_TARGET_HIT ->
         MaterialTheme.colorScheme.tertiary
     PositionStatus.STOPPED_OUT -> extraColors.loss

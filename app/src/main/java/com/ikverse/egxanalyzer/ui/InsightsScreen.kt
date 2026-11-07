@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -617,9 +618,10 @@ private fun ColumnScope.InsightsHero(report: PerformanceReport) {
                 // worth is the other half of the answer, and neither figure is readable alone - a
                 // source printing its target 2% above the entry reaches it nearly every time and
                 // hands it all back on the call that goes wrong.
-                Text(
+                // The Swiss lead figure (2026-11 redesign): the largest thing on the page.
+                RollingText(
                     best.winRateSplit(HeroRateSecondary),
-                    style = MaterialTheme.typography.headlineLarge.copy(fontFamily = TabularFigures),
+                    style = MaterialTheme.typography.displayMedium.copy(fontFamily = TabularFigures),
                     color = best.anyTargetRate.rateTone(),
                 )
                 // Under the figure rather than beside it. Set in a row it began wherever a
@@ -772,7 +774,7 @@ private fun ChannelCard(
             ) {
                 // Top-aligned with everything else on this row, so a name that wraps to two lines
                 // grows downward away from the mark rather than pushing it off the first line.
-                if (place != null) PlaceChip(place)
+                if (place != null) PlaceNumeral(place)
                 ChannelAvatar(channel.channel, photoPath, LogoSize.Row)
                 Text(
                     channel.channel,
@@ -786,8 +788,8 @@ private fun ChannelCard(
                 // ordered on - the two answer different questions and neither is the whole verdict.
                 Text(
                     channel.winRateSplit(ChannelRateSecondary),
-                    style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.headlineMedium.copy(fontFamily = TabularFigures),
+                    fontWeight = FontWeight.SemiBold,
                     color = if (thin) {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     } else {
@@ -968,27 +970,21 @@ private val ChannelHeaderHeight = 44.dp
  * which source leads, and the hue is already spoken for by the rate beside it; neutral for the rest
  * makes the one that leads readable without any of them competing with the figure the card is for.
  *
- * [FilledPill] rather than a chip of its own, so it is the app's one pill shape at the app's one
- * label height - a single digit in it comes out very nearly square, which is what a place wants to
- * look like.
  */
 @Composable
-private fun PlaceChip(place: Int) {
-    val leads = place == 1
-    FilledPill(
+private fun PlaceNumeral(place: Int) {
+    // A large numeral rather than a chip since the 2026-11 redesign: the Swiss way of saying an
+    // order. Still only the leader takes the accent, for the reason above.
+    Text(
         place.toString(),
-        container = if (leads) {
-            MaterialTheme.colorScheme.secondaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHighest
-        },
-        content = if (leads) {
-            MaterialTheme.colorScheme.onSecondaryContainer
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        },
+        style = MaterialTheme.typography.displaySmall.copy(fontFamily = TabularFigures),
+        color = if (place == 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.widthIn(min = PlaceNumeralWidth),
     )
 }
+
+/** Room for a two-digit place, so a column of cards keeps its avatars in one line. */
+private val PlaceNumeralWidth = 36.dp
 
 /**
  * How a session went, under its own date, so a folded card still says something.
@@ -1573,8 +1569,7 @@ private fun ScoredCallRow(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
-                            .padding(Space.m),
+                            .flatPanel(),
                     ) {
                         PriceLadder(
                             stopLoss = call.stopLoss,
@@ -1596,8 +1591,7 @@ private fun ScoredCallRow(
                         Box(
                             Modifier
                                 .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
-                                .padding(Space.m),
+                                .flatPanel(),
                         ) {
                             // The full chart in the ladder's place: there's finally width to spend
                             // on how the stock actually got from the entry to wherever it settled,
@@ -1620,8 +1614,7 @@ private fun ScoredCallRow(
                 val theCallPanel: @Composable (Modifier) -> Unit = { panelModifier ->
                     Box(
                         panelModifier
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
-                            .padding(Space.m),
+                            .flatPanel(),
                     ) {
                         FigureGroup(
                             "The call",
@@ -1669,7 +1662,7 @@ private fun ScoredCallRow(
                                     }
                                 },
                             ),
-                            titleColor = pageAccent.ink,
+                            
                         )
                     }
                 }
@@ -1678,8 +1671,7 @@ private fun ScoredCallRow(
                 val whatHappenedPanel: @Composable (Modifier) -> Unit = { panelModifier ->
                     Box(
                         panelModifier
-                            .background(pageAccent.soft, SectionPanelShape)
-                            .padding(Space.m),
+                            .flatPanel(),
                     ) {
                         FigureGroup(
                             "What happened",
@@ -1775,7 +1767,7 @@ private fun ScoredCallRow(
                                     )
                                 },
                             ),
-                            titleColor = pageAccent.ink,
+                            
                         )
                     }
                 }
@@ -2506,18 +2498,21 @@ private fun Outcome.onContainer(): Color = when (this) {
  * The error colour is reserved for the app failing at something - a rejected key, prices that
  * would not load. A source reaching its targets half the time is highlighted; below that the
  * number speaks for itself in the ordinary text colour.
+ *
+ * Highlighted in full ink since the 2026-11 redesign, not the accent: vermilion is a red, and a
+ * good rate drawn in it would read as a loss.
  */
 internal fun Double?.rateTone(): Color = when {
     this == null -> MaterialTheme.colorScheme.onSurfaceVariant
-    this >= 50.0 -> MaterialTheme.colorScheme.primary
+    this >= 50.0 -> MaterialTheme.colorScheme.onSurface
     else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 /** The target-2 figure beside a channel card's `headlineSmall` target-1 rate. */
-private val ChannelRateSecondary = 16.sp
+private val ChannelRateSecondary = 18.sp
 
 /** The same, beside the hero's `headlineLarge`. */
-private val HeroRateSecondary = 22.sp
+private val HeroRateSecondary = 26.sp
 
 /**
  * The win rate, divided at the two levels the source printed: how often a call reached target 1,

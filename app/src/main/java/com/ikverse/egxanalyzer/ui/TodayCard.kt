@@ -110,7 +110,8 @@ internal fun ColumnScope.TodayCard(appState: AppState) {
                                 appState.openCall(event.positionId)
                             }
                         },
-                        modifier = tileModifier,
+                        // One after another the first time the card opens (2026-11 redesign).
+                        modifier = tileModifier.staggerIn(digest.events.indexOf(event)),
                     )
                 }
             }
@@ -203,10 +204,10 @@ private fun EventTile(event: DayEvent, onOpen: () -> Unit, modifier: Modifier = 
             .semantics {
                 onClick(label = if (event.kind.held) "Open this trade" else "Open this call", action = null)
             },
+        // Tonal with no edge since the 2026-11 redesign.
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
-        border = cardOutline,
         shape = MaterialTheme.shapes.medium,
     ) {
         Column(Modifier.padding(horizontal = Space.m, vertical = Space.xs)) {
@@ -225,7 +226,7 @@ private fun EventTile(event: DayEvent, onOpen: () -> Unit, modifier: Modifier = 
                     StockLogo(event.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
                     Text(
                         event.ticker,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleLarge,
                         maxLines = 1,
                         softWrap = false,
                         overflow = TextOverflow.Ellipsis,
@@ -250,13 +251,14 @@ private fun EventTile(event: DayEvent, onOpen: () -> Unit, modifier: Modifier = 
                 overflow = TextOverflow.Ellipsis,
             )
             detail?.let { (text, tone) ->
-                Text(
-                    text,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = tone,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // A size up: a held trade's return is the tile's figure (2026-11 redesign), and it
+                // rolls when it changes. A channel name keeps its ellipsis instead.
+                val style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures)
+                if (event.kind.held && event.returnPct != null) {
+                    RollingText(AnnotatedString(text), style = style, color = tone)
+                } else {
+                    Text(text, style = style, color = tone, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
             // Only where there is room for it, which is the app's own answer to that question
             // rather than a second measurement taken here - see LocalWindowWidth, published by the
