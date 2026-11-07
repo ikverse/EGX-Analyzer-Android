@@ -23,7 +23,7 @@ A row in this app reads `AMOC · الإسكندرية للزيوت المعدن�
 in one line, with the figures meant to be compared down a column. Since the 2026-11 redesign, Inter
 Tight sets page names, tickers and every figure, with tabular digits so a column of prices lines up;
 IBM Plex Sans Arabic sets the sentences in both scripts without changing voice mid-line, since Inter
-Tight has no Arabic. Cairo and IBM Plex Mono, bundled before the redesign, were removed in 4.3.0.
+Tight has no Arabic. Cairo and IBM Plex Mono, bundled before the redesign, were removed in 4.5.0.
 They are bundled rather than fetched because the app is sideloaded onto two phones and has to draw
 its own record with no network.
 

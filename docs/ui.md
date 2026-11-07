@@ -549,7 +549,7 @@ Diagnostics.
   irreversible button on the page should not sit at the end of a run of buttons that are not, and its
   note says to take a backup first.
 
-## A hue per page — retired in 4.3.0
+## A hue per page — retired in 4.5.0
 
 Every destination used to speak in its own colour (cyan, violet, rose, indigo, bronze), carried
 into the navigation, a wash at the top of the page, the section cards and the controls. The

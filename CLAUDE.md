@@ -320,7 +320,7 @@ Detailed documentation lives in [`docs/`](docs/):
 - [`docs/features.md`](docs/features.md) — Ask AI, reports, corrections, export, backup, sync, update, scheduling
 - [`docs/ui.md`](docs/ui.md) — Back/stock sheet, page header, filters, status line, settings, colors
 
-## Design language (since 4.3.0, the 2026-11 redesign)
+## Design language (since 4.5.0, the 2026-11 redesign)
 
 A mix of M3 Expressive and Swiss editorial, chosen by the owner on 2026-11-08 and built in seven
 phases on the `redesign` branch. Where an older note below or in `docs/ui.md` describes glass,
@@ -555,7 +555,7 @@ auroras, washes, per-page hues or 6dp pills, this section is what is true now.
   line lives in the header now and that clearance is gone with it, so the action is the only
   floating chrome left that has to follow the bar at all. The wide layout draws it unconditionally with no bar to follow, so all of this is
   the compact branch only.
-- **The Analyze action is a solid capsule since 4.3.0** — see **Design language**. The notes on
+- **The Analyze action is a solid capsule since 4.5.0** — see **Design language**. The notes on
   its 0.94 ground, its gradient edge and its aurora described the glass design and went with it.
 - **`FloatingSurface.outline` is a `Brush`, not a `Color`.** One parameter rather than two that can
   both be set and disagree; a flat edge passes `SolidColor(…)`. The width stays 1dp for every
@@ -567,7 +567,7 @@ auroras, washes, per-page hues or 6dp pills, this section is what is true now.
   (Compose's `FastOutSlowIn` starts gently, which is exactly when a finger is watching);
   `ExpandIn` / `CollapseOut` are how every disclosure opens and closes (200ms in, 140ms out), and the
   status line uses the same pair. `pressScale` is what every pressable does the moment a finger
-  lands — 0.95, about 90ms down and back on `releaseSpring` since 4.3.0 — read in the layer's lambda so a press recomposes nothing; the caller
+  lands — 0.95, about 90ms down and back on `releaseSpring` since 4.5.0 — read in the layer's lambda so a press recomposes nothing; the caller
   owns the `InteractionSource` and hands the same one to its `clickable` or `Surface`. A new button
   uses it. `LocalReduceMotion` is the system's animation scale read at `AppRoot` (and again on every
   resume, because the setting lives in another app): the model's breathing, the action's drifting
