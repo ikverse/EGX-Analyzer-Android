@@ -61,33 +61,28 @@ class GlassContrastTest {
         val onSurface: Color,
     )
 
+    // Read from the real schemes since the 2026-11 redesign made them internal: a guard restating
+    // the numbers it guards passes whatever those numbers become, which is what this used to do.
+    private fun SchemeColors(scheme: androidx.compose.material3.ColorScheme, lift: Float) = SchemeColors(
+        background = scheme.background,
+        lift = lift,
+        section = scheme.surfaceContainer,
+        card = scheme.surfaceContainerHigh,
+        tile = scheme.surfaceContainerHighest,
+        onSurfaceVariant = scheme.onSurfaceVariant,
+        onSurface = scheme.onSurface,
+    )
+
     private val schemes = mapOf(
-        "dark" to SchemeColors(
-            background = Color(0xFF0A0E18),
-            lift = GroundLift,
-            // The scheme's own figures, read rather than repeated: a guard restating the numbers it
-            // guards passes whatever those numbers become.
-            section = Color(0xFF141C2C).copy(alpha = GlassSection),
-            card = Color(0xFF182030).copy(alpha = GlassCard),
-            tile = Color(0xFF243046).copy(alpha = GlassTile),
-            onSurfaceVariant = Color(0xFF9AA7BD),
-            onSurface = Color(0xFFE8ECF4),
-        ),
-        "light" to SchemeColors(
-            background = Color(0xFFF5F7FE),
-            lift = LightGroundLift,
-            section = Color(0xFFFFFFFF).copy(alpha = LightGlassSection),
-            card = Color(0xFFF4F6FE).copy(alpha = LightGlassCard),
-            tile = Color(0xFFE4EAF8).copy(alpha = LightGlassTile),
-            onSurfaceVariant = Color(0xFF55617A),
-            onSurface = Color(0xFF121926),
-        ),
+        "dark" to SchemeColors(DarkColors, GroundLift),
+        "black" to SchemeColors(BlackColors, GroundLift),
+        "light" to SchemeColors(LightColors, LightGroundLift),
     )
 
     private fun eachSurface(body: (name: String, surface: Color, scheme: SchemeColors) -> Unit) {
         schemes.forEach { (theme, scheme) ->
             AccentKey.entries.forEach { key ->
-                val accent = accentFor(key, dark = theme == "dark")
+                val accent = accentFor(key, dark = theme != "light")
                 val ground = litGround(accent, scheme)
                 val levels = listOf(
                     "section" to stack(ground, listOf(scheme.section)),
@@ -137,7 +132,7 @@ class GlassContrastTest {
     fun `each level separates from the one above it`() {
         schemes.forEach { (theme, scheme) ->
             AccentKey.entries.forEach { key ->
-                val ground = litGround(accentFor(key, dark = theme == "dark"), scheme)
+                val ground = litGround(accentFor(key, dark = theme != "light"), scheme)
                 val section = stack(ground, listOf(scheme.section))
                 val card = stack(ground, listOf(scheme.section, scheme.card))
                 val tile = stack(ground, listOf(scheme.section, scheme.card, scheme.tile))

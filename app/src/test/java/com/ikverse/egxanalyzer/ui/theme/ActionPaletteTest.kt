@@ -141,41 +141,77 @@ class ActionPaletteTest {
     }
 
     /**
-     * Five pages, five hues.
+     * One accent on every page, since the 2026-11 redesign.
      *
-     * The whole point of a page accent is that it identifies the page, so two destinations sharing
-     * one is the feature silently not working - and it is an easy slip, because the seeds are a
-     * table and a row is copied to start the next one.
+     * The opposite of what this test pinned before: a Swiss page has one accent, and a destination is
+     * named by its title rather than its hue. Two pages drifting apart is now the slip, because the
+     * five keys still exist and a seed table is the easiest place for one row to differ.
      */
     @Test
-    fun `no two pages speak in the same hue`() {
+    fun `every page speaks the one accent`() {
         listOf(true, false).forEach { dark ->
             val theme = if (dark) "dark" else "light"
             val bases = AccentKey.entries.map { accentFor(it, dark).base.value }
-            assertEquals("$theme reuses a hue between pages", AccentKey.entries.size, bases.toSet().size)
+            assertEquals("$theme gives two pages different hues", 1, bases.toSet().size)
             val inks = AccentKey.entries.map { accentFor(it, dark).ink.value }
-            assertEquals("$theme reuses an ink between pages", AccentKey.entries.size, inks.toSet().size)
+            assertEquals("$theme gives two pages different inks", 1, inks.toSet().size)
         }
     }
 
     /**
-     * The Ask AI pill starts in violet everywhere and ends where it was pressed.
+     * The Ask AI pill starts in violet everywhere and ends in the accent.
      *
-     * Both halves matter and they pull in opposite directions. The first stop is the model
-     * announcing itself, which is the same announcement on every page; the last is the page it was
-     * asked from, which is what stops five pages' pills being one pill. A change that made the whole
-     * ramp follow the accent would read as five unrelated buttons, and one that pinned the whole
-     * ramp would undo the feature - this fails on either.
+     * The first stop is the model announcing itself; the last is the app's one accent, the same on
+     * every page now that pages share it. A ramp that started and ended in one colour would be no
+     * gradient at all.
      */
     @Test
-    fun `the pill begins in violet on every page and ends in the page's own hue`() {
+    fun `the pill begins in violet on every page and ends in the accent`() {
         listOf(true, false).forEach { dark ->
             val theme = if (dark) "dark" else "light"
             val starts = AccentKey.entries.map { accentFor(it, dark).aiFill.first().value }
             assertEquals("$theme starts the pill somewhere other than violet", 1, starts.toSet().size)
             val ends = AccentKey.entries.map { accentFor(it, dark).aiFill.last().value }
-            assertEquals("$theme ends two pages' pills in one hue", AccentKey.entries.size, ends.toSet().size)
+            assertEquals("$theme ends two pages' pills in different hues", 1, ends.toSet().size)
+            assertNotEquals("$theme pill does not move", starts.first(), ends.first())
         }
+    }
+
+    /**
+     * Vermilion, gain and loss stay three hues apart in both themes.
+     *
+     * The risk the redesign took on: the accent is a red-orange in an app where red means a loss.
+     * Loss was pushed toward crimson for exactly this, and gain must never drift toward the accent
+     * either. Measured in hue degrees, so it holds whatever the lightness of each theme's stops.
+     */
+    @Test
+    fun `the accent stays apart from gain and loss`() {
+        listOf(Triple("dark", DarkColors, DarkExtras), Triple("light", LightColors, LightExtras)).forEach { (theme, scheme, extras) ->
+            val accent = accentFor(AccentKey.CYAN, dark = theme == "dark")
+            listOf(accent.base, accent.ink, scheme.primary).forEach { chrome ->
+                listOf("loss" to extras.loss, "gain" to scheme.tertiary).forEach { (role, signal) ->
+                    val apart = hueDistance(chrome, signal)
+                    assertTrue("$theme accent sits $apart degrees from $role", apart >= MinimumHueSeparation)
+                }
+            }
+        }
+    }
+
+    private fun hue(color: Color): Float {
+        val r = color.red; val g = color.green; val b = color.blue
+        val max = maxOf(r, g, b); val min = minOf(r, g, b); val d = max - min
+        if (d == 0f) return 0f
+        val h = when (max) {
+            r -> ((g - b) / d).mod(6f)
+            g -> (b - r) / d + 2f
+            else -> (r - g) / d + 4f
+        }
+        return h * 60f
+    }
+
+    private fun hueDistance(a: Color, b: Color): Float {
+        val d = kotlin.math.abs(hue(a) - hue(b)) % 360f
+        return minOf(d, 360f - d)
     }
 
     /**
@@ -202,8 +238,11 @@ class ActionPaletteTest {
         }
     }
 
-    /** The two signal roles that live on the scheme rather than in [ExtraColors]. */
-    private fun darkSignals() = listOf(Color(0xFF2FE39B), Color(0xFFFF6B7A))
+    /** The signal roles that live on the scheme, read from it rather than repeated. */
+    private fun darkSignals() = listOf(DarkColors.tertiary, DarkColors.error, DarkExtras.loss)
 
-    private fun lightSignals() = listOf(Color(0xFF00804F), Color(0xFFC42D3F))
+    private fun lightSignals() = listOf(LightColors.tertiary, LightColors.error, LightExtras.loss)
 }
+
+/** Enough that vermilion and crimson read as two colours at a glance, not two shades of one. */
+private const val MinimumHueSeparation = 20f

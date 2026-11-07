@@ -15,8 +15,12 @@ which is what this file is for. The full text is at <https://openfontlicense.org
 | **Cairo** | `cairo_semibold.ttf`, `cairo_bold.ttf` | [google/fonts `ofl/cairo`](https://github.com/google/fonts/tree/main/ofl/cairo) |
 | **IBM Plex Sans Arabic** | `plex_arabic_regular.ttf`, `plex_arabic_medium.ttf`, `plex_arabic_semibold.ttf` | [google/fonts `ofl/ibmplexsansarabic`](https://github.com/google/fonts/tree/main/ofl/ibmplexsansarabic) |
 | **IBM Plex Mono** | `plex_mono_regular.ttf`, `plex_mono_medium.ttf`, `plex_mono_semibold.ttf`†, `plex_mono_bold.ttf`† | [google/fonts `ofl/ibmplexmono`](https://github.com/google/fonts/tree/main/ofl/ibmplexmono) |
+| **Inter Tight** | `inter_tight.ttf` (the upstream variable font, unmodified) | [google/fonts `ofl/intertight`](https://github.com/google/fonts/tree/main/ofl/intertight) |
 
-Copyright: Cairo — the Cairo Project Authors. IBM Plex Sans Arabic and IBM Plex Mono — IBM Corp.
+Copyright: Cairo — the Cairo Project Authors. IBM Plex Sans Arabic and IBM Plex Mono — IBM Corp. Inter Tight — the Inter Project Authors.
+
+Since the 2026-11 redesign, Inter Tight sets page names, tickers and every figure; Cairo and IBM Plex
+Mono are still bundled but no longer drawn, and can be removed in a later release.
 
 ### The one modification
 

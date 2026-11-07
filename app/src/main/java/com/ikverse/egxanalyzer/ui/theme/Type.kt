@@ -3,7 +3,9 @@ package com.ikverse.egxanalyzer.ui.theme
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.R
@@ -31,10 +33,32 @@ import com.ikverse.egxanalyzer.R
  * Instanced from the upstream variable font at two weights; see the download step in the commit
  * that added these files.
  */
-val Display = FontFamily(
-    Font(R.font.cairo_semibold, FontWeight.SemiBold),
-    Font(R.font.cairo_bold, FontWeight.Bold),
+val Display = interTight()
+
+/**
+ * Inter Tight, bundled once as the upstream variable font and instanced here per weight. minSdk 31
+ * reads variation settings natively, so one 580 KB file stands in for four statics.
+ *
+ * **Since the 2026-11 redesign** this is the Swiss half of the design: page names, tickers, and
+ * every figure, set large and tracked tight. It has no Arabic, which is why [Body] stays IBM Plex
+ * Sans Arabic - every sentence that can carry a company's Arabic name keeps one voice.
+ */
+@OptIn(ExperimentalTextApi::class)
+private fun interTight() = FontFamily(
+    listOf(FontWeight.Normal, FontWeight.Medium, FontWeight.SemiBold, FontWeight.Bold).map { weight ->
+        Font(
+            R.font.inter_tight,
+            weight,
+            variationSettings = FontVariation.Settings(FontVariation.weight(weight.weight)),
+        )
+    },
 )
+
+/**
+ * Tabular figures on every style, so `.copy(fontFamily = Figures)` at a call site inherits them and a
+ * column of prices lines up in Inter Tight the way it did in Plex Mono.
+ */
+private const val Tabular = "tnum"
 
 /**
  * Every sentence the app speaks, and every label on a figure.
@@ -52,14 +76,14 @@ val Body = FontFamily(
 /**
  * Every figure: prices, percentages, counts, dates.
  *
+ * **Inter Tight since the 2026-11 redesign**, with tabular figures switched on in every style below.
+ * What follows describes the Plex Mono it replaced.
+ *
  * IBM Plex Mono, replacing `FontFamily.Monospace` - which resolved to whatever the device called
  * monospace, matched nothing else on screen, and reached two call sites out of the dozens that draw
  * a number. Its digits are all one width, which is the entire point: a column of prices lines up.
  */
-val Figures = FontFamily(
-    Font(R.font.plex_mono_regular, FontWeight.Normal),
-    Font(R.font.plex_mono_medium, FontWeight.Medium),
-)
+val Figures = Display
 
 /**
  * The scale, set rather than inherited.
@@ -74,84 +98,71 @@ val Figures = FontFamily(
  * decides the size.
  */
 internal val AppTypography = Typography(
+    // The Swiss numerals: the one figure a screen leads with. Tight tracking, because a large
+    // figure set at default spacing falls apart into separate digits.
+    displayLarge = TextStyle(
+        fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 64.sp, lineHeight = 64.sp,
+        letterSpacing = (-2.6).sp, fontFeatureSettings = Tabular,
+    ),
+    displayMedium = TextStyle(
+        fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 44.sp, lineHeight = 46.sp,
+        letterSpacing = (-1.6).sp, fontFeatureSettings = Tabular,
+    ),
+    displaySmall = TextStyle(
+        fontFamily = Display, fontWeight = FontWeight.Medium, fontSize = 34.sp, lineHeight = 38.sp,
+        letterSpacing = (-1.0).sp, fontFeatureSettings = Tabular,
+    ),
     // The page name, and nothing else at this size.
     headlineLarge = TextStyle(
-        fontFamily = Display,
-        fontWeight = FontWeight.Bold,
-        fontSize = 30.sp,
-        lineHeight = 36.sp,
-        letterSpacing = (-0.5).sp,
+        fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 30.sp, lineHeight = 34.sp,
+        letterSpacing = (-0.9).sp, fontFeatureSettings = Tabular,
     ),
     headlineMedium = TextStyle(
-        fontFamily = Display,
-        fontWeight = FontWeight.Bold,
-        fontSize = 25.sp,
-        lineHeight = 31.sp,
-        letterSpacing = (-0.4).sp,
+        fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 25.sp, lineHeight = 30.sp,
+        letterSpacing = (-0.6).sp, fontFeatureSettings = Tabular,
     ),
     // A ticker, and a figure a card leads with.
     headlineSmall = TextStyle(
-        fontFamily = Display,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 21.sp,
-        lineHeight = 27.sp,
-        letterSpacing = (-0.2).sp,
+        fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 21.sp, lineHeight = 26.sp,
+        letterSpacing = (-0.4).sp, fontFeatureSettings = Tabular,
     ),
     titleLarge = TextStyle(
-        fontFamily = Display,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 19.sp,
-        lineHeight = 25.sp,
+        fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 19.sp, lineHeight = 24.sp,
+        letterSpacing = (-0.3).sp, fontFeatureSettings = Tabular,
     ),
-    // From here down it is the body face: these are labels on things, not names of things.
+    // From here down it is the body face: labels on things, not names of things. Line heights stay
+    // tall because Arabic carries marks above and below the line.
     titleMedium = TextStyle(
-        fontFamily = Body,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 16.sp,
-        lineHeight = 22.sp,
+        fontFamily = Body, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp,
+        fontFeatureSettings = Tabular,
     ),
     titleSmall = TextStyle(
-        fontFamily = Body,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 14.sp,
-        lineHeight = 20.sp,
+        fontFamily = Body, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 20.sp,
+        fontFeatureSettings = Tabular,
     ),
     bodyLarge = TextStyle(
-        fontFamily = Body,
-        fontWeight = FontWeight.Normal,
-        fontSize = 15.sp,
-        lineHeight = 22.sp,
+        fontFamily = Body, fontWeight = FontWeight.Normal, fontSize = 15.sp, lineHeight = 22.sp,
+        fontFeatureSettings = Tabular,
     ),
     bodyMedium = TextStyle(
-        fontFamily = Body,
-        fontWeight = FontWeight.Normal,
-        fontSize = 14.sp,
-        lineHeight = 21.sp,
+        fontFamily = Body, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 21.sp,
+        fontFeatureSettings = Tabular,
     ),
     bodySmall = TextStyle(
-        fontFamily = Body,
-        fontWeight = FontWeight.Normal,
-        fontSize = 13.sp,
-        lineHeight = 18.sp,
+        fontFamily = Body, fontWeight = FontWeight.Normal, fontSize = 13.sp, lineHeight = 18.sp,
+        fontFeatureSettings = Tabular,
     ),
     labelLarge = TextStyle(
-        fontFamily = Body,
-        fontWeight = FontWeight.Medium,
-        fontSize = 14.sp,
-        lineHeight = 18.sp,
+        fontFamily = Body, fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 18.sp,
+        fontFeatureSettings = Tabular,
     ),
     labelMedium = TextStyle(
-        fontFamily = Body,
-        fontWeight = FontWeight.Medium,
-        fontSize = 12.sp,
-        lineHeight = 16.sp,
+        fontFamily = Body, fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp,
+        fontFeatureSettings = Tabular,
     ),
-    // The uppercase key over a figure. Tracked out, because uppercase set solid is a wall.
+    // The key over a figure. Tracked out, the Swiss way, so a small label reads as a caption.
     labelSmall = TextStyle(
-        fontFamily = Body,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 11.sp,
-        lineHeight = 14.sp,
-        letterSpacing = 0.6.sp,
+        fontFamily = Body, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 14.sp,
+        letterSpacing = (0.8).sp, fontFeatureSettings = Tabular,
     ),
 )
