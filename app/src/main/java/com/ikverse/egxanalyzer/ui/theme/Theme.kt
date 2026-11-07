@@ -508,33 +508,15 @@ private val LightAccents = lightSeeds.mapValues { (_, seed) -> accent(seed, dark
  */
 enum class CardHue { BLUE, GREEN, AMBER, PINK, VIOLET, CYAN }
 
-private val DarkCardHues = mapOf(
-    CardHue.BLUE to Color(0xFF5AA9FF),
-    CardHue.GREEN to Color(0xFF2FE39B),
-    CardHue.AMBER to Color(0xFFFFB74D),
-    CardHue.PINK to Color(0xFFFF5FA2),
-    CardHue.VIOLET to Color(0xFF9B7CFF),
-    CardHue.CYAN to Color(0xFF35D7F2),
-)
-
 /**
- * Not the dark theme's values reused.
- *
- * These are drawn on a near-white card, where the dark theme's come out between 1.5:1 and 2.5:1 -
- * the same argument that darkened `market` for the light theme, applied to every hue at once.
+ * This hue in the theme in force: **the one accent, whichever hue is named**, since the 2026-11
+ * redesign. A Swiss page has one accent, so the six card hues now all resolve to the page's ink. The
+ * enum and every call site naming a hue are kept, so a card's place in the rhythm is still stated
+ * and a later design can give the hues back without touching a screen.
  */
-private val LightCardHues = mapOf(
-    CardHue.BLUE to Color(0xFF1668C7),
-    CardHue.GREEN to Color(0xFF00804F),
-    CardHue.AMBER to Color(0xFF9A6206),
-    CardHue.PINK to Color(0xFFB32C6C),
-    CardHue.VIOLET to Color(0xFF5B41C9),
-    CardHue.CYAN to Color(0xFF00788E),
-)
-
-/** This hue in the theme in force. */
+@Suppress("UnusedReceiverParameter")
 val CardHue.color: Color
-    @Composable get() = (if (LocalDarkTheme.current) DarkCardHues else LightCardHues).getValue(this)
+    @Composable get() = LocalPageAccent.current.ink
 
 /** The accent for [key] in the theme in force. */
 internal fun accentFor(key: AccentKey, dark: Boolean): PageAccent =

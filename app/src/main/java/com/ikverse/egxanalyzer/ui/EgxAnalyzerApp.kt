@@ -1,5 +1,12 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
@@ -178,30 +185,6 @@ fun EgxAnalyzerApp(appState: AppState) {
     // Held here for the same reason, and read by exactly one thing - see LocalTabsSettled. The pager
     // below writes it; beside a rail nothing does, and nothing there needs to.
     val tabsSettled = remember { mutableStateOf(true) }
-    // Held here for the same reason again: the rail is drawn beside every page and wears the wash of
-    // whichever one is on screen, so the page has to be able to hand it out. See LocalPageWash.
-    val pageWash = remember { mutableFloatStateOf(1f) }
-    // Both hues are animated here, once, rather than separately inside appGround and AppRail -
-    // and the rail's own wash is painted here too, on the same ground `Box` below, rather than
-    // inside AppRail at all. AppRail is composed inside NavigationSuiteScaffoldLayout's own
-    // subcomposed slot, which exists to measure the rail before the page is given the width that
-    // is left - and content driven by a value that changes every animation frame is not
-    // guaranteed to recompose in step with the tree it is subcomposed into. It usually looked
-    // right, which is what let two independent `animateColorAsState` calls ship in the first
-    // place, until the app was backgrounded mid-transition and the seam became visible - and
-    // handing AppRail an already-animated `Color` closed that particular gap without closing this
-    // one: the rail could still recompose a frame behind the ground it sits beside. One draw call,
-    // in the one part of this tree that is never subcomposed, cannot fall behind itself.
-    val dark = LocalDarkTheme.current
-    val groundHue by animateColorAsState(
-        accentFor(appState.destination.accent, dark).base,
-        label = "appGround",
-    )
-    val railWashHue by animateColorAsState(
-        accentFor(appState.destination.accent, dark).wash,
-        label = "railWash",
-    )
-    val washHeightPx = with(density) { PageWashHeight.toPx() }
     // Above the shells and not inside either of them: back means the same thing whichever one is
     // drawn, and a handler in each would be one rule written twice. Enabled only when there is
     // something to undo, so a reader with nothing outstanding gets the system's own behaviour -
@@ -236,42 +219,19 @@ fun EgxAnalyzerApp(appState: AppState) {
         LocalWindowWidth provides windowWidth,
         LocalNavBarVisible provides navBarVisible,
         LocalTabsSettled provides tabsSettled,
-        LocalPageWash provides pageWash,
         // Remembered on the state rather than rebuilt each frame: a new lambda every recomposition
         // is a new value for a static local, which invalidates every reader of it - and the readers
         // here are every ticker on every card on the page.
         LocalOpenStock provides remember(appState) { appState::openStock },
     ) {
-      // The ground every surface in the app is see-through *to*. Drawn once, here, across the whole
-      // window - the rail included - because a ground that began at the page's edge would put a
-      // seam down the side of every wide window, which is exactly what the first attempt did.
-      //
-      // The rail's own wash band is painted here too, in the same draw pass, rather than inside
-      // AppRail - see the comment above [railWashHue]. `RailWidth` stands in for the rail's real,
-      // measured width rather than reading it back from AppRail: Material floors a NavigationRail
-      // at 80dp and nothing here may make it wider (see AppRail's own note on that), so the figure
-      // is already fixed and used elsewhere in this app's own accounting of a wide window's width.
+      // The ground, drawn once across the whole window - the rail included - because a ground
+      // that began at the page's edge would put a seam down the side of every wide window.
       Box(
           Modifier
               .fillMaxSize()
-              .appGround(groundHue)
-              .then(
-                  if (rail) {
-                      Modifier.drawBehind {
-                          val left = pageWash.floatValue
-                          if (left <= 0f) return@drawBehind
-                          drawRect(
-                              Brush.verticalGradient(
-                                  listOf(railWashHue.copy(alpha = railWashHue.alpha * left), Color.Transparent),
-                                  endY = washHeightPx,
-                              ),
-                              size = Size(RailWidth.toPx(), washHeightPx),
-                          )
-                      }
-                  } else {
-                      Modifier
-                  },
-              ),
+              // Plain paper or ink since the 2026-11 redesign: no lights behind the page and no
+              // band down the rail. One flat ground for the whole window still means no seam.
+              .background(MaterialTheme.colorScheme.background),
       ) {
         if (rail) {
             // **The mark is not drawn in the chrome at all.** It used to be drawn in the header
@@ -332,61 +292,6 @@ fun EgxAnalyzerApp(appState: AppState) {
     }
 }
 
-/**
- * The page's hue as two soft lights behind the whole window.
- *
- * **Half of the material, and the half that is not on any card.** The surfaces above are glass and
- * glass over a flat colour is that colour: without this the whole treatment is a tint, which is the
- * lesson of the first attempt at it - built, shipped and looked at on a device before anyone could
- * see that nothing had changed.
- *
- * Faint on purpose. It was 0.20 and the band behind a page title read as a coloured header, which
- * is a decoration the app does not have and a ground the type then had to be read against. At these
- * alphas the lit ground and the unlit differ by about five L\*, which is enough for a card crossing
- * the boundary to show it and little enough that no figure is read against a different ground than
- * the one beside it.
- *
- * The lights are held low and wide for the same reason: the top of a window is where the title, the
- * status line and the first card all are, and it is the one part of the page that must stay quiet.
- *
- * The hue follows the destination the way the rail's wash does, and arrives already animated - an
- * instant change of ground under a cross-fading page reads as a flash. Animated once, by the
- * caller, and handed to both this and the rail: see the comment where [EgxAnalyzerApp] builds it.
- */
-@Composable
-private fun Modifier.appGround(hue: Color): Modifier {
-    val dark = LocalDarkTheme.current
-    val page = MaterialTheme.colorScheme.background
-    // Solved from the hue rather than written down, so every page is lit to one brightness and only
-    // the colour of the light changes. See groundAlpha - a single alpha across five hues of very
-    // different luminance is what put a lit page above the cards standing on it.
-    val alpha = groundAlpha(hue, page, if (dark) GroundLift else LightGroundLift)
-    return this.drawBehind {
-        drawRect(page)
-        // Two lights and not three: a third left no unlit ground for the lit parts to be lighter
-        // than, which is a page with a colour rather than a page with light on it. Both carry the
-        // same alpha, which is what the solve above is solved for. Lower and wider than the first
-        // cut, which was spent by the second or third card and read as a band rather than a page
-        // lit from below.
-        drawGroundLight(hue, alpha, Offset(size.width * 0.10f, size.height * 0.78f), size.width * 0.88f)
-        drawGroundLight(hue, alpha, Offset(size.width * 1.00f, size.height * 0.30f), size.width * 0.88f)
-    }
-}
-
-/** One light: the hue at its middle, gone by its edge. */
-private fun DrawScope.drawGroundLight(hue: Color, alpha: Float, centre: Offset, radius: Float) {
-    drawCircle(
-        brush = Brush.radialGradient(
-            listOf(hue.copy(alpha = alpha), hue.copy(alpha = 0f)),
-            center = centre,
-            radius = radius,
-        ),
-        radius = radius,
-        center = centre,
-    )
-}
-
-
 /** Icons carry the rail on a glance, so they are a size up from the Material default of 24dp. */
 private val NavigationIconSize = 28.dp
 
@@ -396,7 +301,7 @@ private val NavigationIconSize = 28.dp
  * Material leaves a bar 80dp. This one is drawn over the page rather than under it, so its height is
  * page it is covering, and a shorter pill covers less of it.
  */
-private val NavigationBarHeight = 82.dp
+private val NavigationBarHeight = 72.dp
 
 /** How far the pill is held in from the sides of the window, which is what makes it read as a pill. */
 internal val PillSideMargin = 12.dp
@@ -418,7 +323,7 @@ internal val PillBottomMargin = 10.dp
 internal val NavBarFootprint = NavigationBarHeight + PillBottomMargin
 
 /** A shade under the rail's 28dp: the pill has to leave room for a label under the glyph. */
-private val BarIconSize = 29.dp
+private val BarIconSize = 24.dp
 
 /**
  * A size down from Material's 12sp `labelMedium`.
@@ -577,12 +482,6 @@ private val StatusGlyphSize = 14.dp
 /** Room between rail items, where Material leaves 4dp and the four destinations read as one block. */
 private val RailItemGap = 16.dp
 
-/**
- * Material's own floor for a `NavigationRail`'s width, and the one nothing here may push past it -
- * see the note on the rail below. Stood in for the rail's real width where [EgxAnalyzerApp] paints
- * its wash, because that draw happens outside the rail entirely; see [railWashHue] there.
- */
-private val RailWidth = 80.dp
 
 @Composable
 private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
@@ -595,18 +494,7 @@ private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
     // is a seam, and nothing up there justified one - and this is the same seam stood on its end.
     // On `background` the rail is the page's own ground with the destinations standing on it, and
     // what separates the page is its cards' own inset rather than a change of colour.
-    //
-    // **And the page's own wash, drawn above this rail rather than by it.** The accent band at the
-    // top of a page used to stop at the rail's edge, which on a wide window is a band ending a
-    // rail's width short of the corner - the one place the eye reads as the top of the *window*
-    // rather than the top of the page. It belongs to [EgxAnalyzerApp]'s own ground `Box` now, not
-    // to this composable: this rail is built inside `NavigationSuiteScaffoldLayout`'s own
-    // subcomposed slot, which exists to measure the rail before the page is given the width that is
-    // left - and a wash painted in here, driven by a colour that changes every animation frame, is
-    // not guaranteed to recompose in step with the ground light beside it. It usually looked right,
-    // which is what let it ship this way once already, until the app was backgrounded mid-transition
-    // and the seam showed. Nothing paints the rail's own background any more; the shared ground
-    // shows straight through it, wash included, the same way the two soft lights already do.
+    // Nothing paints the rail's own background; the window's one ground shows through it.
     // How tall the Settings item turned out to be, held so the column above it can hold back the
     // same amount and leave the group centred on the window. See the spacers in the rail below.
     var settingsHeight by remember { mutableStateOf(0.dp) }
@@ -693,9 +581,8 @@ private fun RailItem(
     modifier: Modifier = Modifier,
 ) {
     val selected = appState.destination == destination
-    // The pill's colours, on the rail's own item. See PillItem for why every destination
-    // wears its own hue here rather than only the selected one.
-    val accent = accentFor(destination.accent, LocalDarkTheme.current)
+    // The phone bar's colours on the rail's own item (2026-11 redesign): neutral icons, the one
+    // accent's soft container behind the tab you are on.
     NavigationRailItem(
         selected = selected,
         // Pressing the destination you are already on means "back to the top" - the same
@@ -707,22 +594,22 @@ private fun RailItem(
         label = { Text(destination.label) },
         modifier = modifier,
         colors = NavigationRailItemDefaults.colors(
-            selectedIconColor = accent.ink,
+            selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
             selectedTextColor = MaterialTheme.colorScheme.onSurface,
-            indicatorColor = accent.soft,
-            unselectedIconColor = accent.ink.copy(alpha = RestingIconAlpha),
+            indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
             unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ),
     )
 }
 
 /**
- * The phone's navigation: a pill lying on the page rather than a bar holding it up.
+ * The phone's navigation: a tonal bar floating over the page (2026-11 redesign).
  *
- * Slightly see-through, so what is underneath carries on being visible through it and the pill reads
- * as sitting on the page rather than as a hole cut in it. A flat tint and not a blur - Compose has no
- * backdrop blur - so it is kept opaque enough that a dense card scrolling under it cannot make the
- * labels hard to read.
+ * One highlight for the whole bar rather than one per item, so a change of tab is a single object
+ * travelling: it springs sideways to the tab pressed and squares its corners while it moves, which
+ * is the M3 Expressive half of the design. Icons are neutral and only the tab you are on is in the
+ * accent - a Swiss page has one accent, and its name is in the header.
  */
 @Composable
 private fun FloatingNavBar(appState: AppState, modifier: Modifier = Modifier) {
@@ -740,28 +627,54 @@ private fun FloatingNavBar(appState: AppState, modifier: Modifier = Modifier) {
         exit = slideOutVertically { it } + fadeOut(),
     ) {
         FloatingSurface(
-            // The same corner the action button above it takes, which is the page's own card radius.
-            shape = MaterialTheme.shapes.large,
-            color = lerp(MaterialTheme.colorScheme.surfaceContainerHigh, Color.Black, 0.20f),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
             modifier = Modifier.height(NavigationBarHeight),
         ) {
-            // No icon here: five destinations already divide a 411dp cover screen, and a sixth thing
-            // taking width from them buys nothing the header above does not already say.
-            Row(
-                Modifier.fillMaxWidth().selectableGroup(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AppDestination.entries.forEach { destination ->
-                    val selected = appState.destination == destination
-                    PillItem(
-                        destination = destination,
-                        selected = selected,
-                        // As on the rail: already here means take me back to the top.
-                        onClick = {
-                            if (selected) appState.scrollToTop(destination) else appState.navigate(destination)
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val entries = AppDestination.entries
+                val slot = maxWidth / entries.size
+                val index = entries.indexOf(appState.destination).coerceAtLeast(0)
+                val still = LocalReduceMotion.current
+                val target = slot * index + (slot - IndicatorWidth) / 2
+                val left by animateDpAsState(
+                    target,
+                    animationSpec = if (still) snap() else spring(dampingRatio = 0.62f, stiffness = 420f),
+                    label = "navIndicator",
+                )
+                // Squared off while it travels, round again once it lands.
+                val moving = kotlin.math.abs((left - target).value) > 1f
+                val corner by animateDpAsState(
+                    if (moving) IndicatorTravelCorner else IndicatorHeight / 2,
+                    animationSpec = if (still) snap() else spring(stiffness = Spring.StiffnessMedium),
+                    label = "navIndicatorCorner",
+                )
+                // The highlight sits where the icon sits: centred in the item's column above the
+                // label, so it is placed by the same arithmetic the column below uses.
+                Box(
+                    Modifier
+                        .offset(x = left, y = (NavigationBarHeight - ItemBlockHeight) / 2)
+                        .size(IndicatorWidth, IndicatorHeight)
+                        .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(corner)),
+                )
+                // No icon here: five destinations already divide a 411dp cover screen, and a sixth
+                // thing taking width from them buys nothing the header above does not already say.
+                Row(
+                    Modifier.fillMaxWidth().selectableGroup(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    entries.forEach { destination ->
+                        val selected = appState.destination == destination
+                        PillItem(
+                            destination = destination,
+                            selected = selected,
+                            // As on the rail: already here means take me back to the top.
+                            onClick = {
+                                if (selected) appState.scrollToTop(destination) else appState.navigate(destination)
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
         }
@@ -771,11 +684,9 @@ private fun FloatingNavBar(appState: AppState, modifier: Modifier = Modifier) {
 /**
  * One destination in the pill.
  *
- * Material's own `NavigationBarItem` asks for around 82dp - a fixed 16dp above and below a 32dp
- * indicator - and a bar that tall would cover a fifth of the page it floats over. Given less, it
- * overflows rather than shrinks, and the indicator came out tangent to the bar's top edge with the
- * label sitting on the bottom one. This is the same item built to the height available, so the block
- * sits centred with room on both sides.
+ * Material's own `NavigationBarItem` asks for around 82dp and overflows rather than shrinks, so this
+ * is the same item built to the height available. It draws no highlight of its own: the bar's one
+ * travelling highlight sits behind whichever item is chosen.
  */
 @Composable
 private fun PillItem(
@@ -785,43 +696,33 @@ private fun PillItem(
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
-    // The bar is shell chrome and sits outside any page's theme, so it asks each destination for its
-    // own hue rather than reading `secondaryContainer` - which out here is still Analyze's.
-    val accent = accentFor(destination.accent, LocalDarkTheme.current)
+    val press = remember { MutableInteractionSource() }
+    val ink by animateColorAsState(
+        if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant,
+        label = "navInk",
+    )
     Column(
         modifier.fillMaxHeight()
-            .selectable(selected = selected, role = Role.Tab, onClick = onClick),
+            .selectable(
+                selected = selected,
+                role = Role.Tab,
+                interactionSource = press,
+                indication = null,
+                onClick = onClick,
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Box(
-            Modifier.size(IndicatorWidth, IndicatorHeight)
-                .background(
-                    if (selected) accent.soft else Color.Transparent,
-                    CircleShape,
-                ),
+            Modifier.size(IndicatorWidth, IndicatorHeight).pressScale(press),
             contentAlignment = Alignment.Center,
         ) {
-            // A size down from the rail's, which has the room for it. At the pill's height an icon
-            // over a label needs the smaller glyph or the label clips.
-            //
-            // **Every destination wears its own hue here, not only the one you are on.** The bar is
-            // where the mapping between a colour and a page is learned, and it can only teach it by
-            // showing all five at once. The unselected four are held back to RestingIconAlpha so
-            // that the bar still says where you are: the difference between them and the selected
-            // item is the filled indicator behind it and a hue at full strength, which is a larger
-            // difference than the grey-to-colour one it replaces.
-            NavigationIcon(
-                destination,
-                selected,
-                BarIconSize,
-                if (selected) accent.ink else accent.ink.copy(alpha = RestingIconAlpha),
-            )
+            NavigationIcon(destination, selected, BarIconSize, ink)
         }
         Spacer(Modifier.height(IndicatorLabelGap))
         Text(
             destination.label,
-            style = MaterialTheme.typography.labelMedium.copy(fontSize = BarLabelSize),
+            style = MaterialTheme.typography.labelMedium.copy(fontSize = BarLabelSize, lineHeight = BarLabelLine),
             color = if (selected) colors.onSurface else colors.onSurfaceVariant,
             maxLines = 1,
         )
@@ -829,21 +730,23 @@ private fun PillItem(
 }
 
 /** Wide enough to hold the icon clear of a five-slot 411dp screen's edges, and no wider. */
-private val IndicatorWidth = 66.dp
+private val IndicatorWidth = 60.dp
 
-/** Material leaves 32dp around a 24dp icon; this holds the same margin around a 26dp one. */
-private val IndicatorHeight = 38.dp
+/** A 24dp icon with Material's own 4dp either side. */
+private val IndicatorHeight = 32.dp
+
+/** The highlight's corner while it is travelling between tabs. */
+private val IndicatorTravelCorner = 10.dp
 
 /** Close enough that the icon and its name read as one item, far enough that they do not touch. */
 private val IndicatorLabelGap = 3.dp
 
-/**
- * How far the four destinations you are not on are held back.
- *
- * Enough that the selected one still leads the bar, not so far that the other four stop being
- * colours - at much under this they grey out and the bar goes back to being a legend for one page.
- */
-private const val RestingIconAlpha = 0.82f
+/** The label's own line, fixed so [ItemBlockHeight] is a sum rather than a measurement. */
+private val BarLabelLine = 15.sp
+
+/** Indicator, gap and label: the block each item centres, which the highlight is placed against. */
+private val ItemBlockHeight = IndicatorHeight + IndicatorLabelGap + 15.dp
+
 
 @Composable
 private fun NavigationIcon(

@@ -191,6 +191,9 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = SheetShape,
+        containerColor = MaterialTheme.colorScheme.background,
+        dragHandle = { SheetHandle() },
     ) {
         StockSheetHeading(
             key, score, calls.firstOrNull(), latest, history, trades, faults,

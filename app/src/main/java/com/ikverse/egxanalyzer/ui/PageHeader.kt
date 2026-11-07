@@ -1,5 +1,7 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -273,13 +275,8 @@ private fun TitleRow(
         horizontalArrangement = Arrangement.spacedBy(Space.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            destination.selectedIcon,
-            // The word is right beside it, and a reader announcing both says it twice.
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(lerp(ExpandedIcon, CollapsedIcon, collapse)),
-        )
+        // The page's name alone since the 2026-11 redesign: the Swiss half of the design lets the
+        // type say which page this is, so the glyph that stood before it went.
         Text(
             destination.label,
             style = MaterialTheme.typography.headlineLarge.copy(
@@ -339,17 +336,21 @@ private fun HeaderAction(
     onClick: () -> Unit,
     dot: Boolean = false,
 ) {
+    // A round tonal button (2026-11 redesign): something you press sits in a container.
+    val press = remember { MutableInteractionSource() }
     Box(
         Modifier
             .size(SearchTarget)
+            .pressScale(press)
             .clip(CircleShape)
-            .clickable(onClick = onClick),
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickable(interactionSource = press, indication = LocalIndication.current, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             icon,
             contentDescription = description,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.size(size),
         )
         if (dot) {
@@ -580,8 +581,8 @@ private val CollapsedHeight = 56.dp
 internal val HeaderCollapseTravel: Dp = ExpandedHeight - CollapsedHeight
 
 /** Sized to the title beside it at either end, the way the app's mark used to be. */
-private val ExpandedIcon = 30.dp
-private val CollapsedIcon = 22.dp
+private val ExpandedIcon = 22.dp
+private val CollapsedIcon = 20.dp
 
 /**
  * `headlineLarge`'s own size, and what it falls to.
@@ -590,10 +591,10 @@ private val CollapsedIcon = 22.dp
  * sit, because this one shares its row with an icon and a control rather than heading a page alone.
  * The tracking travels with it: -0.5sp is set for 30sp text and reads as cramped at 20.
  */
-private val ExpandedTitle = 30.sp
+private val ExpandedTitle = 34.sp
 private val CollapsedTitle = 20.sp
-private val ExpandedTracking = (-0.5).sp
-private val CollapsedTracking = (-0.2).sp
+private val ExpandedTracking = (-1.2).sp
+private val CollapsedTracking = (-0.4).sp
 
 /** A press target for the glyph, not the size of it - the glyph itself is [ExpandedIcon]/[CollapsedIcon]. */
 private val SearchTarget = 40.dp

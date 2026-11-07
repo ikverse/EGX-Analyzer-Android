@@ -1,5 +1,8 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -178,6 +181,9 @@ internal fun FilterSheet(
     ModalBottomSheet(
         onDismissRequest = { open.value = false },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = SheetShape,
+        containerColor = MaterialTheme.colorScheme.background,
+        dragHandle = { SheetHandle() },
     ) {
         Column(
             Modifier
@@ -395,9 +401,24 @@ internal fun <T> SortSection(
 /** One choice in a sheet's section: a chip that says whether it is the one in force. */
 @Composable
 private fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    // Tonal when chosen, and squaring off under the finger (2026-11 redesign).
+    val press = remember { MutableInteractionSource() }
     FilterChip(
         selected = selected,
         onClick = onClick,
+        shape = RoundedCornerShape(pressCorner(press, rest = ChipCorner, pressed = ChipCorner / 2)),
+        interactionSource = press,
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+            selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
+            selectedBorderColor = Color.Transparent,
+            borderColor = MaterialTheme.colorScheme.outlineVariant,
+        ),
         label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingIcon = if (!selected) null else ({
             Icon(
@@ -408,6 +429,9 @@ private fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
         }),
     )
 }
+
+/** Half a chip's 32dp: a capsule at rest. */
+private val ChipCorner = 16.dp
 
 /** The row a screen's filters sit in, wrapping rather than scrolling on a narrow screen. */
 @Composable

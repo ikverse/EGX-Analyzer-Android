@@ -1,5 +1,18 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.material.icons.outlined.StopCircle
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.ui.geometry.Size
 import android.Manifest
 import android.app.DatePickerDialog
 import android.content.Context
@@ -139,79 +152,41 @@ internal fun AnalyzeScreen(appState: AppState) {
         floatingAction = {
             val big = LocalWindowWidth.current != WindowWidth.COMPACT
             val actionModifier = Modifier.height(if (big) BigActionHeight else ActionHeight)
-            val ai = extraColors
-            // The page's own hue, which on this page is cyan - the colour this button already wore.
-            // Read from the accent rather than from `ExtraColors` so that the rule is the one
-            // stated rather than a coincidence: **the screen's action wears the page's hue**, and a
-            // floating action added to any other destination gets that page's without being told.
-            val accent = pageAccent
             val running = appState.analysisStatus == AnalysisStatus.RUNNING
-            // One instance across both branches, so the mark keeps turning through the moment a run
-            // starts rather than restarting from nothing there.
-            val motion = rememberActionMotion()
-            // The edge, in the same family and its own stops - see ExtraColors.actionLine for why
-            // it cannot simply be the fill: the fill sits inside this line.
-            val actionEdge = remember(accent.actionLine) { Brush.horizontalGradient(accent.actionLine) }
-            // Read in the draw lambda rather than the composable body: read at composition the
-            // drifts would recompose this screen sixty times a second, where here a frame costs a
-            // repaint and nothing else.
-            // The page behind the button, blurred, under everything the button paints. This is the
-            // one place in the app where a frost is worth its frame: the page scrolls under this
-            // button the whole time it is on screen, so there is something behind it to soften.
-            // See frostedBackdrop - and ActionFrost for why the fills above it had to come down.
-            //
-            // Not at all when the phone has asked for solid surfaces: the frost is the see-through,
-            // and a ground drawn at full strength over it would only be paying for a blur nobody sees.
-            val solid = LocalSolidSurfaces.current
-            val frost = if (solid) Modifier else Modifier.frostedBackdrop()
-            val solidGround = remember(accent.actionAuroraBase) { accent.actionAuroraBase.copy(alpha = 1f) }
-            // Ready wears the same ground running does, held on one frame rather than in motion -
-            // the button no longer changes what it is made of the moment a run starts, only how fast
-            // it moves. No halo either state: it was the one piece of chrome answering "is this
-            // pressable" with a glow, and the ground itself answers that now.
-            val fill = frost.drawBehind {
-                drawActionAurora(
-                    if (solid) solidGround else accent.actionAuroraBase,
-                    accent.actionAurora,
-                    if (running) motion.lights(size.width, size.height) else restLights(size.width, size.height),
-                    alpha = if (solid) 1f else ActionFrost,
-                )
-            }
+            val colors = MaterialTheme.colorScheme
+            // The corner is half the height, so the button is a capsule at rest, and squares off
+            // under the finger - see AnalyzeAction.
+            val corner = (if (big) BigActionHeight else ActionHeight) / 2
             if (running) {
+                // Since the 2026-11 redesign the run is reported by the button filling rather than by
+                // lights drifting through it: from the left with the batches read while the run is
+                // reading, and as a slow sweep while the model writes, which has no count to fill to.
                 AnalyzeAction(
                     onClick = { confirmingCancel = true },
-                    container = Color.Transparent,
-                    content = accent.onAction,
-                    // No halo here. The aurora is what says the control is alive, and a glow around
-                    // a button this wide lights the whole foot of the screen.
+                    container = colors.primaryContainer,
+                    content = colors.onPrimaryContainer,
+                    corner = corner,
                     modifier = actionModifier,
-                    painted = fill,
+                    painted = Modifier.runFill(
+                        fraction = appState.analysisProgress?.fraction,
+                        ground = colors.primaryContainer,
+                        fill = colors.primary.copy(alpha = RunFillAlpha),
+                    ),
                     stretch = !big,
-                    // The page's own hairline, the same edge the ready state wears, so the button
-                    // keeps one line round it through all three of its states. What a press does
-                    // here is the label's job: a red edge on a button whose fill is already moving
-                    // read as a warning about the run rather than as a control.
-                    outline = actionEdge,
-                    // The mark rather than a spinner, turning once every few seconds: the fill
-                    // moving under it is what reports the run is alive. A spinner on top of that is
-                    // one control saying "waiting" twice.
                     icon = {
-                        Spark(
-                            ai.aiSpark,
-                            if (big) BigActionIcon else ActionIcon,
-                            Modifier.graphicsLayer { rotationZ = motion.angle },
+                        Icon(
+                            Icons.Outlined.StopCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(if (big) BigActionIcon else ActionIcon),
                         )
                     },
                     label = { RunningLabel(appState.analysisStartedAt, appState.analysisProgress, big) },
                 )
             } else {
-                // Only the state that can actually spend money wears the fill. A blocked button in
+                // Only the state that can actually spend money wears the accent. A blocked button in
                 // the action colour would be the loudest thing on the screen and do nothing when
                 // pressed, which is the one thing it must not be able to mean.
                 val ready = blocker == null
-                val blocked = MaterialTheme.colorScheme.surfaceContainerHigh
-                // Read out here: `Glass.solid` is composable and the draw lambda below is not.
-                val blockedGround = Glass.solid(blocked)
                 AnalyzeAction(
                     onClick = {
                         // Asked here rather than at first launch: a permission prompt before the
@@ -227,38 +202,17 @@ internal fun AnalyzeScreen(appState: AppState) {
                             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
                     },
-                    // Painted in every state now, blocked included: the frost is the button's
-                    // material, and a state that kept a flat tint would be the one state made of
-                    // something else. The colour is still the step down from surfaceContainerHighest
-                    // this state has worn since the button went see-through.
-                    container = Color.Transparent,
-                    content = if (ready) accent.onAction else MaterialTheme.colorScheme.onSurfaceVariant,
+                    container = if (ready) colors.primary else colors.surfaceContainerHighest,
+                    content = if (ready) colors.onPrimary else colors.onSurfaceVariant,
+                    corner = corner,
                     modifier = actionModifier,
-                    painted = if (ready) {
-                        fill
-                    } else {
-                        frost.drawBehind {
-                            // Opaque colour either way: the theme's own surface colour is see-through, so drawn as it
-                            // is the blocked button let the page through however high the alpha went.
-                            drawRect(blockedGround, alpha = if (solid) 1f else ActionFrost)
-                        }
-                    },
                     stretch = !big,
-                    // Only the state that can spend money wears the coloured edge, for the reason
-                    // only it wears the fill: a blocked button with the action's own hairline round
-                    // it would be inviting a press that does nothing. Blocked keeps the neutral
-                    // outline every other floating thing has.
-                    outline = if (ready) actionEdge else null,
                     icon = {
-                        if (ready) {
-                            Spark(ai.aiSpark, if (big) BigActionIcon else ActionIcon)
-                        } else {
-                            Icon(
-                                Icons.Outlined.AutoGraph,
-                                contentDescription = null,
-                                modifier = Modifier.size(if (big) BigActionIcon else ActionIcon),
-                            )
-                        }
+                        Icon(
+                            if (ready) Icons.Outlined.AutoAwesome else Icons.Outlined.AutoGraph,
+                            contentDescription = null,
+                            modifier = Modifier.size(if (big) BigActionIcon else ActionIcon),
+                        )
                     },
                     label = {
                         Column {
@@ -1057,19 +1011,6 @@ private val BigActionHeight = 88.dp
 /** Material's own extended button height, which this one no longer inherits by being one. */
 private val ActionHeight = 56.dp
 
-/**
- * Where the three lights sit on a ready button that isn't moving - the same paths [ActionMotion.lights]
- * drifts along, frozen at their midpoint rather than at either end they drift between.
- *
- * The midpoint rather than `t = 0`: two of the three start their drift off the button's edge, which
- * is right for a light that is always arriving or leaving but reads as a light half missing on a
- * single held frame.
- */
-private fun restLights(width: Float, height: Float): List<Offset> = listOf(
-    Offset(0.225f * width, 0.10f * height),
-    Offset(0.475f * width, -0.05f * height),
-    Offset(0.725f * width, 0.60f * height),
-)
 
 private val ActionIcon = 24.dp
 private val BigActionIcon = 34.dp
@@ -1077,22 +1018,6 @@ private val BigActionIcon = 34.dp
 /** Room either side of the icon and its label, where the button used to bring Material's own. */
 private val ActionPadding = 20.dp
 
-/**
- * How much of the button's own fill is laid over the frost.
- *
- * The fills were built to sit on a page they hid, at an alpha that already read as glass against a
- * flat ground - and over a blurred page that same alpha simply covers the blur up. Multiplied
- * rather than restated in the theme, so the hues stay the one list `PageAccent` publishes and this
- * number means what it says: what the frost is worth against the colour.
- *
- * **0.92 since 2026-10-05, from 0.66.** At 0.66 the button's fill let a card heading through its
- * own label on the 411dp cover screen ("Recommendation target date" ran straight through "Analyze"),
- * and the frost that was meant to blur it away does not show on every device. The button is nearly
- * solid now; what is left of the glass is the hairline and the blur on the rare device that draws
- * it. The old note: below about 0.6 a white heading scrolling past came through the button and
- * fought its words - which is where this started, and 0.66 had not fixed.
- */
-private const val ActionFrost = 0.92f
 
 /**
  * The screen's action, wearing the same floating treatment as the navigation bar under it.
@@ -1110,8 +1035,9 @@ private fun AnalyzeAction(
     icon: @Composable () -> Unit,
     label: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    /** Half the height: a capsule at rest, squaring off while pressed. */
+    corner: Dp,
     painted: Modifier? = null,
-    outline: Brush? = null,
     /**
      * Whether the button runs the full width of the page, which it does wherever the navigation bar
      * does - see `Screen`. Centred there rather than left-aligned: the icon and its label take about
@@ -1119,13 +1045,16 @@ private fun AnalyzeAction(
      */
     stretch: Boolean = false,
 ) {
+    val press = remember { MutableInteractionSource() }
     FloatingSurface(
-        shape = MaterialTheme.shapes.large,
+        shape = RoundedCornerShape(pressCorner(press, rest = corner, pressed = corner / 2)),
         color = container,
-        modifier = modifier,
+        modifier = modifier.pressScale(press),
         onClick = onClick,
         painted = painted,
-        outline = outline,
+        // No edge: a solid accent capsule holds its own shape against any page.
+        outline = SolidColor(Color.Transparent),
+        interactionSource = press,
     ) {
         CompositionLocalProvider(LocalContentColor provides content) {
             Row(
@@ -1198,4 +1127,54 @@ private fun elapsedSince(startedAt: java.time.Instant?): String? {
     val start = startedAt ?: return null
     val seconds = java.time.Duration.between(start, java.time.Instant.now()).seconds.coerceAtLeast(0)
     return "%d:%02d elapsed".format(seconds / 60, seconds % 60)
+}
+
+
+/** How strongly the read part of a run is drawn over the button's own container. */
+private const val RunFillAlpha = 0.30f
+
+/** One pass of the sweep while the model writes, which has no count to fill to. */
+private const val RunSweepMillis = 1600
+
+/**
+ * The button's ground while a run is going: [fill] from the left to [fraction] while the run reads,
+ * and a band sweeping across while it writes ([fraction] null). With reduce motion on the sweep is
+ * replaced by a still, faint fill, so the button still says a run is going without moving.
+ */
+@Composable
+private fun Modifier.runFill(fraction: Float?, ground: Color, fill: Color): Modifier {
+    val still = LocalReduceMotion.current
+    val shown by animateFloatAsState(
+        targetValue = (fraction ?: 0f).coerceIn(0f, 1f),
+        animationSpec = if (still) snap() else uiSpring(),
+        label = "runFill",
+    )
+    val sweep = if (fraction == null && !still) {
+        rememberInfiniteTransition(label = "runSweep").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(RunSweepMillis, easing = LinearEasing)),
+            label = "runSweepPosition",
+        )
+    } else {
+        null
+    }
+    return drawBehind {
+        drawRect(ground)
+        when {
+            fraction != null -> drawRect(fill, size = Size(size.width * shown, size.height))
+            sweep == null -> drawRect(fill.copy(alpha = fill.alpha / 2))
+            else -> {
+                val band = size.width * 0.4f
+                val x = -band + (size.width + band) * sweep.value
+                drawRect(
+                    Brush.horizontalGradient(
+                        listOf(Color.Transparent, fill, Color.Transparent),
+                        startX = x,
+                        endX = x + band,
+                    ),
+                )
+            }
+        }
+    }
 }
