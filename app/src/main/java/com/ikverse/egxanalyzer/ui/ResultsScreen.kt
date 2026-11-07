@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import kotlinx.coroutines.delay
 import com.ikverse.egxanalyzer.model.timing
 
 
@@ -238,6 +239,14 @@ internal fun ResultsScreen(appState: AppState) {
                     openRun = id
                 }
             }
+            // The report cards fade in one after another the first time the tab draws them (2026-11
+            // redesign), and only then: opening a report reflows the list into new places, and a
+            // card that faded in again every time would read as the list reloading.
+            var introDone by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                delay(ReportIntroMillis)
+                introDone = true
+            }
             BoxWithConstraints {
                 val columns = responsiveColumns(minColumnWidth = SavedRunMinWidth, maxColumns = 2)
                 // One entry per session rather than per run: a session re-read three times is one
@@ -261,7 +270,10 @@ internal fun ResultsScreen(appState: AppState) {
                     cardModifier: Modifier,
                 ) {
                     SavedAnalysisCard(
-                        modifier = cardModifier,
+                        modifier = cardModifier.staggerIn(
+                            days.indexOfFirst { day -> day.any { it.id == saved.id } },
+                            enabled = !introDone,
+                        ),
                         saved = saved,
                         stack = stack,
                         onBringForward = onBringForward,
@@ -526,7 +538,6 @@ private fun UnreadableNotice(count: Int) {
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
         shape = MaterialTheme.shapes.large,
-        border = cardOutline,
     ) {
         Row(
             Modifier.fillMaxWidth().padding(Space.l),
@@ -957,7 +968,8 @@ private fun SavedAnalysisCard(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
-        border = arrivalFlash(highlighted, onHighlightShown) ?: Glass.outline,
+        // Tonal with no edge since the 2026-11 redesign; the arrival flash still takes one.
+        border = arrivalFlash(highlighted, onHighlightShown),
         shape = MaterialTheme.shapes.large,
     ) {
         // Local rather than shared, so the shut layout (a Box pinning a footer to the card's own
@@ -988,7 +1000,8 @@ private fun SavedAnalysisCard(
                         Text(
                             it,
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            // Ink, not the accent: this line is not pressable (2026-11 redesign).
+                            color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                         )
                     }
@@ -1722,7 +1735,7 @@ private fun LegacyDetail(recommendation: RecommendationResult) {
             "${recommendation.signal}" +
                 (recommendation.confidence?.let { " · ${"%.0f".format(it * 100)}%" } ?: ""),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onSurface,
         )
         recommendation.entryLow?.let {
             Text(
@@ -1785,3 +1798,6 @@ private fun tokenLine(diagnostics: AnalysisDiagnostics): String? {
 }
 
 private fun Long.grouped(): String = String.format(java.util.Locale.US, "%,d", this)
+
+/** Long enough for the first screenful of report cards to finish arriving. */
+private const val ReportIntroMillis = 900L

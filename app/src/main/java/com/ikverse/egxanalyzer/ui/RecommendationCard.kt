@@ -79,7 +79,6 @@ internal fun RecommendationCards(
         Card(
             modifier = modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-            border = cardOutline,
         ) {
             Column(Modifier.padding(Space.l)) {
                 StockHeader(
@@ -167,7 +166,8 @@ private fun RecommendationCard(
         // A stock the user is actually in is outlined in the colour of where it stands, so a page
         // of calls can be read for what is held before any card is opened. Everything else carries
         // the hairline every other card on the page is drawn with.
-        border = heldBorder(held) ?: cardOutline,
+        // Tonal with no edge since the 2026-11 redesign, unless it is held.
+        border = heldBorder(held),
     ) {
         Column(Modifier.padding(Space.m)) {
             StockHeader(
@@ -205,8 +205,8 @@ private fun RecommendationCard(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(10.dp))
-                    .padding(Space.m),
+                    // A ruled group since the 2026-11 redesign, as on Insights.
+                    .flatPanel(),
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                     LevelGrid(point)
@@ -403,15 +403,16 @@ private fun SourceLine(channel: String) {
         horizontalArrangement = Arrangement.spacedBy(Space.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // A grey label and an ink name since the 2026-11 redesign: this line is not pressable.
         Text(
             "Source:",
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
             channel,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

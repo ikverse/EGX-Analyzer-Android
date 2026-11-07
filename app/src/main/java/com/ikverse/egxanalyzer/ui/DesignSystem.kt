@@ -980,9 +980,11 @@ private const val StaggerCap = 8
  * moves nothing around it. With reduce motion on, the item is simply there.
  */
 @Composable
-internal fun Modifier.staggerIn(index: Int): Modifier {
+internal fun Modifier.staggerIn(index: Int, enabled: Boolean = true): Modifier {
     val still = LocalReduceMotion.current
-    val shown = remember { Animatable(if (still) 1f else 0f) }
+    // `enabled` false draws the item at once: for a list whose items are recomposed in new places
+    // later (a report opening reflows its neighbours), so only the first showing is staggered.
+    val shown = remember { Animatable(if (still || !enabled) 1f else 0f) }
     LaunchedEffect(Unit) {
         if (shown.value >= 1f) return@LaunchedEffect
         delay(StaggerStepMs * index.coerceIn(0, StaggerCap))

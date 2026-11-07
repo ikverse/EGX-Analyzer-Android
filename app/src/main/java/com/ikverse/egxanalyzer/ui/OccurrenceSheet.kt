@@ -85,6 +85,9 @@ internal fun OccurrenceSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = SheetShape,
+        containerColor = MaterialTheme.colorScheme.background,
+        dragHandle = { SheetHandle() },
     ) {
         OccurrenceHeading(stock, point, channel, peak, editor, session) { editing = true }
         Column(
@@ -106,8 +109,8 @@ internal fun OccurrenceSheet(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest, SectionPanelShape)
-                    .padding(Space.m),
+                    // A ruled group since the 2026-11 redesign.
+                    .flatPanel(),
             ) {
                 PriceLadder(point, reached = peak)
             }
@@ -221,12 +224,12 @@ private fun OccurrenceHeading(
                 Text(
                     "Source:",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     "⁨$it⁩",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
