@@ -8,7 +8,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.interaction.InteractionSource
@@ -124,9 +127,9 @@ internal fun FloatingSurface(
     // See-through enough that the page carries on behind it, opaque enough that it cannot be read
     // there. At 0.88 a heading passing underneath came through as a second row of words tangled in
     // the labels; what is wanted is the movement, not the content.
-    // Solid when the phone has asked for it: see [LocalSolidSurfaces] for which settings that reads.
-    val solid = LocalSolidSurfaces.current
-    val tinted = if (painted == null) color.copy(alpha = if (solid) 1f else 0.94f) else Color.Transparent
+    // Opaque since the 2026-11 redesign: paper and ink, not glass, so [LocalSolidSurfaces] has
+    // nothing left to make solid here.
+    val tinted = if (painted == null) color.copy(alpha = 1f) else Color.Transparent
     // The tint alone leaves the edge indistinct against a card of a similar colour; the hairline is
     // what draws the shape whatever is behind it.
     val hairline = BorderStroke(
@@ -156,7 +159,7 @@ internal fun FloatingSurface(
 }
 
 /** Enough to lift the surface off the page without casting a shadow the tint then shows through. */
-private val FloatingElevation = 6.dp
+private val FloatingElevation = 2.dp
 
 /**
  * The page, held as something a floating surface can look through itself at.
@@ -243,6 +246,9 @@ internal fun Modifier.frostedBackdrop(
     radius: Dp = FrostRadius,
 ): Modifier {
     backdrop ?: return this
+    // Switched off in the 2026-11 redesign: surfaces are opaque, so there is nothing for a frost to
+    // show through. The machinery stays for phase 2, which replaces the floating chrome.
+    if (!FrostEnabled) return this
     val blurred = rememberGraphicsLayer()
     val blur = with(LocalDensity.current) { radius.toPx() }
     val position = remember { mutableStateOf(Offset.Zero) }
@@ -265,6 +271,9 @@ internal fun Modifier.frostedBackdrop(
  * which is the same thing the 0.94 tint was for, said in the medium instead of by hiding the page.
  */
 private val FrostRadius = 20.dp
+
+/** Off since the 2026-11 redesign. See [frostedBackdrop]. */
+private val FrostEnabled: Boolean get() = false
 
 /**
  * One width for every floating edge, gradient or not.
@@ -334,8 +343,11 @@ val LabelPillHeight: Dp = 24.dp
  *
  * Kept as a [Dp] beside the shape because one caller paints its own background rather than clipping
  * to a shape, and a corner given twice in two units is a corner that drifts.
+ *
+ * **8dp since the 2026-11 redesign**, and now for label pills only: a pressable button is a capsule
+ * that squares off under the finger ([pressCorner]), which is the M3 Expressive half of the design.
  */
-val PillCorner: Dp = 6.dp
+val PillCorner: Dp = 8.dp
 
 /** [PillCorner] as a shape, which is what every pill but the painted one asks for. */
 val PillShape: Shape = RoundedCornerShape(PillCorner)
@@ -345,7 +357,7 @@ val PillShape: Shape = RoundedCornerShape(PillCorner)
  * call card, "Your trade"/"Where it stands" on a position card. Shared rather than declared twice,
  * so the two families of card cannot drift apart on a number neither of them has a reason to own.
  */
-val SectionPanelShape: Shape = RoundedCornerShape(10.dp)
+val SectionPanelShape: Shape = RoundedCornerShape(16.dp)
 
 /**
  * How wide a card has to measure before it draws its wide layout instead of its phone one.
@@ -435,25 +447,9 @@ internal object Glass {
      * and take this where they would have taken the hairline.
      */
     val outline: BorderStroke
-        @Composable get() = BorderStroke(
-            1.dp,
-            if (LocalDarkTheme.current) {
-                Brush.verticalGradient(
-                    listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.07f)),
-                )
-            } else {
-                // White at the top and the card hairline below it: on this theme the lit edge is
-                // the page's own light catching the top of the card, and the rest of the outline
-                // still has to be the line every other card is drawn with.
-                Brush.verticalGradient(
-                    listOf(
-                        Color.White,
-                        androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant,
-                    ),
-                )
-            },
-        )
-
+        // The lit top edge went with the glass in the 2026-11 redesign; a card is a tonal step now,
+        // edged with the same hairline as every other card.
+        @Composable get() = cardOutline
 }
 
 
@@ -1021,7 +1017,9 @@ internal const val ExitMs = 140
  * once.
  */
 internal val ExpandIn: EnterTransition =
-    expandVertically(tween(EnterMs, easing = UiEase), expandFrom = Alignment.Top) +
+    // The height on the spatial spring (2026-11 redesign), the fade still on the tween: a fade that
+    // overshoots is a flicker.
+    expandVertically(uiSpring(), expandFrom = Alignment.Top) +
         fadeIn(tween(EnterMs, easing = UiEase))
 
 /** How a section closes: quicker than it opened, for the reason [ExitMs] is. */
@@ -1029,9 +1027,37 @@ internal val CollapseOut: ExitTransition =
     shrinkVertically(tween(ExitMs, easing = UiEase), shrinkTowards = Alignment.Top) +
         fadeOut(tween(ExitMs, easing = UiEase))
 
-private const val PressedScale = 0.97f
-private const val PressInMs = 100
-private const val PressOutMs = 160
+private const val PressedScale = 0.95f
+private const val PressInMs = 90
+
+/**
+ * The release, on a spring that overshoots a little: the M3 Expressive half of the design. The
+ * press goes down on a short tween, because a finger landing wants an answer at once, and comes back
+ * on this, so the control settles with a small bounce rather than stopping dead.
+ */
+internal fun <T> releaseSpring() = spring<T>(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium)
+
+/**
+ * The spatial spring every expand, sheet and indicator moves on. Damped enough not to wobble a
+ * list, lively enough to read as physical.
+ */
+internal fun <T> uiSpring() = spring<T>(dampingRatio = 0.8f, stiffness = 380f)
+
+/**
+ * A pressable's corner, squaring off while a finger is down and springing back on release - the
+ * shape change that says "pressed" in M3 Expressive. Returns [rest] untouched with reduce-motion on.
+ */
+@Composable
+internal fun pressCorner(source: InteractionSource, rest: Dp, pressed: Dp = rest / 2): Dp {
+    val down by source.collectIsPressedAsState()
+    val still = LocalReduceMotion.current
+    val corner by animateDpAsState(
+        targetValue = if (down && !still) pressed else rest,
+        animationSpec = if (down) tween(PressInMs, easing = UiEase) else releaseSpring(),
+        label = "pressCorner",
+    )
+    return corner
+}
 
 /**
  * The thing every pressable in the app does the moment a finger lands: it gives a little.
@@ -1050,7 +1076,7 @@ internal fun Modifier.pressScale(source: InteractionSource): Modifier {
     val still = LocalReduceMotion.current
     val scale by animateFloatAsState(
         targetValue = if (pressed && !still) PressedScale else 1f,
-        animationSpec = tween(if (pressed) PressInMs else PressOutMs, easing = UiEase),
+        animationSpec = if (pressed) tween(PressInMs, easing = UiEase) else releaseSpring(),
         label = "press",
     )
     return graphicsLayer {

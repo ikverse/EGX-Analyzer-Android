@@ -8,6 +8,8 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.repeatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -19,6 +21,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.border
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
@@ -1120,7 +1123,8 @@ internal fun StatTile(
             style = if (dense) {
                 MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures)
             } else {
-                MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures)
+                // A step up in the 2026-11 redesign: the Swiss half leads with the figure.
+                MaterialTheme.typography.headlineMedium.copy(fontFamily = TabularFigures)
             },
             color = tone,
         )
@@ -1164,9 +1168,9 @@ internal fun StatStrip(
     // the width itself would measure before them and leave them nothing.
     Surface(
         modifier,
+        // A tonal step with no edge since the 2026-11 redesign: the dividers inside are the only lines.
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.small,
-        border = cardOutline,
+        shape = MaterialTheme.shapes.medium,
     ) {
         // Intrinsic height so the dividers run the full depth of the row rather than the height
         // Material would otherwise give a divider with nothing to measure against.
@@ -1272,25 +1276,25 @@ internal fun ActionPill(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    val ink = MaterialTheme.colorScheme.primary
+    // A tonal capsule since the 2026-11 redesign (M3 Expressive): the soft accent container says
+    // "this changes the record", and the corner squares off while a finger is down.
+    val ink = MaterialTheme.colorScheme.onSecondaryContainer
     val press = remember { MutableInteractionSource() }
+    val shape = RoundedCornerShape(pressCorner(press, rest = PillHeight / 2))
     Row(
         modifier
             .pressScale(press)
             .minimumInteractiveComponentSize()
             .height(PillHeight)
-            .border(ActionRing, ink.copy(alpha = ActionRingAlpha), PillShape)
-            // After the edge, so the ripple is bounded by the pill rather than by the row.
-            .clip(PillShape)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.secondaryContainer)
             .clickable(
                 interactionSource = press,
                 indication = LocalIndication.current,
                 enabled = enabled,
                 onClick = onClick,
             )
-            // A step under [Space.m]. The ring is tighter on its label than a capsule was, and the
-            // side padding is what a pill's own edge is read against.
-            .padding(horizontal = Space.s),
+            .padding(horizontal = Space.m),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.s),
     ) {
@@ -1305,16 +1309,6 @@ internal fun ActionPill(
     }
 }
 
-/** A hairline, so a row of these never competes with the edge of the card holding them. */
-private val ActionRing = 1.dp
-
-/**
- * Half strength.
- *
- * The label is the button and the ring is only its boundary; at full strength a row of two came out
- * as two bright wires on a dark card - the same fault the action's own edge was taken down for.
- */
-private const val ActionRingAlpha = 0.5f
 
 /**
  * An action on a settings card, at the size a settings card wants.
@@ -1358,6 +1352,8 @@ internal fun SettingsButton(
     // never get under.
     val press = remember { MutableInteractionSource() }
     val sized = modifier.pressScale(press).heightIn(min = PillHeight)
+    // A capsule that squares off under the finger (2026-11 redesign).
+    val shape = RoundedCornerShape(pressCorner(press, rest = PillHeight / 2))
     val padding = PaddingValues(horizontal = Space.m)
     // The row is held rather than passed through: `ProvideTextStyle` takes a plain composable, so
     // inside it the button's own `RowScope` is out of scope and an icon's `align` would not resolve.
@@ -1368,12 +1364,12 @@ internal fun SettingsButton(
     if (filled) {
         Button(
             onClick, sized, enabled,
-            shape = PillShape, contentPadding = padding, interactionSource = press, content = label,
+            shape = shape, contentPadding = padding, interactionSource = press, content = label,
         )
     } else {
         OutlinedButton(
             onClick, sized, enabled,
-            shape = PillShape, contentPadding = padding, interactionSource = press, content = label,
+            shape = shape, contentPadding = padding, interactionSource = press, content = label,
         )
     }
 }
@@ -1394,12 +1390,19 @@ internal fun DisclosureButton(
 ) {
     val ink = MaterialTheme.colorScheme.primary
     val press = remember { MutableInteractionSource() }
+    val shape = RoundedCornerShape(pressCorner(press, rest = PillHeight / 2))
+    // The arrow turns rather than swapping glyphs, on the release spring.
+    val turn by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = if (LocalReduceMotion.current) snap() else uiSpring(),
+        label = "disclosureTurn",
+    )
     Row(
         modifier
             .pressScale(press)
             .minimumInteractiveComponentSize()
             .height(PillHeight)
-            .clip(PillShape)
+            .clip(shape)
             .clickable(interactionSource = press, indication = LocalIndication.current, onClick = onClick)
             .padding(horizontal = Space.s),
         verticalAlignment = Alignment.CenterVertically,
@@ -1413,10 +1416,10 @@ internal fun DisclosureButton(
             overflow = TextOverflow.Ellipsis,
         )
         Icon(
-            if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+            Icons.Outlined.ExpandMore,
             contentDescription = null,
             tint = ink,
-            modifier = Modifier.size(IconSize.Hint),
+            modifier = Modifier.size(IconSize.Hint).graphicsLayer { rotationZ = turn },
         )
     }
 }
@@ -1856,19 +1859,10 @@ internal fun Figure(
  * give back a little advance, so the figure holds together while every digit keeps its column.
  * Applied to [Figure] only - the hero figures are drawn elsewhere and are left as they were.
  */
-internal fun tightPoint(text: String): AnnotatedString = buildAnnotatedString {
-    text.forEachIndexed { index, char ->
-        val digitBeforePoint = char.isDigit() && text.getOrNull(index + 1) == '.' &&
-            text.getOrNull(index + 2)?.isDigit() == true
-        val point = char == '.' && text.getOrNull(index - 1)?.isDigit() == true &&
-            text.getOrNull(index + 1)?.isDigit() == true
-        if (digitBeforePoint || point) {
-            withStyle(SpanStyle(letterSpacing = (-0.12).em)) { append(char) }
-        } else {
-            append(char)
-        }
-    }
-}
+internal fun tightPoint(text: String): AnnotatedString =
+    // Inter Tight (2026-11 redesign) keeps its point narrow even with tabular digits, so the
+    // tightening the monospaced face needed would now crowd the digits together.
+    AnnotatedString(text)
 
 /**
  * One line of text that shrinks to fit rather than ending in an ellipsis.

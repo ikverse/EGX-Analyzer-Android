@@ -31,166 +31,102 @@ import com.ikverse.egxanalyzer.model.ThemeMode
  * would not have been before `market` was given a role of its own.
  */
 /**
- * **The app's surfaces are glass, and these are what make them that.**
- *
- * Every card, tile, sheet, field and chip in this app reads one of the three container roles, so
- * the material is decided here and nowhere else - a treatment applied card by card is a treatment
- * that is on some of them.
- *
- * The alphas **rise as the surfaces nest**, which is the opposite of what glass suggests and the
- * whole reason the hierarchy survives being see-through. A section card sits on the page and may
- * let a lot of it up; a card inside that card must let less up, or it drifts toward the colour of
- * its parent; a tile inside that must let less again, or the smallest surface in the app - the one
- * carrying a bare figure with no heading to anchor it - ends up standing on the page three levels
- * below where it looks like it is.
- *
- * `surfaceContainerLow` and `Lowest` keep their opacity. They are the page well and the table's own
- * banding - grounds rather than things standing on one - and a well that let the page through would
- * not be a well. Anything floating **outside** the page keeps its opacity too: a dialog sits on a
- * scrim and a menu sits on whatever it was opened over, and neither has a page behind it that the
- * material means anything against. See `Glass.solid` in the ui package, which is what those pass.
- *
- * **The figures are derived, not chosen.** `GlassContrastTest` composites every level over the
- * brightest the ground is ever lit, for all five accents and both themes, and pins two properties:
- * that body text holds its contrast, and that each level stays clear of the one above it. The first
- * set of numbers written here failed the second - at a 0.09 ground the lit page came out *brighter*
- * than the section card standing on it, so a card crossing a light disappeared into it. These are
- * the most see-through values that pass.
- *
- * **The card level is the exception, and alpha is not what opened it.** Asked to make those
- * surfaces read as more see-through, the obvious move - drop `GlassCard` and leave the colour -
- * turned out to be worth two values out of 255: a transparent surface shows you what is behind it,
- * and what is behind a card here is its section card, which is very nearly the same blue. The alpha
- * came down *and* the colour came with it, toward the parent rather than away from the page, which
- * is the only lever on this palette that a reader can actually see. The step it leaves - card over
- * section, 0.0023 - is the narrowest in the app and deliberately so; it is still half again the
- * floor `GlassContrastTest` holds, and that test is what says whether the next move of this kind
- * is available.
+ * **The app's surfaces are paper and ink, not glass.** Since the 2026-11 redesign (an M3 Expressive
+ * and Swiss editorial mix) every container is opaque and tonal: a section is one step off the page,
+ * a card one step more, a tile one more again. Information sits flat; anything pressable sits in a
+ * rounded container. The three constants below stayed, at 1, so every reader of them keeps compiling
+ * and `GlassContrastTest` now checks plain opaque steps.
  */
-internal const val GlassSection = 0.66f
-internal const val GlassCard = 0.60f
-internal const val GlassTile = 0.86f
+internal const val GlassSection = 1f
+internal const val GlassCard = 1f
+internal const val GlassTile = 1f
 
-/** A step more opaque each: the same alpha over near-white passes less contrast to the type on it. */
-internal const val LightGlassSection = 0.70f
-internal const val LightGlassCard = 0.64f
-internal const val LightGlassTile = 0.90f
+internal const val LightGlassSection = 1f
+internal const val LightGlassCard = 1f
+internal const val LightGlassTile = 1f
 
-private val DarkColors = darkColorScheme(
-    // Overwritten per page by withAccent. The values here are Analyze's, so anything drawn outside
-    // a destination - a sheet, a preview, a dialog raised by the shell - still gets a whole scheme
-    // rather than a hole where one role should be.
-    primary = Color(0xFF35D7F2),
-    onPrimary = Color(0xFF04222A),
-    primaryContainer = Color(0xFF004E5A),
-    onPrimaryContainer = Color(0xFFB3ECF8),
-    secondary = Color(0xFF35D7F2),
-    onSecondary = Color(0xFF04222A),
-    secondaryContainer = Color(0x2935D7F2),
-    onSecondaryContainer = Color(0xFF35D7F2),
-    // Deeper than the mint it replaces. A target and a price the market reached appear on one card,
-    // and the old green sat close enough to the old cyan that the two read as one colour. Taken up
-    // again in saturation with the rest of the signals: the page under these figures now carries a
-    // blue-violet cast rather than a flat slate, and a signal that stays put while its ground warms
-    // is a signal going quiet.
-    tertiary = Color(0xFF2FE39B),
+/** Vermilion: the one accent. Fills use [base]; text and icons on the page use the `ink` stops. */
+private val DarkVermilion = Color(0xFFFF6A45)
+private val LightVermilionInk = Color(0xFFB8321A)
+
+internal val DarkColors = darkColorScheme(
+    primary = DarkVermilion,
+    onPrimary = Color(0xFF2A0A03),
+    primaryContainer = Color(0xFF4A2018),
+    onPrimaryContainer = Color(0xFFFFD9CE),
+    secondary = DarkVermilion,
+    onSecondary = Color(0xFF2A0A03),
+    secondaryContainer = Color(0xFF3A1A13),
+    onSecondaryContainer = Color(0xFFFFB8A5),
+    // Gain. Never the accent: a vermilion figure would read as a loss half the time.
+    tertiary = Color(0xFF6FD99A),
     onTertiary = Color(0xFF00391F),
     tertiaryContainer = Color(0xFF11512F),
-    onTertiaryContainer = Color(0xFF89FAB5),
-    error = Color(0xFFFF6B7A),
+    onTertiaryContainer = Color(0xFFA6F5C4),
+    error = Color(0xFFFF8A80),
     onError = Color(0xFF4E0002),
     errorContainer = Color(0xFF6E1512),
     onErrorContainer = Color(0xFFFFDAD5),
-    // A blue-violet cast rather than the near-hueless slate these were. The greys were most of why
-    // a page of coloured cards still read as washed out: every accent on it was sitting on a ground
-    // that had no opinion at all.
-    background = Color(0xFF0A0E18),
-    onBackground = Color(0xFFE8ECF4),
-    surface = Color(0xFF0A0E18),
-    onSurface = Color(0xFFE8ECF4),
-    surfaceVariant = Color(0xFF1E2738),
-    onSurfaceVariant = Color(0xFF9AA7BD),
-    surfaceContainerLowest = Color(0xFF06090F),
-    surfaceContainerLow = Color(0xFF101724),
-    // See GlassSection for what the alphas are and why they run the way they do.
-    surfaceContainer = Color(0xFF141C2C).copy(alpha = GlassSection),
-    surfaceContainerHigh = Color(0xFF182030).copy(alpha = GlassCard),
-    surfaceContainerHighest = Color(0xFF243046).copy(alpha = GlassTile),
-    outline = Color(0xFF6B7684),
-    outlineVariant = Color(0xFF2A364B),
+    // Warm ink rather than the blue-violet navy of the glass design.
+    background = Color(0xFF111110),
+    onBackground = Color(0xFFF1EEE7),
+    surface = Color(0xFF111110),
+    onSurface = Color(0xFFF1EEE7),
+    surfaceVariant = Color(0xFF2A2926),
+    onSurfaceVariant = Color(0xFFA8A39A),
+    surfaceContainerLowest = Color(0xFF0B0B0A),
+    surfaceContainerLow = Color(0xFF171716),
+    surfaceContainer = Color(0xFF1D1C1A),
+    surfaceContainerHigh = Color(0xFF252422),
+    surfaceContainerHighest = Color(0xFF302E2B),
+    outline = Color(0xFF8F8B83),
+    outlineVariant = Color(0xFF34322E),
 )
 
-/**
- * [DarkColors] with the navy ground replaced by true black and neutral greys.
- *
- * Every signal colour - primary, secondary, tertiary, error - is copied verbatim: this is a ground
- * swap, not a second palette, and a card that reads amber under [DarkColors] must read amber here
- * too. Only the roles that were painting the navy itself change, and their replacements are chosen
- * off the grey axis rather than off navy's own hue - a glass panel tinted toward `#141C2C` sitting
- * on a pure black page would read as the app forgetting to finish the swap, not as a design.
- */
-private val BlackColors = darkColorScheme(
-    primary = Color(0xFF35D7F2),
-    onPrimary = Color(0xFF04222A),
-    primaryContainer = Color(0xFF004E5A),
-    onPrimaryContainer = Color(0xFFB3ECF8),
-    secondary = Color(0xFF35D7F2),
-    onSecondary = Color(0xFF04222A),
-    secondaryContainer = Color(0x2935D7F2),
-    onSecondaryContainer = Color(0xFF35D7F2),
-    tertiary = Color(0xFF2FE39B),
-    onTertiary = Color(0xFF00391F),
-    tertiaryContainer = Color(0xFF11512F),
-    onTertiaryContainer = Color(0xFF89FAB5),
-    error = Color(0xFFFF6B7A),
-    onError = Color(0xFF4E0002),
-    errorContainer = Color(0xFF6E1512),
-    onErrorContainer = Color(0xFFFFDAD5),
+/** [DarkColors] on true black. Only the grounds change; every signal is copied verbatim. */
+internal val BlackColors = DarkColors.copy(
     background = Color(0xFF000000),
-    onBackground = Color(0xFFE8ECF4),
     surface = Color(0xFF000000),
-    onSurface = Color(0xFFE8ECF4),
-    surfaceVariant = Color(0xFF1A1A1A),
-    onSurfaceVariant = Color(0xFFA3A3A3),
+    surfaceVariant = Color(0xFF1F1E1C),
     surfaceContainerLowest = Color(0xFF000000),
-    surfaceContainerLow = Color(0xFF0D0D0D),
-    surfaceContainer = Color(0xFF141414).copy(alpha = GlassSection),
-    surfaceContainerHigh = Color(0xFF1C1C1C).copy(alpha = GlassCard),
-    surfaceContainerHighest = Color(0xFF262626).copy(alpha = GlassTile),
-    outline = Color(0xFF6B6B6B),
-    outlineVariant = Color(0xFF2A2A2A),
+    surfaceContainerLow = Color(0xFF0C0C0B),
+    surfaceContainer = Color(0xFF141413),
+    surfaceContainerHigh = Color(0xFF1C1B19),
+    surfaceContainerHighest = Color(0xFF272624),
+    outlineVariant = Color(0xFF2A2926),
 )
 
-private val LightColors = lightColorScheme(
-    primary = Color(0xFF00788E),
+internal val LightColors = lightColorScheme(
+    primary = LightVermilionInk,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFB0ECFB),
-    onPrimaryContainer = Color(0xFF001F26),
-    secondary = Color(0xFF00788E),
+    primaryContainer = Color(0xFFFCE3DB),
+    onPrimaryContainer = Color(0xFF5A1406),
+    secondary = LightVermilionInk,
     onSecondary = Color.White,
-    secondaryContainer = Color(0x2100788E),
-    onSecondaryContainer = Color(0xFF00788E),
-    tertiary = Color(0xFF00804F),
+    secondaryContainer = Color(0xFFF6DDD4),
+    onSecondaryContainer = Color(0xFF7A230F),
+    tertiary = Color(0xFF1B7A43),
     onTertiary = Color.White,
-    tertiaryContainer = Color(0xFF9DF6BC),
-    onTertiaryContainer = Color(0xFF00210F),
-    error = Color(0xFFC42D3F),
+    tertiaryContainer = Color(0xFFCDEBD6),
+    onTertiaryContainer = Color(0xFF062B15),
+    error = Color(0xFFB3261E),
     onError = Color.White,
     errorContainer = Color(0xFFF9DEDC),
     onErrorContainer = Color(0xFF410E0B),
-    background = Color(0xFFF5F7FE),
-    onBackground = Color(0xFF121926),
-    surface = Color(0xFFF5F7FE),
-    onSurface = Color(0xFF121926),
-    surfaceVariant = Color(0xFFDCE3F2),
-    onSurfaceVariant = Color(0xFF55617A),
-    surfaceContainerLowest = Color.White,
-    surfaceContainerLow = Color(0xFFF1F4FD),
-    surfaceContainer = Color(0xFFFFFFFF).copy(alpha = LightGlassSection),
-    surfaceContainerHigh = Color(0xFFF4F6FE).copy(alpha = LightGlassCard),
-    surfaceContainerHighest = Color(0xFFE4EAF8).copy(alpha = LightGlassTile),
-    outline = Color(0xFF71787E),
-    outlineVariant = Color(0xFFD7DFF0),
+    // Paper rather than blue-white.
+    background = Color(0xFFF5F3EE),
+    onBackground = Color(0xFF151515),
+    surface = Color(0xFFF5F3EE),
+    onSurface = Color(0xFF151515),
+    surfaceVariant = Color(0xFFE6E2DA),
+    onSurfaceVariant = Color(0xFF5E5A53),
+    surfaceContainerLowest = Color(0xFFFBFAF7),
+    surfaceContainerLow = Color(0xFFF0EDE7),
+    surfaceContainer = Color(0xFFEAE7E0),
+    surfaceContainerHigh = Color(0xFFE3DFD7),
+    surfaceContainerHighest = Color(0xFFDAD5CC),
+    outline = Color(0xFF7A756D),
+    outlineVariant = Color(0xFFD6D1C7),
 )
 
 /**
@@ -284,9 +220,10 @@ internal val DarkExtras = ExtraColors(
     expired = Color(0xFFFFB74D),
     expiredContainer = Color(0xFF5A4318),
     onExpiredContainer = Color(0xFFFFE0A3),
-    loss = Color(0xFFD32F2F),
-    lossContainer = Color(0xFF4A0E0E),
-    onLossContainer = Color(0xFFFFD9D6),
+    // Crimson, pushed away from the vermilion accent so a loss never reads as chrome.
+    loss = Color(0xFFF2557F),
+    lossContainer = Color(0xFF4A0E22),
+    onLossContainer = Color(0xFFFFD9E2),
     market = Color(0xFF5AA9FF),
     aiOnFill = Color.White,
     aiStop = Color(0xFFFF6B7A),
@@ -301,9 +238,9 @@ internal val LightExtras = ExtraColors(
     expired = Color(0xFF9A6206),
     expiredContainer = Color(0xFFFFDFA6),
     onExpiredContainer = Color(0xFF2A1A00),
-    loss = Color(0xFF9E1B1B),
-    lossContainer = Color(0xFFF6D9D6),
-    onLossContainer = Color(0xFF350404),
+    loss = Color(0xFFA3123A),
+    lossContainer = Color(0xFFF6D6DE),
+    onLossContainer = Color(0xFF3A0414),
     // Darkened rather than reused. The dark theme's blue comes out at 2.4:1 on a light card, where
     // these figures are actually drawn, against the 4.5:1 body text needs - and every one of them
     // is a price.
@@ -482,68 +419,25 @@ private class AccentSeed(
  * there and on a near-black one here, so `ink` darkens, `onBase` flips to white, and the edge hues
  * run dark where the dark theme's run light.
  */
-private val darkSeeds = mapOf(
-    AccentKey.CYAN to AccentSeed(
-        base = Color(0xFF35D7F2), ink = Color(0xFF35D7F2), onBase = Color(0xFF04222A),
-        neighbour = Color(0xFF5AA9FF), deep = Color(0xFF004E5A), mid = Color(0xFF0B6D7F),
-        ground = Color(0xFF072A3E),
-    ),
-    AccentKey.VIOLET to AccentSeed(
-        base = Color(0xFF9B7CFF), ink = Color(0xFF9B7CFF), onBase = Color(0xFF160B33),
-        neighbour = Color(0xFFC24A93), deep = Color(0xFF3A2E8C), mid = Color(0xFF5B45D6),
-        ground = Color(0xFF1A1042),
-    ),
-    // Dusty rather than hot. It shipped a magenta and read as the loudest thing on the one page
-    // whose subject is a verdict - so it is taken down in saturation and up in lightness, which
-    // keeps every separation it had (23 degrees off the stop red, 66 off Settings' bronze) and
-    // takes it from 5.35:1 on a card to 7.10:1.
-    AccentKey.ROSE to AccentSeed(
-        base = Color(0xFFE38DB6), ink = Color(0xFFE38DB6), onBase = Color(0xFF33091D),
-        neighbour = Color(0xFF9B7CFF), deep = Color(0xFF8E4C6C), mid = Color(0xFFA85C86),
-        ground = Color(0xFF2A1420),
-    ),
-    AccentKey.INDIGO to AccentSeed(
-        base = Color(0xFF5C7CFA), ink = Color(0xFF5C7CFA), onBase = Color(0xFF0A1440),
-        neighbour = Color(0xFF9B7CFF), deep = Color(0xFF23306E), mid = Color(0xFF3A4FB5),
-        ground = Color(0xFF0D1436),
-    ),
-    AccentKey.BRONZE to AccentSeed(
-        base = Color(0xFFD9A24A), ink = Color(0xFFD9A24A), onBase = Color(0xFF2A1A00),
-        neighbour = Color(0xFFFFD37A), deep = Color(0xFF5A3A0C), mid = Color(0xFF8A5A18),
-        ground = Color(0xFF2A1A06),
-    ),
+private val DarkVermilionSeed = AccentSeed(
+    base = Color(0xFFFF6A45), ink = Color(0xFFFF6A45), onBase = Color(0xFF2A0A03),
+    neighbour = Color(0xFFFF9E5E), deep = Color(0xFF6B1E0C), mid = Color(0xFFA8321A),
+    ground = Color(0xFF2A0E07),
 )
 
-private val lightSeeds = mapOf(
-    AccentKey.CYAN to AccentSeed(
-        base = Color(0xFF0090AA), ink = Color(0xFF00788E), onBase = Color.White,
-        neighbour = Color(0xFF1668C7), deep = Color(0xFF00414C), mid = Color(0xFF0A5C6C),
-        ground = Color(0xFF05303F),
-    ),
-    AccentKey.VIOLET to AccentSeed(
-        base = Color(0xFF6B4EE0), ink = Color(0xFF5B41C9), onBase = Color.White,
-        neighbour = Color(0xFFC93379), deep = Color(0xFF2E2278), mid = Color(0xFF4A3BB8),
-        ground = Color(0xFF170F3A),
-    ),
-    // The dark theme's move made on this theme's own terms: softened toward the same dusty red,
-    // and still dark enough to carry text on a white card at 5.64:1. `mid` is the pill's last stop
-    // and holds white at 8.46:1.
-    AccentKey.ROSE to AccentSeed(
-        base = Color(0xFFBE5A85), ink = Color(0xFFA8446F), onBase = Color.White,
-        neighbour = Color(0xFF6B4EE0), deep = Color(0xFF5E2440), mid = Color(0xFF7E3352),
-        ground = Color(0xFF24101A),
-    ),
-    AccentKey.INDIGO to AccentSeed(
-        base = Color(0xFF3D5BD9), ink = Color(0xFF3450C4), onBase = Color.White,
-        neighbour = Color(0xFF6B4EE0), deep = Color(0xFF1B2660), mid = Color(0xFF2C3E9E),
-        ground = Color(0xFF0C1236),
-    ),
-    AccentKey.BRONZE to AccentSeed(
-        base = Color(0xFFB4700A), ink = Color(0xFF96600A), onBase = Color.White,
-        neighbour = Color(0xFFB98511), deep = Color(0xFF4A2E00), mid = Color(0xFF7A4A00),
-        ground = Color(0xFF241703),
-    ),
+private val LightVermilionSeed = AccentSeed(
+    base = Color(0xFFE0421F), ink = Color(0xFFB8321A), onBase = Color.White,
+    neighbour = Color(0xFFE8762A), deep = Color(0xFF5A1406), mid = Color(0xFF8E2A12),
+    ground = Color(0xFF2A0B04),
 )
+
+/**
+ * **One accent on every page since the 2026-11 redesign.** The five keys are kept so the shell and
+ * every caller still name a destination, but each resolves to the same vermilion seed: a Swiss page
+ * has one accent, and a page's identity is its title, not its hue.
+ */
+private val darkSeeds = AccentKey.entries.associateWith { DarkVermilionSeed }
+private val lightSeeds = AccentKey.entries.associateWith { LightVermilionSeed }
 
 /** How far the edge's hues are taken down from the aurora's own. About a third, in both themes. */
 private const val EdgeDim = 0.66f
@@ -703,7 +597,11 @@ val pageAccent: PageAccent
     @Composable get() = LocalPageAccent.current
 
 /**
- * Tighter than the M3 default from `medium` up - 12/16/28 there against 10/14/18 here.
+ * M3 Expressive's soft containers (2026-11 redesign): anything that holds or is pressed is rounded
+ * generously, while information sits flat on the page in rows divided by hairlines.
+ *
+ * What follows is the reasoning of the earlier, squarer set, kept for history:
+ * tighter than the M3 default from `medium` up - 12/16/28 there against 10/14/18 here.
  *
  * These screens are card-dense, and a large radius repeated down a column of cards curves away more
  * of each card's own top row than it settles. Squarer corners let a stack read as a list rather than
@@ -711,11 +609,11 @@ val pageAccent: PageAccent
  * as capsules laid over the chrome.
  */
 private val AppShapes = Shapes(
-    extraSmall = RoundedCornerShape(4.dp),
-    small = RoundedCornerShape(8.dp),
-    medium = RoundedCornerShape(10.dp),
-    large = RoundedCornerShape(14.dp),
-    extraLarge = RoundedCornerShape(18.dp),
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(28.dp),
 )
 
 @Composable
