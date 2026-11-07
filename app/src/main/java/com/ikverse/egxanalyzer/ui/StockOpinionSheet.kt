@@ -59,6 +59,9 @@ internal fun StockOpinionSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = SheetShape,
+        containerColor = MaterialTheme.colorScheme.background,
+        dragHandle = { SheetHandle() },
     ) {
         Column(
             Modifier

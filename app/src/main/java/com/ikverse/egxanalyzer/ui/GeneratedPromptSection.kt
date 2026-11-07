@@ -76,7 +76,7 @@ internal fun GeneratedPromptSection(appState: AppState) {
                 active.schemaVersion?.let { append(" · shipped prompt schema $it") }
             },
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
             if (active.ruleIds.isEmpty()) {
@@ -95,10 +95,11 @@ internal fun GeneratedPromptSection(appState: AppState) {
                     Text(
                         "v${version.sequence}" + if (version.id == active.id) " · active" else "",
                         style = MaterialTheme.typography.bodyMedium,
+                        // Ink against grey rather than the accent against ink (2026-11 redesign).
                         color = if (version.id == active.id) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
                             MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     )
                     Text(

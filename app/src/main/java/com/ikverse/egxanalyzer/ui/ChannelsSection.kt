@@ -260,7 +260,7 @@ private fun TelegramChats(appState: AppState) {
             // something having gone right, where all it is saying is how many are ticked.
             Text(
                 buildAnnotatedString {
-                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurface)) {
                         append(selectedCount.toString())
                     }
                     append(" of ${chats.size} chats selected")
@@ -425,7 +425,7 @@ private fun AuthMessage(appState: AppState) {
         color = if (state.isError) {
             MaterialTheme.colorScheme.error
         } else {
-            MaterialTheme.colorScheme.primary
+            MaterialTheme.colorScheme.onSurface
         },
     )
 }
@@ -445,6 +445,7 @@ private fun AuthField(
     onImeAction: () -> Unit = {},
 ) {
     OutlinedTextField(
+        shape = FieldShape,
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },

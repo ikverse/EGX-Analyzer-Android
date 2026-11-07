@@ -227,6 +227,9 @@ internal fun ModelPickerSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = SheetShape,
+        containerColor = MaterialTheme.colorScheme.background,
+        dragHandle = { SheetHandle() },
     ) {
         Column(
             Modifier
@@ -239,6 +242,7 @@ internal fun ModelPickerSheet(
             // One field doing both jobs. A second box for naming a model the provider never listed
             // only ever raised the question of which of the two to type into.
             OutlinedTextField(
+                shape = FieldShape,
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),

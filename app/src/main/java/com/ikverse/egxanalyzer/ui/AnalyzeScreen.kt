@@ -395,7 +395,7 @@ internal fun AnalyzeScreen(appState: AppState) {
                     it,
                     color = if (appState.analysisStatus == AnalysisStatus.FAILED) {
                         MaterialTheme.colorScheme.error
-                    } else MaterialTheme.colorScheme.primary,
+                    } else MaterialTheme.colorScheme.onSurface,
                 )
             }
         }
@@ -448,7 +448,7 @@ private fun RunProgress(progress: AnalysisProgress) {
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        Text(progress.line(), color = MaterialTheme.colorScheme.primary)
+        Text(progress.line(), color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -722,7 +722,7 @@ private fun MessageTile(source: SourceTrace) {
                 Icon(
                     contentTypeIcon(source.contentType),
                     contentDescription = source.contentType.name.lowercase(),
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(IconSize.Inline),
                 )
                 Spacer(Modifier.width(Space.s))
@@ -915,7 +915,7 @@ internal fun SetupCard(appState: AppState) {
                     if (step.done) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
                     contentDescription = if (step.done) "Done" else "Still to do",
                     tint = if (step.done) {
-                        MaterialTheme.colorScheme.primary
+                        MaterialTheme.colorScheme.onSurface
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },

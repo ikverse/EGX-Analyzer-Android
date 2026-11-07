@@ -261,6 +261,7 @@ private fun RuleEditor(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 OutlinedTextField(
+                    shape = FieldShape,
                     value = phrase,
                     onValueChange = {
                         phrase = it
@@ -271,6 +272,7 @@ private fun RuleEditor(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
+                    shape = FieldShape,
                     value = note,
                     onValueChange = { note = it },
                     label = { Text("Note (optional)") },

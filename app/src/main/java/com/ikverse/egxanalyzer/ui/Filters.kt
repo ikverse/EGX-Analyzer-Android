@@ -400,7 +400,7 @@ internal fun <T> SortSection(
 
 /** One choice in a sheet's section: a chip that says whether it is the one in force. */
 @Composable
-private fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
+internal fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
     // Tonal when chosen, and squaring off under the finger (2026-11 redesign).
     val press = remember { MutableInteractionSource() }
     FilterChip(
