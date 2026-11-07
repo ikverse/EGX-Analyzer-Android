@@ -202,7 +202,7 @@ internal fun Screen(
     // How much of the header has been taken, in pixels, between 0 and [HeaderCollapseTravel].
     //
     // Written from the scroll callback below and read in two places: [PageHeader]'s own
-    // composition, and the wash's draw lambda. Never read in this function's composition - the page
+    // composition. Never read in this function's composition - the page
     // under it would then recompose on every frame of a collapse.
     val travel = with(LocalDensity.current) { HeaderCollapseTravel.toPx() }
     val taken = remember { mutableFloatStateOf(0f) }
@@ -265,42 +265,6 @@ internal fun Screen(
             mark = offset
         }
     }
-    // How much of the wash is left, eased rather than tracking the raw scroll fraction 1:1.
-    // Scrolling down still snaps straight to the target - the wash is meant to get out of the way
-    // quickly - but scrolling back up used to reveal it exactly as fast as the finger moved, which
-    // read as the wash being dragged into view rather than appearing. Only the direction that grows
-    // it is eased. [PageWash] draws this directly; the rail reads the same value below, so the two
-    // can never show two different amounts of it.
-    val washHeight = with(LocalDensity.current) { PageWashHeight.toPx() }
-    val wash = remember { Animatable(1f) }
-    LaunchedEffect(scroll, washHeight) {
-        var last = wash.value
-        snapshotFlow { (1f - (scroll.value + taken.floatValue) / washHeight).coerceIn(0f, 1f) }
-            .collectLatest { target ->
-                val from = last
-                last = target
-                if (target > from) {
-                    wash.animateTo(target, spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow))
-                } else {
-                    wash.snapTo(target)
-                }
-            }
-    }
-    // The rail beside the page wears this page's wash and has no way to work out how much of it is
-    // left. Written from the same eased value in a flow rather than in composition, for the reason
-    // `wash.value` is never read here directly: a page that read it in its own composition would
-    // recompose whole on every frame it changes.
-    //
-    // **Only the page actually on screen writes.** Beside a rail two of them are composed at once
-    // while the destinations cross-fade, and the one being left would otherwise report its own
-    // scroll as the arriving page's.
-    val railWash = LocalPageWash.current
-    val onScreen = appState.destination == destination
-    LaunchedEffect(railWash, onScreen) {
-        if (!onScreen) return@LaunchedEffect
-        snapshotFlow { wash.value }.collect { railWash.floatValue = it }
-    }
-
     // Pressing the destination already showing means "take me back to the top". Animated rather
     // than jumped, so it reads as the page travelling rather than as the content being replaced -
     // and the watcher above brings the navigation back on its own as the offset passes the slop.
@@ -359,21 +323,9 @@ internal fun Screen(
             content()
         }
     }
-    // The page keeps a copy of itself so the action floating over it can frost against what is
-    // actually behind it. Recorded around the wash and the page together and **not** around the
-    // floating action below, which has to stay outside the recording it reads. See PageBackdrop.
-    val backdrop = rememberPageBackdrop()
-    // The ground the page stands on, recorded separately so a card can frost against it. Only
-    // Results carries one while the frosted treatment is being judged - see PageGround.
-    //
-    // Nested inside the page's own recording rather than drawn beside it: the ground is part of the
-    // page, so a floating action frosting against `backdrop` gets the wash and the aurora it is
-    // actually sitting over. Beside it, the action's frost had the wash and not the lights, and a
-    // card's frost had the lights and not the wash - which is the same page drawn two ways.
     CompositionLocalProvider(LocalViewportTop provides viewportTop) {
     Box(Modifier.fillMaxSize().nestedScroll(headerScroll)) {
-      Box(Modifier.fillMaxSize().recordBackdrop(backdrop)) {
-        PageWash { wash.value }
+      Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             PageHeader(
                 destination = destination,
@@ -436,7 +388,7 @@ internal fun Screen(
         }
       }
         floatingAction?.let {
-          CompositionLocalProvider(LocalPageBackdrop provides backdrop) {
+          run {
             if (compact) {
                 // The action keeps the bar's side margins and its corner, and **never leaves**. It
                 // used to go with the bar on the same scroll, so the one control that starts a run
@@ -488,20 +440,6 @@ internal val LocalViewportTop = compositionLocalOf { 0f }
  */
 internal val LocalNavBarVisible = staticCompositionLocalOf { mutableStateOf(true) }
 
-/**
- * How much of the page's accent wash is still standing: 1f at the top of a page, 0f once it has been
- * scrolled away.
- *
- * Owned by the shell and written by the page, the same way round as [LocalNavBarVisible] and for the
- * same reason - the rail is drawn outside every screen. It wears this page's wash across its own
- * width so the band runs unbroken along the top of the window rather than stopping dead at the
- * rail's edge, and a band that stayed put while the page's faded would be a column of colour beside
- * a plain page. Only the page being scrolled knows the answer.
- *
- * One float for the whole app: only the page on screen writes it, only the rail reads it, and on a
- * phone nothing reads it at all. Read in a draw lambda rather than in composition - see `AppRail`.
- */
-internal val LocalPageWash = staticCompositionLocalOf { mutableFloatStateOf(1f) }
 
 /**
  * Whether the pager holding the five tabs has come to rest.
@@ -756,56 +694,6 @@ internal fun SectionCard(
     }
 }
 
-/**
- * The page's own hue at the top of the page, faded to nothing.
- *
- * An arrival cue and not a paint job: it announces which page this is in the moment it appears and
- * then gets out of the way, because a permanent tint behind the first card would be one more thing
- * every card on the page has to be read against.
- *
- * Inside the page's own recording, which is what lets the floating action frost against the wash it
- * is actually sitting over rather than against a page that does not have it - see [recordBackdrop].
- * The lights behind it are the window's and not the page's: see `appGround`.
- *
- * **Faded on the scroll rather than pinned**, and read inside the draw lambda for the reason
- * [PageHeader]'s collapse is passed as a lambda: read at composition, every frame of a scroll would
- * recompose the whole page, where here a frame costs one rectangle repainted. The fraction itself -
- * eased on the way back up, snapped on the way down - is computed once in [Screen] and handed down
- * as [strength], because the rail reads that same value and the two must never disagree about it.
- */
-@Composable
-private fun PageWash(strength: () -> Float) {
-    val wash = pageAccent.wash
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(PageWashHeight)
-            .drawBehind {
-                val left = strength().coerceIn(0f, 1f)
-                if (left <= 0f) return@drawBehind
-                drawRect(
-                    Brush.verticalGradient(
-                        listOf(wash.copy(alpha = wash.alpha * left), Color.Transparent),
-                    ),
-                )
-            },
-    )
-}
-
-/**
- * How far down the page the wash reaches, and so how far it takes to scroll it away.
- *
- * Measured from the top of the *window* rather than from the top of the content, since the page
- * runs up behind the status bar now - see `AppContent`. 120 became 160 for the bar it has to cover
- * before it starts on the page at all, and 160 became 280 because covering the bar is not the same
- * as reaching the page: at 160 the hue was spent by the second card, which reads as a band that
- * stopped rather than a page that opens in its own colour. The start alpha is untouched, so the top
- * of the page looks the same and the difference is only how far down the colour is still there.
- *
- * Published because the rail measures its own wash from it - one number, or the two halves of the
- * band across the top of a wide window would fade out at different rates. See `AppRail`.
- */
-internal val PageWashHeight = 280.dp
 
 /** A hairline of the card's own hue. Wider and it is a stripe the content has to sit clear of. */
 private val AccentEdgeWidth = 2.dp

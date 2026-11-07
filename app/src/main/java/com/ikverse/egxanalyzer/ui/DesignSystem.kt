@@ -9,6 +9,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.Spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -122,6 +123,8 @@ internal fun FloatingSurface(
     onClick: (() -> Unit)? = null,
     painted: Modifier? = null,
     outline: Brush? = null,
+    /** For a caller that animates its own press - its shape, its scale - off the same touch. */
+    interactionSource: MutableInteractionSource? = null,
     content: @Composable () -> Unit,
 ) {
     // See-through enough that the page carries on behind it, opaque enough that it cannot be read
@@ -152,7 +155,10 @@ internal fun FloatingSurface(
             body()
         }
     } else {
-        Surface(onClick, modifier, shape = shape, color = tinted, border = hairline, shadowElevation = FloatingElevation) {
+        Surface(
+            onClick, modifier, shape = shape, color = tinted, border = hairline,
+            shadowElevation = FloatingElevation, interactionSource = interactionSource,
+        ) {
             body()
         }
     }
@@ -161,119 +167,6 @@ internal fun FloatingSurface(
 /** Enough to lift the surface off the page without casting a shadow the tint then shows through. */
 private val FloatingElevation = 2.dp
 
-/**
- * The page, held as something a floating surface can look through itself at.
- *
- * A card cannot be frosted in any way worth the frame it costs: the page behind one is a flat
- * colour and no card overlaps anything, so blurring what is behind it produces the tint a tint
- * already is. **A floating surface is the opposite case.** The page runs under the action and the
- * navigation the whole time it is being read, so what is behind them is cards, figures and moving
- * text - and softening that is the difference between a control the page passes under and a pane of
- * glass it passes behind.
- *
- * The page draws itself into [layer] on its way to the screen (see [Modifier.recordBackdrop]) and
- * anything floating over it can then draw that same recording, blurred, as its own ground. The two
- * must be **different subtrees**: a surface inside the recorded page drawing the recording it is
- * part of is a layer being read while it is written.
- *
- * @property origin where the recording's own top-left sits in the window, so a surface anywhere on
- *   screen can work out which part of it is behind itself.
- */
-internal class PageBackdrop(val layer: GraphicsLayer) {
-    var origin by mutableStateOf(Offset.Zero)
-}
-
-/**
- * The backdrop a floating surface should frost against, or null where nothing is recording one.
- *
- * Null is the working default and not a failure: a sheet, a preview and a widget all draw floating
- * surfaces with no page behind them, and [Modifier.frostedBackdrop] simply does nothing there
- * rather than each of those having to know whether it is inside a [Screen].
- */
-internal val LocalPageBackdrop = staticCompositionLocalOf<PageBackdrop?> { null }
-
-/**
- * The page's **ground** - its wash and its aurora and nothing that stands on them.
- *
- * A card cannot frost against [LocalPageBackdrop]: a card is part of the page that recording is of,
- * so it would be reading a layer while that layer is being written. It can frost against the ground
- * under the page, because nothing standing on the page is in it - and a ground with an aurora on it
- * is the one thing that makes frosting a card worth doing at all. A flat colour blurred is the
- * colour.
- */
-internal val LocalPageGround = staticCompositionLocalOf<PageBackdrop?> { null }
-
-@Composable
-internal fun rememberPageBackdrop(): PageBackdrop {
-    val layer = rememberGraphicsLayer()
-    return remember(layer) { PageBackdrop(layer) }
-}
-
-/**
- * Draws the page as usual and keeps a copy of it in [backdrop].
- *
- * The copy is what the blur is taken from, so it is re-recorded every frame the page draws - which
- * is the cost of this treatment and the whole of it: one screen-sized layer, written once and read
- * by however many floating surfaces are frosted. Anything that must be frosted has to sit outside
- * the subtree this is applied to.
- */
-internal fun Modifier.recordBackdrop(backdrop: PageBackdrop): Modifier = this
-    .onGloballyPositioned { backdrop.origin = it.positionInWindow() }
-    .drawWithContent {
-        backdrop.layer.record { this@drawWithContent.drawContent() }
-        drawLayer(backdrop.layer)
-    }
-
-/**
- * The page behind this surface, blurred, as the surface's own ground.
- *
- * Drawn behind whatever else the surface paints, so a fill over it still reads as a fill - the frost
- * replaces the flat page showing through, not the colour. The caller's fill has to be see-through
- * enough to let it show, which is the one thing this modifier cannot do for it.
- *
- * A second layer is needed because the blur belongs to this surface and not to the page: a render
- * effect set on the recording itself would blur the page on its way to the screen, which is the one
- * thing nobody asked for. It samples only what is behind the surface's own bounds, so the edges are
- * clamped rather than faded - a decal edge leaves a pale rim around a surface this small.
- */
-@Composable
-internal fun Modifier.frostedBackdrop(
-    /**
-     * What to frost against. The page for something floating over it, the ground under the page for
-     * a card standing on it - see [LocalPageGround] for why a card cannot take the first.
-     */
-    backdrop: PageBackdrop? = LocalPageBackdrop.current,
-    radius: Dp = FrostRadius,
-): Modifier {
-    backdrop ?: return this
-    // Switched off in the 2026-11 redesign: surfaces are opaque, so there is nothing for a frost to
-    // show through. The machinery stays for phase 2, which replaces the floating chrome.
-    if (!FrostEnabled) return this
-    val blurred = rememberGraphicsLayer()
-    val blur = with(LocalDensity.current) { radius.toPx() }
-    val position = remember { mutableStateOf(Offset.Zero) }
-    return this
-        .onGloballyPositioned { position.value = it.positionInWindow() }
-        .drawBehind {
-            // Where the recording's top-left falls in this surface's own coordinates, which is what
-            // the recording has to be shifted by for the part behind this surface to land under it.
-            val shift = backdrop.origin - position.value
-            blurred.renderEffect = BlurEffect(blur, blur, TileMode.Clamp)
-            blurred.record { translate(shift.x, shift.y) { drawLayer(backdrop.layer) } }
-            drawLayer(blurred)
-        }
-}
-
-/**
- * How far the frost carries.
- *
- * Far enough that a headline passing under the action is light and movement rather than words -
- * which is the same thing the 0.94 tint was for, said in the medium instead of by hiding the page.
- */
-private val FrostRadius = 20.dp
-
-/** Off since the 2026-11 redesign. See [frostedBackdrop]. */
-private val FrostEnabled: Boolean get() = false
 
 /**
  * One width for every floating edge, gradient or not.
@@ -284,6 +177,24 @@ private val FrostEnabled: Boolean get() = false
  * is what separates them.
  */
 private val HairlineWidth = 1.dp
+
+/**
+ * The top corners every sheet is cut at since the 2026-11 redesign: M3 Expressive's extra-large
+ * container, so a sheet reads as a soft surface rising over the page.
+ */
+internal val SheetShape: Shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+
+/** A quieter drag handle than Material's: shorter, and in the page's own secondary ink. */
+@Composable
+internal fun SheetHandle() {
+    Box(
+        Modifier
+            .padding(top = 10.dp, bottom = 6.dp)
+            .size(width = 32.dp, height = 4.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.32f)),
+    )
+}
 
 /**
  * The one spacing scale.
