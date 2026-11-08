@@ -158,9 +158,10 @@ class ActionPaletteTest {
     /**
      * A loss and a fault are two reds.
      *
-     * Brick, the loss red since 4.7.0, is exactly Material's own light-theme `error`, which is the
+     * When the loss red became brick in 4.7.0 it was exactly Material's own light-theme `error`, the
      * value the scheme carried until then - so a failed run would have read as money lost. `error`
-     * was moved off it, and this keeps it off.
+     * was moved to a deeper `#8C1D18`, and it stays a different red from the loss now that the loss
+     * is signal red. This keeps the two apart.
      */
     @Test
     fun `a loss and a fault are drawn in different reds`() {

@@ -335,12 +335,12 @@ auroras, washes, per-page hues or 6dp pills, this section is what is true now.
   on it) is too pale to be text, so `primary` stays the text shade (`#9A5A06`, `onPrimary` white).
   **A filled accent button reads `pageAccent.base` / `onBase`, not `colorScheme.primary`** — the
   Analyze action and a filled `SettingsButton` do; a new one that reaches for `primary` comes out
-  dark amber. See `docs/ui.md` → **Amber, brick and grey**.
+  dark amber. See `docs/ui.md` → **Amber, signal red and grey**.
 - **The accent is for what can be pressed, never for a figure.** It is a warm hue in an app where
   red means a loss, so a good hit rate and a stat strip's lead figure are ink and an open trade is the
-  market blue. The loss colour is brick (`#B3261E` light, `#F26B5B` dark), about 30° of hue from
+  market blue. The loss colour is signal red (`#C62020` light, `#FF4D4D` dark), about 35° of hue from
   the accent; `the accent stays apart from gain and loss` in `ActionPaletteTest` holds 20° between
-  them in both themes. Light `error` is `#8C1D18`, off brick on purpose, and expired is a warm grey;
+  them in both themes. Light `error` is `#8C1D18`, a deeper red than the loss on purpose, and expired is a warm grey;
   both are pinned in the same test.
 - **Information sits flat; anything pressable sits in a container.** Section cards are tonal with no
   border, stripe or coloured tile. Groups inside a card are `Modifier.flatPanel()` - a hairline and
