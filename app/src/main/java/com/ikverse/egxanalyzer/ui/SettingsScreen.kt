@@ -985,7 +985,11 @@ internal fun SettingsScreen(appState: AppState) {
         ) {
             SubSection(
                 "Sync",
-                summary = "${appState.savedResults.size} reports on this device",
+                summary = if (appState.telegramSyncEnabled) {
+                    "${appState.savedResults.size} reports on this device"
+                } else {
+                    "Sync off"
+                },
                 about = infoNote(
                     "Sync",
                     "Reports are kept in a private Telegram channel of your own, so every device " +
@@ -995,9 +999,23 @@ internal fun SettingsScreen(appState: AppState) {
                         "own: a report neither of those has touched simply travels once.",
                 ),
             ) {
+                SettingToggle(
+                    label = "Sync with Telegram",
+                    checked = appState.telegramSyncEnabled,
+                    onCheckedChange = appState::updateTelegramSync,
+                    about = infoNote(
+                        "Sync with Telegram",
+                        "Off, this phone sends nothing to your sync channel and reads nothing " +
+                            "from it. Reading your source channels for an analysis is not affected.",
+                        "Nothing is lost while it is off: reports, trades, settings and deletions " +
+                            "wait on this phone, and switching it back on catches up straight away. " +
+                            "The switch is this phone's alone and does not travel to your others.",
+                    ),
+                )
                 SettingsButton(
                     onClick = { appState.startAction { appState.syncReports() } },
-                    enabled = appState.telegramAuthState.step == TelegramAuthStep.READY &&
+                    enabled = appState.telegramSyncEnabled &&
+                        appState.telegramAuthState.step == TelegramAuthStep.READY &&
                         appState.busyLabel == null,
                     filled = true,
                 ) { Text("Sync now") }

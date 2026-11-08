@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [Unreleased]
+
+- A **Sync with Telegram** switch in Settings → Data and backup → Sync. Off, this phone stops sending anything to your sync channel or reading from it; reading your source channels for an analysis still works. Nothing is lost while it is off, and switching it back on catches up straight away. The switch applies to this phone only.
+
 ## [4.5.1] — 2026-11-08
 
 - Losses, stop losses, negative returns and anything else red about money are now a true dark red instead of pink.
