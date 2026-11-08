@@ -4,7 +4,7 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
-## [Unreleased]
+## [4.5.1] — 2026-11-08
 
 - Losses, stop losses, negative returns and anything else red about money are now a true dark red instead of pink.
 - The accent colour on buttons and other things you press is now burnt orange, so it can't be mistaken for a loss.
