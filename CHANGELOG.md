@@ -4,6 +4,14 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.8.0] — 2026-11-09
+
+- The **stock sheet** matches the new design. The price has its own line in large type, with the day's move beside it in gain or loss colour, and it rolls to the new figure when prices refresh. The recommendation rate is set large too.
+- The sheet's sections have no border, and they fade in one after another when it opens.
+- The rows for your trades and for each call shrink slightly when pressed. **Show all calls** now has an arrow like other buttons that open a section.
+- The **Alert** dialog's Rises to / Falls to buttons use the same chips as the filter sheet.
+- The cards on a call's detail sheet also lose their border.
+
 ## [4.7.1] — 2026-11-08
 
 - The **Cancel analysis** button shown during a run is solid again; the page behind it no longer shows through its label.

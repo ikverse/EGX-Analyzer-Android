@@ -2062,13 +2062,13 @@ private const val HoldPromptBlurRadius = 48
  * **A hue per page**.
  */
 @Composable
-internal fun SheetSection(content: @Composable ColumnScope.() -> Unit) {
+internal fun SheetSection(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Card(
-        Modifier.fillMaxWidth(),
+        modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
-        border = cardOutline,
+        // A tonal step with no edge since the 2026-11 redesign, like every section card.
         shape = MaterialTheme.shapes.medium,
     ) {
         Column(

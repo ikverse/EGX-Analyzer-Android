@@ -50,7 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -220,16 +220,16 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
                 .padding(top = Space.s, bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            StockSheetPrice(key, latest, history, chartLevels, callDates, appState.pages)
-            if (score != null) StockSheetRecord(score)
+            StockSheetPrice(key, latest, history, chartLevels, callDates, appState.pages, Modifier.staggerIn(0))
+            if (score != null) StockSheetRecord(score, Modifier.staggerIn(1))
             if (trades.isNotEmpty()) {
-                StockSheetTrades(trades) { id ->
+                StockSheetTrades(trades, Modifier.staggerIn(2)) { id ->
                     onDismiss()
                     appState.openPosition(id)
                 }
             }
             if (calls.isNotEmpty()) {
-                StockSheetCalls(calls) { id ->
+                StockSheetCalls(calls, Modifier.staggerIn(3)) { id ->
                     onDismiss()
                     appState.openCall(id)
                 }
@@ -254,12 +254,11 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
  *
  * Four stacked lines before any figure was what the original heading cost: the label, the ticker,
  * and a name in each script, with the price below the fold on a short phone. The names share a
- * line here and the price comes up beside them, so the two things the sheet was opened for are
- * both above everything else. **Every size in this function is a copy of its role's, not the role
- * itself** - `titleLarge.copy(fontSize = …)` rather than `titleMedium` - because the shipped sizes
- * read as too large once the chips joined the header: reported 2026-09-17, and the fix asked for
- * was explicitly "keep the layout, turn the type down," not a rearrangement. The ticker keeps the
- * display face and its weight; only its size moved.
+ * line here. The ticker and names are turned down from their roles (`titleLarge.copy(fontSize = …)`)
+ * after the 2026-09-17 report that the header read too large. The price was turned down with them
+ * and sat beside the names until the 2026-11 redesign gave it a line of its own under them at
+ * `displaySmall`: the redesign's rule is that a page's lead figure is set at a display size, and on
+ * this sheet the price is that figure.
  *
  * The names come from the score where there is one and from the newest call otherwise: a stock
  * called once has no score and still has a company behind it. Both scripts, because the channels
@@ -345,46 +344,49 @@ private fun StockSheetHeading(
                         )
                     }
             }
-            if (latest != null) {
-                // The move since the session before it, which is the figure a price is always read
-                // against and the one the sheet never carried. Measured off the stored history rather
-                // than the report, which keeps one session per stock and so has nothing to compare
-                // against.
-                val move = history.dayMove()
-                Column(horizontalAlignment = Alignment.End) {
-                    // Labelled, because a bare figure at the top of a sheet is a number the reader has
-                    // to work out the meaning of - and the label is also where the one thing that
-                    // changes its meaning is said: a session still trading is a price, not a close.
+        }
+        if (latest != null) {
+            // The move since the session before it, which is the figure a price is always read
+            // against and the one the sheet never carried. Measured off the stored history rather
+            // than the report, which keeps one session per stock and so has nothing to compare
+            // against.
+            val move = history.dayMove()
+            // The Swiss lead figure (2026-11 redesign): the price on a line of its own under the
+            // identity, at the display size every page's lead figure takes, in ink - a figure is
+            // never the accent, and the move beside it is what carries gain or loss.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Space.l)
+                    .padding(bottom = Space.s),
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Column {
+                    // Labelled, because a bare figure at the top of a sheet is a number the reader
+                    // has to work out the meaning of - and the label is also where the one thing
+                    // that changes its meaning is said: a session still trading is a price, not a
+                    // close.
                     Text(
                         if (latest.provisional) "LATEST PRICE" else "LAST CLOSE",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = HeadingLabelSize,
-                            lineHeight = HeadingLabelLine,
-                        ),
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
-                        formatPrice(latest.session.close),
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontFamily = TabularFigures,
-                            fontSize = HeadingPriceSize,
-                            lineHeight = HeadingPriceLine,
-                        ),
-                        color = PriceRole.market,
+                    RollingText(
+                        AnnotatedString(formatPrice(latest.session.close)),
+                        style = MaterialTheme.typography.displaySmall.copy(fontFamily = TabularFigures),
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
+                }
+                Column(Modifier.padding(bottom = Space.xs)) {
                     if (move != null) {
-                        // In pounds as well as percent. The app has never printed a price move in money
-                        // anywhere, and on a stock trading at 0.24 a percent is the figure that says
-                        // nothing - the two together are what a holder actually reads.
+                        // In pounds as well as percent. The app has never printed a price move in
+                        // money anywhere, and on a stock trading at 0.24 a percent is the figure that
+                        // says nothing - the two together are what a holder actually reads.
                         Text(
                             formatSignedPrice(move.amount) + " (" + formatPercent(move.percent) + ")",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontFamily = TabularFigures,
-                                fontSize = HeadingLabelSize,
-                                lineHeight = HeadingLabelLine,
-                            ),
+                            style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
                             color = PriceRole.forReturn(move.percent),
-                            textAlign = TextAlign.End,
                         )
                     }
                     // A session still trading says so instead of naming its own date: the close is
@@ -396,12 +398,8 @@ private fun StockSheetHeading(
                             (if (move != null) "since " else "") +
                                 AppDates.DayMonth.format(move?.from ?: latest.session.date)
                         },
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = HeadingLabelSize,
-                            lineHeight = HeadingLabelLine,
-                        ),
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.End,
                     )
                 }
             }
@@ -469,7 +467,7 @@ private fun WatchAlertDialog(
     var above by remember { mutableStateOf(true) }
     val parsed = price.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it > 0.0 && it.isFinite() }
     AlertDialog(
-        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         onDismissRequest = onDismiss,
         properties = DialogProperties(dismissOnClickOutside = false),
         title = { Text("Alert me about $ticker") },
@@ -480,19 +478,11 @@ private fun WatchAlertDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // The filter sheet's chip, which every choice of one-of-several takes since the
+                // 2026-11 redesign.
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    FilledPill(
-                        "Rises to",
-                        if (above) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                        if (above) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                        onClick = { above = true },
-                    )
-                    FilledPill(
-                        "Falls to",
-                        if (!above) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                        if (!above) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                        onClick = { above = false },
-                    )
+                    ChoiceChip("Rises to", above) { above = true }
+                    ChoiceChip("Falls to", !above) { above = false }
                 }
                 OutlinedTextField(
                     shape = FieldShape,
@@ -524,13 +514,6 @@ private val HeadingTickerLine = 26.sp
 private val HeadingNamesSize = 11.5.sp
 private val HeadingNamesLine = 15.sp
 
-/** [MaterialTheme.typography.titleMedium] is 16sp; the heading's price is turned down to this. */
-private val HeadingPriceSize = 21.sp
-private val HeadingPriceLine = 26.sp
-
-/** [MaterialTheme.typography.labelSmall] is 11sp; every small line in the heading shares this. */
-private val HeadingLabelSize = 9.5.sp
-private val HeadingLabelLine = 12.sp
 
 /**
  * The one-word answers, before any of the figures behind them.
@@ -617,6 +600,7 @@ private fun StockSheetPrice(
     /** Which sessions carry a call, and who made it, by session. */
     calls: Map<LocalDate, String>,
     pages: PageState,
+    modifier: Modifier = Modifier,
 ) {
     if (latest == null && history.isEmpty()) return
     var range by pages.stockChartRange
@@ -637,7 +621,7 @@ private fun StockSheetPrice(
     // purpose is theirs until they ask a different question.
     var touched by remember(visible) { mutableStateOf<DailySession?>(null) }
     var expanded by remember { mutableStateOf(false) }
-    SheetSection {
+    SheetSection(modifier) {
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -754,8 +738,8 @@ private fun StockSheetPrice(
             onLevels = { showLevels = it },
         )
         latest?.let {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            DayRange(it.session)
+            // A group inside the card, separated by the redesign's hairline rather than a divider.
+            Box(Modifier.fillMaxWidth().flatPanel()) { DayRange(it.session) }
         }
     }
 }
@@ -830,17 +814,20 @@ internal fun ChartCaption(text: String) {
  * one outcome bar anywhere else in the app already knows how to read this one.
  */
 @Composable
-private fun StockSheetRecord(score: StockScore) {
+private fun StockSheetRecord(score: StockScore, modifier: Modifier = Modifier) {
     val tally: CallTally = score.tally
     val thin = tally.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
-    SheetSection {
+    SheetSection(modifier) {
         SheetSectionLabel("When this stock is recommended")
         // Nested, not disjoint, and read exactly as the channel cards' headline is read: reached
         // target 1 on the first figure, ran the whole way on the second.
-        Text(
-            formatPercent(tally.anyTargetRate, signed = false) + " / " +
-                formatPercent(tally.fullHitRate, signed = false),
-            style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
+        // The section's lead figure at the display size, as the Insights hero sets its rate.
+        RollingText(
+            AnnotatedString(
+                formatPercent(tally.anyTargetRate, signed = false) + " / " +
+                    formatPercent(tally.fullHitRate, signed = false),
+            ),
+            style = MaterialTheme.typography.displaySmall.copy(fontFamily = TabularFigures),
             color = if (thin) {
                 MaterialTheme.colorScheme.onSurfaceVariant
             } else {
@@ -898,14 +885,14 @@ private fun StockSheetRecord(score: StockScore) {
 
 /** The reader's own money in this stock, newest first, each row leading to its card. */
 @Composable
-private fun StockSheetTrades(trades: List<PositionView>, onOpen: (String) -> Unit) {
-    SheetSection {
+private fun StockSheetTrades(trades: List<PositionView>, modifier: Modifier, onOpen: (String) -> Unit) {
+    SheetSection(modifier) {
         SheetSectionLabel("Your trades")
         trades.forEach { view ->
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clickable { onOpen(view.position.id) }
+                    .pressableRow { onOpen(view.position.id) }
                     .padding(vertical = Space.xs),
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
                 verticalAlignment = Alignment.CenterVertically,
@@ -956,16 +943,16 @@ private fun StockSheetTrades(trades: List<PositionView>, onOpen: (String) -> Uni
  * the press says how many it is holding, so nothing is hidden without being counted.
  */
 @Composable
-private fun StockSheetCalls(calls: List<ScoredCall>, onOpen: (String) -> Unit) {
+private fun StockSheetCalls(calls: List<ScoredCall>, modifier: Modifier, onOpen: (String) -> Unit) {
     var all by remember(calls) { mutableStateOf(false) }
     val shown = if (all) calls else calls.take(CallsShown)
-    SheetSection {
+    SheetSection(modifier) {
         SheetSectionLabel("Every call on it")
         shown.forEach { call ->
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clickable { onOpen(call.positionId) }
+                    .pressableRow { onOpen(call.positionId) }
                     .padding(vertical = Space.xs),
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1007,11 +994,12 @@ private fun StockSheetCalls(calls: List<ScoredCall>, onOpen: (String) -> Unit) {
             }
         }
         if (!all && calls.size > CallsShown) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                TextButton(onClick = { all = true }) {
-                    Text("Show all ${calls.size} calls")
-                }
-            }
+            // Opening more rows is a disclosure, so it is drawn as one - see **A button on a card**.
+            DisclosureButton(
+                label = "Show all ${calls.size} calls",
+                expanded = false,
+                onClick = { all = true },
+            )
         }
     }
 }
@@ -1058,3 +1046,16 @@ private const val CallsShown = 5
 
 /** Half the Expand capsule's height. */
 private val ExpandCorner = 12.dp
+
+/**
+ * A row that leads to a card, pressed the way every pressable is since the 2026-11 redesign: it
+ * eases down under the finger and springs back. Flat, like the rows it replaces - a row in a list
+ * is information first, and the arrow or the outcome beside it is what says it leads somewhere.
+ */
+@Composable
+private fun Modifier.pressableRow(onClick: () -> Unit): Modifier {
+    val press = remember { MutableInteractionSource() }
+    return this
+        .pressScale(press)
+        .clickable(interactionSource = press, indication = LocalIndication.current, onClick = onClick)
+}
