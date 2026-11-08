@@ -727,10 +727,22 @@ private val SheetDragSlop = 64.dp
  * are dragged on purpose and still dismiss from the first pixel; only the band a reader scrolls
  * has to prove what a drag over it means.
  *
- * The slop is re-armed the moment the content actually scrolls, so a long record read back to its
- * top arrives there with the whole of [SheetDragSlop] in hand rather than having spent it on the
- * way, and re-armed again when the gesture ends - it is per-drag, never a budget that runs down
- * over a sitting.
+ * **A gesture that scrolled the content never moves the sheet.** Once the content has moved under a
+ * finger, the rest of that drag is reading, so whatever is left over at the top is swallowed rather
+ * than handed down. Closing a sheet from its content means lifting the finger at the top and pulling
+ * again, which is a deliberate act and the only one that should close it.
+ *
+ * **Momentum never spends the distance.** This is the fault the first version of this guard shipped
+ * with, reported on 2026-11-09 as sheets "so sensitive to scroll down": a flick back towards the top
+ * ran into the top on its own momentum, the momentum's leftover deltas quietly used up the whole of
+ * [SheetDragSlop] - nothing moves on screen while they do - and the flick's remaining speed, far past
+ * Material's 125dp/s, then reached the sheet with nothing left to stop it. The most ordinary gesture
+ * on a sheet, "take me back to the start", closed it. Only the finger's own deltas count now, and a
+ * fling's leftover speed is held unless the finger actually pulled the sheet in that gesture.
+ *
+ * Everything resets when the gesture ends - it is per-drag, never a budget that runs down over a
+ * sitting. `onPostFling` is that end: a scroller dispatches a fling on every release, at zero
+ * velocity when there was none.
  *
  * Place it **before** the scroll modifier. It has to be the scroller's parent connection to be
  * offered what the scroller could not use, and placed after it would be a child that never hears.
@@ -738,37 +750,50 @@ private val SheetDragSlop = 64.dp
 @Composable
 fun Modifier.sheetDragSlop(): Modifier {
     val slop = with(LocalDensity.current) { SheetDragSlop.toPx() }
-    val connection = remember(slop) {
-        object : NestedScrollConnection {
-            /** What is left of this gesture's [SheetDragSlop], in pixels. */
-            var left = slop
-
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource,
-            ): Offset {
-                // The content moved, so this gesture is reading: anything left over is the far end
-                // of a scroll rather than the start of a pull, and the slop starts again from there.
-                if (consumed.y != 0f) left = slop
-                if (available.y <= 0f) return Offset.Zero
-                val taken = min(available.y, left)
-                left -= taken
-                return Offset(0f, taken)
-            }
-
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                // A flick that never spent the distance must not close the sheet either, or the
-                // distance would be for nothing. Held only while the sheet is still where it
-                // started: once the slop is spent it has been moving under the finger, and a sheet
-                // left part way down is worse than one that closes.
-                val hold = left > 0f && available.y > 0f
-                left = slop
-                return if (hold) available else Velocity.Zero
-            }
-        }
-    }
+    val connection = remember(slop) { SheetDragGuard(slop) }
     return this.nestedScroll(connection)
+}
+
+/**
+ * The state behind [sheetDragSlop], apart from the modifier so it can be driven by a plain test.
+ * [slop] is [SheetDragSlop] in pixels.
+ */
+internal class SheetDragGuard(private val slop: Float) : NestedScrollConnection {
+    /** What is left of this gesture's slop, in pixels. */
+    private var left = slop
+
+    /** The content has moved during this gesture, so the gesture is reading and not pulling. */
+    private var reading = false
+
+    /** The finger has passed the slop and moved the sheet itself during this gesture. */
+    private var pulled = false
+
+    override fun onPostScroll(
+        consumed: Offset,
+        available: Offset,
+        source: NestedScrollSource,
+    ): Offset {
+        // Momentum is let stop at the edge. Material's sheet ignores anything but the finger here
+        // anyway; what matters is that a fling's leftovers do not spend the finger's distance.
+        if (source != NestedScrollSource.UserInput) return Offset.Zero
+        if (consumed.y != 0f) reading = true
+        if (available.y <= 0f) return Offset.Zero
+        if (reading) return Offset(0f, available.y)
+        val taken = min(available.y, left)
+        left -= taken
+        if (available.y > taken) pulled = true
+        return Offset(0f, taken)
+    }
+
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+        // A sheet the finger never moved keeps still. One it did move is handed the speed, so a
+        // deliberate pull still closes it in one gesture and is never left part way down.
+        val hold = !pulled && available.y > 0f
+        left = slop
+        reading = false
+        pulled = false
+        return if (hold) available else Velocity.Zero
+    }
 }
 
 /**
