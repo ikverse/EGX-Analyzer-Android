@@ -46,21 +46,22 @@ internal const val LightGlassCard = 1f
 internal const val LightGlassTile = 1f
 
 /**
- * Burnt orange: the one accent (vermilion until the losses became a true dark red, which it sat
- * too close to). Fills use [base]; text and icons on the page use the `ink` stops.
+ * Amber: the one accent since 4.7.0 (burnt orange before it, vermilion before that). Fills use
+ * [PageAccent.base] with dark text on it; text and icons on the page use the darker `ink` stop,
+ * because the light fill itself is too pale to read as text on paper.
  */
-private val DarkAccent = Color(0xFFFF8A3D)
-private val LightAccentInk = Color(0xFFA84508)
+private val DarkAccent = Color(0xFFFFB050)
+private val LightAccentInk = Color(0xFF9A5A06)
 
 internal val DarkColors = darkColorScheme(
     primary = DarkAccent,
-    onPrimary = Color(0xFF2A1200),
-    primaryContainer = Color(0xFF4A2510),
-    onPrimaryContainer = Color(0xFFFFDCC4),
+    onPrimary = Color(0xFF2A1600),
+    primaryContainer = Color(0xFF4A3008),
+    onPrimaryContainer = Color(0xFFFFE2B8),
     secondary = DarkAccent,
-    onSecondary = Color(0xFF2A1200),
-    secondaryContainer = Color(0xFF3A1E0C),
-    onSecondaryContainer = Color(0xFFFFC29A),
+    onSecondary = Color(0xFF2A1600),
+    secondaryContainer = Color(0xFF3A2606),
+    onSecondaryContainer = Color(0xFFFFCF8A),
     // Gain. Never the accent.
     tertiary = Color(0xFF6FD99A),
     onTertiary = Color(0xFF00391F),
@@ -102,17 +103,19 @@ internal val BlackColors = DarkColors.copy(
 internal val LightColors = lightColorScheme(
     primary = LightAccentInk,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFE3D1),
-    onPrimaryContainer = Color(0xFF4A1A00),
+    primaryContainer = Color(0xFFFCE8CC),
+    onPrimaryContainer = Color(0xFF4F2E02),
     secondary = LightAccentInk,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFF8E0CF),
-    onSecondaryContainer = Color(0xFF6B2C04),
+    secondaryContainer = Color(0xFFFCE8CC),
+    onSecondaryContainer = Color(0xFF4F2E02),
     tertiary = Color(0xFF1B7A43),
     onTertiary = Color.White,
     tertiaryContainer = Color(0xFFCDEBD6),
     onTertiaryContainer = Color(0xFF062B15),
-    error = Color(0xFFB3261E),
+    // A fault, deliberately deeper than the loss red: Material's own #B3261E is exactly the loss
+    // red now, and a failed run must not read as money lost.
+    error = Color(0xFF8C1D18),
     onError = Color.White,
     errorContainer = Color(0xFFF9DEDC),
     onErrorContainer = Color(0xFF410E0B),
@@ -140,12 +143,12 @@ internal val LightColors = lightColorScheme(
  * that ran out of time is none of those - it is waiting on the user, and it can perfectly well be
  * up 5%, so borrowing red would report a loss the trade never made.
  *
- * Amber is added rather than reassigned for the reason the palette is fixed in the first place: a
- * role that already means something must go on meaning it.
+ * Its own role rather than a reassigned one, for the reason the palette is fixed in the first place:
+ * a role that already means something must go on meaning it. A warm grey since 4.7.0, when amber
+ * became the accent.
  *
- * **What used to live here and no longer does**: the action's fill and edge, the mark's aurora and
- * the Ask AI pill's fill. All four are the page's hue now, so they moved to [PageAccent]. What
- * stayed is what is true on every page at once.
+ * **What used to live here and no longer does**: the action's fill and edge, the mark's aurora, and
+ * the Ask AI pill's violet, glow and gold, which went with the pill's redesign in 4.7.0.
  */
 data class ExtraColors(
     /** Text, labels, and the outline a card gets when the trade on it has run out of time. */
@@ -177,86 +180,33 @@ data class ExtraColors(
      * red/green colour-blind reader can still hold apart.
      */
     val market: Color,
-
-    /** The label on an [PageAccent.aiFill] pill. White in both themes: the pill runs dark either way. */
-    val aiOnFill: Color,
-
-    /**
-     * The hairline the action wears while a run is going, in place of the neutral outline.
-     *
-     * One value for both themes, for the same reason [aiOnFill] is white in both: the fill under it
-     * runs dark either way. Material's light-theme `error` on that fill is a dark line on a dark
-     * field and reports nothing.
-     */
-    val aiStop: Color,
-
-    /** The model's own text, where a label rather than a pill has to say a model produced this. */
-    val aiText: Color,
-
-    /**
-     * The halo under the pill. Kept bright: a dark glow on a dark page is not a glow.
-     *
-     * Violet on every page, where the pill's fill now ends in the page's hue. The halo is the model
-     * announcing itself and the fill is where you asked it from - see [PageAccent.aiFill].
-     */
-    val aiGlow: Color,
-
-    /**
-     * The mark, in gold.
-     *
-     * Two sets because it is drawn on two different grounds: [aiSpark] on the dark pill, where gold
-     * can be bright, and [aiSparkOnCard] on the card itself, where the light theme's pale surface
-     * would swallow the same colour whole.
-     */
-    val aiSpark: List<Color>,
-    val aiSparkOnCard: List<Color>,
 )
 
-/** Gold, on a dark pill. The one place this app spends a colour on delight rather than meaning. */
-private val BrightGold = listOf(Color(0xFFFFE9B8), Color(0xFFFFD37A), Color(0xFFE8A53C))
-
-/** Where every Ask AI gradient starts, on every page. See [PageAccent.aiFill]. */
-private val DarkAiViolet = Color(0xFF6E5BE8)
-private val LightAiViolet = Color(0xFF4A3BB8)
-
 internal val DarkExtras = ExtraColors(
-    expired = Color(0xFFFFB74D),
-    expiredContainer = Color(0xFF5A4318),
-    onExpiredContainer = Color(0xFFFFE0A3),
-    // A true red, as bright as it has to be to read on ink (5.0:1); the accent was moved to burnt
-    // orange so the two stay apart.
-    loss = Color(0xFFEF4444),
-    lossContainer = Color(0xFF4A1212),
+    // A warm grey since 4.7.0. It was amber, which is the accent now, and an expired trade must not
+    // look like something to press. Grey also says "this is over" better than a warning hue did.
+    expired = Color(0xFFB5AEA3),
+    expiredContainer = Color(0xFF3A3833),
+    onExpiredContainer = Color(0xFFE6E1D8),
+    // Brick: a red warm enough to sit with amber, 6.3:1 on ink.
+    loss = Color(0xFFF26B5B),
+    lossContainer = Color(0xFF4A1712),
     onLossContainer = Color(0xFFFFDAD6),
     market = Color(0xFF5AA9FF),
-    aiOnFill = Color.White,
-    aiStop = Color(0xFFFF6B7A),
-    aiText = Color(0xFFB9A3F2),
-    aiGlow = Color(0xFF845FD6),
-    aiSpark = BrightGold,
-    // The card is dark here too, so the mark needs no softening.
-    aiSparkOnCard = BrightGold,
 )
 
 internal val LightExtras = ExtraColors(
-    expired = Color(0xFF9A6206),
-    expiredContainer = Color(0xFFFFDFA6),
-    onExpiredContainer = Color(0xFF2A1A00),
-    // Dark red, 5.9:1 on paper.
-    loss = Color(0xFFB71C1C),
+    expired = Color(0xFF6B655C),
+    expiredContainer = Color(0xFFE6E2DA),
+    onExpiredContainer = Color(0xFF2C2A26),
+    // Brick, 5.9:1 on paper. `error` was moved off this exact value so a fault and a loss differ.
+    loss = Color(0xFFB3261E),
     lossContainer = Color(0xFFF9DEDC),
     onLossContainer = Color(0xFF410E0B),
     // Darkened rather than reused. The dark theme's blue comes out at 2.4:1 on a light card, where
     // these figures are actually drawn, against the 4.5:1 body text needs - and every one of them
     // is a price.
     market = Color(0xFF1668C7),
-    aiOnFill = Color.White,
-    aiStop = Color(0xFFFF6B7A),
-    aiText = Color(0xFF55338F),
-    aiGlow = Color(0xFF653B96),
-    aiSpark = BrightGold,
-    // Bright gold on a near-white card is barely there. Deepened until it draws at 3:1 on it.
-    aiSparkOnCard = listOf(Color(0xFFD9A44E), Color(0xFFC2872A), Color(0xFF9E6A17)),
 )
 
 /**
@@ -294,8 +244,15 @@ data class PageAccent(
     val base: Color,
     /** [base] where it has to be read against a card. The same colour on dark; darkened on light. */
     val ink: Color,
-    /** Ink drawn on top of a filled [base] - a checkbox tick, a filled chip. */
+    /** Text drawn on a filled [base]: the Analyze action, a filled settings button. Dark in both themes. */
     val onBase: Color,
+    /**
+     * Ink drawn on a filled [ink] - a checkbox tick, a Material button, anything reading `onPrimary`.
+     *
+     * Its own value since 4.7.0, when the light theme's [base] became a pale amber: dark text is
+     * right on that fill and wrong on the much darker [ink], which `primary` still is.
+     */
+    val onInk: Color,
     /** The tile behind a section icon, a selected chip, the navigation indicator. */
     val soft: Color,
     /** A card's accent edge, and the hairline on a selected control. */
@@ -363,30 +320,6 @@ data class PageAccent(
      * thirds strength is simply a dimmer mark. `ActionPaletteTest` pins both halves of that.
      */
     val markAurora: List<Color>,
-
-    /**
-     * The model speaking, running into the page it was asked from.
-     *
-     * Violet at the first stop on every page, because the thing being announced is the same thing
-     * every time - and then it travels into this page's hue, so a pill pressed on Insights lands in
-     * rose and one opened from a Portfolio sheet lands in indigo.
-     *
-     * That movement is also what keeps the pill legible on the one page whose own hue is violet.
-     * A flat violet page and a flat violet pill would be the same colour saying two things; a pill
-     * that is the only object *travelling out of* violet is still unmistakably itself.
-     *
-     * Runs dark in both themes, so [ExtraColors.aiOnFill] can be white in both.
-     */
-    val aiFill: List<Color>,
-
-    /**
-     * The same family drawn as a line, for the button that only reopens a saved answer.
-     *
-     * Its own stops rather than [aiFill]'s, because an outline has to contrast with the card behind
-     * it while a fill has to contrast with the label on top of it - opposite requirements on a dark
-     * theme, where the fill goes darker than the card and the line has to go lighter.
-     */
-    val aiLine: List<Color>,
 )
 
 /**
@@ -402,6 +335,8 @@ private class AccentSeed(
     val ink: Color,
     /** Ink on a filled [base]. */
     val onBase: Color,
+    /** Ink on a filled [ink]. See [PageAccent.onInk]. */
+    val onInk: Color,
     /**
      * The hue next door, so a gradient in one family still moves.
      *
@@ -418,27 +353,29 @@ private class AccentSeed(
 )
 
 /**
- * Analyze keeps the teal the action already wore; the other four are new.
+ * Amber, since 4.7.0.
  *
- * The light column is not the dark one reused. Every one of these is drawn on a near-white page
- * there and on a near-black one here, so `ink` darkens, `onBase` flips to white, and the edge hues
- * run dark where the dark theme's run light.
+ * The light column is not the dark one reused. On paper the fill is a pale amber that carries dark
+ * text, while `ink` is a much darker amber, because the fill is too pale (2:1) to read as text
+ * there; `onInk` is white for that reason. On ink the one bright amber does both jobs.
  */
 private val DarkAccentSeed = AccentSeed(
-    base = Color(0xFFFF8A3D), ink = Color(0xFFFF8A3D), onBase = Color(0xFF2A1200),
-    neighbour = Color(0xFFFFB066), deep = Color(0xFF6B2E08), mid = Color(0xFFA8500F),
-    ground = Color(0xFF2A1404),
+    base = Color(0xFFFFB050), ink = Color(0xFFFFB050),
+    onBase = Color(0xFF2A1600), onInk = Color(0xFF2A1600),
+    neighbour = Color(0xFFFFC878), deep = Color(0xFF6B4108), mid = Color(0xFFA8670F),
+    ground = Color(0xFF2A1A04),
 )
 
 private val LightAccentSeed = AccentSeed(
-    base = Color(0xFFB84A08), ink = Color(0xFFA84508), onBase = Color.White,
-    neighbour = Color(0xFFD97A1E), deep = Color(0xFF4A1F02), mid = Color(0xFF7E3A06),
-    ground = Color(0xFF2A1203),
+    base = Color(0xFFF29A2E), ink = Color(0xFF9A5A06),
+    onBase = Color(0xFF111110), onInk = Color.White,
+    neighbour = Color(0xFFF5B860), deep = Color(0xFF4A2A02), mid = Color(0xFF7A4704),
+    ground = Color(0xFF2A1803),
 )
 
 /**
  * **One accent on every page since the 2026-11 redesign.** The five keys are kept so the shell and
- * every caller still name a destination, but each resolves to the same burnt-orange seed: a Swiss page
+ * every caller still name a destination, but each resolves to the same amber seed: a Swiss page
  * has one accent, and a page's identity is its title, not its hue.
  */
 private val darkSeeds = AccentKey.entries.associateWith { DarkAccentSeed }
@@ -455,7 +392,7 @@ private const val EdgeAlpha = 0.74f
 
 private fun Color.dim(factor: Float) = lerp(Color.Black, this, factor)
 
-private fun accent(seed: AccentSeed, dark: Boolean, aiStart: Color): PageAccent {
+private fun accent(seed: AccentSeed, dark: Boolean): PageAccent {
     // The aurora's three, and the one list the mark and the action both read from - the test that
     // pins them equal is pinning that this stays one list.
     val aurora = listOf(seed.base, seed.neighbour, seed.mid)
@@ -463,6 +400,7 @@ private fun accent(seed: AccentSeed, dark: Boolean, aiStart: Color): PageAccent 
         base = seed.base,
         ink = seed.ink,
         onBase = seed.onBase,
+        onInk = seed.onInk,
         // A shade lighter-handed on the light theme: the same alpha over near-white reads heavier
         // than it does over near-black.
         soft = seed.ink.copy(alpha = if (dark) 0.16f else 0.13f),
@@ -484,19 +422,11 @@ private fun accent(seed: AccentSeed, dark: Boolean, aiStart: Color): PageAccent 
             aurora[2].copy(alpha = 0.62f),
         ),
         markAurora = aurora,
-        aiFill = listOf(aiStart, lerp(aiStart, seed.mid, 0.5f), seed.mid),
-        // Lighter than the fill on the dark theme and darker on the light one, because the line has
-        // to hold against the card while the fill has to hold up a white label.
-        aiLine = if (dark) {
-            listOf(lerp(aiStart, Color.White, 0.28f), lerp(aiStart, seed.base, 0.5f), seed.base)
-        } else {
-            listOf(aiStart, lerp(aiStart, seed.mid, 0.5f), seed.mid)
-        },
     )
 }
 
-private val DarkAccents = darkSeeds.mapValues { (_, seed) -> accent(seed, dark = true, DarkAiViolet) }
-private val LightAccents = lightSeeds.mapValues { (_, seed) -> accent(seed, dark = false, LightAiViolet) }
+private val DarkAccents = darkSeeds.mapValues { (_, seed) -> accent(seed, dark = true) }
+private val LightAccents = lightSeeds.mapValues { (_, seed) -> accent(seed, dark = false) }
 
 /**
  * The hues a card may take, beside the page's own.
@@ -540,11 +470,11 @@ internal fun accentFor(key: AccentKey, dark: Boolean): PageAccent =
  */
 internal fun ColorScheme.withAccent(accent: PageAccent): ColorScheme = copy(
     primary = accent.ink,
-    onPrimary = accent.onBase,
+    onPrimary = accent.onInk,
     primaryContainer = accent.soft,
     onPrimaryContainer = accent.ink,
     secondary = accent.ink,
-    onSecondary = accent.onBase,
+    onSecondary = accent.onInk,
     secondaryContainer = accent.soft,
     onSecondaryContainer = accent.ink,
 )

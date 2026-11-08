@@ -1811,8 +1811,6 @@ private fun ScoredCallRow(
                         // answer the same question.
                         enabled = !asking,
                         working = asking,
-                        // Stable per card, so the halo does not restart its cycle on every scroll.
-                        phaseKey = call.ticker,
                     )
                     if (call.sessions.isNotEmpty()) {
                         PriceFeedButton(expanded) { expanded = !expanded }

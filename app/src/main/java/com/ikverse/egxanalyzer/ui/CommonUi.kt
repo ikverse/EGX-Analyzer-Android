@@ -74,6 +74,7 @@ import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -1260,9 +1261,14 @@ internal fun SettingsButton(
         ProvideTextStyle(MaterialTheme.typography.labelMedium) { row.content() }
     }
     if (filled) {
+        // The accent's fill with dark text, like the Analyze action, rather than Material's
+        // `primary`, which on paper is the darker amber kept for text.
+        val accent = pageAccent
         Button(
             onClick, sized, enabled,
-            shape = shape, contentPadding = padding, interactionSource = press, content = label,
+            shape = shape,
+            colors = ButtonDefaults.buttonColors(containerColor = accent.base, contentColor = accent.onBase),
+            contentPadding = padding, interactionSource = press, content = label,
         )
     } else {
         OutlinedButton(

@@ -68,8 +68,7 @@ class ActionPaletteTest {
      *
      * The fill sits *inside* this line, so a line in the fill's colours is a line against itself and
      * disappears - and reaching for `actionFill` is the obvious thing to do when adding a gradient
-     * edge, because it is right there and already the right family. `aiLine` exists beside `aiFill`
-     * for the same reason and the comment there says so.
+     * edge, because it is right there and already the right family.
      */
     @Test
     fun `the edge is drawn from its own stops rather than the fill's`() {
@@ -95,11 +94,9 @@ class ActionPaletteTest {
         val fills = accents.values.map { it.actionFill.size }.toSet()
         val edges = accents.values.map { it.actionLine.size }.toSet()
         val auroras = accents.values.map { it.actionAurora.size }.toSet()
-        val pills = accents.values.map { it.aiFill.size }.toSet()
         assertEquals("the fill changes shape between pages or themes", 1, fills.size)
         assertEquals("the edge changes shape between pages or themes", 1, edges.size)
         assertEquals("the aurora changes shape between pages or themes", 1, auroras.size)
-        assertEquals("the pill changes shape between pages or themes", 1, pills.size)
     }
 
     /**
@@ -159,30 +156,50 @@ class ActionPaletteTest {
     }
 
     /**
-     * The Ask AI pill starts in violet everywhere and ends in the accent.
+     * A loss and a fault are two reds.
      *
-     * The first stop is the model announcing itself; the last is the app's one accent, the same on
-     * every page now that pages share it. A ramp that started and ended in one colour would be no
-     * gradient at all.
+     * Brick, the loss red since 4.7.0, is exactly Material's own light-theme `error`, which is the
+     * value the scheme carried until then - so a failed run would have read as money lost. `error`
+     * was moved off it, and this keeps it off.
      */
     @Test
-    fun `the pill begins in violet on every page and ends in the accent`() {
-        listOf(true, false).forEach { dark ->
-            val theme = if (dark) "dark" else "light"
-            val starts = AccentKey.entries.map { accentFor(it, dark).aiFill.first().value }
-            assertEquals("$theme starts the pill somewhere other than violet", 1, starts.toSet().size)
-            val ends = AccentKey.entries.map { accentFor(it, dark).aiFill.last().value }
-            assertEquals("$theme ends two pages' pills in different hues", 1, ends.toSet().size)
-            assertNotEquals("$theme pill does not move", starts.first(), ends.first())
-        }
+    fun `a loss and a fault are drawn in different reds`() {
+        assertNotEquals("light theme draws a fault as a loss", LightExtras.loss, LightColors.error)
+        assertNotEquals("dark theme draws a fault as a loss", DarkExtras.loss, DarkColors.error)
     }
 
     /**
-     * Vermilion, gain and loss stay three hues apart in both themes.
+     * An expired trade is not drawn in the accent's family.
      *
-     * The risk the redesign took on: the accent is a red-orange in an app where red means a loss.
-     * Loss was pushed toward crimson for exactly this, and gain must never drift toward the accent
-     * either. Measured in hue degrees, so it holds whatever the lightness of each theme's stops.
+     * Expired was amber until amber became the accent, at which point a trade that ran out of time
+     * would have looked like something to press. Held to the same hue separation as gain and loss,
+     * unless it is a grey, which has no hue to collide with.
+     */
+    @Test
+    fun `expired stays apart from the accent`() {
+        listOf(true to DarkExtras, false to LightExtras).forEach { (dark, extras) ->
+            val theme = if (dark) "dark" else "light"
+            val accent = accentFor(AccentKey.CYAN, dark)
+            val grey = saturation(extras.expired) < GreyBelow
+            assertTrue(
+                "$theme expired sits ${hueDistance(accent.base, extras.expired)} degrees from the accent",
+                grey || hueDistance(accent.base, extras.expired) >= MinimumHueSeparation,
+            )
+        }
+    }
+
+    private fun saturation(color: Color): Float {
+        val max = maxOf(color.red, color.green, color.blue)
+        val min = minOf(color.red, color.green, color.blue)
+        return if (max == 0f) 0f else (max - min) / max
+    }
+
+    /**
+     * The accent, gain and loss stay three hues apart in both themes.
+     *
+     * The risk the redesign took on: the accent is an orange in an app where red means a loss, and
+     * gain must never drift toward the accent either. Measured in hue degrees, so it holds whatever
+     * the lightness of each theme's stops.
      */
     @Test
     fun `the accent stays apart from gain and loss`() {
@@ -244,5 +261,8 @@ class ActionPaletteTest {
     private fun lightSignals() = listOf(LightColors.tertiary, LightColors.error, LightExtras.loss)
 }
 
-/** Enough that vermilion and crimson read as two colours at a glance, not two shades of one. */
+/** Enough that the accent and the loss red read as two colours at a glance, not two shades of one. */
 private const val MinimumHueSeparation = 20f
+
+/** Below this saturation a colour reads as a grey, whose hue is noise rather than a colour. */
+private const val GreyBelow = 0.2f
