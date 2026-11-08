@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.8.1] — 2026-11-09
+
+- Sheets that slide up from the bottom, such as the stock sheet, no longer close when you flick back up to the top of them. A drag that scrolled the sheet's content can't pull the sheet down; to close it from there, let go at the top and pull down again. The handle and the sheet's fixed top still close it as before.
+
 ## [4.8.0] — 2026-11-09
 
 - The **stock sheet** matches the new design. The price has its own line in large type, with the day's move beside it in gain or loss colour, and it rolls to the new figure when prices refresh. The recommendation rate is set large too.
