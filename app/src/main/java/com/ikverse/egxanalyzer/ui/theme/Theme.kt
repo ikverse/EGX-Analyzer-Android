@@ -45,20 +45,23 @@ internal const val LightGlassSection = 1f
 internal const val LightGlassCard = 1f
 internal const val LightGlassTile = 1f
 
-/** Vermilion: the one accent. Fills use [base]; text and icons on the page use the `ink` stops. */
-private val DarkVermilion = Color(0xFFFF6A45)
-private val LightVermilionInk = Color(0xFFB8321A)
+/**
+ * Burnt orange: the one accent (vermilion until the losses became a true dark red, which it sat
+ * too close to). Fills use [base]; text and icons on the page use the `ink` stops.
+ */
+private val DarkAccent = Color(0xFFFF8A3D)
+private val LightAccentInk = Color(0xFFA84508)
 
 internal val DarkColors = darkColorScheme(
-    primary = DarkVermilion,
-    onPrimary = Color(0xFF2A0A03),
-    primaryContainer = Color(0xFF4A2018),
-    onPrimaryContainer = Color(0xFFFFD9CE),
-    secondary = DarkVermilion,
-    onSecondary = Color(0xFF2A0A03),
-    secondaryContainer = Color(0xFF3A1A13),
-    onSecondaryContainer = Color(0xFFFFB8A5),
-    // Gain. Never the accent: a vermilion figure would read as a loss half the time.
+    primary = DarkAccent,
+    onPrimary = Color(0xFF2A1200),
+    primaryContainer = Color(0xFF4A2510),
+    onPrimaryContainer = Color(0xFFFFDCC4),
+    secondary = DarkAccent,
+    onSecondary = Color(0xFF2A1200),
+    secondaryContainer = Color(0xFF3A1E0C),
+    onSecondaryContainer = Color(0xFFFFC29A),
+    // Gain. Never the accent.
     tertiary = Color(0xFF6FD99A),
     onTertiary = Color(0xFF00391F),
     tertiaryContainer = Color(0xFF11512F),
@@ -97,14 +100,14 @@ internal val BlackColors = DarkColors.copy(
 )
 
 internal val LightColors = lightColorScheme(
-    primary = LightVermilionInk,
+    primary = LightAccentInk,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFCE3DB),
-    onPrimaryContainer = Color(0xFF5A1406),
-    secondary = LightVermilionInk,
+    primaryContainer = Color(0xFFFFE3D1),
+    onPrimaryContainer = Color(0xFF4A1A00),
+    secondary = LightAccentInk,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFF6DDD4),
-    onSecondaryContainer = Color(0xFF7A230F),
+    secondaryContainer = Color(0xFFF8E0CF),
+    onSecondaryContainer = Color(0xFF6B2C04),
     tertiary = Color(0xFF1B7A43),
     onTertiary = Color.White,
     tertiaryContainer = Color(0xFFCDEBD6),
@@ -220,10 +223,11 @@ internal val DarkExtras = ExtraColors(
     expired = Color(0xFFFFB74D),
     expiredContainer = Color(0xFF5A4318),
     onExpiredContainer = Color(0xFFFFE0A3),
-    // Crimson, pushed away from the vermilion accent so a loss never reads as chrome.
-    loss = Color(0xFFF2557F),
-    lossContainer = Color(0xFF4A0E22),
-    onLossContainer = Color(0xFFFFD9E2),
+    // A true red, as bright as it has to be to read on ink (5.0:1); the accent was moved to burnt
+    // orange so the two stay apart.
+    loss = Color(0xFFEF4444),
+    lossContainer = Color(0xFF4A1212),
+    onLossContainer = Color(0xFFFFDAD6),
     market = Color(0xFF5AA9FF),
     aiOnFill = Color.White,
     aiStop = Color(0xFFFF6B7A),
@@ -238,9 +242,10 @@ internal val LightExtras = ExtraColors(
     expired = Color(0xFF9A6206),
     expiredContainer = Color(0xFFFFDFA6),
     onExpiredContainer = Color(0xFF2A1A00),
-    loss = Color(0xFFA3123A),
-    lossContainer = Color(0xFFF6D6DE),
-    onLossContainer = Color(0xFF3A0414),
+    // Dark red, 5.9:1 on paper.
+    loss = Color(0xFFB71C1C),
+    lossContainer = Color(0xFFF9DEDC),
+    onLossContainer = Color(0xFF410E0B),
     // Darkened rather than reused. The dark theme's blue comes out at 2.4:1 on a light card, where
     // these figures are actually drawn, against the 4.5:1 body text needs - and every one of them
     // is a price.
@@ -419,25 +424,25 @@ private class AccentSeed(
  * there and on a near-black one here, so `ink` darkens, `onBase` flips to white, and the edge hues
  * run dark where the dark theme's run light.
  */
-private val DarkVermilionSeed = AccentSeed(
-    base = Color(0xFFFF6A45), ink = Color(0xFFFF6A45), onBase = Color(0xFF2A0A03),
-    neighbour = Color(0xFFFF9E5E), deep = Color(0xFF6B1E0C), mid = Color(0xFFA8321A),
-    ground = Color(0xFF2A0E07),
+private val DarkAccentSeed = AccentSeed(
+    base = Color(0xFFFF8A3D), ink = Color(0xFFFF8A3D), onBase = Color(0xFF2A1200),
+    neighbour = Color(0xFFFFB066), deep = Color(0xFF6B2E08), mid = Color(0xFFA8500F),
+    ground = Color(0xFF2A1404),
 )
 
-private val LightVermilionSeed = AccentSeed(
-    base = Color(0xFFE0421F), ink = Color(0xFFB8321A), onBase = Color.White,
-    neighbour = Color(0xFFE8762A), deep = Color(0xFF5A1406), mid = Color(0xFF8E2A12),
-    ground = Color(0xFF2A0B04),
+private val LightAccentSeed = AccentSeed(
+    base = Color(0xFFB84A08), ink = Color(0xFFA84508), onBase = Color.White,
+    neighbour = Color(0xFFD97A1E), deep = Color(0xFF4A1F02), mid = Color(0xFF7E3A06),
+    ground = Color(0xFF2A1203),
 )
 
 /**
  * **One accent on every page since the 2026-11 redesign.** The five keys are kept so the shell and
- * every caller still name a destination, but each resolves to the same vermilion seed: a Swiss page
+ * every caller still name a destination, but each resolves to the same burnt-orange seed: a Swiss page
  * has one accent, and a page's identity is its title, not its hue.
  */
-private val darkSeeds = AccentKey.entries.associateWith { DarkVermilionSeed }
-private val lightSeeds = AccentKey.entries.associateWith { LightVermilionSeed }
+private val darkSeeds = AccentKey.entries.associateWith { DarkAccentSeed }
+private val lightSeeds = AccentKey.entries.associateWith { LightAccentSeed }
 
 /** How far the edge's hues are taken down from the aurora's own. About a third, in both themes. */
 private const val EdgeDim = 0.66f

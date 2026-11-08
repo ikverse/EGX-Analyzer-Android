@@ -4,6 +4,11 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [Unreleased]
+
+- Losses, stop losses, negative returns and anything else red about money are now a true dark red instead of pink.
+- The accent colour on buttons and other things you press is now burnt orange, so it can't be mistaken for a loss.
+
 ## [4.5.0] — 2026-11-08
 
 - **A new look.** Warm paper in light mode and warm ink in dark, one vermilion accent on every tab, and the Inter Tight typeface for names, tickers and figures. Lead figures are much larger, and cards are flat tonal surfaces with no borders.
