@@ -4,7 +4,7 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
-## [4.7.0] — unreleased
+## [4.7.0] — 2026-11-08
 
 - The accent is now a lighter **amber**. Filled buttons such as Analyze use the light amber with dark text; orange text and links use a deeper amber so they stay readable.
 - Losses and stop losses are now a warmer **brick red**. App errors, such as a failed run, use a deeper red so they never look like a loss.
