@@ -141,10 +141,10 @@ class TodayWidget : GlanceAppWidget() {
          * written out. It is the same red the Overdue pill wears, and if that ever moves this is
          * the one place that has to move with it.
          */
-        // The app's crimson loss colour since the 2026-11 redesign (`ExtraColors.loss`, dark).
-        val Red = Color(0xFFF2557F)
+        // The app's loss red (`ExtraColors.loss`, dark).
+        val Red = Color(0xFFEF4444)
         // The light theme's loss colour, for a widget drawn on a light launcher.
-        val RedDay = Color(0xFFA3123A)
+        val RedDay = Color(0xFFB71C1C)
     }
 }
 

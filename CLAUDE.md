@@ -327,12 +327,13 @@ phases on the `redesign` branch. Where an older note below or in `docs/ui.md` de
 auroras, washes, per-page hues or 6dp pills, this section is what is true now.
 
 - **Paper and ink, one accent.** Warm paper (`#F5F3EE`) and warm ink (`#111110`, true black in the
-  pure-black mode), with vermilion as the only accent on every page. Every `AccentKey` and every
-  `CardHue` still exists and resolves to the same vermilion, so callers keep naming their place and
+  pure-black mode), with burnt orange as the only accent on every page (vermilion until the losses became a true dark red). Every `AccentKey` and every
+  `CardHue` still exists and resolves to the same burnt orange, so callers keep naming their place and
   a later design can give the hues back without touching a screen.
-- **Vermilion is for what can be pressed, never for a figure.** It is a red in an app where red
-  means a loss, so a good hit rate and a stat strip's lead figure are ink and an open trade is the
-  market blue. The loss colour was pushed to crimson to keep its distance;
+- **The accent is for what can be pressed, never for a figure.** It is a warm hue in an app where
+  red means a loss, so a good hit rate and a stat strip's lead figure are ink and an open trade is the
+  market blue. The loss colour is a true dark red (`#B71C1C` light, `#EF4444` dark), and the
+  accent sits about 23° of hue from it;
   `the accent stays apart from gain and loss` in `ActionPaletteTest` holds 20° of hue between them
   in both themes.
 - **Information sits flat; anything pressable sits in a container.** Section cards are tonal with no
@@ -349,7 +350,7 @@ auroras, washes, per-page hues or 6dp pills, this section is what is true now.
   fades lists in on first show, `RollingText` rolls a lead figure to a new value, outcome bars spring
   out, and price lines draw in from the left. Every one of them checks `LocalReduceMotion`.
 - **No glass.** The frost, the page recording behind it, the ground lights, the page wash and the
-  Analyze action's aurora were all deleted in phase 2. The Analyze action is a solid vermilion
+  Analyze action's aurora were all deleted in phase 2. The Analyze action is a solid burnt-orange
   capsule that fills with batch progress while a run reads and sweeps while the model writes.
 - **Every sheet is one shape**: `SheetShape` (28dp top corners), the page's own ground and
   `SheetHandle`. A chart or bar drawn on a sheet must be told `background` as its `on` colour, which
