@@ -4,7 +4,7 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
-## [4.7.1] — unreleased
+## [4.7.1] — 2026-11-08
 
 - The **Cancel analysis** button shown during a run is solid again; the page behind it no longer shows through its label.
 - Losses and stop losses are now a plain **signal red** instead of brick, in the app and on the widget.
