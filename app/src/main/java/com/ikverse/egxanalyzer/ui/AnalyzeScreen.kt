@@ -77,6 +77,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -161,15 +162,19 @@ internal fun AnalyzeScreen(appState: AppState) {
                 // Since the 2026-11 redesign the run is reported by the button filling rather than by
                 // lights drifting through it: from the left with the batches read while the run is
                 // reading, and as a slow sweep while the model writes, which has no count to fill to.
+                // `primaryContainer` is the accent at 13-16% alpha - right on a card, see-through on
+                // a button floating over a scrolling page (the date card's text showed through it
+                // on the Fold, 4.7.0). Blended onto the page here, so it looks the same and is solid.
+                val ground = colors.primaryContainer.compositeOver(colors.surface)
                 AnalyzeAction(
                     onClick = { confirmingCancel = true },
-                    container = colors.primaryContainer,
+                    container = ground,
                     content = colors.onPrimaryContainer,
                     corner = corner,
                     modifier = actionModifier,
                     painted = Modifier.runFill(
                         fraction = appState.analysisProgress?.fraction,
-                        ground = colors.primaryContainer,
+                        ground = ground,
                         fill = colors.primary.copy(alpha = RunFillAlpha),
                     ),
                     stretch = !big,
