@@ -202,8 +202,10 @@ internal fun AnalyzeScreen(appState: AppState) {
                             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
                     },
-                    container = if (ready) colors.primary else colors.surfaceContainerHighest,
-                    content = if (ready) colors.onPrimary else colors.onSurfaceVariant,
+                    // The accent's fill, not `primary`: on paper `primary` is the darker amber kept
+                    // for text, and the button is the lighter one with dark text on it.
+                    container = if (ready) pageAccent.base else colors.surfaceContainerHighest,
+                    content = if (ready) pageAccent.onBase else colors.onSurfaceVariant,
                     corner = corner,
                     modifier = actionModifier,
                     stretch = !big,

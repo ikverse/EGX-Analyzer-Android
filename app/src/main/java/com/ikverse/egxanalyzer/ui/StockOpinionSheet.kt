@@ -226,7 +226,6 @@ internal fun StockOpinionSheet(
                     onClick = { onAskAgain?.invoke() },
                     enabled = onAskAgain != null,
                     working = onAskAgain == null,
-                    phaseKey = call.ticker,
                 )
             }
         }
@@ -556,7 +555,7 @@ internal fun AskAiDialog(
         },
         // The gradient rather than a plain Button: this is the press that actually spends the
         // money, and it should look like the one that opened the dialog.
-        confirmButton = { AskAiButton(label = "Ask", onClick = onConfirm, phaseKey = call.ticker) },
+        confirmButton = { AskAiButton(label = "Ask", onClick = onConfirm) },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

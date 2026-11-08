@@ -142,9 +142,9 @@ class TodayWidget : GlanceAppWidget() {
          * the one place that has to move with it.
          */
         // The app's loss red (`ExtraColors.loss`, dark).
-        val Red = Color(0xFFEF4444)
+        val Red = Color(0xFFF26B5B)
         // The light theme's loss colour, for a widget drawn on a light launcher.
-        val RedDay = Color(0xFFB71C1C)
+        val RedDay = Color(0xFFB3261E)
     }
 }
 

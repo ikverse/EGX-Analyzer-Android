@@ -565,3 +565,23 @@ Two rules from that scheme still hold, because they were never about the hues:
   change without a figure changing meaning.
 - **An accent is chrome and never a figure.** With vermilion that is stricter than before: it is a
   red in an app where red means a loss, so a good rate is ink and an open trade is market blue.
+
+## Amber, brick and grey — 4.7.0
+
+The accent became amber (`#F29A2E` fill / `#9A5A06` text on paper, `#FFB050` on ink), the loss red
+became brick (`#B3261E` / `#F26B5B`), and two things had to move with them:
+
+- **The accent has two shades on paper, and `primary` is the darker one.** The pale fill is 2:1
+  against paper, so it cannot be text; `primary` stays `ink` because Material reads it for text
+  everywhere (dialog buttons, links, a selected chip). Anything that is a *filled* accent button
+  reads `PageAccent.base` and `onBase` (dark) directly: the Analyze action and a filled
+  `SettingsButton`. `onInk` (white on paper) is what `onPrimary` now is. A new filled button goes
+  through `pageAccent.base`, not `colorScheme.primary`, or it comes out the dark amber.
+- **`error` moved to `#8C1D18` on paper**, because brick is exactly Material's own `#B3261E`, and a
+  fault and a loss must not be one red. `ActionPaletteTest` pins it.
+- **Expired is a warm grey** (`#6B655C` / `#B5AEA3`). It was amber, which would have made a trade
+  that ran out of time look like a button. `ActionPaletteTest` holds it apart from the accent.
+- **Ask AI is ink.** A solid ink capsule when pressing it is billed, an ink hairline when it only
+  reopens an answer, same height and press as `ActionPill`. The violet, the breathing halo and the
+  gold mark were the glass design's and are gone; while a request is out a band of light sweeps
+  across it, built only while working and still under reduce motion.

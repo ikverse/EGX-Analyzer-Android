@@ -327,15 +327,21 @@ phases on the `redesign` branch. Where an older note below or in `docs/ui.md` de
 auroras, washes, per-page hues or 6dp pills, this section is what is true now.
 
 - **Paper and ink, one accent.** Warm paper (`#F5F3EE`) and warm ink (`#111110`, true black in the
-  pure-black mode), with burnt orange as the only accent on every page (vermilion until the losses became a true dark red). Every `AccentKey` and every
-  `CardHue` still exists and resolves to the same burnt orange, so callers keep naming their place and
-  a later design can give the hues back without touching a screen.
+  pure-black mode), with amber as the only accent on every page since 4.7.0 (burnt orange before,
+  vermilion before that). Every `AccentKey` and every `CardHue` still exists and resolves to the same
+  amber, so callers keep naming their place and a later design can give the hues back without
+  touching a screen.
+- **On paper the accent is two shades, and `primary` is the darker.** The fill (`#F29A2E`, dark text
+  on it) is too pale to be text, so `primary` stays the text shade (`#9A5A06`, `onPrimary` white).
+  **A filled accent button reads `pageAccent.base` / `onBase`, not `colorScheme.primary`** — the
+  Analyze action and a filled `SettingsButton` do; a new one that reaches for `primary` comes out
+  dark amber. See `docs/ui.md` → **Amber, brick and grey**.
 - **The accent is for what can be pressed, never for a figure.** It is a warm hue in an app where
   red means a loss, so a good hit rate and a stat strip's lead figure are ink and an open trade is the
-  market blue. The loss colour is a true dark red (`#B71C1C` light, `#EF4444` dark), and the
-  accent sits about 23° of hue from it;
-  `the accent stays apart from gain and loss` in `ActionPaletteTest` holds 20° of hue between them
-  in both themes.
+  market blue. The loss colour is brick (`#B3261E` light, `#F26B5B` dark), about 30° of hue from
+  the accent; `the accent stays apart from gain and loss` in `ActionPaletteTest` holds 20° between
+  them in both themes. Light `error` is `#8C1D18`, off brick on purpose, and expired is a warm grey;
+  both are pinned in the same test.
 - **Information sits flat; anything pressable sits in a container.** Section cards are tonal with no
   border, stripe or coloured tile. Groups inside a card are `Modifier.flatPanel()` - a hairline and
   air - not tinted panels. A card keeps a coloured edge only when the edge means something: a held
@@ -639,9 +645,10 @@ auroras, washes, per-page hues or 6dp pills, this section is what is true now.
   label with an arrow that flips with the section. They were a filled tonal button, two outlined
   ones and two text ones, which said that recording a purchase is a heavier act than recording a
   sale, and put those two in one row on a position card disagreeing about it. **Three things are
-  deliberately outside the system**: the Ask AI pill, because violet is the model speaking and the
-  one hue on these screens that is not a measurement; the Analyze action, which is 56dp of teal
-  aurora and a tier above anything drawn on a card (see the entries above); and an `AlertDialog`'s
+  deliberately outside the system**: the Ask AI pill, which since 4.7.0 is ink — solid when the
+  press is billed, a hairline when it reopens a saved answer — because the model is the one voice
+  on a card that is neither the accent nor money; the Analyze action, a 56dp amber capsule and a
+  tier above anything drawn on a card (see the entries above); and an `AlertDialog`'s
   buttons, which are Material's convention rather than this app's. **The pills are 32dp and the
   touch target is still 48**, through `minimumInteractiveComponentSize` — the trick the Ask AI pill
   already used, and the reason a smaller button here costs nothing to press. Settings, Backup and

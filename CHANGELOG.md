@@ -4,6 +4,14 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.7.0] — unreleased
+
+- The accent is now a lighter **amber**. Filled buttons such as Analyze use the light amber with dark text; orange text and links use a deeper amber so they stay readable.
+- Losses and stop losses are now a warmer **brick red**. App errors, such as a failed run, use a deeper red so they never look like a loss.
+- Trades that ran out of time are now **grey** instead of amber, so they can't be mistaken for a button.
+- The **Ask AI** button matches the new design: a solid dark capsule to ask, an outline to reopen a saved answer. The violet glow and gold sparkle are gone; a light sweep shows while a request is out.
+- The home-screen widget's red and the notification colour follow the new palette.
+
 ## [4.6.0] — 2026-11-08
 
 - A **Sync with Telegram** switch in Settings → Data and backup → Sync. Off, this phone stops sending anything to your sync channel or reading from it; reading your source channels for an analysis still works. Nothing is lost while it is off, and switching it back on catches up straight away. The switch applies to this phone only.
