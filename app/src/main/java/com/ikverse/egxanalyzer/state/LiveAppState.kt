@@ -1887,6 +1887,7 @@ class LiveAppState(
      * sends, and that is a disk write on whatever thread asked for it.
      */
     private fun publish(block: suspend () -> Unit) {
+        if (!telegramSyncEnabled) return
         appScope.launch(Dispatchers.IO) { runCatching { block() } }
     }
 
@@ -2368,7 +2369,7 @@ class LiveAppState(
      * for a week therefore catches up on what the others published without anyone pressing anything.
      */
     private fun catchUpOnce() {
-        if (caughtUp) return
+        if (caughtUp || !telegramSyncEnabled) return
         caughtUp = true
         appScope.launch {
             val outcome = runCatching { performSync() }.getOrNull() ?: return@launch
@@ -3539,6 +3540,7 @@ class LiveAppState(
         settingsPublishJob?.cancel()
         settingsPublishJob = appScope.launch {
             delay(SETTINGS_PUBLISH_DELAY_MILLISECONDS)
+            if (!telegramSyncEnabled) return@launch
             val snapshot = settingsRepository.snapshot()
             withContext(Dispatchers.IO) {
                 runCatching { telegramRepository.uploadSettings(snapshot) }
@@ -3642,10 +3644,35 @@ class LiveAppState(
      * have. Nothing is overwritten and nothing is deleted, which is why this can run without asking
      * what to keep.
      */
-    override suspend fun syncReports() = runAction(
-        label = "Syncing reports with Telegram",
-        success = SyncOutcome::summary,
-    ) { performSync() }
+    override suspend fun syncReports() {
+        if (!telegramSyncEnabled) {
+            statusMessage = StatusMessage("Telegram sync is off", succeeded = false)
+            return
+        }
+        runAction(
+            label = "Syncing reports with Telegram",
+            success = SyncOutcome::summary,
+        ) { performSync() }
+    }
+
+    override var telegramSyncEnabled by mutableStateOf(settingsRepository.telegramSyncEnabled())
+        private set
+
+    /**
+     * Off holds back every path to the sync channel - the launch catch-up, the instant publishes,
+     * the burial of a deleted report - and loses nothing: each change is already on disk in the
+     * shape the next sync's diff looks for, which is how an offline phone has always caught up.
+     * On again is that next sync, run at once rather than left for the next launch.
+     */
+    override fun updateTelegramSync(enabled: Boolean) {
+        if (enabled == telegramSyncEnabled) return
+        telegramSyncEnabled = enabled
+        settingsRepository.recordTelegramSyncEnabled(enabled)
+        if (enabled && telegramAuthState.step == TelegramAuthStep.READY) {
+            caughtUp = false
+            catchUpOnce()
+        }
+    }
 
     /**
      * The sync itself, without the progress bar and the announcement.
@@ -4647,6 +4674,8 @@ class LiveAppState(
         unreadableResults = localDataStore.unreadableResults
         selectedResult = savedResults.firstOrNull()
         requestRebuild(performance = true)
+        // Off, the deletion stays recorded and the next sync buries it.
+        if (!telegramSyncEnabled) return
         appScope.launch {
             runCatching { telegramRepository.buryReport(result.result.requestId) }
                 .onSuccess { localDataStore.clearDeletion(result.result.requestId) }
@@ -4665,6 +4694,7 @@ class LiveAppState(
         selectedResult = null
         settingsMessage = "All saved analyses deleted."
         requestRebuild(performance = true)
+        if (!telegramSyncEnabled) return
         appScope.launch {
             doomed.forEach { requestId ->
                 runCatching { telegramRepository.buryReport(requestId) }

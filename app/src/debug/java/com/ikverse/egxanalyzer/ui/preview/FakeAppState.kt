@@ -406,6 +406,8 @@ class FakeAppState(
     override suspend fun resetTelegramApiConfiguration() = Unit
 
     override suspend fun syncReports() = Unit
+    override val telegramSyncEnabled: Boolean = true
+    override fun updateTelegramSync(enabled: Boolean) = Unit
 
     override suspend fun startTelegramQrSignIn() = Unit
 

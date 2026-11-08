@@ -601,6 +601,15 @@ interface AppState : AppUpdates {
 
     suspend fun syncReports()
 
+    /**
+     * Whether this phone keeps the sync channel current. Off, nothing is sent to it or read from
+     * it; every change waits on the device, already shaped for the next sync to carry.
+     */
+    val telegramSyncEnabled: Boolean
+
+    /** Switching back on catches up at once, quietly, when Telegram is signed in. */
+    fun updateTelegramSync(enabled: Boolean)
+
 
     suspend fun startTelegramQrSignIn()
 

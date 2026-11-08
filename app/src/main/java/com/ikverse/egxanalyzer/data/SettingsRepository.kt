@@ -353,6 +353,17 @@ class SettingsRepository(
         preferences.edit().putInt(KEY_OVERDUE_COUNT, count).apply()
     }
 
+    /**
+     * Whether this phone talks to the sync channel at all. Device-local and never synced: carried
+     * in the settings snapshot, switching it off on one phone could never be switched back on from
+     * the other, because the other would no longer be listening.
+     */
+    fun telegramSyncEnabled(): Boolean = preferences.getBoolean(KEY_TELEGRAM_SYNC, true)
+
+    fun recordTelegramSyncEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_TELEGRAM_SYNC, enabled).apply()
+    }
+
     fun insightsSeenAt(): Long = preferences.getLong(KEY_INSIGHTS_SEEN, 0L)
 
     fun recordInsightsSeen(at: Long) {
@@ -694,6 +705,7 @@ class SettingsRepository(
         const val KEY_FEED_QUIET_REPORTED = "feed_quiet_reported"
         const val KEY_INSIGHTS_SEEN = "insights_seen_at"
         const val KEY_OVERDUE_COUNT = "last_overdue_count"
+        const val KEY_TELEGRAM_SYNC = "telegram_sync_enabled"
 
         const val KEY_APPROACH_ALERTS = "approach_alerts_enabled"
         const val KEY_APPROACH_THRESHOLD = "approach_threshold_percent"

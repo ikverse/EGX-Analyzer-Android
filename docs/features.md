@@ -661,6 +661,16 @@ are rows now — shipped, visible, switchable, not deletable — and users add t
 
 Everything travels through a private Telegram channel titled `EGX Analyzer sync`.
 
+- **One switch stops all of it, per phone.** `Data and backup → Sync → Sync with Telegram`
+  (`AppState.telegramSyncEnabled`, stored in `SettingsRepository` and deliberately not part of the
+  settings snapshot: synced, a phone switched off could never be switched back on from another,
+  because it would no longer be listening). Off holds back every path to the channel — the launch
+  catch-up, `publish`, the settings upload, the burial of a deleted report — and Sync now greys out.
+  It costs nothing to keep: every change is already on disk in the shape the next sync's diff looks
+  for, and a deletion stays in `pendingDeletions`, which is how an offline phone has always caught
+  up. Switching back on runs that catch-up at once, quietly, if Telegram is `READY`. Reading the
+  source channels for a run is unaffected.
+
 - **A run's extraction is append-only; what the reader has corrected in it is not.** Syncing used
   to be a plain union on exactly that reasoning — a saved run never changes, so the only question
   was who was missing it. Correcting a misread call made a stored run mutable for the first time,
