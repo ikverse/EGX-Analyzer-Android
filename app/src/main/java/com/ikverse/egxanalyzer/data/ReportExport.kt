@@ -453,7 +453,7 @@ private const val Primary = "FF00697A"
 private const val OnSurface = "FF181C20"
 private const val Muted = "FF41484F"
 private const val Target = "FF13683D"
-private const val Stop = "FFB3261E"
+private const val Stop = "FFC62020"
 private const val HeaderFill = "FFE5EAF0"
 private const val BandFill = "FFF1F4F8"
 

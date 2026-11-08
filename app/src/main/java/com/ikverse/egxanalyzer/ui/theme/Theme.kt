@@ -113,8 +113,7 @@ internal val LightColors = lightColorScheme(
     onTertiary = Color.White,
     tertiaryContainer = Color(0xFFCDEBD6),
     onTertiaryContainer = Color(0xFF062B15),
-    // A fault, deliberately deeper than the loss red: Material's own #B3261E is exactly the loss
-    // red now, and a failed run must not read as money lost.
+    // A fault, deliberately deeper than the loss red, so a failed run never reads as money lost.
     error = Color(0xFF8C1D18),
     onError = Color.White,
     errorContainer = Color(0xFFF9DEDC),
@@ -188,9 +187,9 @@ internal val DarkExtras = ExtraColors(
     expired = Color(0xFFB5AEA3),
     expiredContainer = Color(0xFF3A3833),
     onExpiredContainer = Color(0xFFE6E1D8),
-    // Brick: a red warm enough to sit with amber, 6.3:1 on ink.
-    loss = Color(0xFFF26B5B),
-    lossContainer = Color(0xFF4A1712),
+    // Signal red: a plain red, 5.8:1 on ink and about 35 degrees of hue from the amber accent.
+    loss = Color(0xFFFF4D4D),
+    lossContainer = Color(0xFF4A1212),
     onLossContainer = Color(0xFFFFDAD6),
     market = Color(0xFF5AA9FF),
 )
@@ -199,8 +198,8 @@ internal val LightExtras = ExtraColors(
     expired = Color(0xFF6B655C),
     expiredContainer = Color(0xFFE6E2DA),
     onExpiredContainer = Color(0xFF2C2A26),
-    // Brick, 5.9:1 on paper. `error` was moved off this exact value so a fault and a loss differ.
-    loss = Color(0xFFB3261E),
+    // Signal red, 5.2:1 on paper. `error` is the deeper #8C1D18 so a fault and a loss differ.
+    loss = Color(0xFFC62020),
     lossContainer = Color(0xFFF9DEDC),
     onLossContainer = Color(0xFF410E0B),
     // Darkened rather than reused. The dark theme's blue comes out at 2.4:1 on a light card, where
