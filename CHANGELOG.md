@@ -4,7 +4,7 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
-## [Unreleased]
+## [4.6.0] — 2026-11-08
 
 - A **Sync with Telegram** switch in Settings → Data and backup → Sync. Off, this phone stops sending anything to your sync channel or reading from it; reading your source channels for an analysis still works. Nothing is lost while it is off, and switching it back on catches up straight away. The switch applies to this phone only.
 
