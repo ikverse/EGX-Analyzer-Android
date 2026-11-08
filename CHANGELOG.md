@@ -4,6 +4,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [4.7.1] — unreleased
+
+- The **Cancel analysis** button shown during a run is solid again; the page behind it no longer shows through its label.
+
 ## [4.7.0] — 2026-11-08
 
 - The accent is now a lighter **amber**. Filled buttons such as Analyze use the light amber with dark text; orange text and links use a deeper amber so they stay readable.
