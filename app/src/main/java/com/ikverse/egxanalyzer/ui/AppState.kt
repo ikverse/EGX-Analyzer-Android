@@ -367,6 +367,20 @@ interface AppState : AppUpdates {
     /** Adds [ticker] to the watch list, or removes it if it is already there. */
     fun toggleWatch(ticker: String)
 
+    /**
+     * The indicators the full-screen chart opens with, by the chart library's own names. Device-local
+     * and never synced or backed up, like everything the chart remembers.
+     */
+    val chartIndicators: Set<String>
+
+    fun saveChartIndicators(names: Set<String>)
+
+    /** The lines drawn on [ticker]'s full-screen chart, as the chart page wrote them, or null. */
+    fun chartDrawings(ticker: String): String?
+
+    /** Replaces what is drawn on [ticker]; null or an empty list forgets it. */
+    fun saveChartDrawings(ticker: String, json: String?)
+
     /** Every price alert this phone holds. Device-local. */
     val watchAlerts: List<WatchAlert>
 

@@ -93,6 +93,18 @@ Two things the app could always have done and never did: go back, and put one st
   otherwise clip a chip off the end. **A weighted child cannot go in that row**: it scrolls, so its
   width is unbounded and a weight cannot be measured. Both choices live in `PageState`, so folding
   the phone does not put a reader who has just pressed 6M back on a month of line.
+- **Expand opens the same line as a TradingView-style chart** (`ExpandedChart.kt`, since
+  2026-11-09). The toolbar is two rows of the same chips: the range, a chart-type menu (Candles,
+  Hollow candles, Bars, Line, Area), **Indicators** (a sheet of switches: MA, EMA, Bollinger Bands
+  and Parabolic SAR over the price; Volume, MACD, RSI and KDJ in panes below it), **Draw** (a third
+  row: trend line, ray, horizontal line and ray, vertical line, parallel channel, Fib retracement,
+  note, then Undo and Clear all) and Levels. On the chart itself, as TradingView puts them: the
+  session's O H L C, change and volume across the top, an × beside each indicator's legend, A / L /
+  % under the price axis, and `»` back to the newest session once it is off screen. One finger pans,
+  two pinch, a long press leaves a crosshair, and both axes stretch under a finger. The indicators
+  and each stock's drawings are remembered on the phone (`ChartLayoutStore`) and go nowhere else;
+  the chart type is not remembered and opens on candles. The header carries the last close and its
+  day's move. Range stops at 6M, because that is what the sheet fetches.
 - **The header names its own figures.** `LAST CLOSE` over the price, or `LATEST PRICE` on a session
   still trading, and the move under it in **pounds as well as percent** — the app prints a price move
   in money nowhere else, and on a stock trading at 0.24 the percent is the figure that says nothing.

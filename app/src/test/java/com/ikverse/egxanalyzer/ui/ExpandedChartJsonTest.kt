@@ -36,9 +36,11 @@ class ExpandedChartJsonTest {
         sessions: List<DailySession>,
         levels: ChartLevels? = null,
         calls: Set<LocalDate> = emptySet(),
-        line: Boolean = false,
+        style: ChartStyle = ChartStyle.CANDLES,
         showLevels: Boolean = true,
-    ) = JSONObject(ExpandedChartJson.build(sessions, levels, calls, line, showLevels, theme, "k"))
+        indicators: Set<String> = setOf("VOL"),
+        drawings: String? = null,
+    ) = JSONObject(ExpandedChartJson.build(sessions, levels, calls, style, showLevels, theme, "k", indicators, drawings))
 
     @Test
     fun `a session missing its open is drawn from its close`() {
@@ -127,10 +129,10 @@ class ExpandedChartJsonTest {
 
     @Test
     fun `no levels means an empty list and the switch and mode travel with it`() {
-        val json = build(listOf(day("2026-10-01", 100.0)), levels = null, line = true, showLevels = false)
+        val json = build(listOf(day("2026-10-01", 100.0)), levels = null, style = ChartStyle.LINE, showLevels = false)
 
         assertEquals(0, json.getJSONArray("levels").length())
-        assertTrue(json.getBoolean("line"))
+        assertEquals("line", json.getString("style"))
         assertFalse(json.getBoolean("showLevels"))
         assertEquals("k", json.getString("key"))
     }
@@ -138,5 +140,36 @@ class ExpandedChartJsonTest {
     @Test
     fun `the page is told the same cap on the scale the native chart uses`() {
         assertEquals(2.5, build(listOf(day("2026-10-01", 100.0))).getDouble("growth"), 0.0)
+    }
+
+    @Test
+    fun `indicators travel in the chart's own order and unknown names are dropped`() {
+        val json = build(listOf(day("2026-10-01", 100.0)), indicators = setOf("RSI", "NOPE", "MA", "VOL"))
+
+        val list = json.getJSONArray("indicators")
+        assertEquals(listOf("MA", "VOL", "RSI"), (0 until list.length()).map { list.getString(it) })
+    }
+
+    @Test
+    fun `stored drawings are handed over as a list and a broken one as none`() {
+        val kept = """[{"name":"segment","points":[{"timestamp":1,"value":2}],"text":null}]"""
+        assertEquals(1, build(listOf(day("2026-10-01", 100.0)), drawings = kept).getJSONArray("drawings").length())
+        assertEquals(0, build(listOf(day("2026-10-01", 100.0)), drawings = "{not json").getJSONArray("drawings").length())
+        assertEquals(0, build(listOf(day("2026-10-01", 100.0))).getJSONArray("drawings").length())
+    }
+
+    @Test
+    fun `every chart type has a word the page knows`() {
+        assertEquals(listOf("candles", "hollow", "bars", "line", "area"), ChartStyle.entries.map { it.id })
+    }
+
+    @Test
+    fun `the header's move is the last close against the one before it`() {
+        val move = listOf(day("2026-10-01", 100.0), day("2026-10-02", null), day("2026-10-03", 105.0)).lastMove()!!
+
+        assertEquals(105.0, move.close, 0.0)
+        assertEquals(5.0, move.change, 1e-9)
+        assertEquals(5.0, move.percent, 1e-9)
+        assertEquals(null, listOf(day("2026-10-01", 100.0)).lastMove())
     }
 }

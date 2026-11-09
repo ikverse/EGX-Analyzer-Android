@@ -51,6 +51,7 @@ import com.ikverse.egxanalyzer.data.EndpointPolicy
 import com.ikverse.egxanalyzer.data.IntradayRepository
 import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.ModelUsageStore
+import com.ikverse.egxanalyzer.data.ChartLayoutStore
 import com.ikverse.egxanalyzer.data.OpinionParser
 import com.ikverse.egxanalyzer.data.OpinionPrompt
 import com.ikverse.egxanalyzer.data.OpinionPromptStore
@@ -344,6 +345,8 @@ class LiveAppState(
      * without it - the screens that read it simply have nothing to show.
      */
     private val modelUsageStore: ModelUsageStore? = null,
+    /** What the full-screen chart remembers between openings. Null in tests, like [modelUsageStore]. */
+    private val chartLayoutStore: ChartLayoutStore? = null,
     private val headless: Boolean = false,
     /**
      * The status line, held in its own object so that something other than this class can write it.
@@ -1164,6 +1167,22 @@ class LiveAppState(
         // A stock just added may have no stored history at all; fetched now rather than at the
         // next slot, the same courtesy a newly recorded trade gets.
         if (key in next) appScope.launch { priceStocksWithNoHistory(listOf(key)) }
+    }
+
+    override var chartIndicators by mutableStateOf(chartLayoutStore?.indicators() ?: ChartLayoutStore.DefaultIndicators)
+        private set
+
+    override fun saveChartIndicators(names: Set<String>) {
+        if (names == chartIndicators) return
+        chartLayoutStore?.saveIndicators(names)
+        chartIndicators = names
+    }
+
+    override fun chartDrawings(ticker: String): String? =
+        chartLayoutStore?.drawings(Scoring.normalizeTicker(ticker))
+
+    override fun saveChartDrawings(ticker: String, json: String?) {
+        chartLayoutStore?.saveDrawings(Scoring.normalizeTicker(ticker), json)
     }
 
     override var watchAlerts by mutableStateOf(settingsRepository.watchAlerts())
