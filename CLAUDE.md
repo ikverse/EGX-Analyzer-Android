@@ -233,9 +233,12 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   has been over the chosen range with the levels it is judged against drawn across it, and where its
   close sits inside its own day. `ChartRange` is the 1W/1M/2M/3M/6M row under the chart.
 - `ui/ExpandedChart.kt` + `assets/chart/` — the stock sheet's chart on the whole screen, opened by
-  Expand beside the move% in "Where it stands": KLineChart in one web view, candles or a line, a
-  volume pane, the sheet's levels, and a price axis a finger can scale. The only web view in the
-  app, and deliberately the only chart that is one — see **The expanded chart** under Gotchas.
+  Expand beside the move% in "Where it stands": KLineChart in one web view, built to behave like
+  TradingView — five chart types, eight indicators, eight drawing tools, A/L/% scales, the sheet's
+  levels, and both axes a finger can stretch. The only web view in the app, and deliberately the only
+  chart that is one — see **The expanded chart** under Gotchas.
+- `data/ChartLayoutStore.kt` — the indicators that chart opens with and the lines drawn on each
+  stock. Its own preference file, device-local, outside every backup, sync and diagnostics copy.
 - `model/ApproachAlerts.kt` + `data/ApproachNotifier.kt` — a trade closing on its stop or target 2,
   said while there is still something to decide.
 - `data/SessionDigestNotifier.kt` — what the whole session did, once, after the close.
@@ -372,13 +375,27 @@ auroras, washes, per-page hues or 6dp pills, this section is what is true now.
 - **The expanded chart is a web view, on one screen, and nothing else in the app is.** KLineChart
   has no native Android build, and `PriceChart` stays the chart on the sheet and on the call and
   position cards: a web view per card in a scrolling list is the wrong trade, one on a screen opened
-  on purpose is the right one. `ExpandedChart.kt` draws the controls (range, Candles/Line, Levels —
-  the range and levels are the sheet's own `PageState`, so pressing 6M in one is 6M in the other)
-  and `assets/chart/chart.html` draws the chart; the app sends one JSON payload per change through
-  `egxChart.setData`. Only the bundled page loads: `shouldInterceptRequest` answers anything outside
+  on purpose is the right one. `ExpandedChart.kt` draws the toolbar (range, chart type, Indicators,
+  Draw, Levels — the range and levels are the sheet's own `PageState`, so pressing 6M in one is 6M in
+  the other) and `assets/chart/chart.html` draws the chart and what sits on it: the price strip, the
+  A/L/% buttons, `»` back to the newest session, the × beside each indicator. The app sends one JSON
+  payload per change through `egxChart.setData`, plus `draw` / `cancel` / `undo` / `clearDrawings`.
+  Only the bundled page loads: `shouldInterceptRequest` answers anything outside
   `file:///android_asset/` with nothing, and `blockNetworkLoads` is on, so the page never touches the
   network the app holds a permission for. R8 needs no rule for it, there being no JavaScript
   interface. The library is Apache 2.0 and its notice is in `THIRD-PARTY-NOTICES.md`.
+- **The page is read, never heard from.** With no JavaScript interface the page cannot tell the app
+  that the reader pressed × on an indicator or finished a trend line, so the app asks:
+  `egxChart.state()` returns the indicators on, the drawings, and whether one is still being placed.
+  It is pulled when the Indicators sheet opens, when the chart closes, on `ON_PAUSE`, and every 350ms
+  while a drawing tool is lit. Two consequences worth knowing. The page applies the payload's
+  indicator list **only when that list changes**, or a payload re-sent with the app's stale set
+  would put back the indicator the reader just took off. And the stored drawings ride in the payload
+  but are read **once**, on the first `setData`; after that the page owns them, and keeps them across
+  a change of range by taking them off and putting them back by their dates around `applyNewData`.
+- **Pan, fling, pinch and the long-press crosshair are the library's own touch handling**, and
+  `chart.html` does not touch them. The date axis is the other strip, after the price axis, that the
+  library stretches only for a mouse, so a finger on it is forwarded the same way.
 - **The price axis scales by finger, and the library only does that for a mouse.** Dragging along
   the axis rescales it in KLineChart (up and down, like TradingView), but its touch handler for the
   axis does nothing, so `chart.html` hands a finger on the axis strip to the library as the same
@@ -389,7 +406,9 @@ auroras, washes, per-page hues or 6dp pills, this section is what is true now.
   carrying their prices in an invisible indicator, since the library has no public call to set the
   range. A level past the cap, or off the screen after a drag, is pinned to the edge with an arrow.
   **Touch is untested on a device**: the page was checked in a desktop browser with synthetic touch
-  events, which exercise the forwarding but not a real WebView on the Fold.
+  events, which exercise the forwarding but not a real WebView on the Fold. The 2026-11-09 additions
+  (indicators, drawings, scales, `»`, the price strip) were checked by script in a desktop browser
+  and never by a finger: placing a drawing's points by tap is the part most likely to need work.
 
 - `local.properties` holds `telegramApiId` / `telegramApiHash` and is gitignored. Absent, the app
   falls back to asking for them, so a fresh checkout still builds.

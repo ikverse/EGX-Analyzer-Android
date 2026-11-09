@@ -220,7 +220,7 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
                 .padding(top = Space.s, bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
-            StockSheetPrice(key, latest, history, chartLevels, callDates, appState.pages, Modifier.staggerIn(0))
+            StockSheetPrice(key, latest, history, chartLevels, callDates, appState.pages, appState, Modifier.staggerIn(0))
             if (score != null) StockSheetRecord(score, Modifier.staggerIn(1))
             if (trades.isNotEmpty()) {
                 StockSheetTrades(trades, Modifier.staggerIn(2)) { id ->
@@ -600,6 +600,8 @@ private fun StockSheetPrice(
     /** Which sessions carry a call, and who made it, by session. */
     calls: Map<LocalDate, String>,
     pages: PageState,
+    /** Where the full-screen chart keeps its indicators and drawings. */
+    appState: AppState,
     modifier: Modifier = Modifier,
 ) {
     if (latest == null && history.isEmpty()) return
@@ -672,6 +674,10 @@ private fun StockSheetPrice(
                 onRange = { range = it },
                 showLevels = showLevels,
                 onLevels = { showLevels = it },
+                indicators = appState.chartIndicators,
+                onIndicators = appState::saveChartIndicators,
+                drawings = appState.chartDrawings(ticker),
+                onDrawings = { appState.saveChartDrawings(ticker, it) },
                 onClose = { expanded = false },
             )
         }

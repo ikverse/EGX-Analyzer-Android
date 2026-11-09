@@ -16,6 +16,7 @@ import com.ikverse.egxanalyzer.data.PriceSeriesStore
 import com.ikverse.egxanalyzer.data.JobScheduler
 import com.ikverse.egxanalyzer.data.LocalDataStore
 import com.ikverse.egxanalyzer.data.ModelUsageStore
+import com.ikverse.egxanalyzer.data.ChartLayoutStore
 import com.ikverse.egxanalyzer.data.OverdueWorker
 import com.ikverse.egxanalyzer.data.PriceRepository
 import com.ikverse.egxanalyzer.data.PromptStore
@@ -196,6 +197,7 @@ class EgxApplication : Application() {
                 widgetScope.launch { refreshTodayWidget(this@EgxApplication) }
             },
             modelUsageStore = modelUsageStore,
+            chartLayoutStore = ChartLayoutStore(this),
             headless = startedForSchedule,
         ).also { state = it }
         // Booked on every launch rather than only when the switch is touched, so an install that

@@ -188,6 +188,14 @@ class FakeAppState(
 
     override fun toggleWatch(ticker: String) = Unit
 
+    override val chartIndicators: Set<String> = setOf("VOL")
+
+    override fun saveChartIndicators(names: Set<String>) = Unit
+
+    override fun chartDrawings(ticker: String): String? = null
+
+    override fun saveChartDrawings(ticker: String, json: String?) = Unit
+
     override val watchAlerts: List<WatchAlert> = emptyList()
 
     override fun addWatchAlert(ticker: String, level: Double, above: Boolean) = Unit
