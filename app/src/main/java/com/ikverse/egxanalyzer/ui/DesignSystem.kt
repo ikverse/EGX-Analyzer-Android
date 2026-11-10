@@ -91,80 +91,6 @@ import com.ikverse.egxanalyzer.ui.theme.LocalDarkTheme
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-/**
- * Anything that floats over a page rather than sitting in it.
- *
- * The navigation bar and the action button are both loose on top of the content, and both have to
- * say so the same way: slightly see-through, so the page carries on behind them, and outlined, so
- * their edge holds against whatever scrolls under it. Defined once here because two definitions of
- * "floating" drift apart the first time one of them is adjusted.
- *
- * They are the same material and deliberately not the same edge. The bar wears the neutral hairline
- * below; the action wears a gradient in its own colours while it is ready and a red one while a run
- * is going. That is what makes the action read as the thing to press rather than as a second piece
- * of furniture - two identically edged slabs at the foot of the screen said nothing about which of
- * them did anything.
- *
- * The shape is still the caller's, though both callers currently pass the page's own card radius.
- *
- * @param painted draws the surface itself, for a caller whose fill is not one colour. It is applied
- *   to the content rather than to [modifier] so it lands where the flat tint would have - inside the
- *   shape's clip and on top of the elevation shadow - and it carries its own alpha, so a gradient
- *   here is as see-through as a tint here. [color] is ignored when it is passed; pass
- *   `Color.Transparent`.
- * @param outline overrides the neutral hairline for a caller that needs the edge to mean something.
- *   A [Brush] rather than a colour, so a gradient edge and a flat one are one parameter and not two
- *   that can both be set - pass `SolidColor(…)` for a flat one.
- */
-@Composable
-internal fun FloatingSurface(
-    shape: Shape,
-    color: Color,
-    modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null,
-    painted: Modifier? = null,
-    outline: Brush? = null,
-    /** For a caller that animates its own press - its shape, its scale - off the same touch. */
-    interactionSource: MutableInteractionSource? = null,
-    content: @Composable () -> Unit,
-) {
-    // See-through enough that the page carries on behind it, opaque enough that it cannot be read
-    // there. At 0.88 a heading passing underneath came through as a second row of words tangled in
-    // the labels; what is wanted is the movement, not the content.
-    // Opaque since the 2026-11 redesign: paper and ink, not glass, so [LocalSolidSurfaces] has
-    // nothing left to make solid here.
-    val tinted = if (painted == null) color.copy(alpha = 1f) else Color.Transparent
-    // The tint alone leaves the edge indistinct against a card of a similar colour; the hairline is
-    // what draws the shape whatever is behind it.
-    val hairline = BorderStroke(
-        HairlineWidth,
-        outline ?: SolidColor(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
-    )
-    // Only wrapped when there is something to paint: an unconditional Box would put a layout node
-    // under every floating surface in the app to serve the one that needs it.
-    val body: @Composable () -> Unit = if (painted == null) {
-        content
-    } else {
-        // Clipped to the shape ahead of the paint, so every layer the caller draws - the frost, the
-        // fill, the lights - is cut to the corners itself and does not lean on the surface's own
-        // clip. Light theme showed a lighter square inside the blocked action's rounded outline
-        // (2026-10-05); this is what makes that impossible whatever the caller paints.
-        { Box(Modifier.clip(shape).then(painted), propagateMinConstraints = true) { content() } }
-    }
-    if (onClick == null) {
-        Surface(modifier, shape = shape, color = tinted, border = hairline, shadowElevation = FloatingElevation) {
-            body()
-        }
-    } else {
-        Surface(
-            onClick, modifier, shape = shape, color = tinted, border = hairline,
-            shadowElevation = FloatingElevation, interactionSource = interactionSource,
-        ) {
-            body()
-        }
-    }
-}
-
 /** Enough to lift the surface off the page without casting a shadow the tint then shows through. */
 private val FloatingElevation = 2.dp
 
@@ -178,12 +104,6 @@ private val FloatingElevation = 2.dp
  * is what separates them.
  */
 private val HairlineWidth = 1.dp
-
-/**
- * The top corners every sheet is cut at since the 2026-11 redesign: M3 Expressive's extra-large
- * container, so a sheet reads as a soft surface rising over the page.
- */
-internal val SheetShape: Shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
 /** Every text field's corner since the 2026-11 redesign: a soft container, not Material's 4dp box. */
 internal val FieldShape: Shape = RoundedCornerShape(16.dp)
@@ -265,27 +185,12 @@ val LabelPillHeight: Dp = 24.dp
 val PillCorner: Dp = 8.dp
 
 /** [PillCorner] as a shape, which is what every pill but the painted one asks for. */
-val PillShape: Shape = RoundedCornerShape(PillCorner)
-
 /**
  * The corner a tinted panel inside a card is cut at - "The call"/"What happened" on the Insights
  * call card, "Your trade"/"Where it stands" on a position card. Shared rather than declared twice,
  * so the two families of card cannot drift apart on a number neither of them has a reason to own.
  */
 val SectionPanelShape: Shape = RoundedCornerShape(16.dp)
-
-/**
- * A group inside a card since the 2026-11 redesign: no fill, a hairline across its top and air
- * either side of it. The tinted panels it replaces were a second container inside the card; the
- * Swiss half of the design separates groups with rules, and the label above each says what it is.
- */
-@Composable
-internal fun Modifier.flatPanel(): Modifier {
-    val rule = MaterialTheme.colorScheme.outlineVariant
-    return this
-        .drawBehind { drawRect(rule, size = Size(size.width, 1.dp.toPx())) }
-        .padding(top = Space.m, bottom = Space.xs)
-}
 
 /**
  * How wide a card has to measure before it draws its wide layout instead of its phone one.
@@ -336,50 +241,6 @@ val cardOutline: BorderStroke
         1.dp,
         androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant,
     )
-
-/**
- * What a card is made of where it is drawn as glass rather than as a slab.
- *
- * Three parts that only mean anything together: a fill the page shows through, a sheen across the
- * top corner, and an edge lit along its top. Any one of them alone reads as a card that failed to
- * paint rather than as a card made of something - a see-through card with a flat grey edge is the
- * worst of the three - so they are declared here together and applied in one line at each call site.
- *
- * **Not a blur, deliberately.** The page behind a card is one flat colour and cards do not overlap,
- * so blurring what is behind one would cost a layer a frame to produce the tint this already is.
- * What makes these read as glass is the page coming through them and the light along their top,
- * neither of which needs a [android.graphics.RenderEffect].
- *
- * Held to the two cards it is being judged on - the Results occurrence card and the Portfolio
- * position card - rather than applied to [SectionCard], which every page draws.
- */
-internal object Glass {
-    /**
-     * A container role with its alpha taken back off, for something floating outside the page.
-     *
-     * The three container roles are see-through in the theme, which is what makes every surface in
-     * the app glass in one place - see `GlassSection`. A dialog and a menu are the exception and not
-     * an oversight: a dialog sits on a scrim and a menu sits on whatever it was opened over, so
-     * neither has the page behind it that the material means anything against. See-through, a
-     * confirm dialog shows the very card it is asking about through its own words.
-     */
-    @Composable
-    fun solid(color: Color): Color = color.copy(alpha = 1f)
-
-    /**
-     * Light along the top edge, falling away down the sides.
-     *
-     * Stands in for [cardOutline] **only where the card has nothing better to say with its edge**. A
-     * trade's status and an arrival flash both own this edge while they are there, and what a card
-     * means outranks how it is lit - so both call sites keep their own border where they have one
-     * and take this where they would have taken the hairline.
-     */
-    val outline: BorderStroke
-        // The lit top edge went with the glass in the 2026-11 redesign; a card is a tonal step now,
-        // edged with the same hairline as every other card.
-        @Composable get() = cardOutline
-}
-
 
 /**
  * Colour carries meaning for a price, not decoration.
@@ -595,17 +456,8 @@ internal fun PageDots(current: Int, total: Int) = PageDots(total) { current.toFl
  */
 @Composable
 internal fun PageDots(total: Int, position: () -> Float) {
-    val marker = MaterialTheme.colorScheme.primary
-    val rest = MaterialTheme.colorScheme.outlineVariant
-    Canvas(Modifier.size(width = DotPitch * total, height = DotMarkerSize)) {
-        val pitch = DotPitch.toPx()
-        val middle = size.height / 2f
-        repeat(total) { index ->
-            drawCircle(rest, DotSize.toPx() / 2f, Offset(pitch * (index + 0.5f), middle))
-        }
-        val at = position().coerceIn(0f, (total - 1).toFloat())
-        drawCircle(marker, DotMarkerSize.toPx() / 2f, Offset(pitch * (at + 0.5f), middle))
-    }
+    // The kit's dots since 5.0: faint dots on a track, the front page a wider ink capsule.
+    com.ikverse.egxanalyzer.ui.kit.KitDots(total, position)
 }
 
 private val DotSize = 5.dp
@@ -1024,22 +876,6 @@ internal fun Modifier.staggerIn(index: Int, enabled: Boolean = true): Modifier {
         alpha = v.coerceIn(0f, 1f)
         translationY = (1f - v) * lift
     }
-}
-
-/**
- * A pressable's corner, squaring off while a finger is down and springing back on release - the
- * shape change that says "pressed" in M3 Expressive. Returns [rest] untouched with reduce-motion on.
- */
-@Composable
-internal fun pressCorner(source: InteractionSource, rest: Dp, pressed: Dp = rest / 2): Dp {
-    val down by source.collectIsPressedAsState()
-    val still = LocalReduceMotion.current
-    val corner by animateDpAsState(
-        targetValue = if (down && !still) pressed else rest,
-        animationSpec = if (down) tween(PressInMs, easing = UiEase) else releaseSpring(),
-        label = "pressCorner",
-    )
-    return corner
 }
 
 /**

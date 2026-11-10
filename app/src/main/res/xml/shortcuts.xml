@@ -21,7 +21,7 @@
     <shortcut
         android:shortcutId="portfolio"
         android:enabled="true"
-        android:icon="@drawable/ic_egx_notification"
+        android:icon="@drawable/ic_shortcut_portfolio"
         android:shortcutShortLabel="@string/shortcut_portfolio_short"
         android:shortcutLongLabel="@string/shortcut_portfolio_long">
         <intent
@@ -32,7 +32,7 @@
     <shortcut
         android:shortcutId="insights"
         android:enabled="true"
-        android:icon="@drawable/ic_egx_notification"
+        android:icon="@drawable/ic_shortcut_insights"
         android:shortcutShortLabel="@string/shortcut_insights_short"
         android:shortcutLongLabel="@string/shortcut_insights_long">
         <intent

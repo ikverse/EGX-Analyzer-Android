@@ -189,14 +189,13 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   the way back in from one, and the three buttons in Settings. See below.
 - `ui/PortfolioScreen.kt` + `ui/PositionCard.kt` + `ui/TradeControls.kt` — the Portfolio tab, one
   trade's card, and the Bought button and closing controls that sit on a recommendation card.
-- `ui/CommonUi.kt` holds `Figure` and `FigureGroup`, and `ui/DesignSystem.kt` holds `AppDates` —
-  the one figure layout and the one set of date patterns, for every screen that draws either.
-  `CommonUi.kt` also holds `ActionPill` and `DisclosureButton`, the two kinds of button a card is
-  allowed to carry, and `SettingsButton`, the one a settings page carries. See **A button on a card
-  is one of two things** under Gotchas. It holds two instruments as well: `StatStrip`, a handful of
-  counts bounded and divided so they are read against each other (a report card's figures and the
-  token tally's), and `ShareBar`, how one quantity divides in two — deliberately not `OutcomeBar`,
-  which is four fixed verdicts in four fixed colours with a legend drawn above the cards using it.
+- `ui/CommonUi.kt` holds `Figure` and `FigureGroup`, `Screen`, `SectionCard` and the other shared
+  helpers, each rebuilt in place on the kit in 5.0; `ui/DesignSystem.kt` holds `AppDates`, `Space`
+  and `TabularFigures`. `ActionPill`, `DisclosureButton`, `SettingsButton`, `AppMenu`, `MoreButton`,
+  `StatStrip`, `ShareBar`, `FloatingSurface`, `Glass` and `PillShape` were deleted in 5.0.
+- `ui/kit/` — the 5.0 component kit. See **Design language**.
+- `ui/SettingsScreen.kt` — the Settings hub and its seven pages (`SettingsSection`), the open one held
+  in `PageState.settingsSection` so a fold keeps it.
 - `ui/PageHeader.kt` — the page's own name and icon at the top of every screen, shrinking as the
   page is read, and the two controls that arrive with the collapsed bar: the page's stock filter,
   and the icon that opens the rest of its filters. It replaced the `EGX Analyzer` band on
@@ -218,9 +217,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/JobScheduler.kt` + `data/ScheduleReceiver.kt` + `data/ScheduledJobWorker.kt` +
   `data/ScheduleMigration.kt` — the alarm, the things that mean re-book it, what runs, and the
   one-time move off the old job table. See below.
-- `ui/PricesSection.kt` carries the price-refresh checkbox, the series-archive checkbox, the
-  never-blank status lines and Fetch prices now, drawn as the `Prices` group inside Settings'
-  `General` card. It also carries `SystemPermissions` — the exact-alarm and battery-optimization
+- `ui/PricesSection.kt` carries the price-refresh switch, the series-archive switch, the
+  never-blank status lines and Fetch prices now, drawn as the `Prices` tile on Settings' General page. It also carries `SystemPermissions` — the exact-alarm and battery-optimization
   rows both features depend on.
 - `data/OpinionPrompt.kt` + `data/OpinionPromptStore.kt` + `data/OpinionSearchBrief.kt` +
   `data/OpinionParser.kt` + `ui/StockOpinionSheet.kt` — Ask AI, on a call card in Insights.
@@ -236,7 +234,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   Expand beside the move% in "Where it stands": KLineChart in one web view, built to behave like
   TradingView — five chart types, eight indicators, eight drawing tools, A/L/% scales, the sheet's
   levels, and both axes a finger can stretch. The only web view in the app, and deliberately the only
-  chart that is one — see **The expanded chart** under Gotchas.
+  chart that is one — see **The expanded chart** under Gotchas. Its theme follows the app's, light or
+  dark, and its text is JetBrains Mono from `assets/chart`.
 - `data/ChartLayoutStore.kt` — the indicators that chart opens with and the lines drawn on each
   stock. Its own preference file, device-local, outside every backup, sync and diagnostics copy.
 - `model/ApproachAlerts.kt` + `data/ApproachNotifier.kt` — a trade closing on its stop or target 2,
@@ -246,7 +245,10 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   a feed that has gone quiet, and a schedule that did not run.
 - `data/TradeActionReceiver.kt` — Keep open, pressed from a notification with the app closed.
 - `data/AppShortcuts.kt` + `res/xml/shortcuts.xml` — long-press the launcher icon.
-- `data/TodayWidget.kt` — the home-screen widget, and the only Glance in the codebase.
+- `data/TodayWidget.kt` — the home-screen widget, and the only Glance in the codebase. Two sizes
+  since 5.0, picked by `widgetLayoutFor`.
+- `data/NotificationAccent.kt` — `NotificationTone`, the colour each kind of notification carries,
+  and `StockBadge`, the logo or monogram on the right of one about a single stock.
 - `ui/CallText.kt` — one call as plain text, for the ⋮ on a call card.
 - `ui/InfoSheet.kt` — `InfoNote`, the question mark that opens one, and the `SettingToggle` /
   `SettingLabel` rows every explained control is built from. See **Where an explanation lives**.
@@ -323,52 +325,47 @@ Detailed documentation lives in [`docs/`](docs/):
 - [`docs/features.md`](docs/features.md) — Ask AI, reports, corrections, export, backup, sync, update, scheduling
 - [`docs/ui.md`](docs/ui.md) — Back/stock sheet, page header, filters, status line, settings, colors
 
-## Design language (since 4.5.0, the 2026-11 redesign)
+## Design language (since 5.0.0, the Bento redesign)
 
-A mix of M3 Expressive and Swiss editorial, chosen by the owner on 2026-11-08 and built in seven
-phases on the `redesign` branch. Where an older note below or in `docs/ui.md` describes glass,
-auroras, washes, per-page hues or 6dp pills, this section is what is true now.
+The owner chose the "B+ mix" on 2026-11-09 — Bento tiles, with Pulse's mono figures, progress bars,
+book-vs-EGX30 chart, live-session cues and dark look folded in — and it was built in ten stages on
+`expanded-chart-tradingview` and shipped whole as 5.0.0, once no pre-5.0 element was left anywhere.
+The mockups are on the claude.ai design canvas named in memory. Where an older note below or in
+`docs/ui.md` describes paper and amber, 6dp pills, `ActionPill`, `SettingsButton`, glass or a
+floating bar, this section is what is true now.
 
-- **Paper and ink, one accent.** Warm paper (`#F5F3EE`) and warm ink (`#111110`, true black in the
-  pure-black mode), with amber as the only accent on every page since 4.7.0 (burnt orange before,
-  vermilion before that). Every `AccentKey` and every `CardHue` still exists and resolves to the same
-  amber, so callers keep naming their place and a later design can give the hues back without
-  touching a screen.
-- **On paper the accent is two shades, and `primary` is the darker.** The fill (`#F29A2E`, dark text
-  on it) is too pale to be text, so `primary` stays the text shade (`#9A5A06`, `onPrimary` white).
-  **A filled accent button reads `pageAccent.base` / `onBase`, not `colorScheme.primary`** — the
-  Analyze action and a filled `SettingsButton` do; a new one that reaches for `primary` comes out
-  dark amber. See `docs/ui.md` → **Amber, signal red and grey**.
-- **The accent is for what can be pressed, never for a figure.** It is a warm hue in an app where
-  red means a loss, so a good hit rate and a stat strip's lead figure are ink and an open trade is the
-  market blue. The loss colour is signal red (`#C62020` light, `#FF4D4D` dark), about 35° of hue from
-  the accent; `the accent stays apart from gain and loss` in `ActionPaletteTest` holds 20° between
-  them in both themes. Light `error` is `#8C1D18`, a deeper red than the loss on purpose, and expired is a warm grey;
-  both are pinned in the same test.
-- **Information sits flat; anything pressable sits in a container.** Section cards are tonal with no
-  border, stripe or coloured tile. Groups inside a card are `Modifier.flatPanel()` - a hairline and
-  air - not tinted panels. A card keeps a coloured edge only when the edge means something: a held
-  trade's status, or the arrival flash.
-- **Type does the work.** Inter Tight (one variable font, instanced per weight) sets names, tickers
-  and every figure, with tabular digits switched on in every style; IBM Plex Sans Arabic sets the
-  sentences because Inter Tight has no Arabic. Lead figures use `displayLarge`/`Medium`/`Small`
-  (64/44/34sp); a page title is 34sp and shrinks with the header.
-- **Expressive motion, held still by reduce motion.** `pressScale` (0.95, back on `releaseSpring`)
-  and `pressCorner` (a capsule squaring off under the finger) are what a pressable does.
-  `uiSpring` moves expands, the nav indicator and the stock sheet's day-range marker. `staggerIn`
-  fades lists in on first show, `RollingText` rolls a lead figure to a new value, outcome bars spring
-  out, and price lines draw in from the left. Every one of them checks `LocalReduceMotion`.
-- **No glass.** The frost, the page recording behind it, the ground lights, the page wash and the
-  Analyze action's aurora were all deleted in phase 2. The Analyze action is a solid burnt-orange
-  capsule that fills with batch progress while a run reads and sweeps while the model writes.
-- **Every sheet is one shape**: `SheetShape` (28dp top corners), the page's own ground and
-  `SheetHandle`. A chart or bar drawn on a sheet must be told `background` as its `on` colour, which
-  phase 2 forgot and phase 5 fixed.
-- **Material is kept where it is the convention**: dialogs, switches, checkboxes and the Telegram
-  sign-in buttons. Material's own expressive theme is not used - it is internal in material3 1.4.0
-  and would need an alpha release.
-- **The full-screen chart's text is still Roboto.** The web view may only load the bundled chart
-  assets, and Inter Tight there would mean a second copy of the font or loosening that rule.
+- **Tiles on a ground.** Paper `#EFEDE6` (graphite `#141518` at night, true black in the pure-black
+  mode) with rounded tiles on it (`Kit.TileCorner`, 30dp; `Kit.TileGap`, 10dp). A tile's tone says
+  what it is: ink for what leads a page, cobalt `#1E2BFF` for the hero, lime `#C8FF4D` for the
+  highlight, coral `#FF6B4A` for alerts, and sunflower, lilac and sky (`tile1`–`tile3`) for the rest.
+  `TileTone` names them; `tileColors` gives the ink that goes on each. Gain and loss are their own
+  colours (`#0B8A4A` / `#C62020`) and never a tile fill.
+- **The kit is `ui/kit/`, and it is the only place allowed to build on Material.** `Tile`, `Panel`,
+  `KitButton` (primary / secondary / danger / on-tone, three sizes), `KitIconButton`, `KitChip`,
+  `SegmentedControl`, `KitSwitch` / `KitSwitchFace`, `KitCheckbox`, `KitTextField` (figure, error,
+  "was … Put back", password, keyboard action), `KitStepper`, `KitSheet` (a bottom sheet folded, a
+  side panel unfolded or in book posture), `KitDialog`, `KitMenu`, `KitCalendarSheet`,
+  `KitExpandable`, `KitTag`, `KitProgress`, `KitSplitBar`, `KitSpinner`, `KitRule`, and the market
+  pieces — `TickerTape`, `OutcomeStrip`, `TargetProgress`, `BreadthBar`, `LiveDot`.
+- **`NoOldElementsTest` holds the rule.** It reads every file in `ui/` and `ui/theme/` and fails on
+  any call to a Material component or a pre-5.0 control, by name. A new file is held to it the day
+  it is added. Material's colour names (`onSurfaceVariant` and the like) still appear in places and
+  are mapped onto the 5.0 palette in `theme/Theme.kt`, so they draw new colours.
+- **Type.** Bricolage Grotesque for every word, JetBrains Mono for every figure (`TabularFigures`),
+  IBM Plex Sans Arabic as the Arabic fallback. Inter Tight was removed in 5.0.0. The full-screen
+  chart's page loads its own copy of JetBrains Mono from `assets/chart`.
+- **Every design has three postures.** `LocalFoldPosture` is `Cover`, `Unfolded`, `Tabletop` (with
+  the hinge's fractions) or `Book`. Unfolded and book put two columns side by side, book splitting
+  on the hinge; tabletop keeps what is read on the upright half and what is pressed on the flat
+  half, using `tabletopHeroHeight`. Every page and sheet has a branch for each.
+- **One shell at every width.** No rail and no floating bar since 5.0: the tabs are in the page
+  header, and Analyze's button is on the Analyze page.
+- **Motion** is `popIn` on first show, `popSpring`, `rememberDrawIn` for lines and bars,
+  `pressScale` on a press, and all of it held still by `LocalReduceMotion`.
+- **Outside the app** the same palette is written out by hand, because those surfaces have no theme:
+  `res/values/colors.xml` (launcher, splash, shortcut icons), `NotificationTone` and `StockBadge` in
+  `data/NotificationAccent.kt`, and the companion of `TodayWidget`. `OutsideSurfacesTest` checks
+  them against `LightPalette`.
 
 ## Gotchas
 
@@ -475,8 +472,8 @@ auroras, washes, per-page hues or 6dp pills, this section is what is true now.
   most expensive thing in the app running on the cheapest surface it has, in a process the system is
   free to kill halfway through. The widget declares **no `updatePeriodMillis`**: the record changes
   when prices arrive rather than on a clock, and the app pushes a redraw from the same callback that
-  counts overdue trades. The one colour it needs is written out, because a widget has no access to
-  `MaterialTheme`.
+  counts overdue trades. Its palette is written out in its companion, because a widget has no access
+  to the app's theme, and it cannot load the app's fonts, so its text is the system face.
 - `PriceRepository` fetches **from where a stock's stored history stops**, via `period1`/`period2`,
   not a fixed range. It used to ask for `5d`: a phone left shut for a week got a hole that every
   later refresh stepped straight over, permanently — and a call whose window contains a hole never
@@ -568,26 +565,6 @@ auroras, washes, per-page hues or 6dp pills, this section is what is true now.
   calls that on every swipe and its `snapshotFlow` reports the page it is already on the moment it
   starts collecting, so a scroll-to-top in there would fire on first composition and again on every
   settle, throwing the reader to the top for having swiped to a tab.
-- **The Analyze action never leaves, and it follows the bar down.** It used to go with the bar on
-  the same scroll — tidy, and it meant the one control that starts a run was reachable only from the
-  top of the page. It is always on screen now, and rather than holding its height over the hole the
-  bar leaves, it travels into the bar's own place: `animateDpAsState` between
-  `NavBarFootprint + PillBottomMargin` (94dp, clear of the bar and then the same gap again, so the
-  two read as one stack) and `PillBottomMargin` (10dp, the bar's own float off the bottom). The
-  travel is exactly `NavBarFootprint`, which is what makes it land there rather than near there.
-  **This was the rule `toastClearance` in the shell followed**, back when an outcome was a toast at
-  the foot of the screen — same problem, same `animateDpAsState`, and its comment said why: "so a
-  toast raised on a scrolled page does not hang over the gap where the bar used to be". The status
-  line lives in the header now and that clearance is gone with it, so the action is the only
-  floating chrome left that has to follow the bar at all. The wide layout draws it unconditionally with no bar to follow, so all of this is
-  the compact branch only.
-- **The Analyze action is a solid capsule since 4.5.0** — see **Design language**. The notes on
-  its 0.94 ground, its gradient edge and its aurora described the glass design and went with it.
-- **`FloatingSurface.outline` is a `Brush`, not a `Color`.** One parameter rather than two that can
-  both be set and disagree; a flat edge passes `SolidColor(…)`. The width stays 1dp for every
-  floating edge in the app, gradient or not — the bar sits directly under the action on a compact
-  screen, and an edge thicker on one of them would read as the two not matching rather than as one
-  of them being the control. The colour is what separates them.
 - **Motion has one curve, one press, and a switch.** Written 2026-10-05 from an audit against the
   Emil Kowalski and Apple motion notes. `UiEase` in `DesignSystem.kt` is the curve every tween names
   (Compose's `FastOutSlowIn` starts gently, which is exactly when a finger is watching);
@@ -620,23 +597,6 @@ auroras, washes, per-page hues or 6dp pills, this section is what is true now.
   wrapped it snapped mid-word. Split into the model (middle-ellipsised, so its version suffix
   survives) and the run time (its own line), nothing wraps and the date that tells two runs apart is
   never the part cut off.
-- **Every pill in the app is one shape and one of two heights**, `PillShape` and `LabelPillHeight`
-  / `PillHeight` in `DesignSystem.kt`. Before 2026-09-11 they were all `CircleShape` at whatever
-  height their own padding produced, which is what the owner reported as pills "too rounded" and
-  "different sizes in one card": a capsule is a shape nothing else on a screen of 14dp cards makes,
-  and a height derived from padding moves with the text, the font scale and whoever wrote that
-  particular chip. Six families had grown - the ring on a card, the button on a card, the EGX 33
-  badge, the stock sheet's filled flags and two chips spelled inline in the table - across four
-  corners and five heights. They are one now: **6dp**; **20dp** for anything only read, with the text
-  centred in a fixed box rather than propping it open; **32dp** for anything pressed, where the extra
-  12dp is the fingertip. **The 6 is not a free number and 8 was tried first.** `CircleShape` takes
-  half the *shorter* side, so the capsule on a 20dp pill was already only a 10dp corner - 8dp moved
-  every label pill by two, shipped, and looked identical on the device, while making the EGX 33 badge
-  *rounder* than the 4dp it had. 6dp is the largest corner that visibly cuts a 20dp pill. `OutlinePill` is the ring and
-  `FilledPill` is the block of colour, and both draw one `PillLabel`, so a pill's padding and type
-  cannot be restated anywhere. **What stays round is round by nature** and not by drift: avatars,
-  logos, the empty state's glyph, the navigation indicator, the header's search field, `DayChip`
-  (a seven-across day toggle) and `RiskRewardBar` (a bar, not a pill).
 - **A card says its pills in one place.** The position card drew the status chip in the header and
   the rest of them a block lower down, and the call card stacked Edited over Timing in the top-right
   corner - against a name block three or four lines tall, so the one annotation every call card
@@ -647,44 +607,11 @@ auroras, washes, per-page hues or 6dp pills, this section is what is true now.
   row (which is unconditional now, since a status is always there to say). No fact was added or
   removed by either move. The call card's own regroup was missed on the first pass and reported on
   2026-09-11 as pills "at the very top of the card, not aligned, placed randomly".
-- **The EGX 33 badge is deliberately outside `PillShape`**, and was folded in once and had to come
-  back out the same day. It is a 4dp square because round its outline sits concentric with the star
-  inside it and the pair reads as a settings cog; the shared 6dp made it rounder than the 4dp it had
-  and it read as a gear on the device within the hour. The pill rule is about labels, and this
-  carries no wording.
 - **T+1 is neutral, like every other note pill.** It was `primary` in all three places that draw it -
   the call card, the position card, Insights - on the reasoning that it is neither a verdict nor a
   warning and so may take the app's own voice. True, and not a reason to be the one differently
   coloured ring in a row of them; the wording already says the call named its own deadline. Asked
   for on 2026-09-11. It is still tappable in the two places it explains itself.
-- **A button on a card is one of two things, and its colour says which.** `ActionPill` in
-  `CommonUi.kt` is anything that changes the record — Bought, Sold, Keep open — as a `PillHeight`
-  ring in the app's own `primary` at half strength. `DisclosureButton` is anything that only opens
-  or closes a section — View / Hide recommendations, Source, Source trace — as a bare `primary`
-  label with an arrow that flips with the section. They were a filled tonal button, two outlined
-  ones and two text ones, which said that recording a purchase is a heavier act than recording a
-  sale, and put those two in one row on a position card disagreeing about it. **Three things are
-  deliberately outside the system**: the Ask AI pill, which since 4.7.0 is ink — solid when the
-  press is billed, a hairline when it reopens a saved answer — because the model is the one voice
-  on a card that is neither the accent nor money; the Analyze action, a 56dp amber capsule and a
-  tier above anything drawn on a card (see the entries above); and an `AlertDialog`'s
-  buttons, which are Material's convention rather than this app's. **The pills are 32dp and the
-  touch target is still 48**, through `minimumInteractiveComponentSize` — the trick the Ask AI pill
-  already used, and the reason a smaller button here costs nothing to press. Settings, Backup and
-  Prices were finished on 2026-09-09 by `SettingsButton`, the bullet below. **Channels is
-  deliberately still Material's own**: its eight `Button`s are the steps of the Telegram sign-in,
-  each the sole action of the card it is on and correctly the point of that screen.
-- **`SettingsButton` is the third kind, for a page of settings rather than a card about one call.**
-  `PillHeight` and `Space.m` against Material's 40dp and 24, and `labelMedium` like both card
-  buttons — at the default it was the heaviest thing on a card whose subject is the words beside it,
-  standing next to switches 32dp tall. It stays an `OutlinedButton` rather than becoming an
-  `ActionPill`: a pill takes the page's own hue to say that pressing it changes the record, and a
-  column of cyan rings down Settings is the page of coloured glyphs the question mark is muted to
-  avoid. It carries a `filled` flag for the four card primaries — Save and verify, Sync now,
-  Download, Install — **because they share a row with the outlined ones**, and a `FlowRow` 40dp tall
-  at one end and 32 at the other reads as a layout fault rather than as emphasis. Which button is
-  filled did not change; only how tall the row is. `AlertDialog` buttons stay Material's, the same
-  exception the card pills make.
 - **A report card toggles on a press, open or shut.** `Card(onClick = { onExpandedChange(!expanded) })`
   in `SavedAnalysisCard`; release 3.8.4 dropped the earlier `enabled = !expanded`, so a press on the
   card's own area closes an open report as well as opening a shut one. That means any region inside
@@ -694,17 +621,6 @@ auroras, washes, per-page hues or 6dp pills, this section is what is true now.
   `Modifier.pointerInput(Unit) { detectTapGestures { } }`, which swallows taps nothing in the table
   answers; rows, the ticker, the toolbar and Hide take theirs first. The narrow layout's cards and
   the source trace are not covered by that.
-- **Nothing inside the `NavigationRail` may fill its width, and one `fillMaxWidth()` took the whole
-  unfolded layout out.** Material sizes a rail with `widthIn(min = ContainerWidth)` — a floor, not a
-  width — so a child that fills the width stretches the rail to whatever it is measured against.
-  `NavigationSuiteScaffoldLayout` measures the navigation suite against the entire window and then
-  hands the page `width - railWidth`, so the rail became the screen and the page was measured at
-  zero: five destinations centred on an empty display. It arrived with the app mark on 2026-09-09,
-  as `Box(Modifier.fillMaxWidth().height(RailTopInset))` holding the mark in the rail's top gap, and
-  was fixed in 3.6.2 by deleting that one call — the rail's column centres its children already.
-  **A phone cannot show this**: there is no rail on the compact layout, so it shipped through a
-  release that was checked folded, and only the Fold opened shows it. Anything new drawn in the rail
-  wants a bounded width for the same reason.
 - **A page's filters live in a sheet the header opens, not on a shelf on the page.** The page
   header's filter icon opens a `ModalBottomSheet` holding that page's filters; it replaced
   `FilterBar` on 2026-09-09, the day after the stock box left that shelf for the header.

@@ -65,7 +65,7 @@ class OverdueNotifier(private val context: Context) {
             NOTIFICATION_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_egx_notification)
-                .setColor(NotificationAccent)
+                .setColor(NotificationTone.TRADES.argb)
                 .setContentTitle(what)
                 .setContentText(detail)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(detail))

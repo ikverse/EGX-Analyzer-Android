@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The launch screen's icon since 5.0: the launcher icon's lime mark on its cobalt, as a vector. The
+  platform shows the middle 160dp of this 240dp layer as a circle, so the disc is drawn to exactly
+  that size and the mark sits well inside it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="240dp"
+    android:height="240dp"
+    android:viewportWidth="240"
+    android:viewportHeight="240">
+    <path
+        android:fillColor="@color/egx_cobalt"
+        android:pathData="M120,40a80,80 0,1 1,0 160a80,80 0,1 1,0 -160z" />
+    <group
+        android:scaleX="4"
+        android:scaleY="4"
+        android:translateX="72"
+        android:translateY="72">
+        <path
+            android:pathData="M3,17L9,11L13,15L21,7"
+            android:strokeColor="@color/egx_lime"
+            android:strokeWidth="2.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M15,7H21V13"
+            android:strokeColor="@color/egx_lime"
+            android:strokeWidth="2.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>

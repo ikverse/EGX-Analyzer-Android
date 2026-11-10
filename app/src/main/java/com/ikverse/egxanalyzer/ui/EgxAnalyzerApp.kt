@@ -1,5 +1,19 @@
 package com.ikverse.egxanalyzer.ui
 
+import com.ikverse.egxanalyzer.ui.theme.palette
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.text.font.FontWeight
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
@@ -65,18 +79,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBarDefaults
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailDefaults
-import androidx.compose.material3.NavigationRailItem
-import androidx.compose.material3.NavigationRailItemDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldLayout
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -131,6 +136,9 @@ import com.ikverse.egxanalyzer.ui.theme.groundAlpha
 import com.ikverse.egxanalyzer.ui.theme.LightGroundLift
 import com.ikverse.egxanalyzer.ui.theme.GroundLift
 import androidx.window.layout.FoldingFeature
+import com.ikverse.egxanalyzer.model.HingeReport
+import com.ikverse.egxanalyzer.model.foldPosture
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
 import androidx.window.layout.WindowInfoTracker
 import androidx.window.layout.WindowLayoutInfo
 
@@ -173,17 +181,28 @@ fun EgxAnalyzerApp(appState: AppState) {
     }
     val separatingFold = layoutInfo?.displayFeatures.orEmpty().filterIsInstance<FoldingFeature>()
         .firstOrNull(FoldingFeature::isSeparating)
+    // The 5.0 layouts read the hinge through one value: cover, unfolded, tabletop or book. Reduced
+    // to plain numbers here so the decision itself is `foldPosture`, a function a test can call.
+    val windowPx = LocalWindowInfo.current.containerSize
+    val hinge = layoutInfo?.displayFeatures.orEmpty().filterIsInstance<FoldingFeature>().firstOrNull()
+    val posture = foldPosture(
+        widthDp = width,
+        hinge = hinge?.let { feature ->
+            val across = feature.orientation == FoldingFeature.Orientation.HORIZONTAL
+            HingeReport(
+                halfOpened = feature.state == FoldingFeature.State.HALF_OPENED,
+                runsAcross = across,
+                start = (if (across) feature.bounds.top else feature.bounds.left).toFloat(),
+                end = (if (across) feature.bounds.bottom else feature.bounds.right).toFloat(),
+                windowExtent = (if (across) windowPx.height else windowPx.width).toFloat(),
+            )
+        },
+    )
 
-    // A rail beside the page on anything wider than a phone, and a floating bar over the page on a
-    // phone, at the same breakpoint the suite used when it chose for itself. The two are laid out
-    // differently enough - one takes width from the page, the other takes nothing at all - that they
-    // are separate shells rather than one shell with a choice of navigation in it.
-    val rail = windowWidth != WindowWidth.COMPACT
-    // Held here rather than inside the pages: the bar is drawn over them, and it has to survive a
-    // change of destination.
-    val navBarVisible = remember { mutableStateOf(true) }
-    // Held here for the same reason, and read by exactly one thing - see LocalTabsSettled. The pager
-    // below writes it; beside a rail nothing does, and nothing there needs to.
+    // **One shell at every width since 5.0.** The rail and the floating bar are gone; every page
+    // carries its own tab row in its header, so the wide layout and the narrow one are the same
+    // composition and a fold no longer swaps one subtree for another. Read by exactly one thing -
+    // see LocalTabsSettled. The pager below writes it.
     val tabsSettled = remember { mutableStateOf(true) }
     // Above the shells and not inside either of them: back means the same thing whichever one is
     // drawn, and a handler in each would be one rule written twice. Enabled only when there is
@@ -206,24 +225,22 @@ fun EgxAnalyzerApp(appState: AppState) {
             appState.markInsightsSeen()
         }
     }
-    // Drawn once for the whole app, above both shells, for the reason the handler above is: a
-    // ticker is pressable on four tabs and one sheet must serve all four. It is outside the
-    // CompositionLocalProvider's content but inside the same composition, so it survives a fold
-    // exactly as the state naming it does. See AppState.openStockTicker.
-    appState.openStockTicker?.let { ticker ->
-        StockSheet(ticker, appState, onDismiss = appState::closeStock)
-    }
     // What each page has open lives on AppState rather than anywhere below this line - see
     // PageState, which explains why the two shells below cannot hold it between them.
     CompositionLocalProvider(
+        LocalFoldPosture provides posture,
         LocalWindowWidth provides windowWidth,
-        LocalNavBarVisible provides navBarVisible,
         LocalTabsSettled provides tabsSettled,
         // Remembered on the state rather than rebuilt each frame: a new lambda every recomposition
         // is a new value for a static local, which invalidates every reader of it - and the readers
         // here are every ticker on every card on the page.
         LocalOpenStock provides remember(appState) { appState::openStock },
     ) {
+      // Inside the provider since 5.0: outside it the sheet read the default posture and always laid
+      // out for the cover screen, and its full-screen chart with it.
+      appState.openStockTicker?.let { ticker ->
+          StockSheet(ticker, appState, onDismiss = appState::closeStock)
+      }
       // The ground, drawn once across the whole window - the rail included - because a ground
       // that began at the page's edge would put a seam down the side of every wide window.
       Box(
@@ -233,106 +250,12 @@ fun EgxAnalyzerApp(appState: AppState) {
               // band down the rail. One flat ground for the whole window still means no seam.
               .background(MaterialTheme.colorScheme.background),
       ) {
-        if (rail) {
-            // **The mark is not drawn in the chrome at all.** It used to be drawn in the header
-            // beside the app's name and travel across into the rail's top gap as that header
-            // collapsed - a whole mechanism of anchors, window coordinates and two animations,
-            // existing so one glyph could be in two places. The name band went on 2026-09-09 and
-            // the travel had nothing to travel from; the mark stood in the rail's top gap for a
-            // while after that, and that gap itself is gone now the destinations are centred on
-            // the window - see [AppRail].
-            //
-            // On the phone there is no rail, so the mark is not drawn at all: the page's own name
-            // and icon are what the top of the window says. The launcher icon and the notification
-            // glyph are unchanged, which is where the artwork still earns its keep.
-            NavigationSuiteScaffoldLayout(
-                navigationSuite = { AppRail(appState) },
-                navigationSuiteType = NavigationSuiteType.NavigationRail,
-            ) {
-                // The suite scaffold used to paint this; the layout does not. Without it the
-                // window background shows through behind the system bars as a pale band - the theme
-                // parents `Theme.Material.Light`, so that band is very nearly white. It is the
-                // page's own ground rather than the chrome colour: this shows behind the gesture
-                // strip, where `surfaceContainer` drew a full-width strip about 20dp tall along the
-                // foot of every page - the same band the top edge was cleared of when the app-name
-                // band went, lying along the other end of the window.
-                Surface(
-                    // The layout does not do this for us the way the full NavigationSuiteScaffold
-                    // does, and without it the page keeps clear of the gesture strip that the rail
-                    // beside it is already holding: a second empty band, the width of the strip, in
-                    // the chrome colour, between the bottom of the page and the first row of icons.
-                    Modifier.fillMaxSize().consumeWindowInsets(
-                        NavigationRailDefaults.windowInsets.only(WindowInsetsSides.Start),
-                    ),
-                    // Transparent, because the ground is painted once for the whole window now -
-                    // see appGround. Painted here as well it would cover the light on this half of
-                    // the window and put back the seam beside the rail.
-                    color = Color.Transparent,
-                ) {
-                    AppContent(appState, rail = true)
-                }
-            }
-        } else {
-            // The bar floats over the page rather than sitting under it, so the page is the full
-            // height of the window and nothing is laid out around the bar. It consumes no insets of
-            // its own: both it and the page clear the gesture strip separately, and neither hands
-            // the other anything when the bar hides.
-            Box(Modifier.fillMaxSize()) {
-                Surface(
-                    Modifier.fillMaxSize(),
-                    // Transparent for appGround's reason, as above.
-                    color = Color.Transparent,
-                ) {
-                    AppContent(appState, rail = false)
-                }
-                FloatingNavBar(appState, Modifier.align(Alignment.BottomCenter))
-            }
-        }
+        // Swiping between tabs on the cover screen only: unfolded, a sideways drag belongs to the
+        // tables that scroll sideways, and the tabs are a press away in the header.
+        AppContent(appState, swipeBetweenTabs = windowWidth == WindowWidth.COMPACT)
       }
     }
 }
-
-/** Icons carry the rail on a glance, so they are a size up from the Material default of 24dp. */
-private val NavigationIconSize = 28.dp
-
-/**
- * The pill's own height.
- *
- * Material leaves a bar 80dp. This one is drawn over the page rather than under it, so its height is
- * page it is covering, and a shorter pill covers less of it.
- */
-private val NavigationBarHeight = 72.dp
-
-/** How far the pill is held in from the sides of the window, which is what makes it read as a pill. */
-internal val PillSideMargin = 12.dp
-
-/** Room under the pill, above whatever the gesture strip claims, so it floats rather than sits. */
-internal val PillBottomMargin = 10.dp
-
-/**
- * The bottom of a page the pill is covering.
- *
- * Nothing is laid out around a floating bar, so a page that padded itself by nothing would end its
- * last card underneath one. Deliberately not the gesture strip's inset as well: the page already
- * clears that through `safeDrawing`, and the pill is measured up from the same line.
- *
- * Published because a page has to know it twice over - to hold its content clear of the pill, and to
- * decide whether hiding the pill is worth it at all. A page with less than this left to scroll shows
- * nothing new by hiding it.
- */
-internal val NavBarFootprint = NavigationBarHeight + PillBottomMargin
-
-/** A shade under the rail's 28dp: the pill has to leave room for a label under the glyph. */
-private val BarIconSize = 24.dp
-
-/**
- * A size down from Material's 12sp `labelMedium`.
- *
- * The pill is [PillSideMargin] narrower on each side than the bar it replaced, and five destinations
- * divide what is left of a 411dp cover screen into slots too narrow for "Portfolio" at the full
- * size. Shrinking the label rather than dropping it keeps all five named.
- */
-private val BarLabelSize = 12.sp
 
 /** Between the header above the line and the first card under it. */
 private val StatusLineGap = 6.dp
@@ -372,7 +295,11 @@ internal fun AppStatusLine(
 ) {
     // A quiet run is running with nothing to say: the screen that started it is already saying it,
     // and the bar under this header is still drawn from `busyLabel` itself.
-    val busy = appState.busyLabel?.takeIf { appState.busyAnnounced }
+    // An analysis says itself through RunProgress above this line, with its batches and its clock,
+    // so its busy label is not said a second time here.
+    val busy = appState.busyLabel?.takeIf {
+        appState.busyAnnounced && appState.analysisStatus != AnalysisStatus.RUNNING
+    }
     val message = appState.statusMessage
     val text = busy ?: message?.text
     val stage = when {
@@ -421,7 +348,7 @@ internal fun AppStatusLine(
             Text(
                 label,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (glyph == StatusStage.FAILED) palette.loss else palette.muted,
                 textAlign = TextAlign.Start,
                 // Two lines is the ceiling, as it was on the toast. Anything needing more than that
                 // is a screen, not a status line, and a provider's own error can run to a paragraph.
@@ -436,341 +363,90 @@ internal fun AppStatusLine(
                     .semantics { liveRegion = LiveRegionMode.Polite },
             )
             if (undo != null) {
-                // A plain text button in the app's own accent, which is the one thing on this line
-                // allowed to carry colour - the glyph is tinted and the words never are, and an
-                // action the reader has seconds to notice is the exception that earns it.
-                TextButton(
+                Spacer(Modifier.weight(1f))
+                UndoButton(
+                    label = undo.label,
+                    message = message,
                     onClick = {
                         undo.action()
                         onDismiss()
                     },
-                    contentPadding = PaddingValues(horizontal = Space.s, vertical = 0.dp),
-                ) {
-                    Text(undo.label, style = MaterialTheme.typography.labelLarge)
-                }
+                )
             }
+        }
+    }
+}
+
+/**
+ * Undo, as an ink capsule with a ring that empties over the seconds the offer stands - so the
+ * reader can see how long they have rather than finding the button gone. The ring restarts for
+ * each new message, and holds full with reduce motion on.
+ */
+@Composable
+private fun UndoButton(label: String, message: StatusMessage?, onClick: () -> Unit) {
+    val p = palette
+    val still = LocalReduceMotion.current
+    val left = remember(message) { Animatable(1f) }
+    LaunchedEffect(message, still) {
+        if (!still) left.animateTo(0f, tween(StatusUndoMilliseconds.toInt(), easing = LinearEasing))
+    }
+    val press = remember { MutableInteractionSource() }
+    Row(
+        Modifier
+            .minimumInteractiveComponentSize()
+            .pressScale(press)
+            .height(34.dp)
+            .clip(Kit.Capsule)
+            .background(p.ink)
+            .clickable(interactionSource = press, indication = null, role = Role.Button, onClick = onClick)
+            .padding(start = 14.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.ExtraBold, color = p.onInk)
+        Canvas(Modifier.size(22.dp)) {
+            val stroke = 3.dp.toPx()
+            drawCircle(p.onInk.copy(alpha = 0.25f), radius = size.minDimension / 2 - stroke / 2, style = Stroke(stroke))
+            drawArc(p.onInk, startAngle = -90f, sweepAngle = 360f * left.value, useCenter = false, style = Stroke(stroke, cap = StrokeCap.Round))
         }
     }
 }
 
 @Composable
 private fun StatusGlyph(stage: StatusStage) {
+    val p = palette
     when (stage) {
-        // Nothing at all. A run already has the bar under the header travelling for it, and a
-        // 14dp spinner beside the words was the same fact drawn a second time - two small moving
-        // things a line apart, neither of them the one the eye should follow.
-        StatusStage.WORKING -> Unit
-        StatusStage.DONE -> Icon(
-            Icons.Outlined.CheckCircle,
-            // The message says what happened; a reader announcing the tone as well says it twice.
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.tertiary,
-            modifier = Modifier.size(StatusGlyphSize),
-        )
-        StatusStage.FAILED -> Icon(
-            Icons.Outlined.ErrorOutline,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.error,
-            modifier = Modifier.size(StatusGlyphSize),
-        )
+        // A small cobalt spinner: the line is the only thing saying the app is busy now that the
+        // generic progress bar under the header is reserved for an analysis.
+        StatusStage.WORKING -> {
+            val still = LocalReduceMotion.current
+            val turn = if (still) 0f else {
+                val t = rememberInfiniteTransition(label = "statusSpin")
+                val v by t.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "spin")
+                v
+            }
+            Canvas(Modifier.size(StatusGlyphSize)) {
+                val stroke = 2.5.dp.toPx()
+                drawArc(p.hero, startAngle = turn, sweepAngle = 270f, useCenter = false, style = Stroke(stroke, cap = StrokeCap.Round))
+            }
+        }
+        // The message says what happened; a reader announcing the tone as well says it twice.
+        StatusStage.DONE -> Box(
+            Modifier.size(StatusGlyphSize + 4.dp).clip(Kit.Capsule).background(p.gain),
+            contentAlignment = Alignment.Center,
+        ) { Text("✓", color = Color.White, style = MaterialTheme.typography.labelSmall) }
+        StatusStage.FAILED -> Box(
+            Modifier.size(StatusGlyphSize + 4.dp).clip(Kit.Capsule).background(p.loss),
+            contentAlignment = Alignment.Center,
+        ) { Text("!", color = Color.White, style = MaterialTheme.typography.labelSmall) }
     }
 }
 
 /** Smaller than an inline icon: it sits against body text, not against a control. */
-private val StatusGlyphSize = 14.dp
-
-/** Room between rail items, where Material leaves 4dp and the four destinations read as one block. */
-private val RailItemGap = 16.dp
-
+private val StatusGlyphSize = 16.dp
 
 @Composable
-private fun AppRail(appState: AppState, modifier: Modifier = Modifier) {
-    // **The page's own ground, not the chrome colour.** It was `surfaceContainer` so that it read
-    // as the app-name band turning the corner down the side of the page - and that band was removed
-    // on 2026-09-09, which left the rail a slab in the one colour every `SectionCard` is also drawn
-    // in: a full-height card parked beside a page of cards, twice as light as the page between
-    // them, with no divider and nothing to say which of the two was chrome. The top edge was
-    // already argued out when the band went - a `surfaceContainer` strip over a `background` page
-    // is a seam, and nothing up there justified one - and this is the same seam stood on its end.
-    // On `background` the rail is the page's own ground with the destinations standing on it, and
-    // what separates the page is its cards' own inset rather than a change of colour.
-    // Nothing paints the rail's own background; the window's one ground shows through it.
-    // How tall the Settings item turned out to be, held so the column above it can hold back the
-    // same amount and leave the group centred on the window. See the spacers in the rail below.
-    var settingsHeight by remember { mutableStateOf(0.dp) }
-    val density = LocalDensity.current
-    NavigationRail(
-        modifier = modifier,
-        containerColor = Color.Transparent,
-        // Spelled out because `contentColorFor(Transparent)` is `Unspecified`, which would leave
-        // anything in the rail that did not name its own colour taking whatever was in scope.
-        contentColor = MaterialTheme.colorScheme.onBackground,
-    ) {
-        // **What the destinations are centred on is the window, not the space above Settings.**
-        // Two weighted spacers alone would centre the four in what is left after Settings has taken
-        // its height off the bottom, which lands the group half an item - about 29dp - above the
-        // middle of a window whose middle is the one line the eye checks a centred column against.
-        // Holding that much of the top back, on top of the equal weights, is what makes the group's
-        // own midpoint and the rail's the same line: with a top hold of `settings + gap` and a
-        // bottom of `gap`, the space above the group comes out exactly one Settings taller than the
-        // space below it, which is the offset Settings itself introduced.
-        //
-        // The height is measured rather than named because a `NavigationRailItem` has no fixed one:
-        // it is an indicator over a label, so it moves with the icon size, the label's text size
-        // and the font scale the reader chose. The first frame of a cold start is laid out against
-        // zero and settles on the next - a rail that is on screen for a fold's worth of animation
-        // anyway.
-        //
-        // **Nothing put in this rail may fill its width**, and a `Box` that did broke the unfolded
-        // layout in 3.6.1 - worth keeping written down, because the spacers below are where the
-        // next thing would go. Material sizes a `NavigationRail` with `widthIn(min =
-        // ContainerWidth)`, a floor rather than a width, so a child that fills it stretches the
-        // rail to whatever it was measured against - and `NavigationSuiteScaffoldLayout` measures
-        // the navigation suite against the whole window, then gives the page `width - railWidth`.
-        // The rail became the screen and the page was measured at zero: five destinations centred
-        // on an empty display, with no page beside them at all. A phone cannot show it, since there
-        // is no rail there. A `Spacer` carrying only a height or a weight has no width to give, so
-        // the ones below are safe.
-        //
-        // The app's mark stood at the top of this column from 2026-09-09, when it left the header
-        // that was removed the same day, until it was taken out again: `ic_egx_notification` is
-        // three ascending bars and a rising arrow, and the three destinations under it are
-        // `AutoGraph`, `Assessment` and `Insights` - so the mark was a fourth chart glyph at the
-        // head of a column of chart glyphs, unlabelled among labelled ones and wearing the current
-        // page's own aurora. What it was there to say, [PageHeader] now says on both layouts, in
-        // the page's name and its own glyph; the launcher icon and the notification glyph are where
-        // that artwork still earns its keep.
-        Spacer(Modifier.height(settingsHeight + RailItemGap))
-        Spacer(Modifier.weight(1f))
-        // **Settings is the one destination that is not part of the group.** It is where you go to
-        // set the app up rather than to read it, which is the same reason it sits last in
-        // [AppDestination] and last in the phone's pill - and on a rail there is somewhere for that
-        // to be said out loud: the reading at the middle of the window, the configuration at the
-        // far end of it.
-        AppDestination.entries.filter { it != AppDestination.SETTINGS }
-            .forEachIndexed { index, destination ->
-                if (index > 0) Spacer(Modifier.height(RailItemGap))
-                RailItem(appState, destination)
-            }
-        Spacer(Modifier.weight(1f))
-        // A floor under the weighted gap: on a window short enough for the weights to collapse to
-        // nothing, this is what keeps Settings off the bottom of the group.
-        Spacer(Modifier.height(RailItemGap))
-        RailItem(
-            appState,
-            AppDestination.SETTINGS,
-            // Read back for the hold at the top of the column. `onSizeChanged` rather than a
-            // `Layout`: the value is wanted once, and only to the nearest pixel.
-            Modifier.onSizeChanged { size ->
-                settingsHeight = with(density) { size.height.toDp() }
-            },
-        )
-    }
-}
-
-/**
- * One destination on the rail.
- *
- * Written out once because the rail composes it in two places - the centred group and Settings at
- * the foot - and a destination has to look and behave the same in both.
- */
-@Composable
-private fun RailItem(
-    appState: AppState,
-    destination: AppDestination,
-    modifier: Modifier = Modifier,
-) {
-    val selected = appState.destination == destination
-    // The phone bar's colours on the rail's own item (2026-11 redesign): neutral icons, the one
-    // accent's soft container behind the tab you are on.
-    NavigationRailItem(
-        selected = selected,
-        // Pressing the destination you are already on means "back to the top" - the same
-        // press every bottom bar on this platform answers that way. See AppState.scrollToTop.
-        onClick = {
-            if (selected) appState.scrollToTop(destination) else appState.navigate(destination)
-        },
-        icon = { NavigationIcon(destination, selected) },
-        label = { Text(destination.label) },
-        modifier = modifier,
-        colors = NavigationRailItemDefaults.colors(
-            selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            selectedTextColor = MaterialTheme.colorScheme.onSurface,
-            indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
-            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ),
-    )
-}
-
-/**
- * The phone's navigation: a tonal bar floating over the page (2026-11 redesign).
- *
- * One highlight for the whole bar rather than one per item, so a change of tab is a single object
- * travelling: it springs sideways to the tab pressed and squares its corners while it moves, which
- * is the M3 Expressive half of the design. Icons are neutral and only the tab you are on is in the
- * accent - a Swiss page has one accent, and its name is in the header.
- */
-@Composable
-private fun FloatingNavBar(appState: AppState, modifier: Modifier = Modifier) {
-    AnimatedVisibility(
-        // Slides away while a page is scrolled down and comes back on the way up. Only the pill
-        // moves: the page is the full height of the window either way, so there is nothing to
-        // collapse and nothing underneath waiting for the room.
-        visible = LocalNavBarVisible.current.value,
-        modifier = modifier
-            // The strip is the pill's to clear, the same as it is the page's - neither is laid out
-            // around the other.
-            .windowInsetsPadding(NavigationBarDefaults.windowInsets)
-            .padding(start = PillSideMargin, end = PillSideMargin, bottom = PillBottomMargin),
-        enter = fadeIn() + slideInVertically { it },
-        exit = slideOutVertically { it } + fadeOut(),
-    ) {
-        FloatingSurface(
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.height(NavigationBarHeight),
-        ) {
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val entries = AppDestination.entries
-                val slot = maxWidth / entries.size
-                val index = entries.indexOf(appState.destination).coerceAtLeast(0)
-                val still = LocalReduceMotion.current
-                val target = slot * index + (slot - IndicatorWidth) / 2
-                val left by animateDpAsState(
-                    target,
-                    animationSpec = if (still) snap() else spring(dampingRatio = 0.62f, stiffness = 420f),
-                    label = "navIndicator",
-                )
-                // Squared off while it travels, round again once it lands.
-                val moving = kotlin.math.abs((left - target).value) > 1f
-                val corner by animateDpAsState(
-                    if (moving) IndicatorTravelCorner else IndicatorHeight / 2,
-                    animationSpec = if (still) snap() else spring(stiffness = Spring.StiffnessMedium),
-                    label = "navIndicatorCorner",
-                )
-                // The highlight sits where the icon sits: centred in the item's column above the
-                // label, so it is placed by the same arithmetic the column below uses.
-                Box(
-                    Modifier
-                        .offset(x = left, y = (NavigationBarHeight - ItemBlockHeight) / 2)
-                        .size(IndicatorWidth, IndicatorHeight)
-                        .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(corner)),
-                )
-                // No icon here: five destinations already divide a 411dp cover screen, and a sixth
-                // thing taking width from them buys nothing the header above does not already say.
-                Row(
-                    Modifier.fillMaxWidth().selectableGroup(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    entries.forEach { destination ->
-                        val selected = appState.destination == destination
-                        PillItem(
-                            destination = destination,
-                            selected = selected,
-                            // As on the rail: already here means take me back to the top.
-                            onClick = {
-                                if (selected) appState.scrollToTop(destination) else appState.navigate(destination)
-                            },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * One destination in the pill.
- *
- * Material's own `NavigationBarItem` asks for around 82dp and overflows rather than shrinks, so this
- * is the same item built to the height available. It draws no highlight of its own: the bar's one
- * travelling highlight sits behind whichever item is chosen.
- */
-@Composable
-private fun PillItem(
-    destination: AppDestination,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = MaterialTheme.colorScheme
-    val press = remember { MutableInteractionSource() }
-    val ink by animateColorAsState(
-        if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant,
-        label = "navInk",
-    )
-    Column(
-        modifier.fillMaxHeight()
-            .selectable(
-                selected = selected,
-                role = Role.Tab,
-                interactionSource = press,
-                indication = null,
-                onClick = onClick,
-            ),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Box(
-            Modifier.size(IndicatorWidth, IndicatorHeight).pressScale(press),
-            contentAlignment = Alignment.Center,
-        ) {
-            NavigationIcon(destination, selected, BarIconSize, ink)
-        }
-        Spacer(Modifier.height(IndicatorLabelGap))
-        Text(
-            destination.label,
-            style = MaterialTheme.typography.labelMedium.copy(fontSize = BarLabelSize, lineHeight = BarLabelLine),
-            color = if (selected) colors.onSurface else colors.onSurfaceVariant,
-            maxLines = 1,
-        )
-    }
-}
-
-/** Wide enough to hold the icon clear of a five-slot 411dp screen's edges, and no wider. */
-private val IndicatorWidth = 60.dp
-
-/** A 24dp icon with Material's own 4dp either side. */
-private val IndicatorHeight = 32.dp
-
-/** The highlight's corner while it is travelling between tabs. */
-private val IndicatorTravelCorner = 10.dp
-
-/** Close enough that the icon and its name read as one item, far enough that they do not touch. */
-private val IndicatorLabelGap = 3.dp
-
-/** The label's own line, fixed so [ItemBlockHeight] is a sum rather than a measurement. */
-private val BarLabelLine = 15.sp
-
-/** Indicator, gap and label: the block each item centres, which the highlight is placed against. */
-private val ItemBlockHeight = IndicatorHeight + IndicatorLabelGap + 15.dp
-
-
-@Composable
-private fun NavigationIcon(
-    destination: AppDestination,
-    selected: Boolean,
-    size: Dp = NavigationIconSize,
-    // The rail's items colour their own content; the pill's are drawn by hand and have to say.
-    tint: Color = LocalContentColor.current,
-) {
-    Icon(
-        if (selected) destination.selectedIcon else destination.icon,
-        contentDescription = destination.label,
-        modifier = Modifier.size(size),
-        tint = tint,
-    )
-}
-
-@Composable
-private fun AppContent(appState: AppState, rail: Boolean) {
-    // Arriving somewhere new with the navigation still hidden reads as the bar having gone missing,
-    // and the page that hid it is no longer on screen to bring it back.
-    val navBarVisible = LocalNavBarVisible.current
-    LaunchedEffect(appState.destination) { navBarVisible.value = true }
-
+private fun AppContent(appState: AppState, swipeBetweenTabs: Boolean) {
     // How long the header keeps a message. A confirmation gets out of the way on its own; a failure
     // does not, because it is the one kind worth reading twice and the one kind that can arrive
     // while the reader is looking somewhere else - a provider's refusal is often the only account
@@ -783,65 +459,20 @@ private fun AppContent(appState: AppState, rail: Boolean) {
         appState.consumeStatusMessage()
     }
 
-    Scaffold(
-        // **Every side but the top.** The page runs up behind the status bar on purpose, so that
-        // its own background and the accent wash at the top of it carry on up behind the clock and
-        // the battery instead of stopping under a strip of chrome in a different colour. With the
-        // app-name band gone there is nothing up there to justify a band: a `surfaceContainer`
-        // strip over a `background` page is a seam across the top of every screen.
-        //
-        // What keeps the title out from under the clock is [PageHeader], which pads itself by the
-        // top inset. It reads `safeDrawing` rather than `statusBars` so a tall cutout is cleared
-        // too.
-        modifier = Modifier.fillMaxSize().windowInsetsPadding(
+    // **Every side but the top.** The page runs up behind the status bar on purpose, so its own
+    // ground carries on up behind the clock and the battery instead of stopping under a strip of
+    // chrome. What keeps the title out from under the clock is [PageHeader], which pads itself by
+    // the top inset; it reads `safeDrawing` rather than `statusBars` so a tall cutout is cleared too.
+    //
+    // A plain box since 5.0, where a transparent Material `Scaffold` stood: it carried no bar, no
+    // snackbar and no colour, and its only job - holding these insets - is this one modifier. The
+    // window's ground is already under it; see appGround.
+    Box(
+        Modifier.fillMaxSize().windowInsetsPadding(
             WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
         ),
-        // **Zero, because the modifier above has already done all of it.** Left at its default of
-        // `systemBars`, the Scaffold reports whatever that modifier did not consume - which is
-        // exactly the top inset this layout deliberately leaves unconsumed - and `padding(padding)`
-        // below then applies it a second time on top of the one `PageHeader` applies itself. That
-        // is a status bar's worth of empty band above every page, and it also puts the page's own
-        // background back below the status bar, which is the band this change existed to remove.
-        contentWindowInsets = WindowInsets(0.dp),
-        // The page's ground, not the chrome colour. The `Surface` below is padded out of the
-        // horizontal and bottom safe-drawing insets, so what this paints is the strip behind the
-        // gesture bar - and in `surfaceContainer` that was a band across the foot of every page.
-        // Transparent: the window's ground is already under this - see appGround.
-        containerColor = Color.Transparent,
-    ) { padding ->
-        // No chrome above the page any more - no name band, no progress hairline, no status
-        // line. The first two are gone; the third moved on to the page, under its own title. See
-        // `Screen`, and [AppStatusLine] for what the move cost.
-        //
-        // The page is no longer *set into* anything either, so the rounded top corners and the
-        // hairline round them have gone with the band that made them read as an inset panel. A
-        // radius against the top of the window is a curve against the frame of the screen, and a
-        // hairline there is a line under the status bar.
-        Surface(
-            Modifier.padding(padding).fillMaxSize(),
-            // Transparent for appGround's reason, as above.
-            color = Color.Transparent,
-        ) {
-            if (rail) {
-                // Screens cross-fade and rise slightly, so changing destination reads as moving
-                // somewhere rather than the content being swapped underneath. Beside a rail the
-                // destinations are a column of buttons rather than a row of pages, and sliding
-                // between them sideways would answer a gesture this layout does not offer.
-                AnimatedContent(
-                    targetState = appState.destination,
-                    transitionSpec = {
-                        (fadeIn(initialAlpha = 0.4f) + slideInVertically { it / 24 })
-                            .togetherWith(fadeOut())
-                            .using(SizeTransform(clip = false))
-                    },
-                    label = "destination",
-                ) { destination ->
-                    DestinationScreen(destination, appState)
-                }
-            } else {
-                DestinationPager(appState)
-            }
-        }
+    ) {
+        DestinationPager(appState, swipeBetweenTabs)
     }
 }
 
@@ -871,11 +502,12 @@ private fun AppContent(appState: AppState, rail: Boolean) {
  * against a page read a frame or more later, so a second swipe arriving inside that window scrolled
  * the reader back to the page they had just left.
  *
- * Compact only. A tab a swipe away is the phone's gesture; beside a rail there is no reason to expect
- * it and a page-wide horizontal drag would be caught by the tables that scroll sideways.
+ * **Every width since 5.0, swiped on the cover screen only** ([swipe]). Unfolded, the pager still
+ * carries the travel between tabs - a press on a tab's name in the header - but takes no drag: a
+ * page-wide horizontal drag there belongs to the tables that scroll sideways.
  */
 @Composable
-private fun DestinationPager(appState: AppState) {
+private fun DestinationPager(appState: AppState, swipe: Boolean) {
     val destinations = AppDestination.entries
     val pager = rememberPagerState(
         initialPage = destinations.indexOf(appState.destination),
@@ -964,6 +596,7 @@ private fun DestinationPager(appState: AppState) {
         // whole cost landed in the middle of the gesture. It is the same work either way; this only
         // moves it somewhere there is no gesture for it to stutter.
         beyondViewportPageCount = 1,
+        userScrollEnabled = swipe,
     ) { page ->
         Box(Modifier.fillMaxSize().sidewaysGesturesStayOnThePage()) {
             DestinationScreen(destinations[page], appState)

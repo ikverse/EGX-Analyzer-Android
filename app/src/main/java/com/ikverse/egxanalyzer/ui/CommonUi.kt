@@ -1,5 +1,9 @@
 package com.ikverse.egxanalyzer.ui
 
+import com.ikverse.egxanalyzer.ui.kit.KitRefreshIndicator
+
+import com.ikverse.egxanalyzer.ui.kit.TickerTape
+import com.ikverse.egxanalyzer.ui.theme.palette
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
@@ -80,7 +84,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -153,6 +156,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material3.LocalContentColor
+import com.ikverse.egxanalyzer.ui.kit.KitRule
 
 /**
  * Standard page frame: the page's own name at the top, shrinking as the page is read.
@@ -187,8 +193,6 @@ internal fun Screen(
      * the navigation cannot drift apart: there is one of each, on [AppDestination].
      */
     destination: AppDestination,
-    /** Stays put while the page scrolls. The content reserves room so it never covers anything. */
-    floatingAction: (@Composable () -> Unit)? = null,
     /** Given, the page pulls down to refresh. Its spinner is [refreshing]. */
     onRefresh: (() -> Unit)? = null,
     refreshing: Boolean = false,
@@ -236,48 +240,10 @@ internal fun Screen(
             }
         }
     }
-    // The bottom bar gets out of the way while a page is being read, and comes back the moment it is
-    // pulled back up. Taken from this page's own scroll position rather than from the gesture, so
-    // scrolling a list inside a card - the chat list, the source list - leaves the bar alone.
-    val navBarVisible = LocalNavBarVisible.current
-    val slop = with(LocalDensity.current) { NavBarScrollSlop.toPx() }
-    // Less scroll than this and the bar stays: the page has less left to read than the bar is
-    // covering, so moving it out of the way uncovers nothing worth the movement.
-    val worthHiding = with(LocalDensity.current) { NavBarFootprint.toPx() } + slop
-    LaunchedEffect(scroll, slop, worthHiding) {
-        var mark = scroll.value
-        var lastMax = scroll.maxValue
-        snapshotFlow { scroll.value to scroll.maxValue }.collect { (offset, max) ->
-            // **Only a still page is read as a gesture.** The header collapsing gives this page a
-            // taller viewport, which shortens `maxValue` - and at the foot of a page a shorter
-            // `maxValue` clamps the offset down by the height the header just gave up. That drop is
-            // not a reader pulling the page back; it is the page growing under them. Read as a
-            // gesture it showed the chrome again, which shrank the viewport, which pushed the
-            // offset back down, which hid it again - the chrome flickering for as long as a finger
-            // was moving, and never settling hidden. So a frame where the extent changed only
-            // re-marks where the page is: the watcher picks up again from there once the header has
-            // finished moving.
-            if (max != lastMax) {
-                lastMax = max
-                mark = offset
-                return@collect
-            }
-            when {
-                // The top of a page always shows it: there is nothing hidden behind the bar up
-                // here, and a page that opens with no navigation showing looks broken.
-                offset <= slop -> navBarVisible.value = true
-                offset - mark > slop && max > worthHiding -> navBarVisible.value = false
-                mark - offset > slop -> navBarVisible.value = true
-                else -> return@collect
-            }
-            mark = offset
-        }
-    }
     // Pressing the destination already showing means "take me back to the top". Animated rather
-    // than jumped, so it reads as the page travelling rather than as the content being replaced -
-    // and the watcher above brings the navigation back on its own as the offset passes the slop.
+    // than jumped, so it reads as the page travelling rather than as the content being replaced.
     // The header comes back with it: the scroll that took it is being undone, so leaving it
-    // collapsed would strand the one piece of chrome the press is aimed at.
+    // collapsed would strand the tab row the press was made on.
     val scrollToTop = LocalScrollToTop.current
     LaunchedEffect(scrollToTop) {
         if (scrollToTop <= 0) return@LaunchedEffect
@@ -285,14 +251,9 @@ internal fun Screen(
         scroll.animateScrollTo(0)
     }
 
-    // The bar floats over the page, so the page has to hold its own content out from under it.
-    // Beside a rail there is no bar over anything and nothing to hold clear of.
-    val compact = LocalWindowWidth.current == WindowWidth.COMPACT
-    val barClearance = if (compact) NavBarFootprint else 0.dp
-    // What a card scrolled into view is held clear of at the foot: the bar and a gap. Without it
-    // the scroll stops with the card's bottom edge on the viewport's, which is *under* the bar, and
-    // the button at the foot of a revealed trade - Sold - was the thing hidden (seen 2026-10-05).
-    val revealClearance = with(LocalDensity.current) { (barClearance + Space.m).toPx() }
+    // What a card scrolled into view is held clear of at the foot: a gap, so the scroll does not
+    // stop with the card's bottom edge on the viewport's. Since 5.0 there is no bar over the page.
+    val revealClearance = with(LocalDensity.current) { Space.m.toPx() }
     val clearBar = remember(revealClearance) {
         object : BringIntoViewResponder {
             override fun calculateRectForParent(localRect: Rect): Rect =
@@ -321,11 +282,7 @@ internal fun Screen(
                 .verticalScroll(scroll)
                 .bringIntoViewResponder(clearBar)
                 .padding(horizontal = Space.l)
-                .padding(
-                    top = Space.l,
-                    bottom = (if (floatingAction == null) Space.xl else FloatingActionInset) +
-                        barClearance,
-                ),
+                .padding(top = Space.l, bottom = Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.m),
         ) {
             content()
@@ -354,25 +311,24 @@ internal fun Screen(
                 // the calls or the positions here would subscribe every page to all three and walk
                 // them on every recomposition. The picker calls it once, when its list opens.
                 stocksOnPage = { pageStocks(appState, destination) },
+                onNavigate = appState::navigate,
+                onScrollToTop = appState::scrollToTop,
             )
-            // Under the header rather than above it, because the header is the top of the window
-            // now. Above the page's own content, so a run starting does not push the first card
-            // down the screen.
-            if (appState.busyLabel != null) {
-                LinearProgressIndicator(
-                    color = MaterialTheme.colorScheme.primary,
-                    // A tint of the page's own hue rather than Material's grey track, so the bar is
-                    // one line with a light running through it rather than a grey rail with a
-                    // coloured piece on it.
-                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = BusyTrackAlpha),
-                    strokeCap = StrokeCap.Round,
-                    // Material punches a gap either side of the moving piece, which on a bar this
-                    // wide reads as three separate bars rather than as one thing in motion.
-                    gapSize = 0.dp,
-                    // Held to the page's own margin. Edge to edge it was the one thing on the
-                    // screen touching the frame, on a page whose every card is inset - which is
-                    // what made it read as a system bar dropped on top rather than as the app's.
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.l),
+            // The price strip, while the market is trading and only then: the movement itself is
+            // what says the session is open. Hairlines above and below hold it as a band.
+            val session = rememberSessionState()
+            if (session.open && appState.tapeQuotes.isNotEmpty()) {
+                KitRule(color = palette.ink, thickness = 1.5.dp)
+                TickerTape(appState.tapeQuotes)
+                KitRule()
+            }
+            // A run's progress, on every page while it lasts. Above the page's own content, so a
+            // run starting does not push the first card down the screen.
+            if (appState.analysisStatus == AnalysisStatus.RUNNING) {
+                RunProgress(
+                    progress = appState.analysisProgress,
+                    startedAt = appState.analysisStartedAt,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.l).padding(top = Space.s),
                 )
             }
             // One line for everything the app is doing or has just done. It sat in the app-name
@@ -390,43 +346,17 @@ internal fun Screen(
                 } else {
                     // The gesture wraps only the scrolling page: a floating button that slid down
                     // with the indicator would look like it had come loose.
-                    PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh) { page() }
+                    val pull = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+                    PullToRefreshBox(
+                        isRefreshing = refreshing,
+                        onRefresh = onRefresh,
+                        state = pull,
+                        indicator = { KitRefreshIndicator(pull, refreshing) },
+                    ) { page() }
                 }
             }
         }
       }
-        floatingAction?.let {
-          run {
-            if (compact) {
-                // The action keeps the bar's side margins and its corner, and **never leaves**. It
-                // used to go with the bar on the same scroll, so the one control that starts a run
-                // could not be reached from anywhere but the top of the page - a poor trade for
-                // chrome that tidies itself away.
-                //
-                // It follows the bar down instead of holding its height. Above the bar it stands
-                // clear of it and then the same gap again, so the two read as one stack; with the
-                // bar gone it takes the bar's own place, on the bar's own PillBottomMargin, rather
-                // than hovering over the hole it left. The travel is exactly NavBarFootprint, which
-                // is what makes it land there and not near there.
-                val liftedClear = NavBarFootprint + PillBottomMargin
-                val lift by animateDpAsState(
-                    if (navBarVisible.value) liftedClear else PillBottomMargin,
-                    label = "action lift",
-                )
-                Box(
-                    Modifier.align(Alignment.BottomCenter)
-                        .padding(start = PillSideMargin, end = PillSideMargin, bottom = lift),
-                ) { it() }
-            } else {
-                // Further in from the corner on a big screen, where the edge is a long way from the
-                // content and a button hard against it reads as stuck to the frame. Not stretched
-                // and not pinned: beside a rail the navigation is a column at the side, so there is
-                // no bar at the foot to match, nothing to travel with, and a full-width action here
-                // would be an 88dp slab the width of an unfolded Fold.
-                Box(Modifier.align(Alignment.BottomEnd).padding(Space.xl + Space.s)) { it() }
-            }
-          }
-        }
     }
     }
 }
@@ -441,20 +371,10 @@ internal fun Screen(
 internal val LocalViewportTop = compositionLocalOf { 0f }
 
 /**
- * Whether the bottom navigation bar is showing.
- *
- * Owned by the shell and written by whichever page is on screen. The bar is drawn outside every
- * screen, so a page being scrolled has no other way to tell it to get out of the way.
- */
-internal val LocalNavBarVisible = staticCompositionLocalOf { mutableStateOf(true) }
-
-
-/**
  * Whether the pager holding the five tabs has come to rest.
  *
- * Owned by the shell and written by `DestinationPager`, the same way round as [LocalNavBarVisible]:
- * something outside every screen knows this, and a page has no other way to ask. True beside a rail
- * and true whenever there is no pager at all, because there is then nothing to arrive from.
+ * Owned by the shell and written by `DestinationPager`: something outside every screen knows this,
+ * and a page has no other way to ask.
  *
  * Read by [revealIfOnScreen], which is the only thing that needs it - see the trap written up
  * there. A page composing is not the same event as a reader arriving on it: on a phone the two are
@@ -465,8 +385,7 @@ internal val LocalTabsSettled = staticCompositionLocalOf { mutableStateOf(true) 
 /**
  * How many times this page has been asked to return to the top, or zero.
  *
- * The counterpart of [LocalNavBarVisible] and provided the other way round: the shell writes this
- * and the page reads it. Zero means "nothing asked"; every press after that is a distinct number,
+ * The shell writes this and the page reads it. Zero means "nothing asked"; every press after that is a distinct number,
  * which is what makes a second press restart the effect rather than look like the first one again.
  *
  * Provided **per destination** by the shell, so a page only ever sees presses meant for it - see
@@ -516,12 +435,6 @@ internal val PageTextInset = Space.l
  */
 internal const val BusyTrackAlpha = 0.14f
 
-/** Enough movement to be a scroll rather than a wobble, so the bar does not flicker on a nudge. */
-private val NavBarScrollSlop = 6.dp
-
-/** Height of an extended action plus its margin, so the last card clears it when scrolled to. */
-private val FloatingActionInset = 88.dp
-
 /**
  * A group inside a card, for settings that belong to one another.
  *
@@ -548,22 +461,29 @@ internal fun SubSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 summary?.let {
                     Text(
                         it,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = LocalContentColor.current.copy(alpha = 0.72f),
                     )
                 }
             }
             about?.let { InfoButton(it) }
-            Icon(
-                if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(IconSize.Inline),
-            )
+            // The kit's own disclosure: a raised capsule whose chevron turns, as KitExpandable's does.
+            val turn by animateFloatAsState(if (expanded) 180f else 0f, label = "subsection")
+            Box(
+                Modifier.size(32.dp).clip(CircleShape).background(palette.raised),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Outlined.ExpandMore,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = palette.ink,
+                    modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = turn },
+                )
+            }
         }
         AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {
             Column(
@@ -572,7 +492,7 @@ internal fun SubSection(
                 content = content,
             )
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        KitRule()
     }
 }
 
@@ -613,78 +533,37 @@ internal fun SectionCard(
     accent: Color? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    // `accent` is no longer drawn: since the 2026-11 redesign a section is a tonal surface with no
-    // stripe and no coloured tile. The parameter stays so every caller still states its card's place.
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        // The colour is see-through in the theme itself - see GlassSection - so what this adds is
-        // only what a **first-level** card gets: the light along its top edge. **No shadow**: a
-        // shadow is drawn behind the card's whole shape, and behind a see-through card that is a
-        // dark panel tinting the card's own face rather than a lift under its edge - which is what
-        // was reading as a solid background on every card on every tab. It comes off every card
-        // that had it: the treatment is the material and the edge, not depth faked under glass.
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        shape = MaterialTheme.shapes.large,
+    // A white kit tile since 5.0: the heading in display type, its question mark beside it, and
+    // the content under it. `accent` is no longer drawn; callers still name their card's place.
+    val p = palette
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(com.ikverse.egxanalyzer.ui.kit.Kit.TileShape)
+            .background(p.card)
+            .padding(vertical = Space.l),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
-        // Drawn behind the content rather than as a `Row` beside it: the edge runs the whole height
-        // of the card, which is not known until everything inside it has been laid out, and a column
-        // that had to reserve width for it would hold that width open on every card in the app.
-        // Clipped by the card's own shape, so it takes the corner radius with it.
-        //
-        // **Full height of the card, not of what is inside it.** A card stretched to match its
-        // neighbour (Analyze's two settings cards, a row of session cards) is taller than its own
-        // content, and an edge drawn on the content stopped where the words did - halfway down the
-        // card it was meant to run the whole length of (seen 2026-10-05). Under an unbounded height,
-        // where nothing stretches, this is simply the content's height as it always was.
-        Box(Modifier.fillMaxHeight()) {
-        // Vertical only, so the heading band and the content band can be held in by different
-        // amounts. Both were one padding on this Column until the nesting above made the two
-        // different questions.
-        Column(
-            Modifier.padding(vertical = Space.l),
-            verticalArrangement = Arrangement.spacedBy(Space.s),
-        ) {
+        CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides p.ink) {
             if (title != null) {
-                Row(
-                    Modifier.padding(horizontal = Space.l),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                Row(Modifier.padding(horizontal = Space.l), verticalAlignment = Alignment.CenterVertically) {
                     if (icon != null) {
-                        // A grey glyph since the 2026-11 redesign: the title leads, and the one
-                        // accent is spent on what can be pressed.
-                        Icon(
-                            icon,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(SectionIconSize),
-                        )
+                        Icon(icon, contentDescription = null, tint = p.muted, modifier = Modifier.size(SectionIconSize))
                         Spacer(Modifier.width(Space.s))
                     }
                     Text(
                         title,
-                        // Weighted only when something sits after it, so a card without an
-                        // explanation keeps a heading that is as wide as its own words.
                         modifier = if (about == null) Modifier else Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.headlineSmall,
                     )
-                    // Dense: the 48dp target on a plain IconButton would make this header band
-                    // taller than the cards beside it on the page that carry no explanation.
                     about?.let { InfoButton(it, dense = true) }
                 }
-                // The same hairline the chrome uses to separate the app header from the page, so a
-                // card says where its heading ends the way the app does. Only with a title: there is
-                // nothing to separate without one.
-                HorizontalDivider(
-                    Modifier.padding(horizontal = Space.l),
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                )
             }
             Column(
                 Modifier.padding(horizontal = contentInset),
                 verticalArrangement = Arrangement.spacedBy(Space.s),
                 content = content,
             )
-        }
         }
     }
 }
@@ -703,24 +582,9 @@ private val SectionIconSize = 18.dp
 internal fun ExpandableSection(
     title: String,
     icon: ImageVector? = null,
-    /**
-     * Colour for [icon], where the card's own **state** is what it should be saying.
-     *
-     * A session on Insights is the case: how that session went is the card's whole subject, and the
-     * icon is where it can be said before a word is read. It outranks [accent] when given, because a
-     * card reporting its own state has something to say that its place in a column does not.
-     *
-     * It used to argue that colouring each icon would be a page of noise, and every card took
-     * `primary`. That was true of a page of identical grey headings and is not true of a tile per
-     * card in a hue the page keeps to - see [accent].
-     */
+    /** A verdict on the card's own state, drawn as the dot before its title. */
     iconTone: Color? = null,
-    /**
-     * This card's own hue, on the tile behind [icon] and the edge down its left side.
-     *
-     * [SectionCard.accent]'s rule exactly, and for the reason given there: chrome, never a figure.
-     * Null takes the page's own, which is what the first card on a page should have.
-     */
+    /** No longer drawn since 5.0; callers still name their card's place. */
     accent: Color? = null,
     modifier: Modifier = Modifier,
     initiallyExpanded: Boolean = false,
@@ -728,43 +592,18 @@ internal fun ExpandableSection(
     summary: String? = null,
     /** Colour for [summary], where the figure itself carries a verdict. */
     summaryTone: Color? = null,
-    /**
-     * Draws that line itself, for a summary whose parts want different colours.
-     *
-     * Takes the place of [summary] where it is given. A plain string covers almost every card in the
-     * app, and making all of them build one would be paying for a Portfolio card's state counts
-     * everywhere else.
-     */
+    /** Draws that line itself, for a summary whose parts want different colours. */
     summaryContent: (@Composable () -> Unit)? = null,
     /** Caps the content, for groups of form controls: a text field the width of a desk is unusable. */
     contentMaxWidth: Dp? = null,
-    /**
-     * How far the content is held in from the card's edge, on [SectionCard]'s rule.
-     *
-     * [Space.s] where the children are cards - the child's own border is the edge, and a full inset
-     * at every level of a nest is what left a trade card 285dp of a 411dp screen. The header row and
-     * the rule under it keep their 16 whatever this is.
-     */
+    /** Unused since the kit tile sets its own inset; kept so every caller still compiles. */
     contentInset: Dp = Space.l,
-    /**
-     * What the whole group is for, behind a question mark in the header.
-     *
-     * Beside the chevron rather than inside the card, on purpose: a section-wide explanation used to
-     * be the first thing under the fold, so it was read once and then stood between the reader and
-     * the controls on every later visit. Here it is reachable without opening the card at all.
-     */
+    /** What the whole group is for, behind a question mark in the header. */
     about: InfoNote? = null,
     /** Hoisted when the layout around it needs to know: an open card claims the whole row. */
     expandedState: Boolean? = null,
     onExpandedChange: ((Boolean) -> Unit)? = null,
-    /**
-     * The card's own fill, for one drawn **inside** another card.
-     *
-     * `surfaceContainer` is right on the page, where the well behind it is darker. Nested in a card
-     * of the same fill it disappears into its parent, so a card within a card goes one step up -
-     * the rule `OverdueTile` and `EventTile` already follow with `surfaceContainerHigh`. Named
-     * rather than assumed, because only the caller knows what it is sitting on.
-     */
+    /** Any value marks a card drawn inside another, which takes the page's ground instead of white. */
     containerColor: Color? = null,
     showAccentEdge: Boolean = true,
     /** Holding the header offers something beyond expanding the card - see [HoldPrompt]. */
@@ -773,84 +612,32 @@ internal fun ExpandableSection(
 ) {
     var localExpanded by remember { mutableStateOf(initiallyExpanded) }
     val expanded = expandedState ?: localExpanded
-    // `accent` and `showAccentEdge` are no longer drawn (2026-11 redesign), as on SectionCard.
-    val turn by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = if (LocalReduceMotion.current) snap() else uiSpring(),
-        label = "sectionTurn",
-    )
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = containerColor ?: MaterialTheme.colorScheme.surfaceContainer,
-        ),
-        shape = MaterialTheme.shapes.large,
+    val p = palette
+    com.ikverse.egxanalyzer.ui.kit.KitExpandable(
+        title = title,
+        expanded = expanded,
+        onExpandedChange = { open -> if (onExpandedChange != null) onExpandedChange(open) else localExpanded = open },
+        modifier = modifier,
+        leading = when {
+            iconTone != null -> ({ com.ikverse.egxanalyzer.ui.kit.StateDot(iconTone) })
+            icon != null -> ({ Icon(icon, contentDescription = null, tint = p.muted, modifier = Modifier.size(SectionIconSize)) })
+            else -> null
+        },
+        summary = when {
+            summaryContent != null -> summaryContent
+            summary != null -> ({ Text(summary, style = MaterialTheme.typography.bodySmall, color = summaryTone ?: p.muted) })
+            else -> null
+        },
+        headerExtra = about?.let { note -> { InfoButton(note) } },
+        onHeaderLongClick = onHeaderLongClick,
+        fill = if (containerColor != null) p.ground else p.card,
     ) {
-        Column {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .combinedClickable(
-                        onLongClick = onHeaderLongClick,
-                        onClick = {
-                            if (onExpandedChange != null) {
-                                onExpandedChange(!expanded)
-                            } else {
-                                localExpanded = !expanded
-                            }
-                        },
-                    )
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (icon != null) {
-                    // SectionCard's tile, so a group heading and a card heading are the same object
-                    // at a glance. iconTone wins where a card is reporting its own state.
-                    // A colour here only when it is a verdict on the card's own state.
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        tint = iconTone ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(SectionIconSize),
-                    )
-                    Spacer(Modifier.width(Space.s))
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleLarge)
-                    when {
-                        summaryContent != null -> summaryContent()
-                        summary != null -> Text(
-                            summary,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = summaryTone ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                about?.let { InfoButton(it) }
-                Icon(
-                    Icons.Outlined.ExpandMore,
-                    contentDescription = if (expanded) "Collapse $title" else "Expand $title",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.graphicsLayer { rotationZ = turn },
-                )
-            }
-            AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {
-                Column {
-                    // Inside the reveal rather than above it: a closed card would otherwise carry a
-                    // rule along its bottom edge with nothing under it.
-                    HorizontalDivider(
-                        Modifier.padding(horizontal = Space.l),
-                        color = MaterialTheme.colorScheme.outlineVariant,
-                    )
-                    Column(
-                        Modifier
-                            .padding(start = contentInset, end = contentInset, top = Space.s, bottom = Space.l)
-                            .then(contentMaxWidth?.let { Modifier.widthIn(max = it) } ?: Modifier),
-                        verticalArrangement = Arrangement.spacedBy(Space.s),
-                        content = content,
-                    )
-                }
-            }
+        CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides p.ink) {
+            Column(
+                if (contentMaxWidth != null) Modifier.widthIn(max = contentMaxWidth) else Modifier,
+                verticalArrangement = Arrangement.spacedBy(Space.s),
+                content = content,
+            )
         }
     }
 }
@@ -961,49 +748,6 @@ internal suspend fun BringIntoViewRequester.revealIfOnScreen(
 }
 
 /** A single figure with its label, for wherever a screen summarises counts or totals. */
-@Composable
-internal fun StatTile(
-    value: String,
-    label: String,
-    modifier: Modifier = Modifier,
-    tone: Color = MaterialTheme.colorScheme.onSurface,
-    /** Centred where the tile is one cell of a divided strip, so figures line up under each other. */
-    alignment: Alignment.Horizontal = Alignment.Start,
-    /**
-     * A step down, for a strip that annotates a card rather than being what the card is for.
-     *
-     * The report card carries four of these over everything it says about a run, where the
-     * Portfolio's are the record itself and lead their own page. Same tile either way - a second
-     * composable for a smaller figure is how the label under one drifts from the label under the
-     * other - and the caller says which of the two jobs it is doing.
-     */
-    dense: Boolean = false,
-) {
-    Column(
-        modifier,
-        verticalArrangement = Arrangement.spacedBy(if (dense) DenseFigureGap else Space.xs),
-        horizontalAlignment = alignment,
-    ) {
-        // The role sets the size; the figure sets its own face. Everything a tile ever holds is a
-        // number, and the display face is for names.
-        RollingText(
-            AnnotatedString(value),
-            style = if (dense) {
-                MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures)
-            } else {
-                // A step up in the 2026-11 redesign: the Swiss half leads with the figure.
-                MaterialTheme.typography.headlineMedium.copy(fontFamily = TabularFigures)
-            },
-            color = tone,
-        )
-        Text(
-            label.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
 /** Tighter than [Space.xs], which read as two facts where a dense tile is meant to read as one. */
 private val DenseFigureGap = 2.dp
 
@@ -1037,105 +781,10 @@ internal fun RollingText(
     }
 }
 
-/**
- * A handful of counts as one instrument rather than as loose numbers.
- *
- * Bounded and divided because figures in a strip are read *against each other* - twelve stocks from
- * twenty-eight readings is a different report from twelve out of twelve, and 2.2M sent against 249K
- * returned is a different bill from an even split. Numbers floating in open space with 24dp between
- * them read as unrelated facts, which is what the divider is for.
- *
- * Lifted out of `ResultsScreen`'s own `ReportFigures` when the token usage section wanted the same
- * instrument, for the reason [FigureGroup] was lifted out of the three screens that had each grown
- * one: a strip of counts is a shape this app draws, not something a screen invents.
- *
- * Every cell is [StatTile] in its `dense` form and centred, so the figures line up under each other
- * whatever the labels beneath them do. The first cell takes the page's own hue by default - it is
- * the figure that says how much there is of whatever the strip is counting - and [leadTone] is for
- * a caller whose lead figure means something other than "the page".
- */
-@Composable
-internal fun StatStrip(
-    figures: List<Pair<String, String>>,
-    modifier: Modifier = Modifier,
-    // Ink rather than the accent since the 2026-11 redesign: a figure is never chrome.
-    leadTone: Color = MaterialTheme.colorScheme.onSurface,
-) {
-    if (figures.isEmpty()) return
-    // The width comes from the Row inside rather than from the surface, which is how the report
-    // card's own version was written: in a Row between two weighted spacers, a surface that filled
-    // the width itself would measure before them and leave them nothing.
-    Surface(
-        modifier,
-        // A tonal step with no edge since the 2026-11 redesign: the dividers inside are the only lines.
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        // Intrinsic height so the dividers run the full depth of the row rather than the height
-        // Material would otherwise give a divider with nothing to measure against.
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            figures.forEachIndexed { index, (value, label) ->
-                if (index > 0) VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                StatTile(
-                    value = value,
-                    label = label,
-                    modifier = Modifier.weight(1f).padding(vertical = Space.xs, horizontal = Space.xs),
-                    tone = if (index == 0) leadTone else MaterialTheme.colorScheme.onSurface,
-                    alignment = Alignment.CenterHorizontally,
-                    dense = true,
-                )
-            }
-        }
-    }
-}
-
-/**
- * How one quantity divides in two, as a bar rather than as a ratio the reader works out.
- *
- * Deliberately not [OutcomeBar], which is about *verdicts* - four fixed outcomes in four fixed
- * colours, with a legend drawn once above the cards that use it. This is the general case: two
- * parts of one total, where the second part is the first part's own colour thinned rather than a
- * second hue, because the two halves are the same kind of thing and a second hue would claim they
- * were not.
- *
- * It carries no figures. A share is a shape, and the sentence under it is where the numbers go -
- * which is also what stops it being read as a second, rounder copy of them.
- */
-@Composable
-internal fun ShareBar(
-    part: Long,
-    total: Long,
-    modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.primary,
-    height: Dp = ShareBarHeight,
-) {
-    if (total <= 0L) return
-    val share = (part.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-    Row(
-        modifier
-            .fillMaxWidth()
-            .height(height)
-            .clip(RoundedCornerShape(ShareBarCorner)),
-    ) {
-        // Nothing is drawn for a part that rounds to none of the width: a sliver one pixel wide
-        // reads as a rendering fault rather than as a small share, and the line beneath says the
-        // figure anyway.
-        if (share > 0f) Box(Modifier.weight(share).fillMaxHeight().background(color))
-        if (share < 1f) {
-            Box(
-                Modifier
-                    .weight(1f - share)
-                    .fillMaxHeight()
-                    .background(color.copy(alpha = ShareRestAlpha)),
-            )
-        }
-    }
-}
-
-/** [OutcomeBarCompact]'s height, so a share and a verdict drawn on one screen are one object. */
+/** The kit result bar's height, so a share and a verdict drawn on one screen are one object. */
 private val ShareBarHeight = 8.dp
 
-/** [PillCorner] would round a bar this short into a capsule; 3dp cuts it without closing it. */
+/** A pill corner would round a bar this short into a capsule; 3dp cuts it without closing it. */
 private val ShareBarCorner = 3.dp
 
 /**
@@ -1148,202 +797,20 @@ private val ShareBarCorner = 3.dp
  */
 private const val ShareRestAlpha = 0.22f
 
-/**
- * Every button on a card that changes the record: bought, sold, kept open.
- *
- * One shape and one colour for the three of them, because they are one kind of act. They were a
- * filled tonal button and two outlined ones, which said that recording a purchase is a heavier
- * thing than recording a sale - and on a position card the two sat in the same row disagreeing
- * about it. What a card's buttons say now is what pressing costs: a ring in the app's own cyan
- * changes something, a bare label with an arrow ([DisclosureButton]) only opens something, and
- * violet is still the model's alone. The screen's own action keeps the teal aurora, a tier above
- * anything drawn on a card; a dialog's buttons stay Material's, because that is a convention the
- * app did not invent and must not fork.
- *
- * A ring rather than a fill, for the reason [OutlinePill] is one: a position card can carry three
- * of these at once, and three blocks of colour compete with the figures they sit under.
- *
- * [PillHeight] like every other pill here, and the target under it is still the full 48dp -
- * `minimumInteractiveComponentSize` is what separates how big a button looks from how big a
- * fingertip is.
- */
-@Composable
-internal fun ActionPill(
-    label: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-) {
-    // A tonal capsule since the 2026-11 redesign (M3 Expressive): the soft accent container says
-    // "this changes the record", and the corner squares off while a finger is down.
-    val ink = MaterialTheme.colorScheme.onSecondaryContainer
-    val press = remember { MutableInteractionSource() }
-    val shape = RoundedCornerShape(pressCorner(press, rest = PillHeight / 2))
-    Row(
-        modifier
-            .pressScale(press)
-            .minimumInteractiveComponentSize()
-            .height(PillHeight)
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.secondaryContainer)
-            .clickable(
-                interactionSource = press,
-                indication = LocalIndication.current,
-                enabled = enabled,
-                onClick = onClick,
-            )
-            .padding(horizontal = Space.m),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.s),
-    ) {
-        Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(IconSize.Hint))
-        Text(
-            label,
-            style = MaterialTheme.typography.labelMedium,
-            color = ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-
-/**
- * An action on a settings card, at the size a settings card wants.
- *
- * Material's own button is 40dp tall with 24dp of padding on each side, which is the size of a
- * button that is the point of the screen it is on. Down a list of settings it is not: it is one row
- * among twenty, standing beside switches 32dp tall, and at the default it was the heaviest thing on
- * a card whose subject is the words next to it. [PillHeight] and [Space.m] put it at the height
- * every other button in this app is already drawn at.
- *
- * It stays an [OutlinedButton] rather than becoming an [ActionPill], and the two are different
- * things rather than one thing drawn twice. A pill sits **on a card about one call or one trade**
- * and takes the page's own hue to say that pressing it changes the record. These sit on a page of
- * settings, several to a card, half of them opening a picker rather than changing anything - and a
- * column of cyan rings down Settings would be the page of coloured glyphs the question mark is
- * muted to avoid.
- *
- * `labelMedium`, which is what both card buttons already carry: at this height Material's
- * `labelLarge` is a 14sp line in a 32dp box, and the button reads as the text having outgrown it.
- *
- * This is the pass of 2026-09-03 finished. It stopped at the cards and left Settings, Channels,
- * Backup and Schedules holding about forty buttons in the old mixed state.
- *
- * @param filled the card's own primary action, where it has one - Save and verify, Sync now,
- *   Download. It carries **both** shapes rather than leaving the filled ones at Material's height,
- *   because they share a row with the outlined ones: Save and verify stands in a `FlowRow` beside
- *   Reset provider and Remove credential, and a row 40dp tall at one end and 32 at the other reads
- *   as a layout fault rather than as an emphasis. Which button is filled is unchanged; only how
- *   tall the row is.
- */
-@Composable
-internal fun SettingsButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    filled: Boolean = false,
-    content: @Composable RowScope.() -> Unit,
-) {
-    // Ahead of Material's own `defaultMinSize`, which raises a minimum only where nothing has set
-    // one - so this wins by being applied first, and the button is not fighting a 40dp floor it can
-    // never get under.
-    val press = remember { MutableInteractionSource() }
-    val sized = modifier.pressScale(press).heightIn(min = PillHeight)
-    // A capsule that squares off under the finger (2026-11 redesign).
-    val shape = RoundedCornerShape(pressCorner(press, rest = PillHeight / 2))
-    val padding = PaddingValues(horizontal = Space.m)
-    // The row is held rather than passed through: `ProvideTextStyle` takes a plain composable, so
-    // inside it the button's own `RowScope` is out of scope and an icon's `align` would not resolve.
-    val label: @Composable RowScope.() -> Unit = {
-        val row = this
-        ProvideTextStyle(MaterialTheme.typography.labelMedium) { row.content() }
-    }
-    if (filled) {
-        // The accent's fill with dark text, like the Analyze action, rather than Material's
-        // `primary`, which on paper is the darker amber kept for text.
-        val accent = pageAccent
-        Button(
-            onClick, sized, enabled,
-            shape = shape,
-            colors = ButtonDefaults.buttonColors(containerColor = accent.base, contentColor = accent.onBase),
-            contentPadding = padding, interactionSource = press, content = label,
-        )
-    } else {
-        OutlinedButton(
-            onClick, sized, enabled,
-            shape = shape, contentPadding = padding, interactionSource = press, content = label,
-        )
-    }
-}
-
-/**
- * The button that opens or closes a section of the card it sits on, and does nothing else.
- *
- * The arrow is the state rather than the label: down where there is more under it, up where what is
- * under it is showing. No ring, because [ActionPill]'s ring is what says a press changes something,
- * and a control that only moves the page must not borrow it.
- */
-@Composable
-internal fun DisclosureButton(
-    label: String,
-    expanded: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val ink = MaterialTheme.colorScheme.primary
-    val press = remember { MutableInteractionSource() }
-    val shape = RoundedCornerShape(pressCorner(press, rest = PillHeight / 2))
-    // The arrow turns rather than swapping glyphs, on the release spring.
-    val turn by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = if (LocalReduceMotion.current) snap() else uiSpring(),
-        label = "disclosureTurn",
-    )
-    Row(
-        modifier
-            .pressScale(press)
-            .minimumInteractiveComponentSize()
-            .height(PillHeight)
-            .clip(shape)
-            .clickable(interactionSource = press, indication = LocalIndication.current, onClick = onClick)
-            .padding(horizontal = Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.xs),
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelMedium,
-            color = ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Icon(
-            Icons.Outlined.ExpandMore,
-            contentDescription = null,
-            tint = ink,
-            modifier = Modifier.size(IconSize.Hint).graphicsLayer { rotationZ = turn },
-        )
-    }
-}
-
 internal enum class StatusTone { GOOD, BAD, NEUTRAL }
 
 /** Short status line, coloured by whether it reports something good, bad, or neutral. */
 @Composable
 internal fun StatusPill(text: String, tone: StatusTone = StatusTone.NEUTRAL) {
-    val outline = when (tone) {
-        StatusTone.GOOD -> MaterialTheme.colorScheme.tertiary
-        StatusTone.BAD -> MaterialTheme.colorScheme.error
-        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.outline
-    }
-    val ink = when (tone) {
-        StatusTone.GOOD -> MaterialTheme.colorScheme.onTertiaryContainer
-        StatusTone.BAD -> MaterialTheme.colorScheme.onErrorContainer
-        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    OutlinePill(text, outline = outline, textColor = ink)
+    val p = palette
+    com.ikverse.egxanalyzer.ui.kit.KitTag(
+        text,
+        when (tone) {
+            StatusTone.GOOD -> p.gain
+            StatusTone.BAD -> p.loss
+            StatusTone.NEUTRAL -> p.muted
+        },
+    )
 }
 
 /**
@@ -1366,29 +833,9 @@ internal fun OutlinePill(
     textColor: Color,
     onClick: (() -> Unit)? = null,
 ) {
-    val label: @Composable () -> Unit = { PillLabel(text) }
-    val ring = BorderStroke(PillOutline, outline)
-    if (onClick == null) {
-        Surface(
-            color = Color.Transparent,
-            contentColor = textColor,
-            shape = PillShape,
-            border = ring,
-            content = label,
-        )
-    } else {
-        val press = remember { MutableInteractionSource() }
-        Surface(
-            onClick = onClick,
-            modifier = Modifier.pressScale(press),
-            color = Color.Transparent,
-            contentColor = textColor,
-            shape = PillShape,
-            border = ring,
-            interactionSource = press,
-            content = label,
-        )
-    }
+    // The kit's tag since 5.0: a hairline capsule in the colour the state means, its word in the
+    // same colour. [textColor] is kept for callers and no longer differs from the edge.
+    com.ikverse.egxanalyzer.ui.kit.KitTag(text, outline, onClick = onClick)
 }
 
 /**
@@ -1411,23 +858,8 @@ internal fun FilledPill(
     content: Color,
     onClick: (() -> Unit)? = null,
 ) {
-    if (onClick == null) {
-        Surface(color = container, contentColor = content, shape = PillShape) {
-            PillLabel(text)
-        }
-    } else {
-        val press = remember { MutableInteractionSource() }
-        Surface(
-            onClick = onClick,
-            modifier = Modifier.pressScale(press),
-            color = container,
-            contentColor = content,
-            shape = PillShape,
-            interactionSource = press,
-        ) {
-            PillLabel(text)
-        }
-    }
+    // A wash of the content colour, the kit's filled tag - a standing fact rather than a note.
+    com.ikverse.egxanalyzer.ui.kit.KitTag(text, content, filled = true, onClick = onClick)
 }
 
 /**
@@ -1447,58 +879,38 @@ internal fun CompactFilterChip(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    /**
-     * A switch rather than one of a set: drawn outlined in the page's own colour with a tick when
-     * on, so it cannot be mistaken for the range that is chosen beside it. Two chips filled alike
-     * said the same thing about two different kinds of choice.
-     */
+    /** A switch rather than one of a set: drawn with a tick when on, never as the chosen range. */
     toggle: Boolean = false,
 ) {
-    val ink = when {
-        toggle && selected -> MaterialTheme.colorScheme.primary
-        selected -> MaterialTheme.colorScheme.onPrimaryContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    // The kit's segment look at a card's density: ink when chosen, a hairline when not, and a
+    // toggle that is on carries a tick so it cannot be mistaken for the chosen range beside it.
+    val p = palette
     val press = remember { MutableInteractionSource() }
-    Surface(
-        onClick = onClick,
-        modifier = modifier.pressScale(press).minimumInteractiveComponentSize(),
-        color = if (selected && !toggle) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-        contentColor = ink,
-        border = when {
-            toggle && selected -> BorderStroke(ChipOutline, MaterialTheme.colorScheme.primary)
-            selected -> null
-            else -> BorderStroke(ChipOutline, MaterialTheme.colorScheme.outline)
-        },
-        shape = PillShape,
-        interactionSource = press,
+    val chosen = selected && !toggle
+    Box(
+        modifier
+            .minimumInteractiveComponentSize()
+            .pressScale(press)
+            .height(PillHeight)
+            .clip(com.ikverse.egxanalyzer.ui.kit.Kit.Capsule)
+            .background(if (chosen) p.ink else Color.Transparent)
+            .then(if (chosen) Modifier else Modifier.border(1.dp, if (toggle && selected) p.hero else p.line, com.ikverse.egxanalyzer.ui.kit.Kit.Capsule))
+            .clickable(interactionSource = press, indication = null, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+            .semantics { selectedState(selected) }
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            // PillPaddingH, not Space.s: the same tight ring every label pill in the app already
-            // hugs its word with, rather than the looser padding a pressed pill usually carries -
-            // five ranges and a toggle need every point of width this row can give back.
-            Modifier.height(PillHeight).padding(horizontal = PillPaddingH),
-            contentAlignment = Alignment.Center,
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.xs),
-            ) {
-                if (toggle && selected) {
-                    Icon(
-                        Icons.Outlined.Check,
-                        contentDescription = null,
-                        modifier = Modifier.size(IconSize.Hint),
-                    )
-                }
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
+        Text(
+            (if (toggle && selected) "✓ " else "") + label,
+            style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
+            color = when {
+                chosen -> p.onInk
+                toggle && selected -> p.heroInk
+                else -> p.ink
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1506,26 +918,6 @@ internal fun CompactFilterChip(
 private val ChipOutline = 1.dp
 
 /** One label, one height, one padding - the whole of what the two pills have in common. */
-@Composable
-private fun PillLabel(text: String) {
-    Box(
-        Modifier.height(LabelPillHeight).padding(horizontal = PillPaddingH),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            // A step under `labelMedium`, set as a copy of it rather than as `labelSmall`: that
-            // style is tracked out for uppercase keys over figures, and a pill is a sentence.
-            text,
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontSize = PillText,
-                lineHeight = PillLine,
-            ),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
 // An 11sp line, centred in [LabelPillHeight] rather than propping the box open from inside. The
 // height is the pill's and no longer the text's: two pills whose words set at different heights
 // used to close to different sizes, and that is what a card of them read as.
@@ -1572,18 +964,22 @@ private val PillOutline = 1.dp
 internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
     if (!isEgx33(ticker)) return
     var explaining by remember { mutableStateOf(false) }
+    // A small ink square with the lime star since 5.0. Square, never round: round, the star inside
+    // a ring reads as a settings cog.
+    val p = palette
     Box(
         modifier
             .size(Egx33BadgeSize)
+            .clip(RoundedCornerShape(5.dp))
+            .background(p.ink)
             .clickable { explaining = true },
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             painterResource(R.drawable.ic_egx33),
-            // Said in full, because nothing on screen says it. The glyph is the only place this
-            // fact appears, so a reader who cannot see it would otherwise not be told at all.
+            // Said in full, because nothing on screen says it.
             contentDescription = "EGX 33 Shariah index",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = p.highlight,
             modifier = Modifier.size(Egx33GlyphSize),
         )
     }
@@ -1616,38 +1012,36 @@ internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
 private val Egx33BadgeSize: Dp = LabelPillHeight
 
 /** 16dp of glyph in the 20dp box, the size the recommendation card grew it to. */
-private val Egx33GlyphSize: Dp = 16.dp
+private val Egx33GlyphSize: Dp = 13.dp
 
 
 /** Placeholder for a screen with nothing to show yet, so empty states explain themselves. */
 @Composable
-internal fun EmptyState(icon: ImageVector, title: String, detail: String) {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        shape = MaterialTheme.shapes.large,
-        border = cardOutline,
-    ) {
-        Column(
-            Modifier.fillMaxWidth().padding(vertical = 32.dp, horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(Space.s),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = CircleShape) {
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(14.dp).size(28.dp),
-                    )
-                }
-            }
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(
-                detail,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+internal fun EmptyState(
+    icon: ImageVector,
+    title: String,
+    detail: String,
+    /** The one thing that undoes the emptiness, where there is one - Clear filters, most often. */
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    // A white kit tile since 5.0: the glyph on a raised disc, the title, the line under it, and the
+    // action that gets the reader out of it.
+    val p = palette
+    com.ikverse.egxanalyzer.ui.kit.Tile(Modifier.fillMaxWidth()) {
+        Box(
+            Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(p.raised),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, contentDescription = null, tint = p.ink, modifier = Modifier.size(24.dp)) }
+        Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = Space.m))
+        Text(detail, style = MaterialTheme.typography.bodyMedium, color = p.muted, modifier = Modifier.padding(top = Space.xs))
+        if (actionLabel != null && onAction != null) {
+            com.ikverse.egxanalyzer.ui.kit.KitButton(
+                actionLabel,
+                onClick = onAction,
+                kind = com.ikverse.egxanalyzer.ui.kit.ButtonKind.SECONDARY,
+                size = com.ikverse.egxanalyzer.ui.kit.ButtonSize.SMALL,
+                modifier = Modifier.padding(top = Space.m),
             )
         }
     }
@@ -1672,33 +1066,19 @@ internal fun EmptyState(icon: ImageVector, title: String, detail: String) {
 internal fun FigureGroup(
     title: String,
     figures: List<@Composable RowScope.() -> Unit>,
-    /** The page's own accent where a group wants to say it is the card's structure, not a caption. */
-    titleColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    /** No longer drawn differently since 5.0: every group's title is the same muted key. */
+    titleColor: Color = palette.muted,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-        Text(
-            title.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = titleColor,
-        )
+    // The kit's figure grid since 5.0: the group's key, then its figures in ground cells, four
+    // across where four prices fit and two where they do not.
+    val p = palette
+    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        Text(title.uppercase(), style = MaterialTheme.typography.labelSmall, color = p.muted)
         BoxWithConstraints {
-            // Taken as a list rather than a row of slots, because wrapping means splitting them -
-            // and a lambda that draws four figures cannot be cut in half.
-            //
-            // Capped rather than "all of them on a wide screen": the threshold below was measured
-            // for four prices, and a group of five would put all five on one row at a width that
-            // was only ever proved to hold four.
-            val perRow = if (maxWidth >= FourFiguresMinWidth) {
-                minOf(figures.size, MaxFiguresPerRow)
-            } else {
-                2
-            }
+            val perRow = if (maxWidth >= FourFiguresMinWidth) minOf(figures.size, MaxFiguresPerRow) else 2
             Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
                 figures.chunked(perRow).forEach { row ->
-                    // A short last row spreads across the width rather than being padded out to
-                    // the column count. Every figure here already carries `weight(1f)`, so dropping
-                    // the spacers is what lets the odd one out have the room.
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                    Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                         row.forEach { figure -> figure() }
                     }
                 }
@@ -1724,33 +1104,26 @@ internal fun Figure(
     label: String,
     value: String,
     modifier: Modifier = Modifier,
-    tone: Color = MaterialTheme.colorScheme.onSurface,
+    tone: Color = palette.ink,
     on: LocalDate? = null,
     caption: String? = null,
-    /**
-     * Overridden only where the value is not a price.
-     *
-     * The default monospaces the digits, because a column of figures is read down as well as
-     * across and proportional digits put the same price at a different width on every card. A
-     * deadline reads "3 of 10 left", and monospacing prose sets it apart from the prices for no
-     * reason; the occurrence sheet sets its figures larger, being a sheet about one call.
-     */
-    valueStyle: TextStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
+    /** Overridden only where the value is not a price; the default sets it in the figures face. */
+    valueStyle: TextStyle = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
 ) {
-    Column(modifier) {
-        Text(
-            label.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(tightPoint(value), style = valueStyle, color = tone, textAlign = TextAlign.Start)
+    // A cell of the page's ground since 5.0: the key over the figure, and the date or note under it.
+    val p = palette
+    Column(
+        modifier
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(16.dp))
+            .background(p.ground)
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+    ) {
+        Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = p.muted, maxLines = 2)
+        Text(tightPoint(value), style = valueStyle, color = tone, textAlign = TextAlign.Start, modifier = Modifier.padding(top = 2.dp))
         val note = caption ?: on?.let(AppDates.DayMonth::format)
         if (note != null) {
-            Text(
-                note,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text(note, style = MaterialTheme.typography.labelSmall, color = p.muted, modifier = Modifier.padding(top = 2.dp))
         }
     }
 }
@@ -1764,8 +1137,8 @@ internal fun Figure(
  * Applied to [Figure] only - the hero figures are drawn elsewhere and are left as they were.
  */
 internal fun tightPoint(text: String): AnnotatedString =
-    // Inter Tight (2026-11 redesign) keeps its point narrow even with tabular digits, so the
-    // tightening the monospaced face needed would now crowd the digits together.
+    // Left as it is: JetBrains Mono draws its point as a full column on purpose, and the figure
+    // reads as one number because every figure on the page shares that same grid.
     AnnotatedString(text)
 
 /**
@@ -1828,105 +1201,6 @@ internal val MinAutoFontSize = 9.sp
 private val DefaultAutoFontSize = 14.sp
 
 
-/**
- * Every dropdown in the app, and the only place a menu's surface is described.
- *
- * Twelve bare `DropdownMenu`s were the last piece of this app still wearing Material's factory
- * look: a 4dp-cornered slab of `surfaceContainer` with no edge, floating over cards drawn at 14dp
- * with a hairline. One menu restyled and eleven not is worse than none restyled, so the container
- * lives here and every call site takes it - the overflow menus on the three cards, and the nine
- * select-style menus on Filters and Settings, which change in appearance only.
- *
- * The edge is [cardOutline], the same hairline a card and the page well are drawn with, for the
- * reason given there: the edge of a menu and the edge of what it opened over should be one line
- * rather than two that happen to agree. `surfaceContainerHigh` rather than the default, because a
- * menu has to sit clearly above the card it covers; the shadow lifts it rather than a tint, which
- * a see-through surface would only show the card through.
- */
-@Composable
-internal fun AppMenu(
-    expanded: Boolean,
-    onDismissRequest: () -> Unit,
-    modifier: Modifier = Modifier,
-    offset: DpOffset = DpOffset(0.dp, 0.dp),
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismissRequest,
-        modifier = modifier,
-        offset = offset,
-        shape = MaterialTheme.shapes.large,
-        // Opaque: a menu is not on the page, it is over whatever it was opened from. See Glass.solid.
-        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-        border = cardOutline,
-        shadowElevation = MenuShadow,
-        content = content,
-    )
-}
-
-/**
- * One row of an [AppMenu].
- *
- * [IconSize.Inline] leading icons, which is what every other icon-beside-text in this app is set
- * at; the menu default is [IconSize.Action], sized for something with a touch target of its own,
- * and a 24dp glyph beside a 14sp label made a five-item menu read as a column of buttons.
- *
- * [destructive] is the point of having this at all. Every one of these menus ends in the one action
- * that cannot be undone - Remove, Delete - drawn in exactly the ink of Share and Edit above it. The
- * error hue is the only thing on the row that says which press is the one to be careful about.
- */
-@Composable
-internal fun AppMenuItem(
-    text: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    destructive: Boolean = false,
-) {
-    val ink = if (destructive) {
-        MaterialTheme.colorScheme.error
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
-    DropdownMenuItem(
-        text = { Text(text, style = MaterialTheme.typography.bodyMedium) },
-        leadingIcon = {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(IconSize.Inline))
-        },
-        onClick = onClick,
-        colors = MenuDefaults.itemColors(
-            textColor = ink,
-            leadingIconColor = if (destructive) ink else MaterialTheme.colorScheme.onSurfaceVariant,
-        ),
-    )
-}
-
-/**
- * The ⋮ that opens one, at one size.
- *
- * The three cards carrying an overflow menu had drifted to two buttons: a 24dp one holding a 20dp
- * glyph on the call card, and Material's 48dp default on the other two. The same control doing the
- * same job in the same corner cannot be two sizes.
- *
- * 40dp, which is neither of them. The 24dp one left a 20dp glyph in 2dp of air - a mark rather than
- * a control, and the reason the timing pill beside it looked enormous. The 48dp default is a
- * screen's worth of button in the corner of a card, and it is 48dp of *drawn* width for no reason:
- * `IconButton` already expands its touch target to the platform minimum through
- * `minimumInteractiveComponentSize`, so the visual size is free to be what the card wants. 40dp
- * leaves 10dp of air around the glyph, which is what makes it read as pressable.
- */
-@Composable
-internal fun MoreButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    IconButton(onClick, modifier.size(MoreButtonSize)) {
-        Icon(
-            Icons.Outlined.MoreVert,
-            contentDescription = "More actions",
-            modifier = Modifier.size(IconSize.Inline),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
 /** Drawn size only. The touch target stays at the platform minimum, which is larger. */
 private val MoreButtonSize = 40.dp
 
@@ -1972,70 +1246,69 @@ internal fun HoldPrompt(title: String, actions: List<HoldAction>, onDismiss: () 
             chosen?.invoke() ?: onDismiss()
         }
     }
+    // The kit's ink action card since 5.0, the ⋮ menu's own look: the title, one row per action
+    // with the primary one in the highlight, and Cancel. Over a dimmed page, centred.
+    val p = palette
     Dialog(
         onDismissRequest = { visible = false },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        val view = LocalView.current
-        DisposableEffect(Unit) {
-            val window = (view.parent as? DialogWindowProvider)?.window
-            window?.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-            window?.setBackgroundBlurRadius(HoldPromptBlurRadius)
-            window?.setDimAmount(HoldPromptDim)
-            onDispose {}
-        }
         Box(
             Modifier
                 .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) { visible = false },
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { visible = false },
             contentAlignment = Alignment.Center,
         ) {
             AnimatedVisibility(
                 visible = visible,
                 enter = fadeIn(tween(HoldPromptEnterMs, easing = UiEase)) +
-                    scaleIn(initialScale = 0.85f, animationSpec = tween(HoldPromptEnterMs, easing = UiEase)),
+                    scaleIn(initialScale = 0.85f, animationSpec = com.ikverse.egxanalyzer.ui.kit.popSpring()),
                 exit = fadeOut(tween(HoldPromptExitMs, easing = UiEase)) +
                     scaleOut(targetScale = 0.85f, animationSpec = tween(HoldPromptExitMs, easing = UiEase)),
             ) {
                 Column(
                     Modifier
                         .padding(Space.xl)
-                        .background(
-                            Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-                            RoundedCornerShape(24.dp),
-                        )
-                        // Swallows a press so it does not fall through to the scrim behind the
-                        // buttons and dismiss the dialog it landed on.
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) {}
-                        .padding(Space.l),
-                    verticalArrangement = Arrangement.spacedBy(Space.s),
+                        .widthIn(max = 320.dp)
+                        .clip(RoundedCornerShape(26.dp))
+                        .background(p.ink)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                        .padding(8.dp),
                 ) {
-                    Text(title, style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(Space.xs))
-                    actions.forEach { action ->
-                        val fire = { chosen = action.onClick; visible = false }
-                        if (action.primary) {
-                            Button(onClick = fire, modifier = Modifier.fillMaxWidth()) {
-                                Text(action.label)
-                            }
-                        } else {
-                            OutlinedButton(onClick = fire, modifier = Modifier.fillMaxWidth()) {
-                                Text(action.label)
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = p.onInk.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    )
+                    (actions.map { it.label to (it.primary to it.onClick) } + ("Cancel" to (false to {})))
+                        .forEachIndexed { index, (label, rest) ->
+                            val (primary, action) = rest
+                            val isCancel = index == actions.size
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(if (primary) p.highlight else Color.Transparent)
+                                    .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                                        if (!isCancel) chosen = action
+                                        visible = false
+                                    }
+                                    .padding(horizontal = 14.dp),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                Text(
+                                    label,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = when {
+                                        primary -> p.onTile
+                                        isCancel -> p.onInk.copy(alpha = 0.7f)
+                                        else -> p.onInk
+                                    },
+                                )
                             }
                         }
-                    }
-                    OutlinedButton(
-                        onClick = { visible = false },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Cancel")
-                    }
                 }
             }
         }
@@ -2063,30 +1336,20 @@ private const val HoldPromptBlurRadius = 48
  */
 @Composable
 internal fun SheetSection(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-        // A tonal step with no edge since the 2026-11 redesign, like every section card.
-        shape = MaterialTheme.shapes.medium,
+    // A white kit panel inside a sheet since 5.0.
+    val p = palette
+    Column(
+        modifier.fillMaxWidth().clip(com.ikverse.egxanalyzer.ui.kit.Kit.PanelShape).background(p.card).padding(Space.m),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
-        Column(
-            Modifier.padding(Space.m),
-            verticalArrangement = Arrangement.spacedBy(Space.xs),
-            content = content,
-        )
+        CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides p.ink) { content() }
     }
 }
 
 /** What a [SheetSection] is called, in the key style every label over a figure already uses. */
 @Composable
 internal fun SheetSectionLabel(text: String) {
-    Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    Text(text.uppercase(), style = MaterialTheme.typography.labelSmall, color = palette.muted)
 }
 
 /**
@@ -2103,17 +1366,29 @@ internal fun SheetSectionLabel(text: String) {
  */
 @Composable
 internal fun RiskRewardBar(ratio: Double, modifier: Modifier = Modifier) {
+    // Two palette segments on a capsule since 5.0, the risk in loss red and the reward in gain
+    // green, a gap between them, growing in from the left.
+    val p = palette
     val riskShare = (1.0 / (1.0 + ratio)).coerceIn(0.08, 0.92).toFloat()
+    val grow = com.ikverse.egxanalyzer.ui.kit.rememberDrawIn(key = ratio, durationMs = 700)
     Row(
         modifier
             .fillMaxWidth()
             .height(RiskBarHeight)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)),
+            .graphicsLayer {
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
+                scaleX = grow.value
+            },
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Box(Modifier.weight(riskShare).fillMaxHeight().background(PriceRole.stop))
-        Box(Modifier.weight(1f - riskShare).fillMaxHeight().background(PriceRole.target))
+        Box(Modifier.weight(riskShare).fillMaxHeight().clip(com.ikverse.egxanalyzer.ui.kit.Kit.Capsule).background(p.loss))
+        Box(Modifier.weight(1f - riskShare).fillMaxHeight().clip(com.ikverse.egxanalyzer.ui.kit.Kit.Capsule).background(p.gain))
     }
 }
 
-private val RiskBarHeight = 4.dp
+private val RiskBarHeight = 8.dp
+
+/** Marks a chip as the chosen one for a screen reader. */
+private fun androidx.compose.ui.semantics.SemanticsPropertyReceiver.selectedState(value: Boolean) {
+    androidx.compose.ui.semantics.SemanticsProperties.Selected.let { key -> this[key] = value }
+}

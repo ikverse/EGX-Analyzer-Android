@@ -117,6 +117,23 @@ class PageState {
 
     internal val stockChartLevels: MutableState<Boolean> = mutableStateOf(true)
 
+    // ── Portfolio ────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The trade a row was pressed on, unfolded; the hero chart's range; and whether the "needs you"
+     * panel is open. Here rather than in `rememberSaveable`, which does not survive the fold - see
+     * the head of this class.
+     */
+    internal val portfolioSelectedTrade: MutableState<String?> = mutableStateOf(null)
+    internal val portfolioReturnRange: MutableState<com.ikverse.egxanalyzer.model.ReturnRange> =
+        mutableStateOf(com.ikverse.egxanalyzer.model.ReturnRange.MONTH)
+    internal val portfolioDecisionsOpen: MutableState<Boolean> = mutableStateOf(false)
+
+    // ── Settings ─────────────────────────────────────────────────────────────────────────────
+
+    /** The part of Settings that is open, or null for the hub. Here so a fold keeps it open. */
+    internal val settingsSection: MutableState<SettingsSection?> = mutableStateOf(null)
+
     // ── Results ──────────────────────────────────────────────────────────────────────────────
 
     /** The run whose table is open, which needs the whole row and so cannot be held by a card. */

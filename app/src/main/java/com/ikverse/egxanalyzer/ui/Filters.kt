@@ -1,5 +1,15 @@
 package com.ikverse.egxanalyzer.ui
 
+import com.ikverse.egxanalyzer.ui.theme.palette
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.ButtonSize
+import com.ikverse.egxanalyzer.ui.kit.ButtonKind
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.kit.KitChip
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.KitCheckbox
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import androidx.compose.foundation.border
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -76,60 +86,49 @@ internal fun CheckedSetFilter(
 ) {
     if (options.size < 2) return
     var open by remember { mutableStateOf(false) }
-    Row(modifier) {
-        FilterChip(
-            selected = shown.size < options.size,
-            onClick = { open = true },
-            label = {
-                Text(
-                    when {
-                        shown.size == options.size -> "All $label"
-                        shown.size == 1 -> shown.first()
-                        else -> "${shown.size} of ${options.size} $label"
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            },
-            trailingIcon = {
-                Icon(
-                    Icons.Outlined.ArrowDropDown,
-                    contentDescription = null,
-                    modifier = Modifier.size(IconSize.Inline),
-                )
-            },
-        )
-        AppMenu(expanded = open, onDismissRequest = { open = false }) {
+    // A chip that opens a sheet of tick boxes rather than a dropdown: the boxes stay open while the
+    // reader ticks several, which a menu that shuts on every press would not let them do.
+    KitChip(
+        label = when {
+            shown.size == options.size -> "All $label"
+            shown.size == 1 -> shown.first()
+            else -> "${shown.size} of ${options.size} $label"
+        },
+        selected = shown.size < options.size,
+        onClick = { open = true },
+        modifier = modifier,
+    )
+    if (open) {
+        KitSheet(
+            onDismiss = { open = false },
+            posture = LocalFoldPosture.current,
+            title = label.replaceFirstChar(Char::uppercase),
+        ) {
             options.forEach { option ->
-                DropdownMenuItem(
-                    text = {
-                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            Checkbox(checked = option in shown, onCheckedChange = null)
-                            Text(
-                                option,
-                                Modifier.padding(start = Space.s),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    },
-                    onClick = { onToggle(option) },
-                )
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onToggle(option) }
+                        .padding(vertical = Space.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.m),
+                ) {
+                    KitCheckbox(checked = option in shown, onCheckedChange = { onToggle(option) }, label = option)
+                    Text(
+                        option,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = palette.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             if (shown.size < options.size) {
-                DropdownMenuItem(
-                    text = { Text("Select all") },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Outlined.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(IconSize.Inline),
-                        )
-                    },
-                    onClick = {
-                        onSelectAll()
-                        open = false
-                    },
+                KitButton(
+                    "Show all",
+                    onClick = { onSelectAll() },
+                    kind = ButtonKind.SECONDARY,
+                    modifier = Modifier.padding(top = Space.s),
                 )
             }
         }
@@ -178,36 +177,22 @@ internal fun FilterSheet(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     if (!open.value) return
-    ModalBottomSheet(
-        onDismissRequest = { open.value = false },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = SheetShape,
-        containerColor = MaterialTheme.colorScheme.background,
-        dragHandle = { SheetHandle() },
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .sheetDragSlop()
-                .scrollableColumn()
-                .padding(horizontal = Space.l)
-                .padding(bottom = Space.xl),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
+    // **A kit sheet since 5.0**: from the bottom on the cover screen, beside the page unfolded.
+    KitSheet(onDismiss = { open.value = false }, posture = LocalFoldPosture.current, title = title) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Space.xs),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(title, style = MaterialTheme.typography.headlineSmall)
-                // On the title's line rather than at the foot of the sheet, which is where the
-                // shelf's panel kept it: the sections below are as long as the page has channels,
-                // and a button under them is one the reader has to scroll to in order to undo
-                // something they can see from the top.
-                if (active) {
-                    TextButton(onClick = onClearAll) { Text("Clear filters") }
-                }
+            Text(title, style = MaterialTheme.typography.headlineMedium, color = palette.ink)
+            // On the title's line rather than at the foot of the sheet: the sections below are as
+            // long as the page has channels, and a button under them is one the reader has to
+            // scroll to in order to undo something they can see from the top.
+            if (active) {
+                KitButton("Clear filters", onClick = onClearAll, kind = ButtonKind.DANGER, size = ButtonSize.SMALL)
             }
+        }
+        Column(Modifier.padding(horizontal = Space.xs), verticalArrangement = Arrangement.spacedBy(Space.l)) {
             content()
         }
     }
@@ -224,8 +209,8 @@ internal fun FilterSection(label: String, content: @Composable FlowRowScope.() -
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
         Text(
             label,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.titleMedium,
+            color = palette.ink,
         )
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(Space.s),
@@ -308,7 +293,6 @@ internal fun DateFilter?.accepts(date: String?): Boolean =
  * [SelectableDates] is what keeps a picked date honest: every date outside [dates] is greyed out
  * and cannot be tapped, so the picker can never land on a date the page would show nothing for.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun DateFilterSection(
     label: String,
@@ -335,40 +319,22 @@ internal fun DateFilterSection(
         ) { open = true }
     }
     if (open) {
-        val initial = exact?.date?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-            ?: allowed.maxOrNull()
-        val state = rememberDatePickerState(
-            initialSelectedDateMillis = initial?.let {
-                it.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        // The kit's calendar since 5.0. Every day outside [dates] is faint and refuses a press, so
+        // the filter can never land on a session the page would show nothing for, and the arrows
+        // stop at the first and last month that has one.
+        com.ikverse.egxanalyzer.ui.kit.KitCalendarSheet(
+            title = "Pick a date",
+            selected = exact?.date?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: allowed.maxOrNull(),
+            onPick = { picked ->
+                onSelect(DateFilter.Exact(picked.toString()))
+                open = false
             },
-            selectableDates = remember(allowed) {
-                object : SelectableDates {
-                    override fun isSelectableDate(utcTimeMillis: Long): Boolean =
-                        Instant.ofEpochMilli(utcTimeMillis).atZone(ZoneOffset.UTC).toLocalDate() in allowed
-                }
-            },
+            onDismiss = { open = false },
+            posture = LocalFoldPosture.current,
+            allowed = { it in allowed },
+            earliest = allowed.minOrNull(),
+            latest = allowed.maxOrNull(),
         )
-        DatePickerDialog(
-            onDismissRequest = { open = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        state.selectedDateMillis?.let { millis ->
-                            onSelect(
-                                DateFilter.Exact(
-                                    Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC)
-                                        .toLocalDate().toString(),
-                                ),
-                            )
-                        }
-                        open = false
-                    },
-                ) { Text("OK") }
-            },
-            dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
-        ) {
-            DatePicker(state = state)
-        }
     }
 }
 
@@ -389,7 +355,7 @@ internal fun <T> SortSection(
     onSelect: (T) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        com.ikverse.egxanalyzer.ui.kit.KitRule(thickness = 1.5.dp, color = palette.ink)
         FilterSection("Sort") {
             options.forEach { option ->
                 ChoiceChip(label(option), option == selected) { onSelect(option) }
@@ -401,37 +367,9 @@ internal fun <T> SortSection(
 /** One choice in a sheet's section: a chip that says whether it is the one in force. */
 @Composable
 internal fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    // Tonal when chosen, and squaring off under the finger (2026-11 redesign).
-    val press = remember { MutableInteractionSource() }
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        shape = RoundedCornerShape(pressCorner(press, rest = ChipCorner, pressed = ChipCorner / 2)),
-        interactionSource = press,
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-            selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        ),
-        border = FilterChipDefaults.filterChipBorder(
-            enabled = true,
-            selected = selected,
-            selectedBorderColor = Color.Transparent,
-            borderColor = MaterialTheme.colorScheme.outlineVariant,
-        ),
-        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        leadingIcon = if (!selected) null else ({
-            Icon(
-                Icons.Outlined.Check,
-                contentDescription = null,
-                modifier = Modifier.size(IconSize.Inline),
-            )
-        }),
-    )
+    // The kit's chip since 5.0: a hairline capsule, ink with the highlight's tick when chosen.
+    KitChip(label = label, selected = selected, onClick = onClick)
 }
-
-/** Half a chip's 32dp: a capsule at rest. */
-private val ChipCorner = 16.dp
 
 /** The row a screen's filters sit in, wrapping rather than scrolling on a narrow screen. */
 @Composable
@@ -447,7 +385,7 @@ internal fun FilterRow(
     ) {
         content()
         if (active) {
-            TextButton(onClick = onClearAll) { Text("Clear filters") }
+            KitButton("Clear filters", onClick = onClearAll, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
         }
     }
 }
@@ -465,10 +403,8 @@ internal fun StockFilterField(
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = Color.Transparent,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    // A hairline capsule at a chip's height, so the box and the chips beside it read as one line.
+    Box(
         // Its own height and width **first**, then the caller's. The other way round the 150dp
         // won whatever was passed in, which is why a `weight(1f)` around this box used to do
         // nothing at all. [StockFieldWidth] is still the right default for a box sharing a row
@@ -476,7 +412,9 @@ internal fun StockFilterField(
         modifier = Modifier
             .height(FilterControlHeight)
             .width(StockFieldWidth)
-            .then(modifier),
+            .then(modifier)
+            .border(BorderStroke(1.dp, palette.ink.copy(alpha = 0.4f)), Kit.Capsule),
+        contentAlignment = Alignment.CenterStart,
     ) {
         Row(
             Modifier.padding(horizontal = Space.m),
@@ -485,7 +423,7 @@ internal fun StockFilterField(
             Icon(
                 Icons.Outlined.Search,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = palette.muted,
                 modifier = Modifier.size(IconSize.Inline),
             )
             Box(Modifier.weight(1f).padding(start = Space.s)) {
@@ -493,7 +431,7 @@ internal fun StockFilterField(
                     Text(
                         "Stock",
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.muted,
                     )
                 }
                 BasicTextField(
@@ -501,16 +439,16 @@ internal fun StockFilterField(
                     onValueChange = onValueChange,
                     singleLine = true,
                     textStyle = MaterialTheme.typography.labelLarge.copy(
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = palette.ink,
                     ),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    cursorBrush = SolidColor(palette.hero),
                 )
             }
             if (value.isNotEmpty()) {
                 Icon(
                     Icons.Outlined.Close,
                     contentDescription = "Clear stock filter",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = palette.muted,
                     // The icon stays small; the target it can be pressed from does not - the same
                     // trick `ActionPill` uses to keep a 32dp control pressable at the full 48dp
                     // Android asks for, wrapped outside the click and the visual size rather than

@@ -1,5 +1,16 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import com.ikverse.egxanalyzer.model.DayEventKind
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.ui.theme.palette
+
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -65,52 +76,81 @@ import com.ikverse.egxanalyzer.ui.theme.extraColors
 @Composable
 internal fun ColumnScope.TodayCard(appState: AppState) {
     val digest = appState.sessionDigest ?: return
-    var expanded by appState.pages.todayExpanded
-    ExpandableSection(
-        title = "What happened",
-        icon = Icons.Outlined.Today,
-        iconTone = digest.headline?.let { toneColor(it) },
-        summaryContent = { Text(digest.headlineLine(), style = MaterialTheme.typography.bodySmall) },
-        expandedState = expanded,
-        onExpandedChange = { expanded = it },
-    ) {
+    val p = palette
+    val counts = remember(digest) {
+        fun count(vararg kinds: DayEventKind) = digest.events.count { it.kind in kinds }
+        listOf(
+            Triple(count(DayEventKind.TRADE_TARGET1, DayEventKind.CALL_TARGET1), "hit target 1", p.gain),
+            Triple(count(DayEventKind.TRADE_TARGET2, DayEventKind.CALL_TARGET2), "hit target 2", p.gain),
+            Triple(digest.stops, "stopped", p.loss),
+            Triple(digest.inRange, "came into range", p.ink),
+        )
+    }
+    // Open, alone among the tiles that hold a list: it is read once and scrolled past, and a tile
+    // that has to be opened before it says anything is a tile nobody opens.
+    Tile(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+            Text(
+                "${digest.date.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH)}'s session",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                AppDates.DayMonth.format(digest.date),
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
+                color = p.muted,
+            )
+        }
+        Row(Modifier.fillMaxWidth().padding(top = Space.m), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            counts.forEach { (value, label, tone) ->
+                FigureCell(value.toString(), label, Modifier.weight(1f), tone = if (value > 0) tone else p.ink)
+            }
+        }
+        val also = buildList {
+            if (digest.expiries > 0) add("${digest.expiries} out of time")
+            if (digest.newCalls > 0) {
+                add(
+                    "${digest.newCalls} new ${plural(digest.newCalls, "call")}" +
+                        if (digest.newCallSources > 1) " from ${digest.newCallSources} sources" else "",
+                )
+            }
+        }
+        if (also.isNotEmpty()) {
+            Text(
+                also.joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = TabularFigures),
+                color = p.muted,
+                modifier = Modifier.padding(top = Space.s),
+            )
+        }
         if (digest.events.isEmpty()) {
-            // Said rather than hidden, which is the one place this card parts company with Overdue.
-            // "Nothing is late" is the state the app is normally in and a permanent card announcing
-            // it would be furniture; "nothing moved this session" is a genuine answer to the
+            // Said rather than hidden: "nothing moved this session" is a genuine answer to the
             // question being asked, and its absence would read as the app not having looked.
             Text(
-                if (digest.newCalls > 0) {
-                    "Nothing moved on this session, beyond the new calls above."
-                } else {
-                    "Nothing moved on this session."
-                },
+                "Nothing moved on this session.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = p.muted,
+                modifier = Modifier.padding(top = Space.s),
             )
-            return@ExpandableSection
+            return@Tile
         }
-        BoxWithConstraints {
-            // The Overdue card's helper, deliberately not its numbers - see [EventTileMinWidth].
+        BoxWithConstraints(Modifier.padding(top = Space.m)) {
             // Three across at most, so a wide screen spends its width on tiles that fit their
-            // contents rather than on more tiles that do not.
+            // contents rather than on more tiles that do not. See [EventTileMinWidth].
             val columns = responsiveColumns(minColumnWidth = EventTileMinWidth, maxColumns = 3)
             Column {
                 ResponsiveRows(digest.events, columns, spacing = Space.s) { event, tileModifier ->
                     EventTile(
                         event = event,
                         onOpen = {
-                            // A trade opens in the Portfolio and a call in Insights, through the
-                            // two entrances every other cross-tab press already uses. Which one is
-                            // a property of the event rather than of the tab the card is drawn on,
-                            // so the same tile leads to the same place from either side.
+                            // A trade opens in the Portfolio and a call in Insights. Which one is a
+                            // property of the event rather than of the tab the card is drawn on.
                             if (event.kind.held) {
                                 appState.openPosition(event.positionId)
                             } else {
                                 appState.openCall(event.positionId)
                             }
                         },
-                        // One after another the first time the card opens (2026-11 redesign).
                         modifier = tileModifier.staggerIn(digest.events.indexOf(event)),
                     )
                 }
@@ -132,7 +172,7 @@ internal fun ColumnScope.TodayCard(appState: AppState) {
  */
 @Composable
 private fun SessionDigest.headlineLine(): AnnotatedString {
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val muted = palette.muted
     val parts = buildList {
         if (targets > 0) add(EventTone.GAIN to "$targets ${plural(targets, "target")}")
         if (stops > 0) add(EventTone.LOSS to "$stops ${plural(stops, "stop")}")
@@ -193,24 +233,23 @@ private fun EventTile(event: DayEvent, onOpen: () -> Unit, modifier: Modifier = 
             formatPercent(event.returnPct) to PriceRole.forReturn(event.returnPct)
 
         !event.channel.isNullOrBlank() ->
-            event.channel to MaterialTheme.colorScheme.onSurfaceVariant
+            event.channel to palette.muted
 
         else -> null
     }
-    Card(
-        onClick = onOpen,
-        modifier = modifier
+    // A ground block inside the white tile, pressed as one thing.
+    Box(
+        modifier
             .fillMaxWidth()
-            .semantics {
-                onClick(label = if (event.kind.held) "Open this trade" else "Open this call", action = null)
-            },
-        // Tonal with no edge since the 2026-11 redesign.
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-        shape = MaterialTheme.shapes.medium,
+            .clip(RoundedCornerShape(18.dp))
+            .background(palette.ground)
+            .clickable(
+                role = Role.Button,
+                onClickLabel = if (event.kind.held) "Open this trade" else "Open this call",
+                onClick = onOpen,
+            ),
     ) {
-        Column(Modifier.padding(horizontal = Space.m, vertical = Space.xs)) {
+        Column(Modifier.padding(horizontal = Space.m, vertical = Space.s)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // The ticker is **not** a second target here, and this tile is one of the two
                 // places that is true - see the Overdue tile for the other. Both are the smallest
@@ -237,7 +276,7 @@ private fun EventTile(event: DayEvent, onOpen: () -> Unit, modifier: Modifier = 
                     // Named by the press it belongs to, one level up; announcing the glyph as well
                     // would say it twice.
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = palette.muted,
                     modifier = Modifier.padding(start = Space.xs).size(IconSize.Hint),
                 )
             }

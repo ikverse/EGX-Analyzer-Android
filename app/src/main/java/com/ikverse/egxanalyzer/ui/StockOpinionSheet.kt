@@ -1,5 +1,20 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.ui.kit.TileTone
+import com.ikverse.egxanalyzer.ui.theme.palette
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -8,12 +23,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,7 +59,6 @@ import com.ikverse.egxanalyzer.ui.theme.extraColors
  * The answer is Arabic and reads right to left; the section headings stay English, exactly as an
  * English label already sits over an Arabic company name everywhere else in the app.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun StockOpinionSheet(
     call: ScoredCall,
@@ -56,180 +67,161 @@ internal fun StockOpinionSheet(
     onAskAgain: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = SheetShape,
-        containerColor = MaterialTheme.colorScheme.background,
-        dragHandle = { SheetHandle() },
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .sheetDragSlop()
-                .scrollableColumn()
-                .padding(horizontal = Space.l)
-                .padding(bottom = Space.xl),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            Row(verticalAlignment = Alignment.Top) {
+    val p = palette
+    KitSheet(onDismiss = onDismiss, posture = LocalFoldPosture.current, title = "AI answer about ${call.ticker}") {
+        // The lilac head: the stock, the verdict, how sure, and the answer in one line.
+        Tile(Modifier.fillMaxWidth(), tone = TileTone.TILE2) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StockLogo(call.ticker, LogoSize.Header, Modifier.padding(end = Space.m))
                 Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        StockLogo(call.ticker, LogoSize.Header, Modifier.padding(end = Space.s))
-                        Text(call.ticker, style = MaterialTheme.typography.headlineSmall)
-                    }
+                    Text(call.ticker, style = MaterialTheme.typography.headlineMedium)
                     listOfNotNull(call.companyEnglish, call.companyArabic)
                         .filter(String::isNotBlank)
                         .distinct()
                         .takeIf(List<String>::isNotEmpty)
-                        ?.let {
-                            Text(
-                                it.joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        ?.let { Text(it.joinToString(" · "), style = MaterialTheme.typography.bodySmall) }
                 }
                 VerdictChip(opinion.verdict)
             }
-            // The confidence sits under the name because a verdict does not mean much without it:
-            // "buy" from a model that has just called its own confidence low is a different
-            // sentence from the same word at high. The horizon joins it **only on an answer with no
-            // forecast** - a schema 2 row - because where there is one, three dated spans sit a few
-            // lines below and a single holding period above them is the same claim said worse.
-            Text(
+            // The confidence sits under the name because a verdict does not mean much without it.
+            // The horizon joins it **only on an answer with no forecast**, because where there is
+            // one, three dated spans sit below and a single holding period is the same claim said worse.
+            ArabicText(
                 listOfNotNull(
                     opinion.horizon.arabic.takeIf { opinion.forecast == null },
                     opinion.confidence.arabic,
                 ).joinToString(" · "),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                MaterialTheme.typography.labelLarge,
+                color = LocalContentColor.current.copy(alpha = 0.75f),
+                modifier = Modifier.fillMaxWidth().padding(top = Space.m),
             )
             if (opinion.headline.isNotBlank()) {
-                ArabicText(opinion.headline, MaterialTheme.typography.titleSmall)
-            }
-
-            // Absent rather than empty on an answer that carried none - every opinion saved before
-            // this shipped, and any later one where the model skipped the section. A heading over
-            // nothing would read as the app having lost the paragraph.
-            if (opinion.standing.isNotBlank()) {
-                HorizontalDivider()
-                OpinionSection("How it has traded") {
-                    ArabicText(opinion.standing, MaterialTheme.typography.bodyMedium)
-                }
-            }
-
-            HorizontalDivider()
-            OpinionSection("The stock") {
-                ArabicText(opinion.outlook, MaterialTheme.typography.bodyMedium)
-            }
-
-            opinion.forecast?.let { forecast ->
-                HorizontalDivider()
-                OpinionSection("Where it goes") {
-                    forecast.legs.forEach { ForecastLegRow(it) }
-                }
-            }
-
-            HorizontalDivider()
-            OpinionSection("The recommendation", trailing = { StanceChip(opinion.onTheCall.stance) }) {
-                if (opinion.onTheCall.detail.isBlank()) {
-                    Text(
-                        "The model said nothing about the levels.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    ArabicText(opinion.onTheCall.detail, MaterialTheme.typography.bodyMedium)
-                }
-                // Under the prose rather than instead of it: the paragraph is the reading of the
-                // levels taken together, and these are what each number is worth on its own.
-                opinion.onTheCall.checks.forEach { CheckRow(it) }
-            }
-
-            // Shown even when it found nothing. An empty list here is a finding - it says the
-            // fortnight was quiet - and it only reads as one beside the window it covered, which is
-            // why the window rather than [StockOpinion.searched] is what admits the section. An
-            // answer given before the window existed carries a zero and is left out: it was
-            // searched, but under a prompt that told it to report no news either way, so an empty
-            // list under this heading would be this build putting words in its mouth.
-            if (opinion.news.isNotEmpty() || opinion.newsWindowDays > 0) {
-                HorizontalDivider()
-                OpinionSection("What it found") {
-                    if (opinion.news.isEmpty()) {
-                        Text(
-                            opinion.newsWindowDays
-                                .takeIf { it > 0 }
-                                ?.let { "Nothing published about this company in the last $it days." }
-                                ?: "The search turned up nothing about this company.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        opinion.news.forEach { NewsRow(it) }
-                    }
-                }
-            }
-
-            if (opinion.catalysts.isNotEmpty()) {
-                HorizontalDivider()
-                OpinionSection("What is coming") {
-                    opinion.catalysts.forEach { CatalystRow(it) }
-                }
-            }
-
-            if (opinion.risks.isNotEmpty()) {
-                HorizontalDivider()
-                OpinionSection("What goes wrong") {
-                    opinion.risks.forEach { line ->
-                        ArabicText("• $line", MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-
-            // Deliberately last and deliberately grey. It is the part that stops a thin answer
-            // reading as an authoritative one, and it is not what the reader came for.
-            if (opinion.unknowns.isNotEmpty()) {
-                HorizontalDivider()
-                OpinionSection("What it could not see") {
-                    opinion.unknowns.forEach { line ->
-                        ArabicText(
-                            "• $line",
-                            MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            HorizontalDivider()
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "${opinion.model} · asked ${opinion.askedOn}" + opinion.searchNote(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    // Said plainly, because everything else on the screen behind this sheet is
-                    // measured from prices and this is not.
-                    Text(
-                        "An opinion, not a measurement.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                // Filled, like the button on the card that first spent money here: a re-ask is a
-                // second billed request, and the ring is reserved for reopening what is already
-                // paid for - which is this sheet.
-                AskAiButton(
-                    label = if (onAskAgain == null) "Asking…" else "Ask again",
-                    onClick = { onAskAgain?.invoke() },
-                    enabled = onAskAgain != null,
-                    working = onAskAgain == null,
+                ArabicText(
+                    opinion.headline,
+                    MaterialTheme.typography.titleLarge,
+                    color = LocalContentColor.current,
+                    modifier = Modifier.fillMaxWidth().padding(top = Space.xs),
                 )
             }
         }
+
+        // Absent rather than empty on an answer that carried none - a heading over nothing would
+        // read as the app having lost the paragraph.
+        if (opinion.standing.isNotBlank()) {
+            OpinionSection("How it has traded") {
+                ArabicText(opinion.standing, MaterialTheme.typography.bodyMedium)
+            }
+        }
+        OpinionSection("The stock") {
+            ArabicText(opinion.outlook, MaterialTheme.typography.bodyMedium)
+        }
+        opinion.forecast?.let { forecast ->
+            OpinionSection("Where it goes") {
+                forecast.legs.forEach { ForecastLegRow(it) }
+            }
+        }
+        OpinionSection("The recommendation", trailing = { StanceChip(opinion.onTheCall.stance) }) {
+            if (opinion.onTheCall.detail.isBlank()) {
+                Text("The model said nothing about the levels.", style = MaterialTheme.typography.bodySmall, color = p.muted)
+            } else {
+                ArabicText(opinion.onTheCall.detail, MaterialTheme.typography.bodyMedium)
+            }
+            // Under the prose rather than instead of it: the paragraph is the reading of the
+            // levels taken together, and these are what each number is worth on its own.
+            opinion.onTheCall.checks.forEach { CheckRow(it) }
+        }
+
+        // Shown even when it found nothing: an empty list here is a finding, and it only reads as
+        // one beside the window it covered. An answer from before the window existed is left out.
+        if (opinion.news.isNotEmpty() || opinion.newsWindowDays > 0) {
+            OpinionSection(
+                "What it found" + opinion.newsWindowDays.takeIf { it > 0 }?.let { " · last $it days" }.orEmpty(),
+            ) {
+                if (opinion.news.isEmpty()) {
+                    Text(
+                        opinion.newsWindowDays
+                            .takeIf { it > 0 }
+                            ?.let { "Nothing published about this company in the last $it days." }
+                            ?: "The search turned up nothing about this company.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = p.muted,
+                    )
+                } else {
+                    opinion.news.forEach { NewsRow(it) }
+                }
+            }
+        }
+
+        // What is coming and what goes wrong side by side, sky and coral, when there are both.
+        val coming: (@Composable (Modifier) -> Unit)? = opinion.catalysts.takeIf { it.isNotEmpty() }?.let { items ->
+            { m ->
+                Tile(m, tone = TileTone.TILE3) {
+                    SectionHeading("What is coming")
+                    items.forEach { CatalystRow(it) }
+                }
+            }
+        }
+        val wrong: (@Composable (Modifier) -> Unit)? = opinion.risks.takeIf { it.isNotEmpty() }?.let { items ->
+            { m ->
+                Tile(m, tone = TileTone.ALERT) {
+                    SectionHeading("What goes wrong")
+                    items.forEach { ArabicText("• $it", MaterialTheme.typography.bodyMedium, color = LocalContentColor.current) }
+                }
+            }
+        }
+        if (coming != null && wrong != null) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+                coming(Modifier.weight(1f))
+                wrong(Modifier.weight(1f))
+            }
+        } else {
+            coming?.invoke(Modifier.fillMaxWidth())
+            wrong?.invoke(Modifier.fillMaxWidth())
+        }
+
+        // Deliberately last and deliberately quiet. It is the part that stops a thin answer reading
+        // as an authoritative one, and it is not what the reader came for.
+        if (opinion.unknowns.isNotEmpty()) {
+            Column(
+                Modifier.fillMaxWidth().dashedOutline(p.faint).padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
+                SectionHeading("What it could not see")
+                opinion.unknowns.forEach { ArabicText("• $it", MaterialTheme.typography.bodySmall, color = p.muted) }
+            }
+        }
+
+        Row(Modifier.padding(horizontal = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "${opinion.model} · asked ${opinion.askedOn}" + opinion.searchNote(),
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                    color = p.muted,
+                )
+                // Said plainly, because everything else on the screen behind this sheet is measured
+                // from prices and this is not.
+                Text("An opinion, not a measurement.", style = MaterialTheme.typography.labelSmall, color = p.muted)
+            }
+            // A re-ask is a second billed request, so it is the filled Ask AI pill.
+            AskAiButton(
+                label = if (onAskAgain == null) "Asking…" else "Ask again",
+                onClick = { onAskAgain?.invoke() },
+                enabled = onAskAgain != null,
+                working = onAskAgain == null,
+            )
+        }
     }
+}
+
+/** A tile section's heading, tracked out over what it holds. */
+@Composable
+private fun SectionHeading(title: String) {
+    Text(
+        title.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = LocalContentColor.current.copy(alpha = 0.72f),
+        modifier = Modifier.padding(bottom = Space.xs),
+    )
 }
 
 /**
@@ -270,7 +262,7 @@ private fun NewsRow(item: StockOpinion.NewsItem) {
             listOf(item.date, item.source).filter(String::isNotBlank).joinToString(" · ")
                 .ifBlank { "undated, unattributed" },
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = palette.muted,
         )
     }
 }
@@ -299,13 +291,13 @@ private fun ForecastLegRow(leg: StockOpinion.Forecast.Leg) {
                 Text(
                     leg.span.window,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.muted,
                 )
             }
             Text(
                 leg.confidence.arabic,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = palette.muted,
                 modifier = Modifier.padding(end = Space.s),
             )
             DirectionChip(leg.direction)
@@ -358,7 +350,7 @@ private fun CatalystRow(item: StockOpinion.Catalyst) {
                 Text(
                     it.joinToString(" · "),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.muted,
                 )
             }
     }
@@ -375,7 +367,7 @@ private fun CatalystRow(item: StockOpinion.Catalyst) {
 private fun ArabicText(
     value: String,
     style: androidx.compose.ui.text.TextStyle,
-    color: Color = MaterialTheme.colorScheme.onSurface,
+    color: Color = LocalContentColor.current,
     modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -389,122 +381,119 @@ private fun ArabicText(
     }
 }
 
+/** One white tile of the answer, with its heading and an optional chip on the heading's line. */
 @Composable
 private fun OpinionSection(
     title: String,
     trailing: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+    Tile(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                title.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
+            Box(Modifier.weight(1f)) { SectionHeading(title) }
             trailing?.invoke()
         }
-        content()
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s), content = content)
     }
 }
 
 /**
- * The answer in one word and one colour.
- *
- * The palette is the app's own and unchanged: green is where the call says to take profit, red
- * where it says to give up, amber is the "out of time, not lost" hue the portfolio already uses.
- * Waiting is neither good nor bad, which is exactly what amber means here.
+ * The answer in one word, on a filled capsule. Lime is where the call says to take it, coral
+ * where it says to keep away, sunflower is waiting - neither good nor bad.
  */
 @Composable
 private fun VerdictChip(verdict: StockOpinion.Verdict) {
-    val outline = when (verdict) {
-        StockOpinion.Verdict.BUY_NOW -> MaterialTheme.colorScheme.tertiary
-        StockOpinion.Verdict.WAIT -> extraColors.expired
-        StockOpinion.Verdict.AVOID -> extraColors.loss
-    }
-    val ink = when (verdict) {
-        StockOpinion.Verdict.BUY_NOW -> MaterialTheme.colorScheme.onTertiaryContainer
-        StockOpinion.Verdict.WAIT -> extraColors.onExpiredContainer
-        StockOpinion.Verdict.AVOID -> extraColors.onLossContainer
-    }
-    OutlinePill(verdict.arabic, outline = outline, textColor = ink)
+    val p = palette
+    FillTag(
+        verdict.arabic,
+        when (verdict) {
+            StockOpinion.Verdict.BUY_NOW -> p.highlight
+            StockOpinion.Verdict.WAIT -> p.tile1
+            StockOpinion.Verdict.AVOID -> p.alert
+        },
+        large = true,
+    )
 }
 
 @Composable
 private fun StanceChip(stance: StockOpinion.Stance) {
-    val outline = when (stance) {
-        StockOpinion.Stance.SOUND -> MaterialTheme.colorScheme.tertiary
-        StockOpinion.Stance.RISKY, StockOpinion.Stance.OVERTAKEN -> extraColors.expired
-        StockOpinion.Stance.UNSOUND -> extraColors.loss
-    }
-    val ink = when (stance) {
-        StockOpinion.Stance.SOUND -> MaterialTheme.colorScheme.onTertiaryContainer
-        StockOpinion.Stance.RISKY, StockOpinion.Stance.OVERTAKEN -> extraColors.onExpiredContainer
-        StockOpinion.Stance.UNSOUND -> extraColors.onLossContainer
-    }
-    OutlinePill(stance.arabic, outline = outline, textColor = ink)
+    val p = palette
+    FillTag(
+        stance.arabic,
+        when (stance) {
+            StockOpinion.Stance.SOUND -> p.tile3
+            StockOpinion.Stance.RISKY, StockOpinion.Stance.OVERTAKEN -> p.tile1
+            StockOpinion.Stance.UNSOUND -> p.alert
+        },
+    )
 }
 
-/**
- * Which way one span points.
- *
- * The same three colours a news item's tone wears, and deliberately so: both answer "good or bad
- * for the price", and a fourth palette on one sheet would be three vocabularies to learn. Sideways
- * takes the outline rather than the amber a waiting verdict wears - amber here means the app is
- * unsure, and a flat forecast is a definite answer that the price goes nowhere.
- */
+/** Which way one span points: lime up, coral down, the ground for flat - a definite answer too. */
 @Composable
 private fun DirectionChip(direction: StockOpinion.Direction) {
-    val outline = when (direction) {
-        StockOpinion.Direction.UP -> MaterialTheme.colorScheme.tertiary
-        StockOpinion.Direction.DOWN -> extraColors.loss
-        StockOpinion.Direction.SIDEWAYS -> MaterialTheme.colorScheme.outline
-    }
-    val ink = when (direction) {
-        StockOpinion.Direction.UP -> MaterialTheme.colorScheme.onTertiaryContainer
-        StockOpinion.Direction.DOWN -> extraColors.onLossContainer
-        StockOpinion.Direction.SIDEWAYS -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    OutlinePill(direction.arabic, outline = outline, textColor = ink)
+    val p = palette
+    FillTag(
+        direction.arabic,
+        when (direction) {
+            StockOpinion.Direction.UP -> p.highlight
+            StockOpinion.Direction.DOWN -> p.alert
+            StockOpinion.Direction.SIDEWAYS -> p.ground
+        },
+    )
 }
 
-/**
- * What one printed number is worth, in the palette a stance already uses.
- *
- * `FAIR` takes the amber a `RISKY` stance takes, for the same reason: neither is a fault and
- * neither is a recommendation, and the app already means "workable, with something wrong with it"
- * by that hue.
- */
+/** What one printed number is worth: lime, sunflower for workable with a fault, coral for poor. */
 @Composable
 private fun RatingChip(rating: StockOpinion.Rating) {
-    val outline = when (rating) {
-        StockOpinion.Rating.GOOD -> MaterialTheme.colorScheme.tertiary
-        StockOpinion.Rating.FAIR -> extraColors.expired
-        StockOpinion.Rating.POOR -> extraColors.loss
-    }
-    val ink = when (rating) {
-        StockOpinion.Rating.GOOD -> MaterialTheme.colorScheme.onTertiaryContainer
-        StockOpinion.Rating.FAIR -> extraColors.onExpiredContainer
-        StockOpinion.Rating.POOR -> extraColors.onLossContainer
-    }
-    OutlinePill(rating.arabic, outline = outline, textColor = ink)
+    val p = palette
+    FillTag(
+        rating.arabic,
+        when (rating) {
+            StockOpinion.Rating.GOOD -> p.highlight
+            StockOpinion.Rating.FAIR -> p.tile1
+            StockOpinion.Rating.POOR -> p.alert
+        },
+    )
 }
 
-/** What one item means for the price, in the same three colours the rest of the sheet uses. */
+/** What one news item means for the price, as a dot in the gain, loss or neutral colour. */
 @Composable
 private fun ToneChip(tone: StockOpinion.Tone) {
-    val outline = when (tone) {
-        StockOpinion.Tone.BULLISH -> MaterialTheme.colorScheme.tertiary
-        StockOpinion.Tone.BEARISH -> extraColors.loss
-        StockOpinion.Tone.NEUTRAL -> MaterialTheme.colorScheme.outline
+    val p = palette
+    Box(
+        Modifier
+            .padding(start = Space.s, top = 6.dp)
+            .size(10.dp)
+            .clip(CircleShape)
+            .background(
+                when (tone) {
+                    StockOpinion.Tone.BULLISH -> p.gain
+                    StockOpinion.Tone.BEARISH -> p.loss
+                    StockOpinion.Tone.NEUTRAL -> p.faint
+                },
+            )
+            .semantics { contentDescription = tone.arabic },
+    )
+}
+
+/** A word on a filled capsule, in the tile ink every bright fill takes. */
+@Composable
+private fun FillTag(text: String, fill: Color, large: Boolean = false) {
+    Box(
+        Modifier
+            .clip(Kit.Capsule)
+            .background(fill)
+            .padding(horizontal = if (large) 14.dp else 10.dp, vertical = if (large) 7.dp else 3.dp),
+    ) {
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+            Text(
+                text,
+                style = if (large) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelMedium,
+                color = palette.onTile,
+                maxLines = 1,
+            )
+        }
     }
-    val ink = when (tone) {
-        StockOpinion.Tone.BULLISH -> MaterialTheme.colorScheme.onTertiaryContainer
-        StockOpinion.Tone.BEARISH -> extraColors.onLossContainer
-        StockOpinion.Tone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    OutlinePill(tone.arabic, outline = outline, textColor = ink)
 }
 
 /**
@@ -533,29 +522,27 @@ internal fun AskAiDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-        onDismissRequest = onDismiss,
-        title = { Text("Ask about ${call.ticker}?") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                Text(
-                    "One paid question about this stock and what ${call.channel} said about it. " +
-                        "The answer is kept on this card, so opening it again later is free.",
-                )
-                Text(
-                    listOfNotNull(
-                        model,
-                        if (searching) "checks news from the last $newsWindowDays days" else null,
-                    ).joinToString(" · "),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        // The gradient rather than a plain Button: this is the press that actually spends the
-        // money, and it should look like the one that opened the dialog.
-        confirmButton = { AskAiButton(label = "Ask", onClick = onConfirm) },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    // The kit's dialog since 5.0, with the model and the news window kept as its footnote. The
+    // confirming button is the one that spends the money; nothing is sent until it is pressed.
+    com.ikverse.egxanalyzer.ui.kit.KitDialog(
+        title = "Ask about ${call.ticker}?",
+        text = "One paid question about this stock and what ${call.channel} said about it. " +
+            "The answer is kept on this card, so opening it again later is free.",
+        confirmLabel = "Ask",
+        onConfirm = onConfirm,
+        dismissLabel = "Cancel",
+        onDismiss = onDismiss,
+        posture = LocalFoldPosture.current,
+        glyph = "✦",
+    ) {
+        Text(
+            listOfNotNull(
+                model,
+                if (searching) "checks news from the last $newsWindowDays days" else null,
+            ).joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+            color = palette.muted,
+            modifier = Modifier.padding(top = Space.s),
+        )
+    }
 }

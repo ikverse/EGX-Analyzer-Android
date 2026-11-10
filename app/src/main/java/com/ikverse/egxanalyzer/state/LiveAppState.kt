@@ -146,6 +146,15 @@ import com.ikverse.egxanalyzer.model.SeriesHarvest
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.ScoredSession
 import com.ikverse.egxanalyzer.model.Scoring
+import com.ikverse.egxanalyzer.model.lastMove
+import com.ikverse.egxanalyzer.model.MarketBreadth
+import com.ikverse.egxanalyzer.model.ReturnPoint
+import com.ikverse.egxanalyzer.model.marketBreadth
+import com.ikverse.egxanalyzer.model.returnByDay
+import com.ikverse.egxanalyzer.model.indexByDay
+import com.ikverse.egxanalyzer.model.callsInPlay
+import com.ikverse.egxanalyzer.model.IndexPoint
+import com.ikverse.egxanalyzer.ui.kit.TapeQuote
 import com.ikverse.egxanalyzer.model.SessionDigest
 import com.ikverse.egxanalyzer.model.SourceFreshness
 import com.ikverse.egxanalyzer.model.SourceTrace
@@ -406,7 +415,7 @@ class LiveAppState(
 
     /** Started by whichever path first needs Telegram, and never by merely existing. */
     private val telegramRepository: TelegramRepository by lazy { telegramProvider() }
-    override var destination by mutableStateOf(AppDestination.ANALYZE)
+    override var destination by mutableStateOf(AppDestination.PORTFOLIO)
         private set
 
     /**
@@ -1300,6 +1309,80 @@ class LiveAppState(
      */
     override var priceHealth by mutableStateOf(PriceHealthReport())
         private set
+    override var tapeQuotes by mutableStateOf(emptyList<TapeQuote>())
+        private set
+
+    /**
+     * The price strip, rebuilt after every portfolio pass: one entry per stock with an open trade,
+     * then the stocks of calls still in play that are not held, each stock once - from the sessions
+     * already stored. Two weeks back is enough to find the close before the last across a weekend
+     * and a holiday.
+     */
+    private suspend fun recomputeTape() {
+        val held = portfolio.positions.filter { it.open }.map { it.ticker }.distinct().sorted()
+        val calls = callsInPlay(performance).calls
+            .map { Scoring.normalizeTicker(it.ticker) }
+            .distinct()
+            .filter { it !in held }
+            .sorted()
+        val tickers = held + calls.take(TapeCallLimit)
+        val from = LocalDate.now(ScheduleClock.ZONE).minusDays(14)
+        tapeQuotes = withContext(Dispatchers.IO) {
+            tickers.mapNotNull { ticker ->
+                lastMove(localDataStore.sessionsFrom(ticker, from))?.let { move ->
+                    // The app's own price format, which is the same digits whatever the phone's
+                    // language - "%.2f" followed the locale and drew Arabic-Indic digits.
+                    TapeQuote(ticker, formatPrice(move.close), move.changePercent)
+                }
+            }
+        }
+    }
+
+    /** How many calls in play the strip carries after the held stocks, so a long record stays a strip. */
+    private val TapeCallLimit = 24
+
+    override var returnByDay by mutableStateOf(emptyList<ReturnPoint>())
+        private set
+    override var marketBreadth by mutableStateOf<MarketBreadth?>(null)
+        private set
+
+    /**
+     * The Portfolio page's chart and breadth, after every portfolio pass. Both read only what is
+     * stored: the held stocks' sessions from the first entry on, and the newest two closes of every
+     * listing. Nothing is fetched.
+     */
+    private suspend fun recomputePulse() {
+        val positions = portfolio.positions
+        val from = positions.minOfOrNull { it.position.entryDate }
+        val result = withContext(Dispatchers.IO) {
+            val sessions = if (from == null) emptyMap() else positions.map { it.ticker }.distinct()
+                .associateWith { localDataStore.sessionsFrom(it, from) }
+            val breadth = runCatching { marketBreadth(localDataStore.lastTwoCloses()) }.getOrNull()
+            returnByDay(positions, sessions) to breadth
+        }
+        returnByDay = result.first
+        marketBreadth = result.second
+        indexByDay = indexByDay(indexSessions, returnByDay.map { it.date })
+    }
+
+    override var indexByDay by mutableStateOf(emptyList<IndexPoint>())
+        private set
+
+    /** The EGX30's daily sessions from the last refresh. In memory only; see [indexByDay]. */
+    private var indexSessions: List<DailySession> = emptyList()
+
+    /**
+     * Fetches the EGX30 back to the first trade's entry, after a refresh reached the feed. A
+     * failure leaves the line as it was rather than taking it away.
+     */
+    private suspend fun refreshIndexLine() {
+        val from = portfolio.positions.minOfOrNull { it.position.entryDate } ?: return
+        val fetched = runCatching { intradayRepository.indexHistory(from.minusDays(7)) }.getOrNull()
+        if (fetched.isNullOrEmpty()) return
+        indexSessions = fetched
+        indexByDay = indexByDay(fetched, returnByDay.map { it.date })
+    }
+
     override var pricesRefreshing by mutableStateOf(false)
         private set
 
@@ -2013,6 +2096,11 @@ class LiveAppState(
         // a trade that settled on this pass is no longer approaching anything.
         reviewApproaches(rebuilt, announceChanges)
         reviewSessions(rebuilt, performance, announceChanges, finalThrough)
+        // The strip, the Portfolio chart, the breadth and the EGX30 line, off every rebuild rather
+        // than only the debounced one: launch and a price refresh call this directly, and before
+        // they did the four surfaces stayed empty or a session behind until a trade was touched.
+        recomputeTape()
+        recomputePulse()
     }
 
     /**
@@ -2262,6 +2350,10 @@ class LiveAppState(
             regeneratePrompt("First run")
             recomputePerformance()
             recomputePortfolio(announceChanges = true)
+            // The EGX30 is held in memory only, so a launch that does not refresh prices - the
+            // second opening of a day - would otherwise draw the Portfolio chart without it. Its own
+            // coroutine, so the launch never waits on the network for it.
+            appScope.launch { if (indexSessions.isEmpty()) refreshIndexLine() }
             refreshPricesIfStale()
         }
         // The one consumer of `requestRebuild`'s signal, for the whole life of this class - see the
@@ -2272,7 +2364,13 @@ class LiveAppState(
                 val wantsPortfolio = rebuildWantsPortfolio.getAndSet(false)
                 val announce = rebuildAnnounce.getAndSet(false)
                 if (wantsPerformance) recomputePerformance()
-                if (wantsPortfolio) recomputePortfolio(announceChanges = announce)
+                if (wantsPortfolio) {
+                    // The strip and the chart are rebuilt inside, as on every other path.
+                    recomputePortfolio(announceChanges = announce)
+                } else if (wantsPerformance) {
+                    // The strip carries the calls in play, so a re-score alone moves it too.
+                    recomputeTape()
+                }
             }
         }
         appScope.launch {
@@ -3309,6 +3407,7 @@ class LiveAppState(
             // Only now, because which sessions need bars is something only a scored record knows.
             // A second recompute is cheap and happens only when bars actually arrived.
             if (resolveUnorderedSessions()) recomputePerformance()
+            refreshIndexLine()
             val missing = refresh.unpriced.size
             // A stock whose prices changed scale, and one whose feed has stopped moving, are
             // both worth saying out loud: neither shows up as a failure, and the app's own

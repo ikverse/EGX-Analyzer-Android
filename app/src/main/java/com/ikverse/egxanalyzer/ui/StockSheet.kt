@@ -1,44 +1,37 @@
 package com.ikverse.egxanalyzer.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.NotificationsNone
+import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
-import androidx.compose.material.icons.outlined.NotificationsNone
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.window.DialogProperties
-import com.ikverse.egxanalyzer.model.WatchAlert
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,20 +43,47 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ikverse.egxanalyzer.model.CallTally
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.FeedFault
-import com.ikverse.egxanalyzer.model.PerformanceCalculator
-import com.ikverse.egxanalyzer.model.CallTally
 import com.ikverse.egxanalyzer.model.LatestPrice
+import com.ikverse.egxanalyzer.model.Outcome
+import com.ikverse.egxanalyzer.model.PerformanceCalculator
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.StockScore
+import com.ikverse.egxanalyzer.model.WatchAlert
+import com.ikverse.egxanalyzer.model.inPlay
+import com.ikverse.egxanalyzer.model.isEgx33
+import com.ikverse.egxanalyzer.model.opinionId
 import com.ikverse.egxanalyzer.model.positionId
+import com.ikverse.egxanalyzer.ui.kit.ButtonKind
+import com.ikverse.egxanalyzer.ui.kit.ButtonSize
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.kit.KitIconButton
+import com.ikverse.egxanalyzer.ui.kit.KitRule
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.KitTag
+import com.ikverse.egxanalyzer.ui.kit.KitTextField
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.OutcomeStrip
+import com.ikverse.egxanalyzer.ui.kit.Outcomes
+import com.ikverse.egxanalyzer.ui.kit.SegmentedControl
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.ui.kit.TileTone
+import com.ikverse.egxanalyzer.ui.kit.popIn
+import com.ikverse.egxanalyzer.ui.theme.palette
 import java.time.LocalDate
 import java.util.Locale
 
@@ -120,12 +140,8 @@ internal val LocalOpenStock = staticCompositionLocalOf<(String) -> Unit> { {} }
  * way of finding a trade. Each dismisses the sheet first: a sheet left open over the tab it just
  * sent the reader to is covering the card it sent them to read.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Unit) {
-    // Normalized once. COMI and COMI.CA are one stock everywhere else in the app - the stock score
-    // is grouped on the normalized ticker for exactly this reason - and a sheet that matched the
-    // raw string would show half a record and look like the rest had been lost.
     val key = remember(ticker) { Scoring.normalizeTicker(ticker) }
     val report = appState.performance
     val score = remember(report, key) { report.stocks.firstOrNull { it.ticker == key } }
@@ -145,13 +161,10 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
     val faults = remember(appState.priceHealth, key) {
         appState.priceHealth.faults.firstOrNull { it.ticker == key }?.faults.orEmpty()
     }
-    // Whose levels the chart draws. The reader's own trade where they hold one - those are the
-    // stop and the targets they are actually running under, snapshotted at the purchase, so
-    // re-running the analysis cannot move a line under a trade already taken - and the newest call's
-    // otherwise. Two channels calling one stock print two different sets, and the newest is the one
-    // a reader opening this sheet today is acting on, which is the same call the action bar acts on.
+    val held = trades.firstOrNull(PositionView::open)
+    // The call the sheet's actions are about: the newest one the market has not finished with.
+    val inPlay = remember(calls) { calls.firstOrNull { it.inPlay() } }
     val chartLevels = remember(trades, calls) {
-        val held = trades.firstOrNull(PositionView::open)
         when {
             held != null -> ChartLevels(
                 source = "your trade",
@@ -162,7 +175,6 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
                 target2 = held.position.target2,
                 paid = held.position.entryPrice,
             )
-
             else -> calls.firstOrNull()?.let { call ->
                 ChartLevels(
                     source = "⁨${call.channel}⁩ · " + AppDates.DayMonth.format(call.openedOn),
@@ -176,100 +188,68 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
             }
         }?.takeIf(ChartLevels::any)
     }
-    // Every session anybody named this stock on, which is what the rings on the line mark, and who
-    // named it - the chart marks the session and the readout under a thumb says whose it was. Two
-    // channels calling it on one morning are one mark, counted rather than one of them picked.
     val callDates = remember(calls) {
         calls.groupBy(ScoredCall::openedOn).mapValues { (_, made) ->
             val channels = made.map(ScoredCall::channel).distinct()
             if (channels.size == 1) "⁨${channels.first()}⁩ called it" else "${channels.size} sources called it"
         }
     }
-    // Off the disk rather than out of the report, and after the sheet is already on screen: the
-    // rest of this sheet is in memory and must not wait behind a query. An empty list draws no
-    // line, which is what a stock the feed has never carried should look like.
     var history by remember(key) { mutableStateOf(emptyList<DailySession>()) }
     LaunchedEffect(key, report) {
         history = appState.priceHistory(key, ChartRange.Widest.since(LocalDate.now()))
     }
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = SheetShape,
-        containerColor = MaterialTheme.colorScheme.background,
-        dragHandle = { SheetHandle() },
-    ) {
+    KitSheet(onDismiss = onDismiss, posture = LocalFoldPosture.current, title = key) {
         StockSheetHeading(
-            key, score, calls.firstOrNull(), latest, history, trades, faults,
+            key, score, calls.firstOrNull(), latest, history,
             watching = key in appState.watchlist,
             onToggleWatch = { appState.toggleWatch(key) },
-            alerts = appState.watchAlerts.filter { it.ticker == key },
-            onAddAlert = { level, above -> appState.addWatchAlert(key, level, above) },
-            onRemoveAlert = appState::removeWatchAlert,
+            onClose = onDismiss,
         )
-        Column(
-            Modifier
-                .fillMaxWidth()
-                // Bounded by what the header leaves, and no taller than its own content: a short
-                // record must not stretch the sheet to the full screen with nothing at all
-                // anchoring its bottom edge.
-                .weight(1f, fill = false)
-                .sheetDragSlop()
-                .scrollableColumn()
-                .padding(horizontal = Space.l)
-                .padding(top = Space.s, bottom = Space.xl),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            StockSheetPrice(key, latest, history, chartLevels, callDates, appState.pages, appState, Modifier.staggerIn(0))
-            if (score != null) StockSheetRecord(score, Modifier.staggerIn(1))
-            if (trades.isNotEmpty()) {
-                StockSheetTrades(trades, Modifier.staggerIn(2)) { id ->
-                    onDismiss()
-                    appState.openPosition(id)
-                }
+        StockSheetChips(trades, score, faults)
+        StockSheetPrice(
+            key, latest, history, chartLevels, callDates,
+            newestCall = calls.firstOrNull()?.openedOn,
+            pages = appState.pages,
+            appState = appState,
+            modifier = Modifier.popIn(0),
+        )
+        StockSheetActions(
+            ticker = key,
+            appState = appState,
+            call = inPlay,
+            held = held,
+            latest = latest,
+            onDismiss = onDismiss,
+        )
+        if (chartLevels != null && latest?.session?.close != null) {
+            StockSheetLevels(chartLevels, latest.session.close!!, inPlay, Modifier.popIn(1))
+        }
+        if (score != null) StockSheetRecord(score, Modifier.popIn(2))
+        if (trades.isNotEmpty()) {
+            StockSheetTrades(trades, Modifier.popIn(3)) { id ->
+                onDismiss()
+                appState.openPosition(id)
             }
-            if (calls.isNotEmpty()) {
-                StockSheetCalls(calls, Modifier.staggerIn(3)) { id ->
-                    onDismiss()
-                    appState.openCall(id)
-                }
+        }
+        if (calls.isNotEmpty()) {
+            StockSheetCalls(calls, Modifier.popIn(4)) { id ->
+                onDismiss()
+                appState.openCall(id)
             }
-            // Absent rather than empty. A stock reaches this sheet by being on screen somewhere, so
-            // "nothing is known about it" should not arise - and if it does, a column of dashes
-            // says less than the sections simply not being there.
-            if (score == null && trades.isEmpty() && calls.isEmpty()) {
-                Text(
-                    "Nothing in the record names this stock yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        }
+        if (score == null && trades.isEmpty() && calls.isEmpty()) {
+            EmptyState(
+                icon = Icons.Outlined.Visibility,
+                title = "Nothing recorded yet",
+                detail = "Nothing in the record names this stock yet. Watch it to follow its price.",
+            )
         }
     }
 }
 
 /**
- * The ticker, what the record knows it as, where it stands, and the one-word answers - all fixed,
- * none of it scrolling away.
- *
- * Four stacked lines before any figure was what the original heading cost: the label, the ticker,
- * and a name in each script, with the price below the fold on a short phone. The names share a
- * line here. The ticker and names are turned down from their roles (`titleLarge.copy(fontSize = …)`)
- * after the 2026-09-17 report that the header read too large. The price was turned down with them
- * and sat beside the names until the 2026-11 redesign gave it a line of its own under them at
- * `displaySmall`: the redesign's rule is that a page's lead figure is set at a display size, and on
- * this sheet the price is that figure.
- *
- * The names come from the score where there is one and from the newest call otherwise: a stock
- * called once has no score and still has a company behind it. Both scripts, because the channels
- * print Arabic and the catalog holds English, and a reader who knows one should not have to know
- * the other.
- *
- * The chips used to be the first thing in the scroller and vanished the instant it moved -
- * **Held**, **sources** and **settled calls** are exactly the three answers a reader wants before
- * anything else on this sheet, and a fact that disappears on the first scroll is not one this
- * sheet is actually leading with. They sit in the fixed band now, under the identity row, for the
- * same reason the price is up here and not lower down.
+ * Who the stock is and where it stands: the logo, the ticker, the names and the EGX 33 mark, the
+ * watch toggle and the close, the price at the display size with the day's move, and the day bar.
  */
 @Composable
 private fun StockSheetHeading(
@@ -278,318 +258,116 @@ private fun StockSheetHeading(
     newest: ScoredCall?,
     latest: LatestPrice?,
     history: List<DailySession>,
-    trades: List<PositionView>,
-    faults: Set<FeedFault>,
-    /** Whether this phone follows the stock, and the press that flips it. */
     watching: Boolean,
     onToggleWatch: () -> Unit,
-    /** The price alerts set on this stock, and how one is added or taken away. */
-    alerts: List<WatchAlert>,
-    onAddAlert: (level: Double, above: Boolean) -> Unit,
-    onRemoveAlert: (WatchAlert) -> Unit,
+    onClose: () -> Unit,
 ) {
-    var settingAlert by remember { mutableStateOf(false) }
-    if (settingAlert) {
-        WatchAlertDialog(
-            ticker = ticker,
-            suggested = latest?.session?.close,
-            onDismiss = { settingAlert = false },
-            onConfirm = { level, above ->
-                settingAlert = false
-                onAddAlert(level, above)
-            },
-        )
-    }
+    val p = palette
     val english = score?.companyEnglish ?: newest?.companyEnglish
     val arabic = score?.companyArabic ?: newest?.companyArabic
-    Column {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Space.l)
-                .padding(bottom = Space.s),
-            horizontalArrangement = Arrangement.spacedBy(Space.s),
-            // Centered against the ticker and the name together, not just top-aligned against
-            // whichever is first - the name already sits in the same Column as the ticker, so
-            // this is what centers the logo beside both lines rather than only the first.
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            StockLogo(ticker, LogoSize.Row)
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        ticker,
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontSize = HeadingTickerSize,
-                            lineHeight = HeadingTickerLine,
-                        ),
-                    )
-                    Egx33Badge(ticker, Modifier.padding(start = Space.s))
-                }
-                // One line for both names rather than one line each. A first-strong isolate round the
-                // Arabic, as every Arabic name in this app carries: without it a digit in the name
-                // drifts to the wrong end of it.
-                listOfNotNull(english, arabic?.let { "⁨$it⁩" })
-                    .takeIf(List<String>::isNotEmpty)
-                    ?.let {
-                        Text(
-                            it.joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontSize = HeadingNamesSize,
-                                lineHeight = HeadingNamesLine,
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+        StockLogo(ticker, HeadingLogoSize)
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(ticker, style = MaterialTheme.typography.headlineLarge.copy(fontSize = 30.sp, lineHeight = 32.sp), color = p.ink)
+                Egx33Badge(ticker, Modifier.padding(start = Space.s))
             }
-        }
-        if (latest != null) {
-            // The move since the session before it, which is the figure a price is always read
-            // against and the one the sheet never carried. Measured off the stored history rather
-            // than the report, which keeps one session per stock and so has nothing to compare
-            // against.
-            val move = history.dayMove()
-            // The Swiss lead figure (2026-11 redesign): the price on a line of its own under the
-            // identity, at the display size every page's lead figure takes, in ink - a figure is
-            // never the accent, and the move beside it is what carries gain or loss.
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Space.l)
-                    .padding(bottom = Space.s),
-                horizontalArrangement = Arrangement.spacedBy(Space.m),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                Column {
-                    // Labelled, because a bare figure at the top of a sheet is a number the reader
-                    // has to work out the meaning of - and the label is also where the one thing
-                    // that changes its meaning is said: a session still trading is a price, not a
-                    // close.
+            // A first-strong isolate round the Arabic, as every Arabic name in this app carries.
+            listOfNotNull(english, arabic?.let { "⁨$it⁩" }, if (isEgx33(ticker)) "EGX 33" else null)
+                .takeIf(List<String>::isNotEmpty)
+                ?.let {
                     Text(
-                        if (latest.provisional) "LATEST PRICE" else "LAST CLOSE",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    RollingText(
-                        AnnotatedString(formatPrice(latest.session.close)),
-                        style = MaterialTheme.typography.displaySmall.copy(fontFamily = TabularFigures),
-                        color = MaterialTheme.colorScheme.onSurface,
+                        it.joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = p.muted,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Column(Modifier.padding(bottom = Space.xs)) {
-                    if (move != null) {
-                        // In pounds as well as percent. The app has never printed a price move in
-                        // money anywhere, and on a stock trading at 0.24 a percent is the figure that
-                        // says nothing - the two together are what a holder actually reads.
-                        Text(
-                            formatSignedPrice(move.amount) + " (" + formatPercent(move.percent) + ")",
-                            style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
-                            color = PriceRole.forReturn(move.percent),
-                        )
-                    }
-                    // A session still trading says so instead of naming its own date: the close is
-                    // going to move, and a date under it reads as settled.
-                    Text(
-                        if (latest.provisional) {
-                            "still trading"
-                        } else {
-                            (if (move != null) "since " else "") +
-                                AppDates.DayMonth.format(move?.from ?: latest.session.date)
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
         }
-        // The one thing on this sheet that writes: following the stock. An action pill, like
-        // Bought, because it changes what the phone does from here on - the stock joins every
-        // price refresh.
-        Row(
-            Modifier.padding(horizontal = Space.l).padding(bottom = Space.s),
-            horizontalArrangement = Arrangement.spacedBy(Space.s),
-        ) {
-            ActionPill(
-                label = if (watching) "Watching" else "Watch",
-                icon = if (watching) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                onClick = onToggleWatch,
-            )
-            ActionPill(
-                label = "Alert",
-                icon = Icons.Outlined.NotificationsNone,
-                onClick = { settingAlert = true },
-            )
-        }
-        if (alerts.isNotEmpty()) {
-            // Each alert as a pill that removes itself: there is nothing to edit on one, only a
-            // level that was asked about and can be unasked.
-            FlowRow(
-                Modifier.padding(horizontal = Space.l).padding(bottom = Space.s),
-                horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                verticalArrangement = Arrangement.spacedBy(Space.xs),
-            ) {
-                alerts.forEach { alert ->
-                    FilledPill(
-                        alert.label + " ×",
-                        MaterialTheme.colorScheme.surfaceContainerHighest,
-                        MaterialTheme.colorScheme.onSurfaceVariant,
-                        onClick = { onRemoveAlert(alert) },
-                    )
-                }
-            }
-        }
-        StockSheetChips(
-            trades,
-            score,
-            faults,
-            Modifier.padding(horizontal = Space.l).padding(bottom = Space.s),
+        // Following the stock is the one thing in the heading that writes: it joins every refresh.
+        KitIconButton(
+            if (watching) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
+            label = if (watching) "Stop watching $ticker" else "Watch $ticker",
+            onClick = onToggleWatch,
+            filled = watching,
+            size = 44.dp,
         )
+        KitIconButton(Icons.Outlined.Close, label = "Close", onClick = onClose, size = 44.dp)
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-}
-
-/**
- * A level and a direction, and nothing else.
- *
- * Prefilled with the last close so the reader edits a number rather than types one; the direction
- * defaults to "rises to", which is the question a watch list is usually asking.
- */
-@Composable
-private fun WatchAlertDialog(
-    ticker: String,
-    suggested: Double?,
-    onDismiss: () -> Unit,
-    onConfirm: (level: Double, above: Boolean) -> Unit,
-) {
-    var price by remember { mutableStateOf(suggested?.let(::formatPrice).orEmpty()) }
-    var above by remember { mutableStateOf(true) }
-    val parsed = price.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it > 0.0 && it.isFinite() }
-    AlertDialog(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(dismissOnClickOutside = false),
-        title = { Text("Alert me about $ticker") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+    if (latest != null) {
+        val move = history.dayMove()
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+            Column {
+                // Labelled: a session still trading is a price, not a close.
                 Text(
-                    "Checked whenever prices are fetched. It fires once and then removes itself.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    if (latest.provisional) "LATEST PRICE" else "LAST CLOSE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = p.muted,
                 )
-                // The filter sheet's chip, which every choice of one-of-several takes since the
-                // 2026-11 redesign.
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    ChoiceChip("Rises to", above) { above = true }
-                    ChoiceChip("Falls to", !above) { above = false }
-                }
-                OutlinedTextField(
-                    shape = FieldShape,
-                    value = price,
-                    onValueChange = { price = it },
-                    label = { Text("Price") },
-                    singleLine = true,
-                    isError = price.isNotBlank() && parsed == null,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
+                RollingText(
+                    AnnotatedString(formatPrice(latest.session.close)),
+                    style = MaterialTheme.typography.displayLarge.copy(fontFamily = TabularFigures, fontSize = 48.sp, lineHeight = 52.sp),
+                    color = p.ink,
                 )
             }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = parsed != null,
-                onClick = { parsed?.let { onConfirm(it, above) } },
-            ) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+            Column(Modifier.padding(bottom = Space.s)) {
+                if (move != null) {
+                    Text(
+                        formatSignedPrice(move.amount) + " · " + formatPercent(move.percent),
+                        style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures),
+                        color = if (move.percent >= 0) p.gain else p.loss,
+                    )
+                }
+                Text(
+                    if (latest.provisional) {
+                        "still trading"
+                    } else {
+                        (if (move != null) "since " else "") + AppDates.DayMonth.format(move?.from ?: latest.session.date)
+                    },
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                    color = p.muted,
+                )
+            }
+        }
+        DayRange(latest.session)
+    }
 }
 
-/** [MaterialTheme.typography.titleLarge] is 19sp; the heading's ticker is turned down to this. */
-private val HeadingTickerSize = 21.sp
-private val HeadingTickerLine = 26.sp
-
-/** [MaterialTheme.typography.bodySmall] is 13sp; the heading's names are turned down to this. */
-private val HeadingNamesSize = 11.5.sp
-private val HeadingNamesLine = 15.sp
-
+/** The stock's logo, a step up from the opinion sheet's, beside a 30sp ticker. */
+private val HeadingLogoSize = 52.dp
 
 /**
- * The one-word answers, before any of the figures behind them.
- *
- * Three of these were on the sheet already and each cost a section to find out: whether the reader
- * holds the stock was three sections down under Your trades, how many sources have called it was a
- * clause in a sentence under the rates, and a broken feed was a red line under the price. A reader
- * who opens a stock to decide something wants those three answers in the first glance and the
- * figures only if the answer surprises them.
- *
- * The fault chips keep [FeedFault.label] and lose the detail: the sentence is still printed in full
- * beside the price where there is room for it, and a chip is a flag rather than an explanation.
+ * The one-word answers before any figure: whether the reader holds it, how many sources have called
+ * it, how many calls have settled, and any fault in its prices.
  */
 @Composable
-private fun StockSheetChips(
-    trades: List<PositionView>,
-    score: StockScore?,
-    faults: Set<FeedFault>,
-    modifier: Modifier = Modifier,
-) {
+private fun StockSheetChips(trades: List<PositionView>, score: StockScore?, faults: Set<FeedFault>) {
+    val p = palette
     val open = trades.firstOrNull(PositionView::open)
     val settled = score?.tally?.judged ?: 0
     if (open == null && score == null && faults.isEmpty()) return
     FlowRow(
-        modifier.fillMaxWidth(),
+        Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(Space.xs),
         verticalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
         if (open != null) {
-            StockChip(
-                "Held " + formatPercent(open.returnPct),
-                MaterialTheme.colorScheme.surfaceContainerHighest,
-                PriceRole.forReturn(open.returnPct),
-            )
+            KitTag("Held " + formatPercent(open.returnPct), if ((open.returnPct ?: 0.0) >= 0) p.gain else p.loss, filled = true)
         }
         if (score != null) {
-            StockChip(
-                "${score.sources} " + (if (score.sources == 1) "source" else "sources"),
-                MaterialTheme.colorScheme.surfaceContainerHighest,
-                MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            KitTag("${score.sources} " + (if (score.sources == 1) "source" else "sources"), p.muted, filled = true, ink = p.ink)
             if (settled > 0) {
-                StockChip(
-                    "$settled settled " + (if (settled == 1) "call" else "calls"),
-                    MaterialTheme.colorScheme.surfaceContainerHighest,
-                    MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                KitTag("$settled settled " + (if (settled == 1) "call" else "calls"), p.muted, filled = true, ink = p.ink)
             }
         }
-        faults.forEach { fault ->
-            StockChip(
-                fault.label,
-                MaterialTheme.colorScheme.errorContainer,
-                MaterialTheme.colorScheme.onErrorContainer,
-            )
-        }
+        faults.forEach { fault -> KitTag(fault.label, p.loss, filled = true) }
     }
 }
 
-@Composable
-private fun StockChip(label: String, container: Color, content: Color) {
-    FilledPill(label, container, content)
-}
-
 /**
- * Where the stock has been, where it is now, and whether that figure can be trusted.
- *
- * The line comes first because it is the context the figures under it are read in: a close of 86.40
- * means one thing at the top of a month of climbing and another at the bottom of a slide, and the
- * app has held the sessions to say which since the first price refresh. Under it the session's own
- * range, which is what turns a high, a low and a close from three prices into one sentence.
- *
- * The faults keep the wording they had. They are computed on every recompute and, until this sheet,
- * reached the reader only in Settings, a screen away from the stock they are about;
- * [FeedFault.detail] is the short form the record already keeps, and the longer wording belongs to
- * the Settings card, which has the room for it and a count to put it against.
+ * Where the stock has been, on the cobalt tile: the line with the levels across it, the expand
+ * button, the reading under the finger, and the range row.
  */
 @Composable
 private fun StockSheetPrice(
@@ -599,68 +377,61 @@ private fun StockSheetPrice(
     levels: ChartLevels?,
     /** Which sessions carry a call, and who made it, by session. */
     calls: Map<LocalDate, String>,
+    /** The newest call's session, which is where the Call range starts. Null with no call. */
+    newestCall: LocalDate?,
     pages: PageState,
     /** Where the full-screen chart keeps its indicators and drawings. */
     appState: AppState,
     modifier: Modifier = Modifier,
 ) {
     if (latest == null && history.isEmpty()) return
+    val p = palette
     var range by pages.stockChartRange
     var showLevels by pages.stockChartLevels
-    // Measured back from the newest session the app holds rather than from today's date. The right
-    // edge of the line is that session whatever the calendar says, so a week counted from today on
-    // a feed three weeks behind would draw an empty box for a stock whose prices are simply old -
-    // and the dates under the line say which week it really is.
-    val visible = remember(history, range) {
-        val anchor = history.lastOrNull()?.date ?: return@remember history
-        val since = range.since(anchor)
-        history.filter { !it.date.isBefore(since) }
-    }
+    // A stored Call range on a stock nobody has called is a month, never an empty box.
+    val effective = if (range == ChartRange.CALL && newestCall == null) ChartRange.MONTH else range
+    val visible = remember(history, effective, newestCall) { history.within(effective, newestCall) }
     val move = remember(visible) { visible.rangeMove() }
     val shown = if (showLevels) levels else null
-    // Kept after the finger lifts, and cleared by changing the range - which is a `remember` keyed
-    // on what is drawn rather than a rule anybody had to write. A reading the reader took on
-    // purpose is theirs until they ask a different question.
     var touched by remember(visible) { mutableStateOf<DailySession?>(null) }
     var expanded by remember { mutableStateOf(false) }
-    SheetSection(modifier) {
+    Tile(modifier.fillMaxWidth(), tone = TileTone.HERO, contentPadding = PaddingValues(vertical = 14.dp)) {
+        val soft = p.onHero.copy(alpha = 0.85f)
         Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SheetSectionLabel("Where it stands")
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(Space.s),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // What the visible line adds up to, which is the one thing its shape cannot say: the
-                // same climb is three percent or forty depending on a scale the chart deliberately
-                // does not print.
-                if (move != null) {
-                    Text(
-                        formatPercent(move),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-                        color = PriceRole.forReturn(move),
-                    )
-                }
-                // The same chart on the whole screen, with candles and a scale the reader can drag.
-                // Offered only where there is a line to expand.
-                if (history.count { it.close != null } > 1) {
-                    // A small tonal capsule that squares off under the finger (2026-11 redesign).
-                    val press = remember { MutableInteractionSource() }
-                    val shape = RoundedCornerShape(pressCorner(press, rest = ExpandCorner))
-                    Text(
-                        "Expand",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier
-                            .pressScale(press)
-                            .clip(shape)
-                            .background(MaterialTheme.colorScheme.secondaryContainer)
-                            .clickable(interactionSource = press, indication = LocalIndication.current) { expanded = true }
-                            .padding(horizontal = Space.m, vertical = Space.xs),
-                    )
+            Text(
+                if (effective == ChartRange.CALL) {
+                    "Since the call · ${visible.size} sessions"
+                } else {
+                    "Where it stands · ${effective.label}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = soft,
+                modifier = Modifier.weight(1f),
+            )
+            if (move != null) {
+                Text(
+                    formatPercent(move),
+                    style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                    color = p.onHero,
+                    modifier = Modifier.padding(end = Space.s),
+                )
+            }
+            // The same chart on the whole screen. Offered only where there is a line to expand.
+            if (history.count { it.close != null } > 1) {
+                Box(
+                    Modifier
+                        .minimumInteractiveComponentSize()
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(p.onHero.copy(alpha = 0.16f))
+                        .clickable(role = Role.Button, onClickLabel = "Expand the chart") { expanded = true }
+                        .semantics { contentDescription = "Expand chart" },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.OpenInFull, contentDescription = null, tint = p.onHero, modifier = Modifier.size(16.dp))
                 }
             }
         }
@@ -679,90 +450,73 @@ private fun StockSheetPrice(
                 drawings = appState.chartDrawings(ticker),
                 onDrawings = { appState.saveChartDrawings(ticker, it) },
                 onClose = { expanded = false },
+                newestCall = newestCall,
             )
         }
         if (visible.count { it.close != null } > 1) {
-            // An extra `Space.xs` on top of the section's own gap - 8dp total rather than 4 - so
-            // the move% above never crowds a level pinned to the chart's own top edge, which sits
-            // almost flush against it. Only this one gap grows; the rest of the section keeps the
-            // tighter spacing.
-            Spacer(Modifier.height(Space.xs))
             PriceChart(
                 visible,
                 shown,
                 calls.keys,
-                // The sheet's own ground since phase 2 of the 2026-11 redesign: the ring and label
-                // outlines knock out to this colour.
-                on = MaterialTheme.colorScheme.background,
+                on = p.hero,
                 selected = touched,
                 onSelect = { touched = it },
+                modifier = Modifier.padding(top = Space.s, start = 4.dp, end = 12.dp),
+                onHero = true,
             )
-            // The readout takes the dates' own line rather than appearing above it: a caption that
-            // arrived on touch would push the chart up under the finger that asked for it.
             val reading = touched
-            if (reading?.close != null) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                ) {
-                    Text(
-                        AppDates.DayMonth.format(reading.date) + " · " +
-                            formatPrice(reading.close),
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontFamily = TabularFigures,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    // What the reader is looking at is a ring on the line; naming the source is
-                    // what turns it from a mark into the reason that session is on the chart.
-                    val since = visible.moveTo(reading)
-                    ChartCaption(
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                if (reading?.close != null) {
+                    HeroCaption(AppDates.DayMonth.format(reading.date) + " · " + formatPrice(reading.close))
+                    HeroCaption(
                         calls[reading.date]
-                            ?: since?.let { formatPercent(it) + " since " + AppDates.DayMonth.format(visible.first().date) }
+                            ?: visible.moveTo(reading)?.let { formatPercent(it) + " since " + AppDates.DayMonth.format(visible.first().date) }
                             ?: "",
                     )
-                }
-            } else {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    ChartCaption(AppDates.DayMonth.format(visible.first().date))
-                    if (visible.any { it.date in calls }) ChartCaption("○ a call was made")
-                    ChartCaption(AppDates.DayMonth.format(visible.last().date))
+                } else {
+                    HeroCaption(AppDates.DayMonth.format(visible.first().date))
+                    if (visible.any { it.date in calls }) HeroCaption("○ a call was made")
+                    HeroCaption(AppDates.DayMonth.format(visible.last().date))
                 }
             }
-            // Whose levels these are, which is the one thing a coloured line across a chart cannot
-            // say for itself.
-            if (shown != null) ChartCaption("levels from " + shown.source)
+            if (shown != null) {
+                HeroCaption("levels from " + shown.source, Modifier.padding(horizontal = 16.dp))
+            }
         } else {
-            // Absent rather than an empty box, which reads as a chart that failed to load. A week
-            // of a stock that has barely traded is a real answer and this is what it looks like.
-            ChartCaption("No sessions stored in this range.")
+            HeroCaption("No sessions stored in this range.", Modifier.padding(16.dp))
         }
         ChartControls(
-            range = range,
+            range = effective,
             onRange = { range = it },
             levels = if (levels == null) null else showLevels,
             onLevels = { showLevels = it },
+            hasCall = newestCall != null,
+            onHero = true,
+            modifier = Modifier.padding(horizontal = 12.dp).padding(top = Space.s),
         )
-        latest?.let {
-            // A group inside the card, separated by the redesign's hairline rather than a divider.
-            Box(Modifier.fillMaxWidth().flatPanel()) { DayRange(it.session) }
-        }
     }
 }
 
+@Composable
+private fun HeroCaption(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+        color = palette.onHero.copy(alpha = 0.8f),
+        modifier = modifier,
+    )
+}
+
 /**
- * How far back the line reaches, and whether it carries the levels.
+ * How far back a chart reaches, and whether it carries the levels.
  *
- * At the foot of the chart, where every chart a reader has used puts its ranges. One line that
- * scrolls sideways rather than a row that wraps - five ranges plus the toggle is about 290dp of
- * controls inside the 355dp a card leaves on the cover screen, so it fits with nothing spare and a
- * large font scale would otherwise clip a chip off the end. `fadingScrollbar` draws nothing when
- * there is nothing to scroll, so at every width it fits the row is indistinguishable from a plain
- * one.
- *
- * The levels chip is **absent rather than disabled** where there are none to draw: a stock nobody
- * has called has no stop and no targets, and a control that answers a press with nothing is worse
- * than one that is not offered.
+ * [hasCall] offers the Call range, which only means something where there is a call to start from.
+ * [onHero] draws the row for the cobalt tile: lime for the chosen range, white washes for the rest,
+ * and cobalt ink on the Levels toggle when it is on. The levels chip is absent rather than disabled
+ * where there are none to draw.
  */
 @Composable
 internal fun ChartControls(
@@ -770,87 +524,355 @@ internal fun ChartControls(
     onRange: (ChartRange) -> Unit,
     levels: Boolean?,
     onLevels: (Boolean) -> Unit,
+    hasCall: Boolean = false,
+    onHero: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
+    val options = ChartRange.entries.filter { hasCall || it != ChartRange.CALL }
     Row(
-        Modifier.fillMaxWidth().scrollableRow(),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        modifier.fillMaxWidth().scrollableRow(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ChartRange.entries.forEach { option ->
-            CompactFilterChip(
-                label = option.label,
-                selected = option == range,
-                onClick = { onRange(option) },
-            )
+        options.forEach { option ->
+            if (onHero) {
+                HeroChip(option.label, selected = option == range) { onRange(option) }
+            } else {
+                CompactFilterChip(label = option.label, selected = option == range, onClick = { onRange(option) })
+            }
         }
         if (levels != null) {
-            // A fixed gap and not a weight: this row scrolls, so its width is unbounded and a
-            // weighted child inside one cannot be measured at all.
-            Spacer(Modifier.width(Space.m))
-            CompactFilterChip(
-                label = "Levels",
-                selected = levels,
-                onClick = { onLevels(!levels) },
-                toggle = true,
-            )
+            Spacer(Modifier.width(Space.s))
+            if (onHero) {
+                HeroChip(if (levels) "Levels ✓" else "Levels", selected = false, on = levels) { onLevels(!levels) }
+            } else {
+                CompactFilterChip(label = "Levels", selected = levels, onClick = { onLevels(!levels) }, toggle = true)
+            }
         }
+    }
+}
+
+/** One choice on the cobalt tile: lime when chosen, white when a toggle is on, a white wash otherwise. */
+@Composable
+private fun HeroChip(label: String, selected: Boolean, on: Boolean = false, onClick: () -> Unit) {
+    val p = palette
+    val press = remember { MutableInteractionSource() }
+    Box(
+        Modifier
+            .minimumInteractiveComponentSize()
+            .pressScale(press)
+            .height(34.dp)
+            .widthIn(min = 48.dp)
+            .clip(Kit.Capsule)
+            .background(
+                when {
+                    selected -> p.highlight
+                    on -> p.onHero
+                    else -> p.onHero.copy(alpha = 0.14f)
+                },
+            )
+            .clickable(interactionSource = press, indication = null, role = Role.Button, onClick = onClick)
+            .semantics { this.selected = selected || on }
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
+            fontWeight = if (selected || on) FontWeight.Bold else FontWeight.Medium,
+            color = when {
+                selected -> p.onTile
+                on -> p.hero
+                else -> p.onHero
+            },
+            maxLines = 1,
+        )
     }
 }
 
 @Composable
 internal fun ChartCaption(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    Text(text, style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures), color = palette.muted)
 }
 
 /**
- * What has happened when anybody recommended this stock.
+ * What the reader can do about the stock from here, as the mockup puts it under the chart.
  *
- * The figure no screen showed. It follows [StockScore]'s own discipline, which is `ChannelScore`'s:
- * below `MINIMUM_JUDGED_TO_RANK` the numbers are reported exactly as measured and lose their
- * colour, and the words "too few to rank" are added - the same rule a call card's source line
- * follows, and for the same reason. A rate resting on two calls is not a smaller rate, it is a
- * different kind of claim.
- *
- * The bar under the rates is the one the channel cards carry, drawn from this stock's own tally.
- * The pair of rates is a division of one quantity and said so in words only; a reader who has read
- * one outcome bar anywhere else in the app already knows how to read this one.
+ * **I bought it** records a trade on the newest call still in play, through the same trade sheet
+ * every other surface uses; it becomes **Open my trade** once the stock is held, and is absent with
+ * no call in play - a trade needs a call to be judged against. **Ask AI** asks about that same call,
+ * behind the same paid confirmation, and reopens a kept answer free. The bell sets a price alert.
+ */
+@Composable
+private fun StockSheetActions(
+    ticker: String,
+    appState: AppState,
+    call: ScoredCall?,
+    held: PositionView?,
+    latest: LatestPrice?,
+    onDismiss: () -> Unit,
+) {
+    var alerting by remember { mutableStateOf(false) }
+    val occurrence = remember(call, appState.savedResults) { call?.let { appState.occurrenceFor(it) } }
+    val book = remember(appState, occurrence?.saved?.id) {
+        occurrence?.let { TradeBook(appState, it.saved.result.recommendationTargetDate) }
+    }
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when {
+            held != null -> KitButton(
+                "Open my trade",
+                onClick = {
+                    onDismiss()
+                    appState.openPosition(held.position.id)
+                },
+                size = ButtonSize.LARGE,
+                modifier = Modifier.weight(1f),
+            )
+            call != null && occurrence != null && book != null && book.dateOf(occurrence.point) != null -> Box(Modifier.weight(1f)) {
+                TradeAction(
+                    held = null,
+                    suggestedEntry = occurrence.point.entryMidpoint(),
+                    defaultWindow = book.windowFor(occurrence.point),
+                    tPlusOne = occurrence.point.isTPlusOne,
+                    canSell = false,
+                    onBuy = { price, date, window ->
+                        book.buy(occurrence.stock, occurrence.point, call.channel, price, date, window)
+                    },
+                    onSell = {},
+                )
+            }
+        }
+        if (call != null) StockSheetAsk(call, appState, Modifier.weight(1f))
+        if (call == null && held == null) Spacer(Modifier.weight(1f))
+        KitIconButton(
+            Icons.Outlined.NotificationsNone,
+            label = "Price alerts",
+            onClick = { alerting = true },
+            size = 52.dp,
+        )
+    }
+    if (alerting) {
+        WatchAlertSheet(
+            ticker = ticker,
+            suggested = latest?.session?.close,
+            alerts = appState.watchAlerts.filter { it.ticker == ticker },
+            onAdd = { level, above -> appState.addWatchAlert(ticker, level, above) },
+            onRemove = appState::removeWatchAlert,
+            onDismiss = { alerting = false },
+        )
+    }
+}
+
+/** Ask AI about [call], with the same confirmation and the same kept answer its card offers. */
+@Composable
+private fun StockSheetAsk(call: ScoredCall, appState: AppState, modifier: Modifier = Modifier) {
+    val opinion = appState.opinionFor(call)
+    val asking = appState.opinionPending == opinionId(call.ticker, call.openedOn, call.channel)
+    var confirming by remember(call) { mutableStateOf(false) }
+    var showing by remember(call) { mutableStateOf(false) }
+    var awaiting by remember(call) { mutableStateOf(false) }
+    LaunchedEffect(opinion) {
+        if (awaiting && opinion != null) {
+            awaiting = false
+            showing = true
+        }
+    }
+    AskAiButton(
+        label = when {
+            asking -> "Asking…"
+            opinion != null -> "AI Response"
+            else -> "Ask AI"
+        },
+        onClick = { if (opinion == null) confirming = true else showing = true },
+        look = if (opinion != null && !asking) AiLook.Outlined else AiLook.Filled,
+        enabled = !asking,
+        working = asking,
+        modifier = modifier,
+    )
+    if (confirming) {
+        AskAiDialog(
+            call = call,
+            model = appState.opinionModel(),
+            searching = appState.opinionSearchEnabled(),
+            newsWindowDays = appState.opinionNewsWindowDays(),
+            onConfirm = {
+                confirming = false
+                awaiting = true
+                appState.askAboutCall(call, false)
+            },
+            onDismiss = { confirming = false },
+        )
+    }
+    if (showing && opinion != null) {
+        StockOpinionSheet(
+            call = call,
+            opinion = opinion,
+            onAskAgain = if (asking) null else ({
+                showing = false
+                awaiting = true
+                appState.askAboutCall(call, true)
+            }),
+            onDismiss = { showing = false },
+        )
+    }
+}
+
+/**
+ * Price alerts on this stock: a level and a direction to add, and the ones already set, each with
+ * its own Remove. Prefilled with the last close, so the reader edits a number rather than types one.
+ */
+@Composable
+private fun WatchAlertSheet(
+    ticker: String,
+    suggested: Double?,
+    alerts: List<WatchAlert>,
+    onAdd: (level: Double, above: Boolean) -> Unit,
+    onRemove: (WatchAlert) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val p = palette
+    var price by remember { mutableStateOf(suggested?.let(::formatPrice).orEmpty()) }
+    var above by remember { mutableStateOf(true) }
+    val parsed = price.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it > 0.0 && it.isFinite() }
+    KitSheet(onDismiss = onDismiss, posture = LocalFoldPosture.current, title = "Alerts on $ticker", dismissOnOutside = false) {
+        SheetTitle("Alert me about $ticker", "Checked whenever prices are fetched. Each fires once and then removes itself.")
+        Tile(Modifier.fillMaxWidth()) {
+            SegmentedControl(
+                options = listOf(true, false),
+                selected = above,
+                onSelect = { above = it },
+                label = { if (it) "Rises to" else "Falls to" },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            KitTextField(
+                value = price,
+                onValueChange = { price = it },
+                label = "Price",
+                figure = true,
+                error = "Not a price".takeIf { price.isNotBlank() && parsed == null },
+                modifier = Modifier.fillMaxWidth().padding(top = Space.m),
+            )
+        }
+        if (alerts.isNotEmpty()) {
+            Tile(Modifier.fillMaxWidth()) {
+                Text("SET ON THIS STOCK", style = MaterialTheme.typography.labelSmall, color = p.muted)
+                alerts.forEach { alert ->
+                    Row(Modifier.fillMaxWidth().padding(top = Space.s), verticalAlignment = Alignment.CenterVertically) {
+                        Text(alert.label, style = MaterialTheme.typography.bodyLarge.copy(fontFamily = TabularFigures), color = p.ink, modifier = Modifier.weight(1f))
+                        KitButton("Remove", onClick = { onRemove(alert) }, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
+                    }
+                }
+            }
+        }
+        SheetButtons(
+            confirmLabel = "Save alert",
+            enabled = parsed != null,
+            onConfirm = {
+                parsed?.let { onAdd(it, above) }
+                onDismiss()
+            },
+            onDismiss = onDismiss,
+        )
+    }
+}
+
+/**
+ * The levels against where the stock is now, as the mockup lists them: highest first, the Now row
+ * standing out where it falls among them, each level with its distance from now. Target 1 carries a
+ * "reached" tag once the call has banked it.
+ */
+@Composable
+private fun StockSheetLevels(levels: ChartLevels, now: Double, call: ScoredCall?, modifier: Modifier = Modifier) {
+    val p = palette
+    val reachedT1 = call?.outcome == Outcome.PARTIAL_HIT || call?.outcome == Outcome.FULL_HIT
+    val reachedT2 = call?.outcome == Outcome.FULL_HIT
+    val entry = when {
+        levels.entryLow != null && levels.entryHigh != null && levels.entryLow != levels.entryHigh ->
+            formatPrice(minOf(levels.entryLow, levels.entryHigh)) + "–" + formatPrice(maxOf(levels.entryLow, levels.entryHigh))
+        else -> (levels.entryLow ?: levels.entryHigh)?.let(::formatPrice)
+    }
+    val entryValue = listOfNotNull(levels.entryLow, levels.entryHigh).takeIf { it.isNotEmpty() }?.average()
+    data class Line(val label: String, val value: Double, val shown: String, val tone: Color, val tag: String?, val isNow: Boolean = false)
+    val lines = buildList {
+        levels.target2?.let { add(Line("Target 2", it, formatPrice(it), p.ink, if (reachedT2) "reached" else null)) }
+        levels.target1?.let { add(Line("Target 1", it, formatPrice(it), p.ink, if (reachedT1) "reached" else null)) }
+        add(Line("Now", now, formatPrice(now), p.ink, null, isNow = true))
+        levels.paid?.let { add(Line("You paid", it, formatPrice(it), p.ink, null)) }
+        if (entry != null && entryValue != null) add(Line("Entry zone", entryValue, entry, p.ink, null))
+        levels.stopLoss?.let { add(Line("Stop", it, formatPrice(it), p.loss, null)) }
+    }.sortedByDescending { it.value }
+    Tile(modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)) {
+        lines.forEachIndexed { index, line ->
+            if (index > 0) KitRule(color = p.ground)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .then(if (line.isNow) Modifier.clip(RoundedCornerShape(12.dp)).background(p.ground) else Modifier)
+                    .padding(vertical = 10.dp, horizontal = if (line.isNow) 8.dp else 0.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    line.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = if (line.isNow) FontWeight.ExtraBold else FontWeight.Bold,
+                    color = line.tone,
+                )
+                line.tag?.let { KitTag(it, p.highlight, filled = true, ink = p.onTile, modifier = Modifier.padding(start = Space.s)) }
+                Spacer(Modifier.weight(1f))
+                Text(line.shown, style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures), fontWeight = FontWeight.Bold, color = line.tone)
+                if (!line.isNow && now > 0) {
+                    Text(
+                        " " + formatPercent((line.value - now) / now * 100),
+                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
+                        color = p.muted,
+                    )
+                }
+            }
+        }
+        Text("levels from " + levels.source, style = MaterialTheme.typography.labelSmall, color = p.muted, modifier = Modifier.padding(vertical = 6.dp))
+    }
+}
+
+/**
+ * What has happened when anybody recommended this stock: the two rates at the display size, the
+ * result bar and its key, and the figures behind them. Below the ranking floor the rates lose their
+ * colour and say "too few to rank".
  */
 @Composable
 private fun StockSheetRecord(score: StockScore, modifier: Modifier = Modifier) {
+    val p = palette
     val tally: CallTally = score.tally
     val thin = tally.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
-    SheetSection(modifier) {
-        SheetSectionLabel("When this stock is recommended")
-        // Nested, not disjoint, and read exactly as the channel cards' headline is read: reached
-        // target 1 on the first figure, ran the whole way on the second.
-        // The section's lead figure at the display size, as the Insights hero sets its rate.
+    Tile(modifier.fillMaxWidth()) {
+        Text("WHEN THIS STOCK IS RECOMMENDED", style = MaterialTheme.typography.labelSmall, color = p.muted)
         RollingText(
-            AnnotatedString(
-                formatPercent(tally.anyTargetRate, signed = false) + " / " +
-                    formatPercent(tally.fullHitRate, signed = false),
-            ),
+            AnnotatedString(formatPercent(tally.anyTargetRate, signed = false) + " / " + formatPercent(tally.fullHitRate, signed = false)),
             style = MaterialTheme.typography.displaySmall.copy(fontFamily = TabularFigures),
-            color = if (thin) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                tally.anyTargetRate.rateTone()
-            },
+            color = if (thin) p.muted else p.ink,
         )
         Text(
             "reached target 1 / target 2, over ${tally.judged} settled " +
                 (if (tally.judged == 1) "call" else "calls") +
-                " from ${score.sources} " +
-                (if (score.sources == 1) "source" else "sources") +
+                " from ${score.sources} " + (if (score.sources == 1) "source" else "sources") +
                 (if (thin) " — too few to rank" else ""),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = p.muted,
         )
-        OutcomeBar(tally, on = MaterialTheme.colorScheme.background)
-        OutcomeLegend()
+        val split = Outcomes(
+            hit = tally.fullHits + tally.partialHits,
+            stopped = tally.stopped,
+            expired = tally.expired,
+            open = (tally.calls - tally.judged - tally.notTradable).coerceAtLeast(0),
+        )
+        if (split.total > 0) {
+            OutcomeStrip(split, Modifier.padding(top = Space.m))
+            OutcomeKey(Modifier.padding(top = Space.s))
+        }
+        Spacer(Modifier.height(Space.m))
         FigureGroup(
             "Across every source",
             listOf<@Composable RowScope.() -> Unit>(
@@ -859,31 +881,17 @@ private fun StockSheetRecord(score: StockScore, modifier: Modifier = Modifier) {
                         "Per judged call",
                         formatPercent(tally.averageReturn),
                         Modifier.weight(1f),
-                        tone = if (thin) {
-                            PriceRole.muted
-                        } else {
-                            PriceRole.forReturn(tally.averageReturn)
-                        },
+                        tone = if (thin) p.muted else PriceRole.forReturn(tally.averageReturn),
                     )
                 },
                 {
                     Figure(
                         "Risk to reward",
-                        tally.averageRiskReward
-                            ?.let { String.format(Locale.US, "%.1f to 1", it) }
-                            ?: Dash,
+                        tally.averageRiskReward?.let { String.format(Locale.US, "%.1f to 1", it) } ?: Dash,
                         Modifier.weight(1f),
-                        tone = PriceRole.muted,
                     )
                 },
-                {
-                    Figure(
-                        "Calls made",
-                        tally.calls.toString(),
-                        Modifier.weight(1f),
-                        tone = PriceRole.muted,
-                    )
-                },
+                { Figure("Calls made", tally.calls.toString(), Modifier.weight(1f)) },
             ),
         )
     }
@@ -892,122 +900,110 @@ private fun StockSheetRecord(score: StockScore, modifier: Modifier = Modifier) {
 /** The reader's own money in this stock, newest first, each row leading to its card. */
 @Composable
 private fun StockSheetTrades(trades: List<PositionView>, modifier: Modifier, onOpen: (String) -> Unit) {
-    SheetSection(modifier) {
-        SheetSectionLabel("Your trades")
-        trades.forEach { view ->
+    val p = palette
+    Tile(modifier.fillMaxWidth()) {
+        Text("Your trades", style = MaterialTheme.typography.headlineSmall, color = p.ink)
+        trades.forEachIndexed { index, view ->
+            if (index > 0) KitRule(color = p.ground)
             Row(
                 Modifier
                     .fillMaxWidth()
                     .pressableRow { onOpen(view.position.id) }
-                    .padding(vertical = Space.xs),
+                    .padding(vertical = Space.s),
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(view.status.label, style = MaterialTheme.typography.bodyMedium)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    KitTag(view.status.label, view.status.tone())
                     Text(
-                        // The deadline beside the entry, because an open trade is the one thing on
-                        // this sheet that is still costing the reader something.
                         listOfNotNull(
-                            "bought ${AppDates.DayMonth.format(view.position.entryDate)} at " +
-                                formatPrice(view.position.entryPrice),
+                            "bought ${AppDates.DayMonth.format(view.position.entryDate)} at " + formatPrice(view.position.entryPrice),
                             view.position.target1?.let { "target 1 " + formatPrice(it) },
                         ).joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
+                        color = p.muted,
                     )
                 }
                 Text(
                     formatPercent(view.returnPct),
-                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
+                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
                     color = PriceRole.forReturn(view.returnPct),
                 )
-                Icon(
-                    Icons.AutoMirrored.Outlined.ArrowForward,
-                    // Named by the press it belongs to, on the row; a reader announcing the glyph
-                    // as well would say it twice.
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = Space.xs).size(IconSize.Hint),
-                )
+                Icon(Icons.AutoMirrored.Outlined.ArrowForward, contentDescription = null, tint = p.muted, modifier = Modifier.size(IconSize.Hint))
             }
         }
     }
 }
 
 /**
- * Every call anybody has printed on this stock, newest first.
- *
- * Re-postings are kept and marked rather than dropped, which is the rule the session cards follow:
- * the card is the record of what the channel published that morning, and only the *rates* leave it
- * out. Here that matters more than usual - this list is a history of what has been said about one
- * stock, and a source that said the same thing eleven mornings running has said something.
- *
- * **Capped until asked.** A stock the whole channel list likes carries thirty of these, and thirty
- * rows put the trades and the record above them off the top of a scroll that was opened to compare
- * all three. Five is enough to see who has been saying what lately; the rest are one press away and
- * the press says how many it is holding, so nothing is hidden without being counted.
+ * Every call printed on this stock, newest first, on the lilac tile: who, when, what they asked
+ * for, and how it went. Five until asked, and the press says how many it is holding.
  */
 @Composable
 private fun StockSheetCalls(calls: List<ScoredCall>, modifier: Modifier, onOpen: (String) -> Unit) {
+    val p = palette
     var all by remember(calls) { mutableStateOf(false) }
     val shown = if (all) calls else calls.take(CallsShown)
-    SheetSection(modifier) {
-        SheetSectionLabel("Every call on it")
+    val sources = calls.map(ScoredCall::channel).distinct().size
+    Tile(modifier.fillMaxWidth(), tone = TileTone.TILE2) {
+        Text(
+            "Called by $sources " + (if (sources == 1) "source" else "sources"),
+            style = MaterialTheme.typography.titleSmall,
+        )
         shown.forEach { call ->
             Row(
                 Modifier
                     .fillMaxWidth()
                     .pressableRow { onOpen(call.positionId) }
-                    .padding(vertical = Space.xs),
+                    .padding(vertical = Space.s),
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         "⁨${call.channel}⁩",
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        // The entry beside the date, which is what makes a call comparable to the
-                        // one under it: two sources naming one stock a week apart are the same
-                        // opinion at two prices, and the date alone does not say that.
                         listOfNotNull(
                             AppDates.DayMonth.format(call.openedOn),
-                            call.entryBand(),
+                            call.entryBand()?.let { "buy $it" },
                             if (call.repeatOf != null) "re-posted" else null,
                         ).joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
+                        color = LocalContentColor.current.copy(alpha = 0.75f),
                     )
                 }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        call.outcome.label,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    KitTag(call.outcome.label, call.outcome.tagTone())
                     Text(
                         formatPercent(call.returnPct),
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = TabularFigures,
-                        ),
-                        color = PriceRole.forReturn(call.returnPct),
+                        style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                        color = LocalContentColor.current,
                     )
                 }
             }
         }
         if (!all && calls.size > CallsShown) {
-            // Opening more rows is a disclosure, so it is drawn as one - see **A button on a card**.
-            DisclosureButton(
-                label = "Show all ${calls.size} calls",
-                expanded = false,
+            KitButton(
+                "Show all ${calls.size} calls",
                 onClick = { all = true },
+                kind = ButtonKind.ON_TONE,
+                size = ButtonSize.SMALL,
+                modifier = Modifier.padding(top = Space.s),
             )
         }
     }
+}
+
+/** The colour an outcome's tag wears on the lilac tile: ink for the verdicts, muted for the rest. */
+@Composable
+private fun Outcome.tagTone(): Color = when (this) {
+    Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> palette.gain
+    Outcome.STOPPED -> palette.loss
+    else -> palette.onTile.copy(alpha = 0.7f)
 }
 
 /** What a stock did between its last two stored sessions, and which one it moved from. */
@@ -1049,9 +1045,6 @@ private fun formatSignedPrice(value: Double): String =
 
 /** Enough recent calls to see who has been saying what, before the list is asked to open. */
 private const val CallsShown = 5
-
-/** Half the Expand capsule's height. */
-private val ExpandCorner = 12.dp
 
 /**
  * A row that leads to a card, pressed the way every pressable is since the 2026-11 redesign: it

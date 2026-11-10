@@ -46,70 +46,70 @@ internal const val LightGlassCard = 1f
 internal const val LightGlassTile = 1f
 
 /**
- * Amber: the one accent since 4.7.0 (burnt orange before it, vermilion before that). Fills use
- * [PageAccent.base] with dark text on it; text and icons on the page use the darker `ink` stop,
- * because the light fill itself is too pale to read as text on paper.
+ * **Since 5.0 the scheme is derived from [AppPalette]** (see `Palette.kt`): paper and navy ink, cobalt
+ * as the one accent, and the five tile colours kept off the scheme entirely because they are fills
+ * and never text. Every role below is a palette colour or a step between two of them, so the scheme
+ * and the palette cannot drift apart.
+ *
+ * Before 5.0 the accent was amber (4.7.0), burnt orange and vermilion before that.
  */
-private val DarkAccent = Color(0xFFFFB050)
-private val LightAccentInk = Color(0xFF9A5A06)
-
 internal val DarkColors = darkColorScheme(
-    primary = DarkAccent,
-    onPrimary = Color(0xFF2A1600),
-    primaryContainer = Color(0xFF4A3008),
-    onPrimaryContainer = Color(0xFFFFE2B8),
-    secondary = DarkAccent,
-    onSecondary = Color(0xFF2A1600),
-    secondaryContainer = Color(0xFF3A2606),
-    onSecondaryContainer = Color(0xFFFFCF8A),
+    primary = DarkPalette.heroInk,
+    onPrimary = DarkPalette.onTile,
+    primaryContainer = Color(0xFF232A6B),
+    onPrimaryContainer = Color(0xFFDADDFF),
+    secondary = DarkPalette.heroInk,
+    onSecondary = DarkPalette.onTile,
+    secondaryContainer = Color(0xFF232A6B),
+    onSecondaryContainer = Color(0xFFDADDFF),
     // Gain. Never the accent.
-    tertiary = Color(0xFF6FD99A),
+    tertiary = DarkPalette.gain,
     onTertiary = Color(0xFF00391F),
     tertiaryContainer = Color(0xFF11512F),
     onTertiaryContainer = Color(0xFFA6F5C4),
+    // A fault, kept apart from the loss red so a failed run never reads as money lost.
     error = Color(0xFFFF8A80),
     onError = Color(0xFF4E0002),
     errorContainer = Color(0xFF6E1512),
     onErrorContainer = Color(0xFFFFDAD5),
-    // Warm ink rather than the blue-violet navy of the glass design.
-    background = Color(0xFF111110),
-    onBackground = Color(0xFFF1EEE7),
-    surface = Color(0xFF111110),
-    onSurface = Color(0xFFF1EEE7),
-    surfaceVariant = Color(0xFF2A2926),
-    onSurfaceVariant = Color(0xFFA8A39A),
-    surfaceContainerLowest = Color(0xFF0B0B0A),
-    surfaceContainerLow = Color(0xFF171716),
-    surfaceContainer = Color(0xFF1D1C1A),
-    surfaceContainerHigh = Color(0xFF252422),
-    surfaceContainerHighest = Color(0xFF302E2B),
-    outline = Color(0xFF8F8B83),
-    outlineVariant = Color(0xFF34322E),
+    background = DarkPalette.ground,
+    onBackground = DarkPalette.ink,
+    surface = DarkPalette.ground,
+    onSurface = DarkPalette.ink,
+    surfaceVariant = DarkPalette.raised,
+    onSurfaceVariant = DarkPalette.muted,
+    surfaceContainerLowest = Color(0xFF0E0F11),
+    surfaceContainerLow = Color(0xFF1A1C20),
+    surfaceContainer = DarkPalette.card,
+    surfaceContainerHigh = DarkPalette.raised,
+    surfaceContainerHighest = Color(0xFF2E333B),
+    outline = Color(0xFF7E838D),
+    outlineVariant = DarkPalette.line,
 )
 
 /** [DarkColors] on true black. Only the grounds change; every signal is copied verbatim. */
 internal val BlackColors = DarkColors.copy(
-    background = Color(0xFF000000),
-    surface = Color(0xFF000000),
-    surfaceVariant = Color(0xFF1F1E1C),
+    background = BlackPalette.ground,
+    surface = BlackPalette.ground,
+    surfaceVariant = BlackPalette.raised,
     surfaceContainerLowest = Color(0xFF000000),
-    surfaceContainerLow = Color(0xFF0C0C0B),
-    surfaceContainer = Color(0xFF141413),
-    surfaceContainerHigh = Color(0xFF1C1B19),
-    surfaceContainerHighest = Color(0xFF272624),
-    outlineVariant = Color(0xFF2A2926),
+    surfaceContainerLow = Color(0xFF0C0D0F),
+    surfaceContainer = BlackPalette.card,
+    surfaceContainerHigh = BlackPalette.raised,
+    surfaceContainerHighest = Color(0xFF282C33),
+    outlineVariant = BlackPalette.line,
 )
 
 internal val LightColors = lightColorScheme(
-    primary = LightAccentInk,
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFFCE8CC),
-    onPrimaryContainer = Color(0xFF4F2E02),
-    secondary = LightAccentInk,
-    onSecondary = Color.White,
-    secondaryContainer = Color(0xFFFCE8CC),
-    onSecondaryContainer = Color(0xFF4F2E02),
-    tertiary = Color(0xFF1B7A43),
+    primary = LightPalette.heroInk,
+    onPrimary = LightPalette.onHero,
+    primaryContainer = Color(0xFFDADDFF),
+    onPrimaryContainer = Color(0xFF0B1490),
+    secondary = LightPalette.heroInk,
+    onSecondary = LightPalette.onHero,
+    secondaryContainer = Color(0xFFDADDFF),
+    onSecondaryContainer = Color(0xFF0B1490),
+    tertiary = LightPalette.gain,
     onTertiary = Color.White,
     tertiaryContainer = Color(0xFFCDEBD6),
     onTertiaryContainer = Color(0xFF062B15),
@@ -118,20 +118,20 @@ internal val LightColors = lightColorScheme(
     onError = Color.White,
     errorContainer = Color(0xFFF9DEDC),
     onErrorContainer = Color(0xFF410E0B),
-    // Paper rather than blue-white.
-    background = Color(0xFFF5F3EE),
-    onBackground = Color(0xFF151515),
-    surface = Color(0xFFF5F3EE),
-    onSurface = Color(0xFF151515),
-    surfaceVariant = Color(0xFFE6E2DA),
-    onSurfaceVariant = Color(0xFF5E5A53),
-    surfaceContainerLowest = Color(0xFFFBFAF7),
-    surfaceContainerLow = Color(0xFFF0EDE7),
-    surfaceContainer = Color(0xFFEAE7E0),
-    surfaceContainerHigh = Color(0xFFE3DFD7),
-    surfaceContainerHighest = Color(0xFFDAD5CC),
-    outline = Color(0xFF7A756D),
-    outlineVariant = Color(0xFFD6D1C7),
+    background = LightPalette.ground,
+    onBackground = LightPalette.ink,
+    surface = LightPalette.ground,
+    onSurface = LightPalette.ink,
+    surfaceVariant = LightPalette.raised,
+    onSurfaceVariant = LightPalette.muted,
+    surfaceContainerLowest = LightPalette.card,
+    surfaceContainerLow = Color(0xFFF7F6F2),
+    // Cards are white on paper, as on the canvas; the two nested steps go back toward the paper.
+    surfaceContainer = LightPalette.card,
+    surfaceContainerHigh = Color(0xFFF6F5F0),
+    surfaceContainerHighest = Color(0xFFECE9E1),
+    outline = LightPalette.faint,
+    outlineVariant = LightPalette.line,
 )
 
 /**
@@ -187,8 +187,8 @@ internal val DarkExtras = ExtraColors(
     expired = Color(0xFFB5AEA3),
     expiredContainer = Color(0xFF3A3833),
     onExpiredContainer = Color(0xFFE6E1D8),
-    // Signal red: a plain red, 5.8:1 on ink and about 35 degrees of hue from the amber accent.
-    loss = Color(0xFFFF4D4D),
+    // Signal red, the palette's dark-theme loss.
+    loss = DarkPalette.loss,
     lossContainer = Color(0xFF4A1212),
     onLossContainer = Color(0xFFFFDAD6),
     market = Color(0xFF5AA9FF),
@@ -199,7 +199,7 @@ internal val LightExtras = ExtraColors(
     expiredContainer = Color(0xFFE6E2DA),
     onExpiredContainer = Color(0xFF2C2A26),
     // Signal red, 5.2:1 on paper. `error` is the deeper #8C1D18 so a fault and a loss differ.
-    loss = Color(0xFFC62020),
+    loss = LightPalette.loss,
     lossContainer = Color(0xFFF9DEDC),
     onLossContainer = Color(0xFF410E0B),
     // Darkened rather than reused. The dark theme's blue comes out at 2.4:1 on a light card, where
@@ -352,30 +352,30 @@ private class AccentSeed(
 )
 
 /**
- * Amber, since 4.7.0.
+ * Electric cobalt, since 5.0 (amber in 4.7.0).
  *
- * The light column is not the dark one reused. On paper the fill is a pale amber that carries dark
- * text, while `ink` is a much darker amber, because the fill is too pale (2:1) to read as text
- * there; `onInk` is white for that reason. On ink the one bright amber does both jobs.
+ * On paper the one cobalt is both the fill and the text: it carries white and reads at well over
+ * 4.5:1 on paper. On Graphite it does not read as text, so the dark column lifts `ink` to a pale
+ * cobalt and keeps the saturated one for fills, which carry white in both themes.
  */
 private val DarkAccentSeed = AccentSeed(
-    base = Color(0xFFFFB050), ink = Color(0xFFFFB050),
-    onBase = Color(0xFF2A1600), onInk = Color(0xFF2A1600),
-    neighbour = Color(0xFFFFC878), deep = Color(0xFF6B4108), mid = Color(0xFFA8670F),
-    ground = Color(0xFF2A1A04),
+    base = DarkPalette.hero, ink = DarkPalette.heroInk,
+    onBase = DarkPalette.onHero, onInk = DarkPalette.onTile,
+    neighbour = Color(0xFF5A66FF), deep = Color(0xFF121A8C), mid = Color(0xFF2430D8),
+    ground = Color(0xFF080C40),
 )
 
 private val LightAccentSeed = AccentSeed(
-    base = Color(0xFFF29A2E), ink = Color(0xFF9A5A06),
-    onBase = Color(0xFF111110), onInk = Color.White,
-    neighbour = Color(0xFFF5B860), deep = Color(0xFF4A2A02), mid = Color(0xFF7A4704),
-    ground = Color(0xFF2A1803),
+    base = LightPalette.hero, ink = LightPalette.heroInk,
+    onBase = LightPalette.onHero, onInk = LightPalette.onHero,
+    neighbour = Color(0xFF4A56FF), deep = Color(0xFF0B1490), mid = Color(0xFF1824D6),
+    ground = Color(0xFF070B4A),
 )
 
 /**
- * **One accent on every page since the 2026-11 redesign.** The five keys are kept so the shell and
- * every caller still name a destination, but each resolves to the same amber seed: a Swiss page
- * has one accent, and a page's identity is its title, not its hue.
+ * **One accent on every page.** The five keys are kept so the shell and every caller still name a
+ * destination, but each resolves to the same cobalt seed: a page's identity is its title, and the
+ * tile colours are what give a screen its rhythm.
  */
 private val darkSeeds = AccentKey.entries.associateWith { DarkAccentSeed }
 private val lightSeeds = AccentKey.entries.associateWith { LightAccentSeed }
@@ -451,6 +451,30 @@ enum class CardHue { BLUE, GREEN, AMBER, PINK, VIOLET, CYAN }
 @Suppress("UnusedReceiverParameter")
 val CardHue.color: Color
     @Composable get() = LocalPageAccent.current.ink
+
+/**
+ * This hue as a **tile fill** in the 5.0 palette, which is what each card slot maps to now.
+ *
+ * Kept apart from [color] on purpose: [color] is read as text and as an edge by the screens that
+ * predate 5.0 and has to hold 4.5:1, which lime, sunflower and sky never do on paper. A fill is read
+ * with [AppPalette.onTile] on it - or [AppPalette.onHero] on [CardHue.BLUE] - and never as text.
+ */
+val CardHue.tile: Color
+    @Composable get() = tileFor(this, LocalAppPalette.current)
+
+/** [CardHue.tile] for a given palette, so a test can read it without a composition. */
+internal fun tileFor(hue: CardHue, palette: AppPalette): Color = when (hue) {
+    CardHue.BLUE -> palette.hero
+    CardHue.GREEN -> palette.highlight
+    CardHue.AMBER -> palette.tile1
+    CardHue.PINK -> palette.alert
+    CardHue.VIOLET -> palette.tile2
+    CardHue.CYAN -> palette.tile3
+}
+
+/** What is drawn on [CardHue.tile]: white on the cobalt tile, navy ink on every other. */
+internal fun onTileFor(hue: CardHue, palette: AppPalette): Color =
+    if (hue == CardHue.BLUE) palette.onHero else palette.onTile
 
 /** The accent for [key] in the theme in force. */
 internal fun accentFor(key: AccentKey, dark: Boolean): PageAccent =
@@ -566,6 +590,11 @@ fun EgxAnalyzerTheme(
     }
     CompositionLocalProvider(
         LocalExtraColors provides if (darkTheme) DarkExtras else LightExtras,
+        LocalAppPalette provides when {
+            !darkTheme -> LightPalette
+            pureBlackDarkMode -> BlackPalette
+            else -> DarkPalette
+        },
         LocalDarkTheme provides darkTheme,
         // The shell re-provides this per destination; this is what everything outside one gets.
         LocalPageAccent provides accentFor(AccentKey.CYAN, darkTheme),
@@ -577,7 +606,7 @@ fun EgxAnalyzerTheme(
                 else -> DarkColors
             },
             shapes = AppShapes,
-            typography = AppTypography,
+            typography = rememberAppTypography(),
             content = content,
         )
     }

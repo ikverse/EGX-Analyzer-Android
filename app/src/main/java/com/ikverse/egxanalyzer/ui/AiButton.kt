@@ -1,5 +1,7 @@
 package com.ikverse.egxanalyzer.ui
 
+import com.ikverse.egxanalyzer.ui.theme.palette
+
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -70,87 +72,52 @@ internal fun AskAiButton(
     enabled: Boolean = true,
     working: Boolean = false,
 ) {
-    val colors = MaterialTheme.colorScheme
+    // The kit's Ask AI pill since 5.0: an ink capsule with lilac words where the press is paid for,
+    // a hairline ring in ink where it only reopens an answer already kept. A turning arc replaces
+    // the sparkle while the request is out.
+    val p = palette
     val filled = look == AiLook.Filled
-    val content = if (filled) colors.surface else colors.onSurface
+    val content = if (filled) p.tile2 else p.ink
     val press = remember { MutableInteractionSource() }
-    val shape = RoundedCornerShape(pressCorner(press, rest = PillHeight / 2))
-    val sweep = rememberSweep(active = working)
     Row(
         modifier
             .pressScale(press)
-            // The pill is shorter than a fingertip. This keeps the target the full 48dp without
-            // making the button look like one.
             .minimumInteractiveComponentSize()
-            .height(PillHeight)
-            // A refused press reads as refused, but not while working: then the sweep is the point.
+            .height(com.ikverse.egxanalyzer.ui.kit.Kit.ButtonSmall)
             .alpha(if (enabled || working) 1f else DisabledAlpha)
-            .clip(shape)
+            .clip(com.ikverse.egxanalyzer.ui.kit.Kit.Capsule)
             .then(
                 if (filled) {
-                    Modifier.background(colors.onSurface)
+                    Modifier.background(p.ink)
                 } else {
-                    Modifier.border(OutlineWidth, colors.onSurface.copy(alpha = OutlineAlpha), shape)
+                    Modifier.border(1.5.dp, p.ink, com.ikverse.egxanalyzer.ui.kit.Kit.Capsule)
                 },
             )
-            .drawWithContent {
-                drawContent()
-                // Read in the draw lambda, so the sweep costs a repaint a frame and no recomposition.
-                val at = sweep.value
-                if (at >= 0f) {
-                    val band = size.width * SweepBand
-                    val x = at * (size.width + band * 2f) - band
-                    drawRect(
-                        Brush.horizontalGradient(
-                            listOf(Color.Transparent, content.copy(alpha = SweepAlpha), Color.Transparent),
-                            startX = x - band,
-                            endX = x + band,
-                        ),
-                        topLeft = Offset.Zero,
-                    )
-                }
-            }
             .clickable(
                 interactionSource = press,
-                indication = LocalIndication.current,
+                indication = null,
                 enabled = enabled,
+                role = androidx.compose.ui.semantics.Role.Button,
                 onClick = onClick,
             )
-            .padding(horizontal = Space.m),
+            .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.s),
     ) {
-        Icon(
-            Icons.Outlined.AutoAwesome,
-            contentDescription = null,
-            tint = content,
-            modifier = Modifier.size(IconSize.Hint),
-        )
+        if (working) {
+            com.ikverse.egxanalyzer.ui.kit.KitSpinner(color = content, size = 16.dp)
+        } else {
+            Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = content, modifier = Modifier.size(IconSize.Hint))
+        }
         Text(
             label,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
             color = content,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
-}
-
-/**
- * Where the working sweep is, 0 to 1 across the button, or -1 when there is none to draw.
- *
- * The transition is only created while [active], so an idle button costs no frames, and reduce
- * motion leaves a working button still rather than moving it.
- */
-@Composable
-private fun rememberSweep(active: Boolean): State<Float> {
-    if (!active || LocalReduceMotion.current) return remember { mutableFloatStateOf(-1f) }
-    return rememberInfiniteTransition(label = "ai").animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(SweepMs, easing = LinearEasing)),
-        label = "sweep",
-    )
 }
 
 private val OutlineWidth: Dp = 1.dp
