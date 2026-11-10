@@ -19,7 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -40,6 +39,12 @@ import androidx.compose.ui.window.PopupProperties
 import com.ikverse.egxanalyzer.data.EgxCatalog
 import com.ikverse.egxanalyzer.data.EgxStock
 import com.ikverse.egxanalyzer.model.WordingRule
+import com.ikverse.egxanalyzer.ui.theme.palette
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 
 /**
  * Which stocks to offer somebody typing in the header, and in what order.
@@ -197,7 +202,7 @@ internal fun TickerPickerList(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = ScrimAlpha))
+                    .background(palette.ink.copy(alpha = ScrimAlpha))
                     // No ripple and no indication: it is the page behind the list, not a control.
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -205,15 +210,15 @@ internal fun TickerPickerList(
                         onClick = onDismiss,
                     ),
             )
-            Surface(
+            Box(
                 Modifier
                     // The header's own margin, so the list stands under the field rather than
                     // under the window - the popup is placed at the window's start edge.
                     .padding(horizontal = Space.l)
-                    .fillMaxWidth(),
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                shadowElevation = PickerElevation,
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(Kit.TileCorner))
+                    .background(palette.card)
+                    .border(BorderStroke(1.dp, palette.line), RoundedCornerShape(Kit.TileCorner)),
             ) {
                 if (held.isEmpty() && rest.isEmpty()) {
                     Text(
@@ -221,10 +226,10 @@ internal fun TickerPickerList(
                         // answers to, and on an empty box the reader has not asked anything yet.
                         if (browsing) "Type to search the exchange" else "No listing answers to that",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.muted,
                         modifier = Modifier.padding(Space.l),
                     )
-                    return@Surface
+                    return@Box
                 }
                 LazyColumn(Modifier.heightIn(max = listHeight).padding(vertical = Space.s)) {
                     if (held.isNotEmpty()) {
@@ -257,7 +262,8 @@ private fun PickerNote(label: String) {
     Text(
         label,
         style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontWeight = FontWeight.Bold,
+        color = palette.muted,
         modifier = Modifier.padding(horizontal = Space.l, vertical = Space.s),
     )
 }
@@ -267,7 +273,8 @@ private fun PickerGroup(label: String) {
     Text(
         label,
         style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontWeight = FontWeight.Bold,
+        color = palette.muted,
         modifier = Modifier.padding(horizontal = Space.l, vertical = Space.s),
     )
 }
@@ -306,7 +313,8 @@ private fun SuggestionRow(
             Text(
                 stock.nameArabic ?: stock.nameEnglish,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.SemiBold,
+                color = palette.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -316,8 +324,8 @@ private fun SuggestionRow(
                 } else {
                     "${stock.ticker} · ${stock.nameEnglish}"
                 },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                color = palette.muted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -327,13 +335,14 @@ private fun SuggestionRow(
                 Modifier
                     .size(SheetTarget)
                     .clip(CircleShape)
+                    .background(palette.raised)
                     .clickable { onOpenStock(stock.ticker) },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     Icons.AutoMirrored.Outlined.ArrowForward,
                     contentDescription = "Open ${stock.ticker}",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = palette.ink,
                     modifier = Modifier.size(IconSize.Inline),
                 )
             }
@@ -350,9 +359,6 @@ private fun SuggestionRow(
  * as tall as is the window above the keyboard, measured in [SearchField].
  */
 private val PickerMaxHeight = 300.dp
-
-/** It floats over the page rather than sitting on it, so it carries a shadow the cards do not. */
-private val PickerElevation: Dp = 6.dp
 
 /** A press target for the arrow, not the size of it - the same 40dp the header's own glyphs use. */
 private val SheetTarget = 40.dp

@@ -134,6 +134,23 @@ class IntradayRepository(
     }
 
     /**
+     * The EGX30's daily closes from [from], rebuilt from hourly bars.
+     *
+     * Hourly because the feed's daily endpoint answers this index with its newest session alone
+     * (measured 2026-11-10: one daily row against 320 hourly bars over three months). Held by the
+     * caller in memory and nowhere else: the index is not a listing, so it stays out of the stored
+     * prices, the catalog and the feed's health checks. Empty when the feed does not answer.
+     */
+    suspend fun indexHistory(
+        from: LocalDate,
+        today: LocalDate = LocalDate.now(ZoneId.of(UTC)),
+    ): List<DailySession> {
+        val start = from.coerceAtLeast(today.minusDays(HOURLY_RANGE_DAYS))
+        val bars = fetchBars(INDEX_SYMBOL, start, today, HOURLY) ?: return emptyList()
+        return DailyFromIntraday.aggregate(INDEX_TICKER, bars)
+    }
+
+    /**
      * Copies the five-minute session of every stock in [tickers] that is behind, and keeps it.
      *
      * **One request per stock, not one per session.** The endpoint answers a whole date range at
@@ -309,6 +326,12 @@ class IntradayRepository(
          * minutes does.
          */
         internal const val HOURLY = "1h"
+
+        /** The EGX30 as the feed names it, escaped for the path: `^CASE30`. */
+        private const val INDEX_SYMBOL = "%5ECASE30"
+
+        /** What the index's rebuilt sessions are labelled, which nothing else reads. */
+        internal const val INDEX_TICKER = "EGX30"
 
         /**
          * How far back a daily history is rebuilt.

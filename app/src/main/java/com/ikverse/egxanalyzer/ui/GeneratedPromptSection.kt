@@ -2,13 +2,12 @@ package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -16,9 +15,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.PromptVersion
+import com.ikverse.egxanalyzer.ui.kit.ButtonKind
+import com.ikverse.egxanalyzer.ui.kit.ButtonSize
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.kit.KitRule
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.Panel
+import com.ikverse.egxanalyzer.ui.theme.palette
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -48,11 +55,9 @@ internal fun GeneratedPromptSection(appState: AppState) {
     var viewing by remember { mutableStateOf<PromptVersion?>(null) }
     val active = appState.activePrompt
     val current = appState.promptVersions.firstOrNull { it.id == active.id }
+    val p = palette
 
     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-        // The switch leads its label here, as every other one in the app now does. It trailed, on
-        // a row whose label was bold and two lines deep - which is why this group and the ones
-        // around it never quite read as one page of settings.
         SettingToggle(
             label = "Use the default prompt only",
             checked = appState.useDefaultPromptOnly,
@@ -65,83 +70,77 @@ internal fun GeneratedPromptSection(appState: AppState) {
             ),
         )
 
-        HorizontalDivider()
+        // The version in force, on the ground, as the one figure this group is about.
+        Panel(Modifier.fillMaxWidth(), color = p.ground, contentPadding = PaddingValues(12.dp)) {
+            Text(
+                buildString {
+                    append("Active: ")
+                    append(current?.let { "v${it.sequence}" } ?: "v1")
+                    append(" · ")
+                    append(active.id)
+                    active.schemaVersion?.let { append(" · schema $it") }
+                },
+                style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                fontWeight = FontWeight.Bold,
+                color = p.ink,
+            )
+            Text(
+                if (active.ruleIds.isEmpty()) {
+                    "No wording is being added to the prompt."
+                } else {
+                    "${active.ruleIds.size} rule${if (active.ruleIds.size == 1) "" else "s"} folded in."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = p.muted,
+            )
+        }
 
-        Text(
-            buildString {
-                append("Active: ")
-                append(current?.let { "v${it.sequence}" } ?: "v1")
-                append(" · ")
-                append(active.id)
-                active.schemaVersion?.let { append(" · shipped prompt schema $it") }
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            if (active.ruleIds.isEmpty()) {
-                "No wording is being added to the prompt."
-            } else {
-                "${active.ruleIds.size} rule${if (active.ruleIds.size == 1) "" else "s"} folded in."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        appState.promptVersions.take(10).forEach { version ->
-            HorizontalDivider()
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "v${version.sequence}" + if (version.id == active.id) " · active" else "",
-                        style = MaterialTheme.typography.bodyMedium,
-                        // Ink against grey rather than the accent against ink (2026-11 redesign).
-                        color = if (version.id == active.id) {
-                            MaterialTheme.colorScheme.onSurface
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                    Text(
-                        version.reason,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "${version.createdAt.asLocalStamp()} · ${version.device}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+        Column {
+            appState.promptVersions.take(10).forEachIndexed { index, version ->
+                if (index > 0) KitRule()
+                Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "v${version.sequence}" + if (version.id == active.id) " · active" else "",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
+                            fontWeight = FontWeight.Bold,
+                            color = if (version.id == active.id) p.ink else p.muted,
+                        )
+                        Text(version.reason, style = MaterialTheme.typography.labelSmall, color = p.muted)
+                        Text(
+                            "${version.createdAt.asLocalStamp()} · ${version.device}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                            color = p.muted,
+                        )
+                    }
+                    KitButton("View", onClick = { viewing = version }, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
                 }
-                TextButton(onClick = { viewing = version }) { Text("View") }
             }
         }
     }
 
     viewing?.let { version ->
-        AlertDialog(
-            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-            onDismissRequest = { viewing = null },
-            title = { Text("v${version.sequence} · ${version.id}") },
-            text = {
-                // Read-only on purpose: a version is a record of what was sent, and a record that
-                // can be typed over is not a record.
-                Column(
-                    Modifier
-                        .heightIn(max = 420.dp)
-                        .scrollableColumn(),
-                ) {
-                    Text(
-                        version.text,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { viewing = null }) { Text("Close") }
-            },
-        )
+        // A sheet rather than a dialog: the prompt runs to pages, and a dialog is for a sentence.
+        // Read-only on purpose: a version is a record of what was sent, and a record that can be
+        // typed over is not a record.
+        KitSheet(
+            onDismiss = { viewing = null },
+            posture = LocalFoldPosture.current,
+            title = "v${version.sequence} · ${version.id}",
+        ) {
+            Text(
+                version.text,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = TabularFigures),
+                color = p.ink,
+            )
+            KitButton(
+                "Close",
+                onClick = { viewing = null },
+                kind = ButtonKind.SECONDARY,
+                size = ButtonSize.SMALL,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+        }
     }
 }
 

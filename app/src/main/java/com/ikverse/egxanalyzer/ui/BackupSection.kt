@@ -6,10 +6,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,6 +17,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.ikverse.egxanalyzer.ui.theme.palette
+import com.ikverse.egxanalyzer.ui.kit.TileTone
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.KitDialog
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.kit.ButtonSize
+import com.ikverse.egxanalyzer.ui.kit.ButtonKind
 
 /**
  * Backing the record up, and getting it back.
@@ -87,7 +92,9 @@ fun BackupControls(appState: AppState) {
                 horizontalArrangement = Arrangement.spacedBy(Space.s),
                 verticalArrangement = Arrangement.spacedBy(Space.s),
             ) {
-                SettingsButton(
+                KitButton(
+                    if (busy) "Working…" else "Back up now",
+                    size = ButtonSize.SMALL,
                     enabled = !busy,
                     onClick = {
                         appState.startAction {
@@ -107,15 +114,21 @@ fun BackupControls(appState: AppState) {
                             busy = false
                         }
                     },
-                ) {
-                    Text(if (busy) "Working…" else "Back up now")
-                }
-                SettingsButton(enabled = !busy, onClick = { chooseFolder.launch(null) }) {
-                    Text(if (holdsFolder) "Change folder" else "Choose a folder")
-                }
-                SettingsButton(enabled = !busy, onClick = { pickBackup.launch(arrayOf("*/*")) }) {
-                    Text("Restore from a backup")
-                }
+                )
+                KitButton(
+                    if (holdsFolder) "Change folder" else "Choose a folder",
+                    onClick = { chooseFolder.launch(null) },
+                    kind = ButtonKind.SECONDARY,
+                    size = ButtonSize.SMALL,
+                    enabled = !busy,
+                )
+                KitButton(
+                    "Restore…",
+                    onClick = { pickBackup.launch(arrayOf("*/*")) },
+                    kind = ButtonKind.SECONDARY,
+                    size = ButtonSize.SMALL,
+                    enabled = !busy,
+                )
             }
         }
 
@@ -142,25 +155,23 @@ fun BackupControls(appState: AppState) {
                         "Back up now saves to Downloads instead."
             },
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = palette.muted,
         )
     }
 
     pendingRestore?.let { source ->
-        AlertDialog(
-            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-            onDismissRequest = { pendingRestore = null },
-            title = { Text("Restore from this backup?") },
-            // Says what it will not do, because that is the question somebody hesitating over this
-            // button is actually asking. A restore that could delete is one nobody dares press.
-            text = {
-                Text(
-                    "Anything in the backup that this phone is missing is added back. Nothing " +
-                        "already here is deleted or overwritten with an older version.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
+        // Says what it will not do, because that is the question somebody hesitating over this
+        // button is actually asking. A restore that could delete is one nobody dares press.
+        KitDialog(
+            title = "Restore from this backup?",
+            text = "Anything in the backup that this phone is missing is added back. Nothing " +
+                "already here is deleted or overwritten with an older version.",
+            confirmLabel = "Restore",
+            dismissLabel = "Cancel",
+            onDismiss = { pendingRestore = null },
+            posture = LocalFoldPosture.current,
+            tone = TileTone.TILE3,
+            onConfirm = {
                     pendingRestore = null
                     appState.startAction {
                         busy = true
@@ -172,10 +183,6 @@ fun BackupControls(appState: AppState) {
                         }
                         busy = false
                     }
-                }) { Text("Restore") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingRestore = null }) { Text("Cancel") }
             },
         )
     }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A launcher shortcut's icon, as an adaptive icon so the launcher masks it like the app's own. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/egx_lime" />
+    <foreground android:drawable="@drawable/ic_shortcut_insights_glyph" />
+</adaptive-icon>

@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.Panel
+import com.ikverse.egxanalyzer.ui.theme.palette
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,9 +47,8 @@ import java.time.LocalDate
  *
  * - **It had no scroller at all.** No `verticalScroll` anywhere, alone among the sheets here - so a
  *   call carrying all six levels, a long Arabic note, or an ordinary one at a large font scale ran
- *   off the bottom of the screen with no way to reach it. It takes `sheetDragSlop().scrollableColumn()`
- *   now, the pair the other six sheets carry, which is also what stops a pull at the top of the
- *   record closing the sheet under the reader's finger.
+ *   off the bottom of the screen with no way to reach it. Since 5.0 it is a `KitSheet`, which
+ *   scrolls its whole column.
  * - **The identity band no longer scrolls.** The logo, the ticker, the EGX 33 mark and both names
  *   are what the sheet was opened to look at, and the ticker opens [StockSheet] through
  *   [LocalOpenStock] the way every other full-width card naming a stock already does. The channel
@@ -62,7 +63,6 @@ import java.time.LocalDate
  * `⋮` the recommendation card already carries - which brings **Copy call** to a surface that had no
  * way of getting a call's numbers out of the app. The `Edited` pill still opens the editor directly.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun OccurrenceSheet(
     stock: ConsolidatedRecommendation,
@@ -82,50 +82,27 @@ internal fun OccurrenceSheet(
     var editing by remember { mutableStateOf(false) }
     val held = trades?.heldFor(stock, point)
     val session = trades?.dateOf(point) ?: editor?.sessionOf(point)
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = SheetShape,
-        containerColor = MaterialTheme.colorScheme.background,
-        dragHandle = { SheetHandle() },
-    ) {
+    // The kit's sheet: a bottom sheet folded, a panel beside the page unfolded or in book posture.
+    // It scrolls as one column, which is what lets a call with every level, a long Arabic note and
+    // a large font scale still reach its trade button.
+    KitSheet(onDismiss = onDismiss, posture = LocalFoldPosture.current, title = stock.stockCode) {
         OccurrenceHeading(stock, point, channel, peak, editor, session) { editing = true }
-        Column(
-            Modifier
-                .fillMaxWidth()
-                // Bounded by what the header and the action bar leave, and no taller than its own
-                // content: a call with two levels and no screenshot must not stretch the sheet to
-                // the full screen with the trade button stranded at the bottom of it.
-                .weight(1f, fill = false)
-                .sheetDragSlop()
-                .scrollableColumn()
-                .padding(horizontal = Space.l)
-                .padding(top = Space.s, bottom = Space.m),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            // On its own now, tinted the way Insights and the recommendation card tint a grouped
-            // panel - it used to open "The call" section, which buried the one drawing on this
-            // sheet inside a card whose label was really about the six figures under it.
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    // A ruled group since the 2026-11 redesign.
-                    .flatPanel(),
-            ) {
-                PriceLadder(point, reached = peak)
-            }
-            SheetSection {
-                SheetSectionLabel("The call")
-                LevelGrid(point)
-                point.riskRewardRatio()?.let { RiskRewardRow(it) }
-            }
-            OccurrenceSource(stock, point, imagePath) { viewingImage = true }
-            // One more object in the same list rather than a bar pinned below it - only where the
-            // call has a session to belong to, since an occurrence the model left undated cannot be
-            // scored, so a trade filed against it would have no deadline to run to.
-            if (trades != null && session != null) {
-                OccurrenceActions(stock, point, channel, trades, held)
-            }
+        // On its own, the one drawing on this sheet: where the entry, the stop and both targets
+        // sit against each other, with how far the stock has been since.
+        Panel(Modifier.fillMaxWidth(), color = palette.card) {
+            PriceLadder(point, reached = peak)
+        }
+        Panel(Modifier.fillMaxWidth(), color = palette.card) {
+            SheetSectionLabel("The call")
+            Spacer(Modifier.height(Space.s))
+            LevelGrid(point)
+            point.riskRewardRatio()?.let { RiskRewardRow(it) }
+        }
+        OccurrenceSource(stock, point, imagePath) { viewingImage = true }
+        // Only where the call has a session to belong to, since an occurrence the model left
+        // undated cannot be scored, so a trade filed against it would have no deadline to run to.
+        if (trades != null && session != null) {
+            OccurrenceActions(stock, point, channel, trades, held)
         }
     }
     if (editing && editor != null) {
@@ -158,10 +135,7 @@ private fun OccurrenceHeading(
 ) {
     val openStock = LocalOpenStock.current
     Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Space.l)
-            .padding(bottom = Space.s),
+        Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(Space.s),
         verticalAlignment = Alignment.Top,
     ) {
@@ -178,8 +152,7 @@ private fun OccurrenceHeading(
                 ) {
                     Text(
                         stock.stockCode,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.headlineMedium,
                     )
                     Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
                 }
@@ -189,7 +162,7 @@ private fun OccurrenceHeading(
                     Text(
                         "⁨$it⁩",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.muted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -198,7 +171,7 @@ private fun OccurrenceHeading(
                     Text(
                         it,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.muted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -224,12 +197,12 @@ private fun OccurrenceHeading(
                 Text(
                     "Source:",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.muted,
                 )
                 Text(
                     "⁨$it⁩",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = palette.ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -239,13 +212,13 @@ private fun OccurrenceHeading(
                     Text(
                         "·",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.muted,
                     )
                 }
                 Text(
                     AppDates.DayMonth.format(it),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.muted,
                 )
             }
         }
@@ -253,10 +226,7 @@ private fun OccurrenceHeading(
     // Every pill on one line under the header and starting at the sheet's own inset - level with
     // the ticker above it and with ENTRY below it. The same row the two call cards carry.
     FlowRow(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Space.l)
-            .padding(bottom = Space.s),
+        Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(Space.s),
         verticalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
@@ -266,7 +236,6 @@ private fun OccurrenceHeading(
         if (editor?.editFor(stock, point) != null) EditedChip(onEdit)
         TimingChip(point)
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 /**
@@ -285,7 +254,7 @@ private fun PeakSinceTheCall(point: RecommendationDataPoint, peak: Double) {
         Text(
             "PEAK",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = palette.muted,
         )
         Text(
             formatPrice(peak),
@@ -320,7 +289,7 @@ private fun RiskRewardRow(ratio: Double) {
         Text(
             "RISK / REWARD",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = palette.muted,
         )
         Text(
             "1 : ${"%.1f".format(ratio)}",
@@ -346,8 +315,9 @@ private fun OccurrenceSource(
     imagePath: String?,
     onOpenImage: () -> Unit,
 ) {
-    SheetSection {
+    Panel(Modifier.fillMaxWidth(), color = palette.card) {
         SheetSectionLabel("What it was read off")
+        Spacer(Modifier.height(Space.s))
         // The quote first and right-aligned, the thumbnail last - the quote is Arabic, and reads
         // toward the photo beside it the same way the notes paragraph below reads toward its own
         // trailing edge. Asked for on 2026-09-20.
@@ -375,11 +345,11 @@ private fun OccurrenceSource(
         // the pattern the recommendation card's own source facts already read in, rather than
         // three stacked rows that ran together with nothing to tell one fact from the next.
         val facts = listOfNotNull(
-            point.timingEvidence?.let { it to MaterialTheme.colorScheme.tertiary },
+            point.timingEvidence?.let { it to palette.hero },
             point.visibleSourceDate?.takeIf(String::isNotBlank)
-                ?.let { ("Printed $it") to MaterialTheme.colorScheme.onSurfaceVariant },
+                ?.let { ("Printed $it") to palette.muted },
             point.date?.let {
-                ("Target " + AppDates.DayMonth.format(it)) to MaterialTheme.colorScheme.onSurfaceVariant
+                ("Target " + AppDates.DayMonth.format(it)) to palette.muted
             },
         )
         if (facts.isNotEmpty()) {
@@ -393,7 +363,7 @@ private fun OccurrenceSource(
                         Text(
                             "·",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = palette.muted,
                         )
                     }
                 }
@@ -409,14 +379,16 @@ private fun OccurrenceSource(
         }
         // The ids are for checking the app against a report, not for reading a call - below a rule
         // now so they read as a footnote rather than running straight on from the notes above them.
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Spacer(Modifier.height(Space.s))
+        Hairline()
+        Spacer(Modifier.height(Space.s))
         Text(
             listOfNotNull(
                 point.sourceImageRef?.let { "image $it" },
                 point.sourceMessageId?.let { "message $it" },
             ).joinToString(" · ").ifBlank { "source not recorded" },
             style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = palette.muted,
         )
     }
 }

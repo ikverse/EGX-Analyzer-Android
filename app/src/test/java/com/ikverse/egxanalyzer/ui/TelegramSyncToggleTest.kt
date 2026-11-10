@@ -52,8 +52,8 @@ class TelegramSyncToggleTest {
             EgxAnalyzerTheme(themeMode = ThemeMode.LIGHT) { SettingsScreen(state) }
         }
 
-        compose.onNodeWithText("Data and backup").performScrollTo().performClick()
-        compose.onNodeWithText("Sync off").performScrollTo().performClick()
+        // Since 5.0 the part is its own page, opened from its tile on the hub.
+        compose.onNodeWithText("Data & backup").performScrollTo().performClick()
 
         compose.onNodeWithText("Sync with Telegram").performScrollTo().assertIsOff()
         compose.onNodeWithText("Sync now").performScrollTo().assertIsNotEnabled()

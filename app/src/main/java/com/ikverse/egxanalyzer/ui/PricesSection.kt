@@ -3,7 +3,6 @@ package com.ikverse.egxanalyzer.ui
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -12,6 +11,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.ikverse.egxanalyzer.ui.kit.ButtonKind
+import com.ikverse.egxanalyzer.ui.kit.ButtonSize
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.theme.palette
 import com.ikverse.egxanalyzer.model.MarketRefresh
 import com.ikverse.egxanalyzer.model.PriceSeriesSummary
 import com.ikverse.egxanalyzer.model.ScheduleClock
@@ -93,9 +96,9 @@ internal fun PricesSubSection(appState: AppState) {
             status.text,
             style = MaterialTheme.typography.bodySmall,
             color = if (status.warning) {
-                MaterialTheme.colorScheme.error
+                palette.loss
             } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
+                palette.muted
             },
         )
         // Only once it is switched on: two system pages offered beside a checkbox nobody has
@@ -114,9 +117,9 @@ internal fun PricesSubSection(appState: AppState) {
                     },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (held > 0) {
-                    MaterialTheme.colorScheme.error
+                    palette.loss
                 } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
+                    palette.muted
                 },
             )
         }
@@ -142,12 +145,13 @@ internal fun PricesSubSection(appState: AppState) {
                     "fetching again cannot bring the old one back.",
             ),
         ) {
-            SettingsButton(
+            KitButton(
+                if (appState.pricesRefreshing) "Fetching…" else "Fetch prices now",
                 onClick = { appState.startAction { appState.refreshCatalogPrices() } },
+                kind = ButtonKind.SECONDARY,
+                size = ButtonSize.SMALL,
                 enabled = !appState.pricesRefreshing,
-            ) {
-                Text(if (appState.pricesRefreshing) "Fetching…" else "Fetch prices now")
-            }
+            )
             Spacer(Modifier.weight(1f))
         }
         PriceSeriesControls(appState)
@@ -215,9 +219,9 @@ private fun PriceSeriesControls(appState: AppState) {
         status.text,
         style = MaterialTheme.typography.bodySmall,
         color = if (status.warning) {
-            MaterialTheme.colorScheme.error
+            palette.loss
         } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
+            palette.muted
         },
     )
     // Only where there is something to save. A button offering to export an empty archive is one
@@ -233,7 +237,10 @@ private fun PriceSeriesControls(appState: AppState) {
                     "to use it. It can be a large file: a year of bars is over a million rows.",
             ),
         ) {
-            SettingsButton(
+            KitButton(
+                if (exporting) "Saving…" else "Save price series",
+                kind = ButtonKind.SECONDARY,
+                size = ButtonSize.SMALL,
                 enabled = !exporting,
                 onClick = {
                     scope.launch {
@@ -253,9 +260,7 @@ private fun PriceSeriesControls(appState: AppState) {
                         exporting = false
                     }
                 },
-            ) {
-                Text(if (exporting) "Saving…" else "Save price series")
-            }
+            )
             Spacer(Modifier.weight(1f))
         }
     }
@@ -373,12 +378,12 @@ private fun SystemPermissionRow(
         if (granted) grantedText else missing,
         style = MaterialTheme.typography.bodySmall,
         color = if (granted) {
-            MaterialTheme.colorScheme.onSurfaceVariant
+            palette.muted
         } else {
-            MaterialTheme.colorScheme.error
+            palette.loss
         },
     )
-    if (!granted) TextButton(onClick = onAct) { Text(action) }
+    if (!granted) KitButton(action, onClick = onAct, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
 }
 
 /**

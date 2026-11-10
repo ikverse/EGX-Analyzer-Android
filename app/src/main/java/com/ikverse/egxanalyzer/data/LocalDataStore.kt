@@ -1006,6 +1006,38 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
     }
 
     /**
+     * The newest two priced sessions of every stock, for the Portfolio page's market breadth: how
+     * many listings rose, held and fell against their previous close.
+     *
+     * One query for all of them, with a window function to keep two rows per ticker (SQLite 3.25,
+     * which every Android this app runs on carries). Read-only; nothing about the table changes.
+     */
+    fun lastTwoCloses(): Map<String, List<DailySession>> = readableDatabase
+        .rawQuery(
+            "SELECT ticker, session_date, close FROM (" +
+                "SELECT ticker, session_date, close, ROW_NUMBER() OVER " +
+                "(PARTITION BY ticker ORDER BY session_date DESC) AS rn " +
+                "FROM daily_prices WHERE close IS NOT NULL) WHERE rn <= 2",
+            null,
+        )
+        .use { cursor ->
+            val out = mutableMapOf<String, MutableList<DailySession>>()
+            while (cursor.moveToNext()) {
+                val date = runCatching { LocalDate.parse(cursor.getString(1)) }.getOrNull() ?: continue
+                val ticker = cursor.getString(0)
+                out.getOrPut(ticker) { mutableListOf() } += DailySession(
+                    ticker = ticker,
+                    date = date,
+                    high = null,
+                    low = null,
+                    close = cursor.nullableDouble(2),
+                    volume = null,
+                )
+            }
+            out
+        }
+
+    /**
      * The newest session for every stock at once, for the screen that shows where each stands now.
      *
      * One query rather than [latestSession] per ticker, which a recompute would otherwise run

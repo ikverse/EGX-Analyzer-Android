@@ -23,7 +23,7 @@ import java.time.LocalDate
  * In `src/debug`, so none of it reaches a release build.
  */
 class FakeAppState(
-    override val destination: AppDestination = AppDestination.ANALYZE,
+    override val destination: AppDestination = AppDestination.PORTFOLIO,
     override val pages: PageState = PageState(),
     override val cloudConfiguration: CloudConfiguration = CloudConfiguration(),
     override val appPreferences: AppPreferences = AppPreferences(),
@@ -71,6 +71,14 @@ class FakeAppState(
     override val performance: PerformanceReport = PerformanceReport(),
     override val priceHealth: PriceHealthReport = PriceHealthReport(),
     override val pricesRefreshing: Boolean = false,
+    override val tapeQuotes: List<com.ikverse.egxanalyzer.ui.kit.TapeQuote> = listOf(
+        com.ikverse.egxanalyzer.ui.kit.TapeQuote("COMI", "82.40", 2.1),
+        com.ikverse.egxanalyzer.ui.kit.TapeQuote("FWRY", "9.87", 4.3),
+        com.ikverse.egxanalyzer.ui.kit.TapeQuote("ABUK", "66.10", -1.9),
+    ),
+    override val returnByDay: List<com.ikverse.egxanalyzer.model.ReturnPoint> = emptyList(),
+    override val marketBreadth: com.ikverse.egxanalyzer.model.MarketBreadth? = null,
+    override val indexByDay: List<com.ikverse.egxanalyzer.model.IndexPoint> = emptyList(),
     override val portfolio: Portfolio = Portfolio(),
     override val sessionDigest: SessionDigest? = null,
     override val opinions: Map<String, StockOpinion> = emptyMap(),

@@ -1,6 +1,19 @@
 package com.ikverse.egxanalyzer.ui
 
 import com.ikverse.egxanalyzer.model.timing
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.outlined.MoreVert
+import com.ikverse.egxanalyzer.ui.kit.ButtonKind
+import com.ikverse.egxanalyzer.ui.kit.ButtonSize
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.kit.KitChip
+import com.ikverse.egxanalyzer.ui.kit.KitIconButton
+import com.ikverse.egxanalyzer.ui.kit.KitMenu
+import com.ikverse.egxanalyzer.ui.kit.MenuItem
+import com.ikverse.egxanalyzer.ui.kit.Panel
+import com.ikverse.egxanalyzer.ui.theme.palette
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -23,9 +36,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -76,10 +86,7 @@ internal fun RecommendationCards(
 ) {
     val points = stock.dataPoints
     if (points.isEmpty()) {
-        Card(
-            modifier = modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        ) {
+        Box(modifier.fillMaxWidth().callBlock(null)) {
             Column(Modifier.padding(Space.l)) {
                 StockHeader(
                     stock,
@@ -148,26 +155,19 @@ private fun RecommendationCard(
     var quickEditOpen by remember(point) { mutableStateOf(false) }
     val held = trades?.heldFor(stock, point)
 
-    Card(
-        modifier = modifier.fillMaxWidth().combinedClickable(
-            onClick = { expanded = !expanded },
-            // Absent rather than always-on where there is no editor to open: a read-only card
-            // holding on it would show a shortcut to a screen it cannot reach, same guard CallMenu
-            // already puts around its own Edit call item.
-            onLongClick = editor?.let { { quickEditOpen = true } },
-        ),
-        // A step up in container rather than a shadow. These sit inside the report's own card, which
-        // is why they were elevated; the step is what separates them now that nothing on the page
-        // casts a shadow.
-        // A **second-level** surface: it sits inside the report's card, so what shows through it is
-        // that card rather than the page, and it takes the container role's own alpha and nothing
-        // else. See GlassSection.
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        // A stock the user is actually in is outlined in the colour of where it stands, so a page
-        // of calls can be read for what is held before any card is opened. Everything else carries
-        // the hairline every other card on the page is drawn with.
-        // Tonal with no edge since the 2026-11 redesign, unless it is held.
-        border = heldBorder(held),
+    // A block of the page's own ground inside the report's white tile, rounded like every tile, and
+    // ringed in the colour of where it stands when the reader is in the stock - so a page of calls
+    // can be read for what is held before any card is opened.
+    Box(
+        modifier
+            .fillMaxWidth()
+            .callBlock(heldBorder(held))
+            .combinedClickable(
+                onClick = { expanded = !expanded },
+                // Absent rather than always-on where there is no editor to open: a read-only card
+                // holding on it would show a shortcut to a screen it cannot reach.
+                onLongClick = editor?.let { { quickEditOpen = true } },
+            ),
     ) {
         Column(Modifier.padding(Space.m)) {
             StockHeader(
@@ -178,7 +178,7 @@ private fun RecommendationCard(
             Spacer(Modifier.height(Space.m))
 
             // What the channel printed, set off from what it printed it about.
-            HorizontalDivider()
+            Hairline()
             Spacer(Modifier.height(Space.m))
 
             // Full width rather than sharing the header's own left column: it answers a
@@ -202,12 +202,7 @@ private fun RecommendationCard(
             // figures earn the same grouping those panels give a call's figures there. Only at this
             // call site: the occurrence sheet's copy of LevelGrid is a single call read in full and
             // was not asked to change.
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    // A ruled group since the 2026-11 redesign, as on Insights.
-                    .flatPanel(),
-            ) {
+            Panel(Modifier.fillMaxWidth(), color = palette.card) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                     LevelGrid(point)
                     // Inside the same panel as the six prices it is measured from, rather than a
@@ -227,7 +222,7 @@ private fun RecommendationCard(
 
             // A line under the figures, because the two things below it are the only parts of this
             // card that answer a press. Everything above is the call as the channel printed it.
-            HorizontalDivider()
+            Hairline()
             Spacer(Modifier.height(Space.m))
 
             // One row, and the two ends of it are the two kinds of press this card offers: what it
@@ -267,7 +262,12 @@ private fun RecommendationCard(
                 }
                 // The same press the whole card already answers, said in a place the reader can
                 // aim at - and the arrow is what makes the card's own press discoverable at all.
-                DisclosureButton("Source", expanded) { expanded = !expanded }
+                KitButton(
+                    if (expanded) "Hide source" else "Source",
+                    onClick = { expanded = !expanded },
+                    kind = ButtonKind.SECONDARY,
+                    size = ButtonSize.SMALL,
+                )
             }
 
             AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {
@@ -275,7 +275,7 @@ private fun RecommendationCard(
                     Modifier.padding(top = Space.m),
                     verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
-                    HorizontalDivider()
+                    Hairline()
                     OccurrenceDetail(point, imagePath) { viewingImage = true }
                 }
             }
@@ -342,14 +342,14 @@ private fun StockHeader(
                 StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(stock.stockCode, style = MaterialTheme.typography.titleSmall)
+                        Text(stock.stockCode, style = MaterialTheme.typography.titleLarge)
                         Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
                     }
                     stock.stockNameArabic?.let {
                         Text(
                             it,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = palette.muted,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -407,12 +407,12 @@ private fun SourceLine(channel: String) {
         Text(
             "Source:",
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = palette.muted,
         )
         Text(
             channel,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = palette.ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -440,43 +440,26 @@ internal fun CallMenu(
     var open by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     Box {
-        MoreButton(onClick = { open = true })
-        AppMenu(expanded = open, onDismissRequest = { open = false }) {
-            AppMenuItem(
-                "Copy call",
-                Icons.Outlined.ContentCopy,
-                onClick = {
-                    open = false
-                    clipboard.setText(
-                        AnnotatedString(CallText.of(stock, point, channel, session)),
-                    )
-                },
-            )
-            // The second thing worth doing to a call the card cannot already do: correcting what
-            // the model read off the screenshot. It lives here rather than only in the occurrence
-            // sheet because the sheet opens from the table, and the table is not drawn at all below
-            // 600dp - which is every phone in portrait, and so most of the time this is used.
-            if (editor != null) {
-                AppMenuItem(
-                    "Edit call",
-                    Icons.Outlined.Edit,
-                    onClick = {
-                        open = false
-                        onEdit()
+        KitIconButton(Icons.Outlined.MoreVert, label = "Call options", onClick = { open = true }, size = 40.dp)
+        KitMenu(
+            expanded = open,
+            onDismiss = { open = false },
+            items = buildList {
+                add(
+                    MenuItem("Copy call") {
+                        clipboard.setText(AnnotatedString(CallText.of(stock, point, channel, session)))
                     },
                 )
-                if (editor.editFor(stock, point) != null) {
-                    AppMenuItem(
-                        "Undo this call's edits",
-                        Icons.Outlined.Undo,
-                        onClick = {
-                            open = false
-                            editor.undo(stock, point)
-                        },
-                    )
+                // The second thing worth doing to a call the card cannot already do: correcting
+                // what the model read off the screenshot.
+                if (editor != null) {
+                    add(MenuItem("Edit call") { onEdit() })
+                    if (editor.editFor(stock, point) != null) {
+                        add(MenuItem("Undo this call's edits") { editor.undo(stock, point) })
+                    }
                 }
-            }
-        }
+            },
+        )
     }
 }
 
@@ -506,12 +489,7 @@ internal fun TimingChip(point: RecommendationDataPoint) {
     // nothing else: a reader who has never seen "Watching" or "T+1" on a card before had no way to
     // ask what either meant.
     var showing by remember(point) { mutableStateOf(false) }
-    OutlinePill(
-        label,
-        outline = MaterialTheme.colorScheme.outline,
-        textColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        onClick = { showing = true },
-    )
+    KitChip(label = label, selected = false, onClick = { showing = true })
     if (showing) {
         // `InfoNote`'s own constructor rather than the checked `infoNote` factory: that helper's
         // callers are checked by InfoNoteTest for static prose, and this label and explanation are
@@ -622,11 +600,12 @@ private fun Level(
             Text(
                 label.uppercase(),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = palette.muted,
             )
             Text(
                 value,
                 style = MaterialTheme.typography.titleMedium.copy(
+                    fontFamily = TabularFigures,
                     fontSize = LevelFigure,
                     lineHeight = LevelFigureLine,
                 ),
@@ -665,7 +644,7 @@ private fun OccurrenceDetail(
                 point.sourceMessageId?.let { "Message $it" },
             ).joinToString(" · ").ifBlank { "Source not recorded" },
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = palette.muted,
         )
         // The card the numbers were read off, where a pressed table row would have shown it. The
         // thumbnail says `#4` when the photo has gone from Telegram's cache rather than a blank.
@@ -679,7 +658,7 @@ private fun OccurrenceDetail(
             Text("“$it”", style = MaterialTheme.typography.bodySmall)
         }
         point.timingEvidence?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+            Text(it, style = MaterialTheme.typography.bodySmall, color = palette.hero)
         }
     }
 }
@@ -727,4 +706,21 @@ private fun impliedReturn(point: RecommendationDataPoint, target: Double?): Doub
         else -> low ?: high ?: return null
     }
     return if (entry == 0.0) null else (target - entry) / entry * 100
+}
+
+/**
+ * A call's block inside the report tile: the page's own ground, the tile's corners, and the held
+ * ring where there is one.
+ */
+@Composable
+private fun Modifier.callBlock(edge: androidx.compose.foundation.BorderStroke?): Modifier =
+    this
+        .clip(Kit.TileShape)
+        .background(palette.ground)
+        .then(if (edge != null) Modifier.border(edge, Kit.TileShape) else Modifier)
+
+/** The one rule a call card draws between what was printed and what can be pressed. */
+@Composable
+internal fun Hairline() {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(palette.line))
 }

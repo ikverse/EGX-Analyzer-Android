@@ -1,5 +1,18 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.outlined.MoreVert
+import com.ikverse.egxanalyzer.ui.theme.palette
+import com.ikverse.egxanalyzer.ui.kit.MenuItem
+import com.ikverse.egxanalyzer.ui.kit.KitMenu
+import com.ikverse.egxanalyzer.ui.kit.KitIconButton
+import com.ikverse.egxanalyzer.ui.kit.Kit
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
@@ -116,11 +129,6 @@ internal fun PositionCard(
         }
     }
 
-    // A **second-level** surface: it sits inside the session card, so it takes the container role's
-    // own alpha - see GlassSection - and none of the lighting a card standing on the page gets.
-    val colors = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-    )
     // The arrival flash takes the edge for as long as it runs, then the status outline has it back.
     val border = arrivalFlash(highlighted, onHighlightShown, view.status.tone()) ?: heldBorder(view)
     val body: @Composable ColumnScope.() -> Unit = {
@@ -180,7 +188,7 @@ internal fun PositionCard(
                             StockLogo(position.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(position.ticker, style = MaterialTheme.typography.titleSmall)
+                                    Text(position.ticker, style = MaterialTheme.typography.headlineSmall)
                                     Egx33Badge(position.ticker, Modifier.padding(start = Space.s))
                                 }
                                 // Arabic only - the English name read as a second, redundant label
@@ -255,59 +263,30 @@ internal fun PositionCard(
                             )
                         }
                         Box {
-                            MoreButton(onClick = { menuOpen = true })
-                            AppMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            AppMenuItem(
-                                "Edit trade",
-                                Icons.Outlined.Edit,
-                                onClick = {
-                                    menuOpen = false
-                                    // A sold trade has no entry or window left to correct - what it
-                                    // has is the sale, so this opens the same dialog Sold does,
-                                    // seeded with what was actually typed rather than the call's own
-                                    // targets.
-                                    if (view.realized) editingSale = true else editing = true
-                                },
+                            KitIconButton(Icons.Outlined.MoreVert, label = "Trade options", onClick = { menuOpen = true }, filled = true, size = 40.dp)
+                            // The same four entries the card has always offered, in the kit's ink
+                            // menu. Edit on a sold trade corrects the sale rather than the entry,
+                            // since a sold trade has no entry or window left to change; Follow the
+                            // deadline again undoes Keep open; Reopen undoes a mistaken Sold for as
+                            // long as the sale stands; Remove is the one red entry, and the status
+                            // line offers Undo after it.
+                            KitMenu(
+                                expanded = menuOpen,
+                                onDismiss = { menuOpen = false },
+                                items = listOfNotNull(
+                                    MenuItem("Edit trade") { if (view.realized) editingSale = true else editing = true },
+                                    if (view.keptOpen) MenuItem("Follow the deadline again") { onKeepOpen(false, null) } else null,
+                                    if (view.realized) MenuItem("Reopen trade") { onReopen() } else null,
+                                    MenuItem("Remove", danger = true) { leaving = true },
+                                ),
                             )
-                            // Undoing Keep Open lives here rather than beside Sold. The pill already
-                            // says the trade is being kept open, and a button repeating it took the
-                            // place where the user looks for the one action that ends a position. It
-                            // has to stay reachable somewhere, though: without it a mistaken press
-                            // could only be undone by deleting the trade and recording it again.
-                            if (view.keptOpen) {
-                                AppMenuItem(
-                                    "Follow the deadline again",
-                                    Icons.Outlined.HourglassEmpty,
-                                    onClick = { menuOpen = false; onKeepOpen(false, null) },
-                                )
-                            }
-                            // The other side of a mistaken Sold: until now the only way back from a
-                            // sale was the brief Undo on the status line, which is gone the moment
-                            // anything else happens. This is the lasting one, reachable for as long
-                            // as the trade shows a sale to undo.
-                            if (view.realized) {
-                                AppMenuItem(
-                                    "Reopen trade",
-                                    Icons.Outlined.Undo,
-                                    onClick = { menuOpen = false; onReopen() },
-                                )
-                            }
-                            // Drawn apart from the rest in red because it is the one press on this card that removes
-                            // something - though it can be undone from the status line now, for a while.
-                            AppMenuItem(
-                                "Remove",
-                                Icons.Outlined.Delete,
-                                onClick = { menuOpen = false; leaving = true },
-                                destructive = true,
-                            )
-                        }
                         }
                     }
                 }
 
                 // Separates identity and status, read together above it, from the trade's own facts
                 // below - the same rule the two figure groups further down are already ruled apart by.
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                com.ikverse.egxanalyzer.ui.kit.KitRule(color = palette.line)
 
                 // The neutral tile "Your trade" is tinted with, wrapped around whichever of the
                 // ladder or the chart is showing: neither is a verdict the app is drawing
@@ -316,7 +295,7 @@ internal fun PositionCard(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .flatPanel(),
+                            .tradePanel(),
                     ) {
                         content()
                     }
@@ -458,7 +437,7 @@ internal fun PositionCard(
                 val yourTradePanel: @Composable (Modifier) -> Unit = { panelModifier ->
                     Box(
                         panelModifier
-                            .flatPanel(),
+                            .tradePanel(),
                     ) {
                         FigureGroup(
                             "Your trade",
@@ -529,7 +508,7 @@ internal fun PositionCard(
                 val whereItStandsPanel: @Composable (Modifier) -> Unit = { panelModifier ->
                     Box(
                         panelModifier
-                            .flatPanel(),
+                            .tradePanel(),
                     ) {
                         FigureGroup(
                             "Where it stands",
@@ -621,13 +600,15 @@ internal fun PositionCard(
                     side = { whereItStandsPanel(Modifier.fillMaxWidth().fillMaxHeight()) },
                 )
 
+                // The window as steps, under the figures, while the trade still runs against it.
+                if (view.open) DeadlineSteps(view)
                 Text(
                     view.profitLine(),
                     style = MaterialTheme.typography.bodySmall,
                     // The figure this line used to carry is a figure above it now, and the colour went
                     // with it. What is left says whether the return is a fact or an estimate and where
                     // it was struck, and that is not in itself good news or bad.
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.muted,
                 )
                 // Selling early is the point of the button, so it stays available for as long as no
                 // sale has been recorded - including on a trade that reached target 2, where recording
@@ -640,7 +621,7 @@ internal fun PositionCard(
                     // belongs with the figures it qualifies - and that left the pills ending the card
                     // with nothing between them and the record. Inside the `if`, so a settled trade with
                     // nothing to press does not finish on a rule under no buttons.
-                    HorizontalDivider()
+                    com.ikverse.egxanalyzer.ui.kit.KitRule(color = palette.line)
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(Space.s),
                         verticalArrangement = Arrangement.spacedBy(Space.xs),
@@ -669,29 +650,28 @@ internal fun PositionCard(
     // Two overloads over one body rather than a clickable wrapped round the card: Material's own
     // pressable card is what keeps the ripple inside the corners, and a trade whose call is gone
     // must not answer a press at all. The menu, Sold and Keep Open take their own taps as before.
+    // **A white card tile since 5.0**, with the trade's status as a coloured edge down its left side
+    // - the one edge a card keeps, because it means something. The arrival flash takes the outline
+    // while it runs. Pressable through to the call when the call still exists; a trade whose analysis
+    // is gone answers no press at all.
+    val edge = view.status.tone()
     AnimatedVisibility(visible = !leaving, exit = CollapseOut) {
-        if (onOpenCall == null) {
-            Card(
-                modifier.fillMaxWidth(),
-                colors = colors,
-                border = border,
-                shape = MaterialTheme.shapes.medium,
-                content = body,
-            )
-        } else {
-            Card(
-                onClick = onOpenCall,
-                // A pressable card announces itself as "activate" and nothing more, which says
-                // nothing about where the press goes. The action itself is Material's; only its
-                // name is ours.
-                modifier = modifier.fillMaxWidth()
-                    .semantics { onClick(label = "Open this call in Insights", action = null) },
-                colors = colors,
-                border = border,
-                shape = MaterialTheme.shapes.medium,
-                content = body,
-            )
-        }
+        Column(
+            modifier
+                .fillMaxWidth()
+                .clip(Kit.TileShape)
+                .background(palette.card)
+                .then(if (border != null) Modifier.border(border, Kit.TileShape) else Modifier)
+                .drawBehind { drawRect(edge, size = Size(StatusEdge.toPx(), size.height)) }
+                .then(
+                    if (onOpenCall != null) {
+                        Modifier.clickable(onClickLabel = "Open this call in Insights", role = Role.Button, onClick = onOpenCall)
+                    } else {
+                        Modifier
+                    },
+                ),
+            content = body,
+        )
     }
 
     if (editing) {
@@ -1008,3 +988,44 @@ private val PositionHeaderHeight = 60.dp
  * gives that cluster a full row before crowding the way the sheet's own 150dp used to.
  */
 private val PositionChartHeight = 180.dp
+
+/**
+ * A group on the 5.0 trade card: a rounded block of the page's own ground inside the white card,
+ * as on the canvas, rather than the hairline the 4.x card ruled its groups apart with.
+ */
+@Composable
+private fun Modifier.tradePanel(): Modifier =
+    clip(Kit.PanelShape).background(palette.ground).padding(horizontal = Space.m, vertical = Space.s)
+
+/**
+ * The deadline as steps: one per session of the window, filled for those already traded. Says
+ * the same thing as "N of M left" beside it, at a glance.
+ */
+@Composable
+private fun DeadlineSteps(view: PositionView, modifier: Modifier = Modifier) {
+    val total = view.position.windowSessions.coerceIn(1, MaxDeadlineSteps)
+    val done = view.sessionsElapsed.coerceIn(0, total)
+    val p = palette
+    Row(
+        modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = "$done of $total sessions of the window traded" },
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        repeat(total) { i ->
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(8.dp)
+                    .clip(Kit.Capsule)
+                    .background(if (i < done) p.ink else p.line),
+            )
+        }
+    }
+}
+
+/** Past this many sessions the steps would be slivers; the figure beside them still says it. */
+private const val MaxDeadlineSteps = 20
+
+/** The status edge down the left of a trade card. */
+private val StatusEdge = 5.dp

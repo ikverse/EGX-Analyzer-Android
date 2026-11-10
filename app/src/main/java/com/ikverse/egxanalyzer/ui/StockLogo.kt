@@ -1,5 +1,7 @@
 package com.ikverse.egxanalyzer.ui
 
+import com.ikverse.egxanalyzer.ui.theme.palette
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -80,7 +82,7 @@ internal fun StockLogo(
             // Many of these marks are drawn on white. Against the light theme's near-white surface
             // that leaves them floating with no edge, so the same hairline the cards use gives them
             // one. On a logo that fills its square in colour it is invisible.
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+            .border(1.dp, palette.line, CircleShape),
     )
 }
 
@@ -141,7 +143,7 @@ internal fun ChannelAvatar(
             .clip(CircleShape)
             // The same hairline [StockLogo] gives a mark drawn on white, and for the same reason: a
             // profile photo with a pale background has no edge against the light theme's surface.
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+            .border(1.dp, palette.line, CircleShape),
     )
 }
 
@@ -174,12 +176,15 @@ private fun Monogram(
     size: Dp,
     modifier: Modifier = Modifier,
 ) {
+    // One of the palette's tile colours since 5.0, picked from the name so a stock or a source
+    // keeps its colour everywhere it is drawn, with the tile ink on it.
+    val p = palette
+    val tones = listOf(p.highlight, p.tile1, p.tile2, p.tile3, p.alert)
     Box(
         modifier
             .size(size)
             .clip(CircleShape)
-            .background(monogramColor(seed))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+            .background(tones[((seed.hashCode() % tones.size) + tones.size) % tones.size]),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -188,21 +193,10 @@ private fun Monogram(
             // size it is drawn at without a table of font sizes to keep in step with them.
             fontSize = (size.value * 0.34f).sp,
             lineHeight = (size.value * 0.34f).sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
+            fontWeight = FontWeight.ExtraBold,
+            color = p.onTile,
             maxLines = 1,
         )
     }
 }
 
-/**
- * A stable colour for a name.
- *
- * [String.hashCode] rather than a random or a rotating index: the same subject has to land on the
- * same colour in the table, on its card and in the sheet, and those are separate compositions with
- * no shared counter between them.
- */
-private fun monogramColor(seed: String): Color {
-    val hue = ((seed.hashCode() % 360) + 360) % 360
-    return Color.hsl(hue.toFloat(), saturation = 0.45f, lightness = 0.34f)
-}

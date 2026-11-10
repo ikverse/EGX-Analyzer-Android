@@ -1,36 +1,21 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.SmartToy
-import androidx.compose.material.icons.outlined.UnfoldMore
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -40,53 +25,74 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.ikverse.egxanalyzer.model.ModelUsageRecord
 import com.ikverse.egxanalyzer.model.CloudConfiguration
 import com.ikverse.egxanalyzer.model.CloudModelInfo
 import com.ikverse.egxanalyzer.model.ModelSuitability
 import com.ikverse.egxanalyzer.model.ModelSuitabilityRules
+import com.ikverse.egxanalyzer.model.ModelUsageRecord
 import com.ikverse.egxanalyzer.model.formatTokenCount
+import com.ikverse.egxanalyzer.ui.kit.ButtonKind
+import com.ikverse.egxanalyzer.ui.kit.ButtonSize
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.KitSpinner
+import com.ikverse.egxanalyzer.ui.kit.KitTextField
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.SegmentedControl
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.ui.kit.TileTone
+import com.ikverse.egxanalyzer.ui.theme.palette
 
 /**
- * Which model a run will be sent to.
+ * The model a run is read by, on Settings' Analysis page: a lilac tile naming it, pressed to choose
+ * another.
  *
  * One control: the name, and a tap to change it. Managing the list - loading it, searching it,
  * naming a model the provider never offered - belongs to the sheet that tap opens, because that is
- * where the list is. The card it replaces put all of that on the page and still had to be expanded
- * before it would say which model was in force.
+ * where the list is. Typing was the primary control once, and a model name mistyped by one character
+ * is only ever discovered by a paid run failing.
  */
 @Composable
-internal fun ColumnScope.AnalysisModelCard(
-    appState: AppState,
-    /** Why a run cannot start, so this card can answer for the parts of it that are its own. */
-    blocker: AnalyzeBlocker?,
-    /** Whether Analyze has been pressed: until it has, a blocker is guidance rather than an error. */
-    attempted: Boolean,
-) {
+internal fun AnalysisModelCard(appState: AppState) {
     var picking by remember { mutableStateOf(false) }
-    SectionCard(title = "Analysis model", icon = Icons.Outlined.SmartToy) {
-        ModelTile(appState.cloudConfiguration) { picking = true }
-        // Drawn here rather than under the sources, where it used to sit: the card that is wrong is
-        // the card that should say so.
-        blocker?.takeIf { it.belongsToModelCard }?.let {
-            Text(
-                it.reason,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (attempted) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-        }
+    val configuration = appState.cloudConfiguration
+    val chosen = configuration.model.isNotBlank()
+    Tile(
+        Modifier.fillMaxWidth(),
+        tone = TileTone.TILE2,
+        onClick = { picking = true },
+        onClickLabel = "Choose the analysis model",
+    ) {
+        Text("Analysis model", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text(
+            if (chosen) configuration.model else "No model chosen",
+            style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
+            fontWeight = FontWeight.Bold,
+            // Ids run long - `meta-llama/Llama-3.3-70B-Instruct` - so two lines rather than one
+            // truncated to uselessness.
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Text(
+            configuration.connectionLabel() + " · tap to change",
+            style = MaterialTheme.typography.bodySmall,
+            color = LocalContentColor.current.copy(alpha = 0.78f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
     if (picking) {
         ModelPickerSheet(
             appState = appState,
             title = "Analysis model",
-            selected = appState.cloudConfiguration.model,
+            selected = configuration.model,
             requireVision = true,
             onChoose = {
                 appState.updateModel(it)
@@ -96,60 +102,6 @@ internal fun ColumnScope.AnalysisModelCard(
             },
             onDismiss = { picking = false },
         )
-    }
-}
-
-/**
- * The chosen model, as a tile rather than a text field.
- *
- * Typing was the primary control here, and a model name mistyped by one character is only ever
- * discovered by a paid run failing.
- */
-@Composable
-private fun ModelTile(configuration: CloudConfiguration, onClick: () -> Unit) {
-    val chosen = configuration.model.isNotBlank()
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium)
-            .clickable(onClick = onClick),
-    ) {
-        Row(
-            Modifier.padding(horizontal = Space.m, vertical = Space.s),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                Text(
-                    if (chosen) configuration.model else "No model chosen",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (chosen) {
-                        MaterialTheme.colorScheme.onSurface
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    // Ids run long - `meta-llama/Llama-3.3-70B-Instruct` - and this sits in the
-                    // narrow pane, so two lines rather than one truncated to uselessness.
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    configuration.connectionLabel(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.width(Space.s))
-            Icon(
-                Icons.Outlined.UnfoldMore,
-                contentDescription = "Choose the analysis model",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(IconSize.Inline),
-            )
-        }
     }
 }
 
@@ -177,7 +129,6 @@ private fun CloudConfiguration.connectionLabel(): String =
  * tells the two jobs apart, so [selected] and [onChoose] are handed in rather than read off
  * `appState.cloudConfiguration` directly, which is only ever true of the first.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ModelPickerSheet(
     appState: AppState,
@@ -195,18 +146,13 @@ internal fun ModelPickerSheet(
         appState.refreshModelUsage()
         // Sparing a tap that would only ever do one thing: a key is saved, so the list this sheet
         // opened to show is worth fetching before the reader has to ask for it by hand.
-        if (appState.availableModels.isEmpty() &&
-            !appState.modelListLoading &&
-            appState.cloudConfiguration.hasCredential
-        ) {
+        if (appState.availableModels.isEmpty() && !appState.modelListLoading && appState.cloudConfiguration.hasCredential) {
             appState.loadCloudModels()
         }
     }
     val catalogue = appState.availableModels
     val stated = remember(catalogue) {
-        catalogue.count {
-            ModelSuitabilityRules.capabilitiesOf(it).suitability == ModelSuitability.SUITABLE
-        }
+        catalogue.count { ModelSuitabilityRules.capabilitiesOf(it).suitability == ModelSuitability.SUITABLE }
     }
     val offered = remember(catalogue, showAll, selected, requireVision) {
         offeredModels(catalogue, showAll, selected, requireVision)
@@ -224,84 +170,48 @@ internal fun ModelPickerSheet(
         onChoose(model)
         onDismiss()
     }
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = SheetShape,
-        containerColor = MaterialTheme.colorScheme.background,
-        dragHandle = { SheetHandle() },
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Space.l)
-                .padding(bottom = Space.xl),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            Text(title, style = MaterialTheme.typography.headlineSmall)
+    KitSheet(onDismiss = onDismiss, posture = LocalFoldPosture.current, title = title) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // One field doing both jobs. A second box for naming a model the provider never listed
             // only ever raised the question of which of the two to type into.
-            OutlinedTextField(
-                shape = FieldShape,
+            KitTextField(
                 value = query,
                 onValueChange = { query = it },
+                label = "Filter, or type a model id",
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Filter, or type a model id") },
-                singleLine = true,
-                leadingIcon = {
-                    Icon(
-                        Icons.Outlined.Search,
-                        contentDescription = null,
-                        modifier = Modifier.size(IconSize.Inline),
-                    )
-                },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) {
-                            Icon(
-                                Icons.Outlined.Close,
-                                contentDescription = "Clear the filter",
-                                modifier = Modifier.size(IconSize.Inline),
-                            )
-                        }
-                    }
-                },
             )
             if (catalogue.isNotEmpty()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         // Says what is being held back and why, so a short list never looks like a
-                        // catalogue that came back short. Two numbers rather than one, and only for
-                        // the picker that cares about vision: what is on offer is wider than what
-                        // is known to see, because a name this build has never heard of is still
-                        // shown.
+                        // catalogue that came back short.
                         if (requireVision) {
                             "${offered.size} of ${catalogue.size} offered · $stated state image input"
                         } else {
                             "${offered.size} of ${catalogue.size} offered"
                         },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = TabularFigures),
+                        color = palette.muted,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    )
+                    SegmentedControl(
+                        options = listOf(false, true),
+                        selected = showAll,
+                        onSelect = { showAll = it },
+                        label = { if (it) "Show all" else "Offered" },
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = { showAll = !showAll }) {
-                        Text(if (showAll) "Show offered" else "Show all")
-                    }
                 }
             }
             when {
                 matches.isNotEmpty() || (typed.isNotEmpty() && !exactMatch) -> LazyColumn(
                     // Lazy because this is the one list in the app that runs to hundreds of rows.
                     Modifier.heightIn(max = ModelListMaxHeight),
-                    verticalArrangement = Arrangement.spacedBy(Space.xs),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     if (typed.isNotEmpty() && !exactMatch) {
                         item(key = "use-typed") {
-                            ModelRow(
-                                label = "Use “$typed”",
-                                detail = null,
-                                selected = false,
-                            ) { choose(typed) }
+                            ModelRow(label = "Use “$typed”", detail = null, selected = false) { choose(typed) }
                         }
                     }
                     items(matches, key = { it.id }) { model ->
@@ -314,52 +224,38 @@ internal fun ModelPickerSheet(
                 }
                 catalogue.isNotEmpty() -> Text(
                     if (requireVision) {
-                        "None of the ${catalogue.size} models loaded can read images. " +
-                            "Show all, or type a model id above."
+                        "None of the ${catalogue.size} models loaded can read images. Show all, or type a model id above."
                     } else {
-                        "None of the ${catalogue.size} models loaded are chat models. " +
-                            "Show all, or type a model id above."
+                        "None of the ${catalogue.size} models loaded are chat models. Show all, or type a model id above."
                     },
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.muted,
                 )
                 else -> Text(
                     "No models loaded. Load the list, or type a model id above.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.muted,
                 )
             }
-            SettingsButton(
-                onClick = { appState.startAction { appState.loadCloudModels() } },
-                enabled = !appState.modelListLoading,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (appState.modelListLoading) {
-                    CircularProgressIndicator(Modifier.size(IconSize.Inline), strokeWidth = 2.dp)
-                } else {
-                    Icon(
-                        Icons.Outlined.CloudDownload,
-                        contentDescription = null,
-                        modifier = Modifier.size(IconSize.Inline),
-                    )
-                }
-                Spacer(Modifier.width(Space.s))
-                Text(
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                KitButton(
                     when {
                         appState.modelListLoading -> "Loading…"
                         appState.availableModels.isEmpty() -> "Load models"
                         else -> "Reload models"
                     },
+                    onClick = { appState.startAction { appState.loadCloudModels() } },
+                    kind = ButtonKind.SECONDARY,
+                    size = ButtonSize.SMALL,
+                    enabled = !appState.modelListLoading,
+                    icon = if (appState.modelListLoading) null else Icons.Outlined.CloudDownload,
                 )
+                if (appState.modelListLoading) KitSpinner(Modifier.padding(start = 10.dp), color = palette.ink)
             }
             // Sits with the button it is about, and only after it has been pressed: a load that
             // failed has to say why, and "enter the API key first" is the usual reason.
             appState.modelListMessage?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted)
             }
         }
     }
@@ -402,49 +298,47 @@ private fun modelDetail(model: CloudModelInfo, usage: ModelUsageRecord?): String
     usage?.let { "${formatTokenCount(it.usage.totalTokens)} tokens · ${it.requests} requests" },
 ).joinToString(" · ").takeIf(String::isNotBlank)
 
+/** One model in the picker: its id in mono, what it reads and has cost, lime when it is in use. */
 @Composable
 private fun ModelRow(label: String, detail: String?, selected: Boolean, onClick: () -> Unit) {
-    Surface(
-        color = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        },
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier
+    val p = palette
+    Row(
+        Modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium)
-            .clickable(onClick = onClick),
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (selected) p.highlight else p.ground)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { this.selected = selected }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.padding(horizontal = Space.m, vertical = Space.s),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                Text(label, style = MaterialTheme.typography.bodyMedium)
-                detail?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            if (selected) {
-                Spacer(Modifier.width(Space.s))
-                Icon(
-                    Icons.Outlined.Check,
-                    contentDescription = "In use",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(IconSize.Inline),
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
+                fontWeight = FontWeight.Bold,
+                color = p.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            detail?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (selected) p.ink else p.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+        if (selected) {
+            Text(
+                "In use ✓",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = p.ink,
+                modifier = Modifier.padding(start = 8.dp),
+            )
         }
     }
 }

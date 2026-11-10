@@ -60,7 +60,7 @@ object AppShortcuts {
                     // beside a number is the number said twice.
                     .setShortLabel(label)
                     .setLongLabel(label)
-                    .setIcon(IconCompat.createWithResource(context, R.drawable.ic_egx_notification))
+                    .setIcon(IconCompat.createWithResource(context, R.drawable.ic_shortcut_overdue))
                     .setIntent(intent)
                     .build(),
             )

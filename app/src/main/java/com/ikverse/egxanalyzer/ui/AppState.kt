@@ -59,12 +59,13 @@ enum class AppDestination(
     val shortLabel: String,
     val accent: AccentKey,
 ) {
+    // Portfolio first since 5.0, chosen by the owner on 2026-11-09: the trades actually held are what
+    // the app is opened to check, and the app opens on this tab. The order here is the order of the
+    // header's tab row and of the pager, and nothing stores a tab by position.
+    PORTFOLIO("Portfolio", "PF", AccentKey.INDIGO),
     ANALYZE("Analyze", "AI", AccentKey.CYAN),
     RESULTS("Results", "RS", AccentKey.VIOLET),
     INSIGHTS("Insights", "IN", AccentKey.ROSE),
-    // Between what the sources said and how the app is configured: the portfolio is read after the
-    // record it is judged against, and it is not a setting.
-    PORTFOLIO("Portfolio", "PF", AccentKey.INDIGO),
     SETTINGS("Settings", "ST", AccentKey.BRONZE),
 }
 
@@ -193,6 +194,29 @@ interface AppState : AppUpdates {
     val performance: PerformanceReport
     val priceHealth: PriceHealthReport
     val pricesRefreshing: Boolean
+
+    /**
+     * The header's price strip: each stock with an open trade, its last stored close and the change
+     * from the close before it. Read from prices already on the phone; nothing is fetched for it.
+     * Drawn only while the session is open.
+     */
+    val tapeQuotes: List<com.ikverse.egxanalyzer.ui.kit.TapeQuote>
+
+    /**
+     * The Portfolio chart: the average return of the trades held on each day, oldest first. Built
+     * from the trades and the stored prices after every portfolio pass. See `returnByDay`.
+     */
+    val returnByDay: List<com.ikverse.egxanalyzer.model.ReturnPoint>
+
+    /** How the whole market split in the newest session, or null before two sessions are stored. */
+    val marketBreadth: com.ikverse.egxanalyzer.model.MarketBreadth?
+
+    /**
+     * The EGX30's move over the same days as [returnByDay], for the second line on the Portfolio
+     * chart. Fetched with every price refresh and held in memory only, so it is empty until the
+     * first refresh after a launch.
+     */
+    val indexByDay: List<com.ikverse.egxanalyzer.model.IndexPoint>
     val portfolio: Portfolio
     val sessionDigest: SessionDigest?
     val opinions: Map<String, StockOpinion>

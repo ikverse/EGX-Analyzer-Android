@@ -1,3 +1,9 @@
+> **5.0.0 redrew every surface in the Bento kit** — see **Design language** in `CLAUDE.md`. The
+> behaviour described here (back, the stock sheet, the header, filters, the status line, where an
+> explanation lives) still holds; where a passage names a pre-5.0 element - a 6dp pill,
+> `ActionPill`, `SettingsButton`, `SectionCard` as a bordered card, amber, glass, the rail or the
+> floating bar - it is history, kept for the reasoning.
+
 ## What back does, and the stock sheet
 
 Two things the app could always have done and never did: go back, and put one stock in one place.
@@ -516,52 +522,29 @@ app's.
 
 ### How Settings is grouped
 
-Seven cards, reorganized again on 2026-09-14, on the owner's request to group what belonged together
-and cut down what each card said about itself: **Analysis**, **Ask AI**, **Telegram**,
-**Notifications**, **General**, **Data and backup**, **About**. Ask AI and Data and backup are new;
-Saved data and privacy is gone, folded into Data and backup along with Sync, Prices, Token usage and
-Diagnostics.
+Since 5.0 Settings is a hub of tiles, each opening its part as a page of its own - `SettingsSection`
+in `SettingsScreen.kt`: **Telegram**, **Analysis**, **Ask AI**, **Notifications**, **General**,
+**Data & backup** and **About**. Pressing a tile opens its part with a back button over its title;
+phone back returns to the hub. Unfolded and in book posture the parts are a column of tiles on the
+left with the open one in ink, and in tabletop they stand above the crease with the open part below.
+The open part is `PageState.settingsSection`, so a fold keeps it.
 
-- **Ask AI got its own card**, out of Analysis, where it sat as the last of seven subsections on the
-  reasoning that it shares the provider and the key with a run. Sharing a key is not sharing a
-  purpose — it is reached from a call card on Insights, not from a run — and burying a whole feature
-  as the sixth thing under "Analysis" cost it to anyone who did not already know it was there.
-- **Data and backup answers one question — what this app holds, and how to get it out or rid of
-  it — instead of five settings that happen to touch a database.** Sync and Prices were two of four
-  unrelated `General` subsections; Backup and Delete were their own card; Token usage sat inside
-  Analysis as a spend report with nothing to do with configuring a run; Diagnostics was a bare
-  `DiagnosticsControl` call loose in About. None of the four is a *setting* the way Analysis,
-  Notifications or General hold settings — each is either a copy of the record (Sync, Prices,
-  Backup), a report about it (Token usage), or a way to get a copy out or delete it (Diagnostics,
-  Delete). One card is what makes "where is my data" answerable by opening one thing rather than
-  three.
-- **`General` is left with exactly what nothing else claims**: Appearance and Trade defaults, one
-  control apiece, still not worth a card each.
-- **About is left with only what it is named for**: the version and the update controls. Diagnostics
-  moving out is what makes that true again — a device copy for chasing a bug was never about the
-  build number.
-- **The 2026-09-03 pass is not undone, only continued.** Appearance, Sync, Trades and the price
-  refresh were four cards holding one control each, and `General`'s four `SubSection`s were the fix
-  for that. This pass moves two of those four (Sync, Prices) into the card their content actually
-  belongs with; Appearance and Trade defaults stay exactly where that pass put them.
-- **A group nests once and never twice.** `SubSection` is a heading, a chevron and a rule, precisely
-  because a card drawn inside a card reads as a mistake — so every one of these is a group inside a
-  card and not a card inside one. `PricesSubSection` is drawn by its own file for length, not because
-  it is a different kind of thing.
-- **Every group carries a summary, and the summary is the point of folding it.** A closed group that
-  said nothing would put the reader back to opening all of them to find the switch they came for,
-  which is what the grouping was for.
-- **Sync sits under Data and backup rather than under Telegram**, the same call the owner made on
-  2026-09-03 for General: the account is what Telegram is about, and pressing Sync now is
-  housekeeping. The Telegram card's own note says where sync went, so the two do not become a place
-  each to look.
-- **Every card and every group carries an `about`**, on the rule above: the note goes on the smallest
-  thing it is true of, and a group-wide one is reachable without opening the group.
-- **`Delete all saved analyses` keeps its own group, at the bottom of Data and backup.** The one
-  irreversible button on the page should not sit at the end of a run of buttons that are not, and its
-  note says to take a backup first.
+- **The grouping is the 2026-09-14 one, with one move.** Prices left Data & backup for General in 5.0:
+  refreshing prices and keeping their history are things the phone does on its own, which is what
+  General is about, rather than data to be backed up.
+- **Each part's groups are tiles**, titled, with the group's `about` on its heading and a summary
+  under it. The wording rules are two tiles of their own - lime for what keeps a message, coral for
+  what drops one - under a heading, because a tile drawn round two tiles reads as a mistake.
+- **Whole numbers are steppers, not sliders.** Every slider here set a small whole number - a
+  timeout in half-minutes, retries, a percentage, a session count - and a stepper is exact where a
+  slider needed dragging. The news window and the result count are segmented controls.
+- **The Telegram sign-in is four steps**, counted by `signInStep()`: the application, signing in,
+  proving it is you (a code, a password, an email, registering), and choosing the chats. The one in
+  hand is a cobalt tile; the ones behind are ticked rows and the ones ahead faded. The QR code stays
+  black on white whatever the theme.
+- **`Delete all analyses` is its own coral tile at the foot of Data & backup**, and still asks first.
 
-## A hue per page — retired in 4.5.0
+## A hue per page — retired in 4.5.0 (history)
 
 Every destination used to speak in its own colour (cyan, violet, rose, indigo, bronze), carried
 into the navigation, a wash at the top of the page, the section cards and the controls. The
@@ -578,7 +561,7 @@ Two rules from that scheme still hold, because they were never about the hues:
 - **An accent is chrome and never a figure.** With vermilion that is stricter than before: it is a
   red in an app where red means a loss, so a good rate is ink and an open trade is market blue.
 
-## Amber, signal red and grey — 4.7.0
+## Amber, signal red and grey — 4.7.0 (history; 5.0 replaced the amber with the Bento palette)
 
 The accent became amber (`#F29A2E` fill / `#9A5A06` text on paper, `#FFB050` on ink), the loss red
 became signal red (`#C62020` / `#FF4D4D`; brick, `#B3261E` / `#F26B5B`, in 4.7.0 itself), and two

@@ -1,5 +1,13 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.runtime.mutableStateOf
+
+import androidx.compose.ui.graphics.Color
+
+import androidx.compose.foundation.border
+
+import androidx.compose.ui.focus.onFocusChanged
+
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.activity.compose.BackHandler
@@ -12,7 +20,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.graphics.graphicsLayer
+import com.ikverse.egxanalyzer.ui.theme.palette
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
@@ -109,6 +120,10 @@ internal fun PageHeader(
     filtered: Boolean,
     /** The tickers this page holds, for the picker's **On this page** group. See `pageStocks`. */
     stocksOnPage: () -> Set<String>,
+    /** A press on another tab's name. */
+    onNavigate: (AppDestination) -> Unit = {},
+    /** A press on this page's own name: back to the top. */
+    onScrollToTop: (AppDestination) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // **Read from the page, and not one of them remembered here.** `opened` and `typed` were held
@@ -182,15 +197,29 @@ internal fun PageHeader(
     // narrowing them - would otherwise expand the title back over the control being typed into.
     val fraction = if (searching) 1f else collapse()
 
-    Box(
+    Column(
         modifier
             .fillMaxWidth()
-            // The top inset, held by the header rather than by the shell. The page runs to the top
-            // of the window now so that its wash carries up behind the clock - see `AppContent` -
-            // which leaves this row responsible for not being under it. `safeDrawing` rather than
+            // The top inset, held by the header rather than by the shell. `safeDrawing` rather than
             // `statusBars`, so a cutout taller than the bar is cleared too; `.only(Top)` keeps the
             // keyboard's inset out of it.
-            .padding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top).asPaddingValues())
+            .padding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top).asPaddingValues()),
+    ) {
+        // **The session line, folding away as the page is read** (5.0). It takes the first part of
+        // the collapse, so the tab row underneath keeps its place on screen while it goes.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(lerp(SessionRowHeight, 0.dp, fraction))
+                .graphicsLayer { alpha = 1f - fraction }
+                .padding(horizontal = Space.l),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            if (fraction < 1f) SessionLine()
+        }
+    Box(
+        Modifier
+            .fillMaxWidth()
             .height(lerp(ExpandedHeight, CollapsedHeight, fraction))
             .padding(horizontal = Space.l),
         contentAlignment = Alignment.CenterStart,
@@ -254,9 +283,12 @@ internal fun PageHeader(
                     onSearch = if (search == null) null else ::open,
                     onFilters = if (filters == null) null else ({ filters.value = true }),
                     filtered = filtered,
+                    onNavigate = onNavigate,
+                    onScrollToTop = onScrollToTop,
                 )
             }
         }
+    }
     }
 }
 
@@ -269,23 +301,21 @@ private fun TitleRow(
     /** Null on a page with no filters, for the same reason. */
     onFilters: (() -> Unit)?,
     filtered: Boolean,
+    onNavigate: (AppDestination) -> Unit,
+    onScrollToTop: (AppDestination) -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(Space.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // The page's name alone since the 2026-11 redesign: the Swiss half of the design lets the
-        // type say which page this is, so the glyph that stood before it went.
-        Text(
-            destination.label,
-            style = MaterialTheme.typography.headlineLarge.copy(
-                fontSize = lerp(ExpandedTitle, CollapsedTitle, collapse),
-                letterSpacing = lerp(ExpandedTracking, CollapsedTracking, collapse),
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        // **The tab row since 5.0**: this page's name large and the other four small beside it,
+        // which is the app's navigation now that the floating bar is gone. See [HeaderTabs].
+        HeaderTabs(
+            current = destination,
+            collapse = collapse,
+            onSelect = onNavigate,
+            onReselect = onScrollToTop,
             modifier = Modifier.weight(1f),
         )
         // **The icons are there from the first frame, sized on the same curve as the page's own
@@ -343,14 +373,14 @@ private fun HeaderAction(
             .size(SearchTarget)
             .pressScale(press)
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .clickable(interactionSource = press, indication = LocalIndication.current, onClick = onClick),
+            .background(palette.raised)
+            .clickable(interactionSource = press, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             icon,
             contentDescription = description,
-            tint = MaterialTheme.colorScheme.onSurface,
+            tint = palette.ink,
             modifier = Modifier.size(size),
         )
         if (dot) {
@@ -363,7 +393,7 @@ private fun HeaderAction(
                     // The page's own hue, which is what the title's icon beside it is tinted with:
                     // a dot in any other colour would be the one mark on this row that belongs to
                     // no page in particular.
-                    .background(MaterialTheme.colorScheme.primary),
+                    .background(palette.hero),
             )
         }
     }
@@ -442,10 +472,17 @@ private fun SearchField(
             anchorTop = placed.positionInWindow().y.roundToInt()
         },
     ) {
-        Surface(
-            Modifier.fillMaxWidth().height(SearchFieldHeight),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        // The kit's field since 5.0: a raised capsule, ringed in cobalt while it holds the cursor.
+        var focused by remember { mutableStateOf(false) }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(SearchFieldHeight)
+                .onFocusChanged { focused = it.hasFocus }
+                .clip(com.ikverse.egxanalyzer.ui.kit.Kit.Capsule)
+                .background(palette.raised)
+                .border(if (focused) 2.dp else 0.dp, if (focused) palette.hero else Color.Transparent, com.ikverse.egxanalyzer.ui.kit.Kit.Capsule),
+            contentAlignment = Alignment.CenterStart,
         ) {
             Row(
                 Modifier.padding(start = Space.m, end = Space.xs),
@@ -454,7 +491,7 @@ private fun SearchField(
                 Icon(
                     Icons.Outlined.Search,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = palette.muted,
                     modifier = Modifier.size(IconSize.Inline),
                 )
                 Box(Modifier.weight(1f).padding(horizontal = Space.s)) {
@@ -464,7 +501,7 @@ private fun SearchField(
                             // here, and the page being narrowed is the consequence of the choice.
                             "Search stocks",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = palette.muted,
                         )
                     }
                     BasicTextField(
@@ -472,9 +509,9 @@ private fun SearchField(
                         onValueChange = onTyped,
                         singleLine = true,
                         textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurface,
+                            color = palette.ink,
                         ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        cursorBrush = SolidColor(palette.hero),
                         modifier = Modifier.fillMaxWidth().focusRequester(focus),
                     )
                 }
@@ -487,7 +524,7 @@ private fun SearchField(
                         // It clears as well as closes, which is what keeps the box the one visible
                         // sign that the page underneath is narrowed.
                         contentDescription = "Clear stock filter",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = palette.muted,
                         modifier = Modifier.size(IconSize.Inline),
                     )
                 }
@@ -525,10 +562,12 @@ private fun PickedStock(
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier.height(SearchFieldHeight),
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    Box(
+        modifier
+            .height(SearchFieldHeight)
+            .clip(com.ikverse.egxanalyzer.ui.kit.Kit.Capsule)
+            .background(palette.raised),
+        contentAlignment = Alignment.CenterStart,
     ) {
         Row(
             Modifier
@@ -540,14 +579,14 @@ private fun PickedStock(
             Text(
                 ticker,
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = palette.ink,
                 maxLines = 1,
                 modifier = Modifier.padding(start = Space.s),
             )
             Text(
                 TickerPicker.name(ticker),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = palette.muted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(start = Space.s),
@@ -559,7 +598,7 @@ private fun PickedStock(
                 Icon(
                     Icons.Outlined.Close,
                     contentDescription = "Clear stock filter",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = palette.muted,
                     modifier = Modifier.size(IconSize.Inline),
                 )
             }
@@ -574,30 +613,24 @@ private fun PickedStock(
  * so it is deliberately small: 40dp is a flick, and a reader who scrolls a whole screen should be
  * looking at content rather than watching chrome finish an animation.
  */
-private val ExpandedHeight = 96.dp
-private val CollapsedHeight = 56.dp
+private val ExpandedHeight = 60.dp
+private val CollapsedHeight = 52.dp
 
-/** How far the page scrolls into the header before it has finished shrinking. */
-internal val HeaderCollapseTravel: Dp = ExpandedHeight - CollapsedHeight
+/** The session line above the tabs, which folds to nothing as the page is read. */
+private val SessionRowHeight = 28.dp
 
-/** Sized to the title beside it at either end, the way the app's mark used to be. */
+/**
+ * How far the page scrolls into the header before it has finished shrinking: the session line,
+ * and the tab row going from its large size to its small one.
+ */
+internal val HeaderCollapseTravel: Dp = SessionRowHeight + ExpandedHeight - CollapsedHeight
+
+/** The glyphs of the search and filter buttons, at either end of the collapse. */
 private val ExpandedIcon = 22.dp
 private val CollapsedIcon = 20.dp
 
-/**
- * `headlineLarge`'s own size, and what it falls to.
- *
- * The collapsed end is a shade above `titleLarge`'s 19sp, which is where the app's name used to
- * sit, because this one shares its row with an icon and a control rather than heading a page alone.
- * The tracking travels with it: -0.5sp is set for 30sp text and reads as cramped at 20.
- */
-private val ExpandedTitle = 34.sp
-private val CollapsedTitle = 20.sp
-private val ExpandedTracking = (-1.2).sp
-private val CollapsedTracking = (-0.4).sp
-
 /** A press target for the glyph, not the size of it - the glyph itself is [ExpandedIcon]/[CollapsedIcon]. */
-private val SearchTarget = 40.dp
+private val SearchTarget = 44.dp
 
 /**
  * The mark on the filter icon, and how far in from the corner of its target it sits.

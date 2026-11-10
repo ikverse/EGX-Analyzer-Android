@@ -1,5 +1,11 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.ui.theme.palette
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -77,12 +83,15 @@ internal fun PriceLadder(
     val span = high - low
     if (span <= 0.0) return
 
-    val stopColor = PriceRole.stop
-    // Entry is the reference the other bands are read against, so it stays neutral.
-    val entryColor = MaterialTheme.colorScheme.onSurface
-    val targetColor = MaterialTheme.colorScheme.tertiary
-    val trackColor = MaterialTheme.colorScheme.surfaceVariant
-    val reachedColor = PriceRole.market
+    // The palette's own since 5.0: loss red for the stop, ink for the entry the rest are read
+    // against, gain green for the targets, cobalt for how far the market actually got.
+    val p = palette
+    val stopColor = p.loss
+    val entryColor = p.ink
+    val targetColor = p.gain
+    val trackColor = p.raised
+    val reachedColor = p.hero
+    val grow = com.ikverse.egxanalyzer.ui.kit.rememberDrawIn(key = levels to reached, durationMs = 900)
 
     // The group is what has to stay together when labels are pushed around: the two ends of the
     // entry band are one fact, and a range printed with its floor below the line and its ceiling
@@ -99,7 +108,7 @@ internal fun PriceLadder(
     }
 
     val measurer = rememberTextMeasurer()
-    val labelStyle = MaterialTheme.typography.labelSmall
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures)
     val labels = marks.map { mark ->
         measurer.measure(formatPrice(mark.value), labelStyle) to mark.color
     }
@@ -141,25 +150,32 @@ internal fun PriceLadder(
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(above + TrackBand + below),
+                .height(above + TrackBand + below)
+                // Drawn in from the low end, the way the kit's price lines arrive.
+                .drawWithContent {
+                    clipRect(right = size.width * grow.value) { this@drawWithContent.drawContent() }
+                },
         ) {
             val top = with(density) { above.toPx() }
             val y = top + trackHeight / 2f
 
-            drawRect(
+            val track = 6.dp.toPx()
+            drawRoundRect(
                 color = trackColor,
-                topLeft = Offset(insetPx, y - TRACK_THICKNESS / 2),
-                size = Size(usable, TRACK_THICKNESS),
+                topLeft = Offset(insetPx, y - track / 2),
+                size = Size(usable, track),
+                cornerRadius = CornerRadius(track / 2),
             )
 
             if (entryLow != null && entryHigh != null) {
                 val start = min(axis(entryLow), axis(entryHigh))
                 val end = max(axis(entryLow), axis(entryHigh))
-                drawRect(
-                    color = entryColor.copy(alpha = 0.28f),
+                drawRoundRect(
+                    color = p.hero.copy(alpha = 0.28f),
                     topLeft = Offset(start, y - BAND_HEIGHT / 2),
                     // A single entry price collapses to zero width, so keep it visible.
                     size = Size(max(end - start, 2f), BAND_HEIGHT),
+                    cornerRadius = CornerRadius(BAND_HEIGHT / 2),
                 )
             }
 
@@ -394,7 +410,6 @@ private val ReachedBand = 9.dp
 private val LabelRowHeight = 15.dp
 private val LabelGap = 6.dp
 
-private const val TRACK_THICKNESS = 4f
 private const val BAND_HEIGHT = 18f
 private const val MARKER_WIDTH = 3f
 private const val MARKER_HEIGHT = 26f

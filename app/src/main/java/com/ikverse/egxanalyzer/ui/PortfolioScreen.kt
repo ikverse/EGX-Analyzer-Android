@@ -1,5 +1,22 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.layout.height
+import com.ikverse.egxanalyzer.ui.kit.popIn
+import com.ikverse.egxanalyzer.ui.kit.TileTone
+import com.ikverse.egxanalyzer.ui.kit.Skeleton
+import androidx.compose.foundation.layout.PaddingValues
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalDensity
+import com.ikverse.egxanalyzer.ui.theme.palette
+import com.ikverse.egxanalyzer.ui.kit.ButtonSize
+import com.ikverse.egxanalyzer.ui.kit.ButtonKind
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.SplitColumns
+import com.ikverse.egxanalyzer.model.FoldPosture
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -87,46 +104,104 @@ internal fun PortfolioScreen(appState: AppState) {
 
         if (portfolio.isEmpty) {
             if (!appState.initialDataLoaded) {
-                EmptyState(
-                    icon = Icons.Outlined.AccountBalanceWallet,
-                    title = "Loading…",
-                    detail = "Reading your trades.",
-                )
+                // Placeholders in the shape of the tiles that are coming, so nothing jumps when
+                // the record arrives.
+                Skeleton(Modifier.fillMaxWidth().height(200.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+                    Skeleton(Modifier.weight(1f).height(160.dp))
+                    Skeleton(Modifier.weight(1f).height(160.dp))
+                }
+                Skeleton(Modifier.fillMaxWidth().height(240.dp))
                 return@Screen
             }
-            EmptyState(
-                icon = Icons.Outlined.AccountBalanceWallet,
-                title = "No trades recorded yet",
-                detail = "Press Bought on a recommendation - on its card in Results, or in the " +
-                    "sheet a table row opens - and the position appears here with its deadline, " +
-                    "its targets and its running profit.",
-            )
+            Tile(modifier = Modifier.fillMaxWidth().popIn(0), tone = TileTone.HIGHLIGHT) {
+                Text("No trades recorded yet", style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    "Press I bought it on a recommendation - on its card in Results, or in the " +
+                        "sheet a table row opens - and the position appears here with its deadline, " +
+                        "its targets and its running return.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = Space.s),
+                )
+            }
             return@Screen
         }
 
-        // Above the record rather than below it: this is the one thing on the screen asking to be
-        // acted on, and the record is reference. Built from the whole portfolio, so a date chosen
-        // in the filter below cannot hide a trade that is late.
-        OverdueCard(
-            overdue = remember(portfolio) { overdueRoster(portfolio.positions) },
-            appState = appState,
-        )
-
-        // Under Overdue and above the record, which is where it belongs in the order those two
-        // already establish: Overdue is the one thing here asking to be acted on, this is what is
-        // still running, and the record underneath is reference. Built off the whole portfolio like
-        // Overdue, so a date chosen in the filter below cannot hide a trade that is open.
-        OpenPositionsCard(
-            positions = remember(portfolio) {
-                portfolio.positions.filter { it.open }.sortedWith(PortfolioOrder.URGENT.positions)
-            },
-            onOpen = appState::openPosition,
-        )
-
-        PortfolioSummary(portfolio.stats)
-
-        PositionSection(groups = portfolio.groups, appState = appState)
+        // **The 5.0 page**: tiles first (the hero, hit rate, what needs you, open positions, today,
+        // best source, the AI's last read, closed this month), then the full record. The tiles are
+        // built from the whole portfolio, so a date chosen in the filter cannot hide a trade that is
+        // late or open; the filter narrows the record underneath, as it always did.
+        val posture = LocalFoldPosture.current
+        var selected by appState.pages.portfolioSelectedTrade
+        when (posture) {
+            is FoldPosture.Unfolded, is FoldPosture.Book -> {
+                // Side by side: the tiles on one half, the trade a row was pressed on and the record
+                // on the other. In book posture the split falls on the hinge.
+                SplitColumns(posture, unfoldedStart = 0.5f, start = {
+                        PortfolioTiles(appState, portfolio, heroHeight = null, onSelectTrade = { selected = it })
+                    }, end = {
+                        val picked = selected?.let { id -> portfolio.positions.firstOrNull { it.position.id == id } }
+                        if (picked != null) {
+                            SelectedTrade(picked, appState, onClose = { selected = null })
+                        }
+                        PositionSection(groups = portfolio.groups, appState = appState)
+                    })
+            }
+            else -> {
+                // On the cover screen, and in tabletop, one column. In tabletop the hero ends at the
+                // crease, so its chart stands on the upright half and everything pressed is on the
+                // flat one.
+                val heroHeight = (posture as? FoldPosture.Tabletop)?.let { tabletopHeroHeight(it) }
+                PortfolioTiles(appState, portfolio, heroHeight = heroHeight, onSelectTrade = appState::openPosition)
+                PositionSection(groups = portfolio.groups, appState = appState)
+            }
+        }
     }
+}
+
+/**
+ * The hero's height in tabletop: from the top of the scrolling area to just above the crease.
+ * Never under a usable minimum, so a window with a hinge unusually high still draws a chart.
+ */
+@Composable
+internal fun tabletopHeroHeight(posture: FoldPosture.Tabletop): Dp {
+    val density = LocalDensity.current
+    val windowHeight = LocalWindowInfo.current.containerSize.height
+    val top = LocalViewportTop.current
+    val crease = windowHeight * posture.hingeStartFraction
+    return with(density) { (crease - top).toDp() - Space.l - Space.s }.coerceAtLeast(220.dp)
+}
+
+/**
+ * The trade a row was pressed on, unfolded, above the record: its full card, with a way to put it
+ * away. The same card and the same actions as in the record below.
+ */
+@Composable
+private fun SelectedTrade(view: PositionView, appState: AppState, onClose: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Selected trade", style = MaterialTheme.typography.titleSmall, color = palette.muted, modifier = Modifier.weight(1f))
+        KitButton("Close", onClick = onClose, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
+    }
+    PositionCard(
+        view = view,
+        appState = appState,
+        onOpenCall = { appState.openCall(view.position.id, NavStop(AppDestination.PORTFOLIO, positionId = view.position.id)) },
+        highlighted = false,
+        onHighlightShown = {},
+        startSelling = false,
+        onSellingShown = {},
+        onSell = { sale -> appState.recordSale(view.position, sale) },
+        onEditTrade = { price, date, window ->
+            appState.reprice(view.position, price, date, window ?: view.position.windowSessions)
+        },
+        onKeepOpen = { keep, note -> appState.setKeepOpen(view.position, keep, note) },
+        onRemove = {
+            onClose()
+            appState.deletePosition(view.position)
+        },
+        onReopen = { appState.clearSale(view.position) },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /**
@@ -168,276 +243,6 @@ private fun PositionFilterSheet(groups: List<PortfolioGroup>, appState: AppState
 }
 
 /**
- * The record as a handful of figures.
- *
- * Percentages rather than pounds, and labelled as averages, because no trade size is recorded: a
- * total in money would be a number the app has no way of knowing. Adding sizes later fills these in
- * without moving anything on the screen.
- */
-@Composable
-private fun ColumnScope.PortfolioSummary(stats: PortfolioStats) {
-    SectionCard(title = "Your record", icon = Icons.Outlined.AccountBalanceWallet) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(Space.xl),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            StatTile(stats.openCount.toString(), "open", tone = MaterialTheme.colorScheme.onSurface)
-            // Settled rather than closed: it counts the expired trades too, and the card below this
-            // one now keeps "closed" for the ones that ended somewhere in particular.
-            StatTile(stats.settledCount.toString(), "settled")
-            // No overdue tile. The card above this one names the trades themselves, in the same
-            // view, and a count of the same thing beside it is a figure the reader has to
-            // reconcile against a list that already says more than it does.
-            StatTile(
-                formatPercent(stats.settledReturnPct),
-                "average settled",
-                tone = PriceRole.forReturn(stats.settledReturnPct),
-            )
-            StatTile(
-                formatPercent(stats.openReturnPct),
-                "average open",
-                tone = PriceRole.forReturn(stats.openReturnPct),
-            )
-            StatTile(
-                formatPercent(stats.winRate, signed = false),
-                "win rate",
-                tone = if ((stats.winRate ?: 0.0) >= 50.0) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
-            )
-        }
-        stats.best?.let { best ->
-            Text(
-                "Best ${best.ticker} ${formatPercent(best.returnPct)}" +
-                    (stats.worst?.let { " · worst ${it.ticker} ${formatPercent(it.returnPct)}" } ?: ""),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-/**
- * The trades that ran out of time, said before anything on this screen has been opened.
- *
- * Overdue is the only state in the app that asks the user for something, and until now it was only
- * ever found: a count in the record card, then a scroll through folded sessions looking for the
- * cards it was counting. Each tile carries what a decision needs - which stock, how late, and when
- * it was bought - and presses through to the trade itself.
- *
- * Absent entirely when nothing is late, exactly as the tile it replaces was. A card reading "no
- * overdue trades" is a permanent reminder of a state the app is not in.
- */
-@Composable
-private fun OverdueCard(overdue: List<PositionView>, appState: AppState) {
-    if (overdue.isEmpty()) return
-    SectionCard(
-        title = "Overdue",
-        icon = Icons.Outlined.HourglassEmpty,
-        accent = CardHue.AMBER.color,
-        about = infoNote(
-            "Overdue",
-            "Still running past their deadline because you chose to keep them open.",
-        ),
-    ) {
-        BoxWithConstraints {
-            // Tiles rather than full-width rows, through the same helper the position cards use:
-            // two across on the cover screen, four on the Fold and the tablet. A trade that is late
-            // is not more urgent for being drawn a screen wide.
-            val columns = responsiveColumns(minColumnWidth = OverdueTileMinWidth, maxColumns = 4)
-            Column {
-                ResponsiveRows(overdue, columns, spacing = Space.s) { view, tileModifier ->
-                    OverdueTile(
-                        view = view,
-                        onOpen = { appState.openPosition(view.position.id) },
-                        onRecordSale = { appState.openPositionToSell(view.position.id) },
-                        onFollowDeadline = { appState.setKeepOpen(view.position, keepOpen = false) },
-                        modifier = tileModifier,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * One late trade, in three facts and a press.
- *
- * The mark and the ticker have the top line to themselves, and everything measured sits under them.
- * Four things on one row is what the logo made impossible: the ticker was the only one of them that
- * could give way, so at four tiles across it wrapped a letter to a line. Nothing up there competes
- * for the width now, and the ticker is held to a single line so it cannot stack again whatever the
- * screen does.
- *
- * The day count carries no word beside it: "6d" in red under a heading that already says Overdue
- * cannot be read as anything else. Beside it the entry date, which is the one figure saying how
- * long the trade has actually been held - the session date the card opens into does not - and then
- * the return, in the same green or red it wears everywhere else in the app.
- *
- * Those three sit on one line while one line holds them, and drop the return onto a second when it
- * does not - which is what the wide screens actually ask for. More room across the window buys more
- * tiles, not wider ones: at four across a tablet's tile is narrower than a phone's two, and the
- * figure being ellipsed away there was the return, the one thing on the tile the user cannot work
- * out from the rest of it. Measured rather than switched on a column count, so a pane width nobody
- * thought to test gets the same answer as the ones that were.
- *
- * The press is the trip a call in Insights already makes: [AppState.openPosition] hands the id to
- * the arrival effect in [PositionSection], which clears the date filter only if it is what hides
- * the trade, unfolds the session card, scrolls to it and flashes its edge. No second path to
- * maintain, and no way for the two entrances to disagree about where a trade is.
- *
- * Holding it offers the two things worth doing about a late trade without opening it first:
- * [onRecordSale], which is the same entrance [AppState.openPositionToSell] gives a trade status
- * notification's own Record sale action, and [onFollowDeadline], which undoes Keep open in place.
- * Not "Keep open" itself - a trade on this card is already overdue, which only happens by having
- * been kept open once already, so offering it again would be offering a decision already made.
- */
-@Composable
-private fun OverdueTile(
-    view: PositionView,
-    onOpen: () -> Unit,
-    onRecordSale: () -> Unit,
-    onFollowDeadline: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var holding by remember(view.position.id) { mutableStateOf(false) }
-    // Read before the builder rather than inside it: the colour is a composable lookup and the line
-    // it belongs to is plain text.
-    val returnColor = PriceRole.forReturn(view.returnPct)
-    // Built as its three parts rather than one string: the line below joins them or breaks them
-    // depending on what fits, and a joined string cannot be taken apart again without parsing it.
-    val days = buildAnnotatedString {
-        withStyle(SpanStyle(color = extraColors.loss)) {
-            append("${view.overdueDays}d")
-        }
-    }
-    val held = AnnotatedString(shortDate(view.position.entryDate))
-    val ret = buildAnnotatedString {
-        withStyle(SpanStyle(color = returnColor)) {
-            append(formatPercent(view.returnPct))
-        }
-    }
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onOpen,
-                onLongClick = { holding = true },
-            )
-            .semantics { onClick(label = "Open this trade", action = null) },
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-        // Tonal with no edge since the 2026-11 redesign.
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        // The measured line takes the tile's own width rather than the column beside the logo. The
-        // logo is one line tall and that column was two, so it left a hole under the mark that the
-        // eye reads before any of the figures; run under it, the line also gets the width back -
-        // at two tiles across on the cover screen the return was being ellipsed away.
-        Column(Modifier.padding(horizontal = Space.m, vertical = Space.xs)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // The ticker is **not** a second target here, and this tile is one of the two
-                // places that is true - see the day's event tiles for the other. Both are the
-                // smallest tiles in the app, two or three across on a cover screen, and the
-                // ticker sits at the leading edge where a thumb reaching for the tile's own press
-                // lands on it: the owner reported missing the trade and getting the stock sheet
-                // instead, repeatedly. Nothing is unreachable, because the trade this opens
-                // carries the ticker press itself. The Row and its weight stay - fill = false is
-                // what sits the arrow against the end of the ticker rather than out at the tile's
-                // edge, where it reads as unrelated to it. See LocalOpenStock.
-                Row(
-                    Modifier.weight(1f, fill = false),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    StockLogo(view.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
-                    Text(
-                        view.ticker,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Icon(
-                    Icons.AutoMirrored.Outlined.ArrowForward,
-                    // Named by the press it belongs to, one level up; a reader announcing the
-                    // glyph as well would say it twice.
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = Space.xs).size(IconSize.Hint),
-                )
-            }
-            // Everything measured, on the line that has room for it. No word for the state:
-            // every trade on this card is one the user is keeping open, so saying so would be
-            // the card's own heading repeated on every tile.
-            OverdueMeta(days = days, held = held, ret = ret)
-        }
-    }
-    if (holding) {
-        HoldPrompt(
-            title = view.ticker,
-            actions = listOf(
-                HoldAction("Record sale", primary = true) { holding = false; onRecordSale() },
-                HoldAction("Follow the deadline again") { holding = false; onFollowDeadline() },
-            ),
-            onDismiss = { holding = false },
-        )
-    }
-}
-
-/**
- * The three measured facts, on one line or two.
- *
- * One line while one line holds them, which is every tile on a phone and most of them on a Fold.
- * When it does not hold them the return drops to a line of its own and the day count keeps the
- * entry date company above it - the pair that reads as one thing, both of them about time, and
- * between them short enough to survive any width a tile is ever given.
- *
- * Measured rather than wrapped: left to wrap, the break lands wherever the width happens to put it,
- * so a tablet row of four tiles would break three of them in three different places and leave a
- * separator dangling at the end of a line. Measured against the tile's own width, every tile that
- * breaks breaks in the same place, and one that does not is left exactly as it was.
- */
-@Composable
-private fun OverdueMeta(days: AnnotatedString, held: AnnotatedString, ret: AnnotatedString) {
-    val measurer = rememberTextMeasurer()
-    val style = MaterialTheme.typography.labelSmall
-    val separator = AnnotatedString(" · ")
-    val whole = remember(days, held, ret) { days + separator + held + separator + ret }
-    val time = remember(days, held) { days + separator + held }
-    BoxWithConstraints {
-        val available = constraints.maxWidth
-        // Unbounded only in a measuring pass nothing is drawn from; treated as room for the line so
-        // the tile is never measured as the taller of the two shapes and then drawn as the shorter.
-        val fits = remember(whole, style, available) {
-            available == Constraints.Infinity ||
-                measurer.measure(whole, style, softWrap = false).size.width <= available
-        }
-        Column {
-            Text(
-                if (fits) whole else time,
-                style = style,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (!fits) {
-                Text(
-                    ret,
-                    style = style,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
-
-/**
  * The trades the card names, in the order it names them.
  *
  * Most overdue first, then by ticker, which is [PortfolioOrder.URGENT]s own rule for the positions
@@ -450,109 +255,6 @@ internal fun overdueRoster(positions: List<PositionView>): List<PositionView> =
     positions
         .filter(PositionView::overdue)
         .sortedWith(compareByDescending<PositionView> { it.overdueDays }.thenBy { it.ticker })
-
-/**
- * Every trade still running, at a glance - what it is doing rather than what it has just done.
- *
- * Replaces the session digest this tab used to carry: a card naming only what changed since the
- * reader last looked said nothing on the far more common visit where nothing had. This says where
- * every open position stands, whether or not the session moved it. Absent entirely with nothing
- * open, the rule [OverdueCard] already follows.
- */
-@Composable
-private fun OpenPositionsCard(positions: List<PositionView>, onOpen: (String) -> Unit) {
-    if (positions.isEmpty()) return
-    SectionCard(title = "Open positions", icon = Icons.Outlined.AccountBalanceWallet) {
-        BoxWithConstraints {
-            val columns = responsiveColumns(minColumnWidth = OpenPositionTileMinWidth, maxColumns = 3)
-            Column {
-                ResponsiveRows(positions, columns, spacing = Space.s) { view, tileModifier ->
-                    OpenPositionTile(
-                        view = view,
-                        onOpen = { onOpen(view.position.id) },
-                        modifier = tileModifier,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * One open trade: ticker, its own status word in the colour that status wears everywhere else, the
- * return since entry, and - where there is room - the day it was bought. The same three-line shape
- * [OverdueTile] and the day's event tiles already use, so a reader who has learned one has learned
- * all of them.
- */
-@Composable
-private fun OpenPositionTile(view: PositionView, onOpen: () -> Unit, modifier: Modifier = Modifier) {
-    val statusColor = view.status.tone()
-    Card(
-        onClick = onOpen,
-        modifier = modifier
-            .fillMaxWidth()
-            .semantics { onClick(label = "Open this trade", action = null) },
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-        // Tonal with no edge since the 2026-11 redesign.
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Column(Modifier.padding(horizontal = Space.m, vertical = Space.xs)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Row(
-                    Modifier.weight(1f, fill = false),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    StockLogo(view.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
-                    Text(
-                        view.ticker,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Icon(
-                    Icons.AutoMirrored.Outlined.ArrowForward,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = Space.xs).size(IconSize.Hint),
-                )
-            }
-            Text(
-                view.status.label,
-                style = MaterialTheme.typography.labelSmall,
-                color = statusColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            view.returnPct?.let { pct ->
-                Text(
-                    formatPercent(pct),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = PriceRole.forReturn(pct),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            // Only where there is room, the rule the day's event tiles already follow - see
-            // LocalWindowWidth there.
-            if (LocalWindowWidth.current != WindowWidth.COMPACT) {
-                Text(
-                    "bought ${shortDate(view.position.entryDate)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = PriceRole.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
-
-/** Same shape as [EventTileMinWidth] in TodayCard.kt, for the same three-line tile content. */
-private val OpenPositionTileMinWidth = 170.dp
 
 /**
  * The trades, one card per session the calls were made for.
@@ -592,18 +294,20 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
     // the Space.l a card of controls uses. Three frames stood between the page and a trade - this
     // card, the session card, the trade card - each paying a full inset and each drawing its own
     // hairline, which left the trade 285dp of a 411dp cover screen. See SectionCard.contentInset.
-    SectionCard(
-        title = "Positions",
-        icon = Icons.Outlined.AccountBalanceWallet,
-        contentInset = Space.s,
-    ) {
+    // The record, in a plain card tile since 5.0: a heading and every session card inside it.
+    Tile(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(Space.s)) {
+        Text(
+            "All positions",
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.padding(horizontal = Space.s, vertical = Space.s),
+        )
         if (groups.isEmpty()) {
             Text(
                 "Nothing recorded yet.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            return@SectionCard
+            return@Tile
         }
 
         // Filtered here rather than in the calculator. The whole record has other readers - the overdue
@@ -690,8 +394,10 @@ private fun ColumnScope.PositionSection(groups: List<PortfolioGroup>, appState: 
                     "No trade you recorded belongs to that session. Clear the filter to see the " +
                         "rest of your positions."
                 },
+                actionLabel = "Clear filters",
+                onAction = { appState.pages.clearFilters(AppDestination.PORTFOLIO) },
             )
-            return@SectionCard
+            return@Tile
         }
 
         // Built once for the whole screen rather than per card. A fresh bundle each time would be a new
@@ -917,11 +623,3 @@ private fun ColumnScope.PositionGrid(
         }
     }
 }
-
-/**
- * Narrow enough for two tiles on the 411dp cover screen, which is the tightest this app is read on.
- *
- * The page holds its content in by [Space.l] and the card by another, so two tiles land at about
- * 165dp there - the same width they take on the Fold, where four fit across instead of two.
- */
-private val OverdueTileMinWidth = 150.dp

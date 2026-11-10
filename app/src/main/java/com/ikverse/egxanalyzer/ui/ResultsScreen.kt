@@ -5,6 +5,33 @@ import com.ikverse.egxanalyzer.model.timing
 
 
 import android.content.Intent
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.draw.clip
+import com.ikverse.egxanalyzer.model.RunOutcomes
+import com.ikverse.egxanalyzer.model.runOutcomes
+import com.ikverse.egxanalyzer.model.runTitle
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import com.ikverse.egxanalyzer.ui.kit.KitDialog
+import com.ikverse.egxanalyzer.ui.kit.KitChip
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.kit.ButtonKind
+import com.ikverse.egxanalyzer.ui.kit.ButtonSize
+import com.ikverse.egxanalyzer.ui.kit.KitIconButton
+import com.ikverse.egxanalyzer.ui.kit.KitMenu
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.SplitColumns
+import com.ikverse.egxanalyzer.ui.kit.MenuItem
+import com.ikverse.egxanalyzer.ui.kit.OutcomeStrip
+import com.ikverse.egxanalyzer.ui.kit.Outcomes
+import com.ikverse.egxanalyzer.ui.kit.Panel
+import com.ikverse.egxanalyzer.model.FoldPosture
+import com.ikverse.egxanalyzer.ui.kit.Skeleton
+import com.ikverse.egxanalyzer.ui.kit.popIn
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.ui.kit.TileTone
+import com.ikverse.egxanalyzer.ui.theme.palette
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -184,35 +211,58 @@ internal fun ResultsScreen(appState: AppState) {
             // The stock is named when it is what emptied the list: "no runs match these filters"
             // beside a box holding COMI reads as though the app had not noticed what was typed.
             val searching = stockFilter.isNotBlank()
-            EmptyState(
-                icon = Icons.Outlined.Assessment,
+            Tile(Modifier.fillMaxWidth().popIn(0)) {
                 // The company, not the code the filter holds: the reader picked a listing from the
                 // catalog, so the app can say back what they picked. See TickerPicker.name.
-                title = if (searching) {
-                    "No runs mention ${TickerPicker.name(stockFilter)}"
-                } else {
-                    "No runs match these filters"
-                },
-                detail = if (searching) {
-                    "No saved analysis holds that stock. Clear the stock filter to see the rest."
-                } else {
-                    "Clear a filter to see the rest of your saved analyses."
-                },
-            )
+                Text(
+                    if (searching) {
+                        "No runs mention ${TickerPicker.name(stockFilter)}"
+                    } else {
+                        "No runs match these filters"
+                    },
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                Text(
+                    if (searching) {
+                        "No saved analysis holds that stock. Clear the stock filter to see the rest."
+                    } else {
+                        "Clear a filter to see the rest of your saved analyses."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.muted,
+                    modifier = Modifier.padding(top = Space.s),
+                )
+                KitButton(
+                    "Clear filters",
+                    onClick = { appState.pages.clearFilters(AppDestination.RESULTS) },
+                    kind = ButtonKind.SECONDARY,
+                    size = ButtonSize.SMALL,
+                    modifier = Modifier.padding(top = Space.m),
+                )
+            }
         }
         if (appState.savedResults.isEmpty()) {
             if (!appState.initialDataLoaded) {
-                EmptyState(
-                    icon = Icons.Outlined.Assessment,
-                    title = "Loading…",
-                    detail = "Reading your saved analyses.",
-                )
+                // The shape of the list while the record is read, so nothing jumps when it lands.
+                Column(verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+                    repeat(3) { Skeleton(Modifier.fillMaxWidth().height(168.dp)) }
+                }
             } else {
-                EmptyState(
-                    icon = Icons.Outlined.Assessment,
-                    title = "No saved results yet",
-                    detail = "Run an analysis and it will be stored here with the sources behind it.",
-                )
+                Tile(Modifier.fillMaxWidth().popIn(0), tone = TileTone.HIGHLIGHT) {
+                    Text("No saved results yet", style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        "Run an analysis and it will be stored here with the sources behind it.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = Space.s),
+                    )
+                    KitButton(
+                        "Go to Analyze",
+                        onClick = { appState.navigate(AppDestination.ANALYZE) },
+                        kind = ButtonKind.ON_TONE,
+                        size = ButtonSize.SMALL,
+                        modifier = Modifier.padding(top = Space.m),
+                    )
+                }
             }
         } else {
             // Which run is open lives outside the card, because a report needs the whole row to show
@@ -268,13 +318,18 @@ internal fun ResultsScreen(appState: AppState) {
                     stack: StackPosition?,
                     onBringForward: (() -> Unit)?,
                     cardModifier: Modifier,
+                    headerMinHeight: Dp = 0.dp,
                 ) {
+                    val dayIndex = days.indexOfFirst { day -> day.any { it.id == saved.id } }
                     SavedAnalysisCard(
-                        modifier = cardModifier.staggerIn(
-                            days.indexOfFirst { day -> day.any { it.id == saved.id } },
-                            enabled = !introDone,
-                        ),
+                        modifier = cardModifier.staggerIn(dayIndex, enabled = !introDone),
                         saved = saved,
+                        headerMinHeight = headerMinHeight,
+                        // Cobalt, lime, white, down the list, so neighbouring runs never share a fill.
+                        tone = RunTones[dayIndex.coerceAtLeast(0) % RunTones.size],
+                        outcomes = remember(saved, appState.performance) {
+                            runOutcomes(saved, appState.performance)
+                        },
                         stack = stack,
                         onBringForward = onBringForward,
                         // Built per run: every card inside it dates its call from this run's target
@@ -337,33 +392,72 @@ internal fun ResultsScreen(appState: AppState) {
                         reveal.revealIfOnScreen(appState, AppDestination.RESULTS, settled)
                     }
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                    bands.forEach { (band, open) ->
-                        if (open) {
-                            val day = band.single()
-                            // Keyed by the run in front, so that re-sorting the list, or a new run
-                            // arriving for this session, cannot hand one day's page to another.
-                            key(day.first().id) {
-                                stack(
-                                    day,
-                                    open = true,
-                                    stackModifier = Modifier.fillMaxWidth()
-                                        .bringIntoViewRequester(reveal),
-                                )
-                            }
-                        } else {
-                            ResponsiveRows(band, columns) { day, cardModifier ->
-                                key(day.first().id) { stack(day, open = false, cardModifier) }
-                            }
-                        }
-                    }
+                @Composable
+                fun showOlder() {
                     if (allDays.size > visibleCount) {
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            TextButton(onClick = { visibleCount += PAGE_SIZE }) {
-                                Text("Show older")
-                            }
+                            KitButton(
+                                "Show older",
+                                onClick = { visibleCount += PAGE_SIZE },
+                                kind = ButtonKind.SECONDARY,
+                                size = ButtonSize.SMALL,
+                            )
                         }
                     }
+                }
+
+                val posture = LocalFoldPosture.current
+                val openSaved = shown.firstOrNull { it.id == openRun }
+                if ((posture is FoldPosture.Unfolded || posture is FoldPosture.Book) && openSaved == null) {
+                    // Side by side while nothing is open: the runs down one half, and a word on the
+                    // other about what opens there. In book posture the gap falls on the crease.
+                    SplitColumns(posture, unfoldedStart = 0.42f, start = {
+                        days.forEach { day ->
+                            key(day.first().id) { stack(day, open = false, Modifier.fillMaxWidth()) }
+                        }
+                        showOlder()
+                    }, end = {
+                        Tile(Modifier.fillMaxWidth(), tone = TileTone.TILE3) {
+                            Text("Pick a run", style = MaterialTheme.typography.headlineSmall)
+                            Text(
+                                "Its report opens across the page: every call, the figures it was " +
+                                    "read off, and the source trace.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(top = Space.s),
+                            )
+                        }
+                    })
+                } else {
+                    // An open report takes the whole row, in every posture. Beside the list it had
+                    // half of one, which is under the 600dp the table needs on every phone here, so
+                    // unfolded it always fell back to cards - and the cards do not swallow a press
+                    // in a gap, so tapping between them closed the report.
+                        // In tabletop the open report's heading and figures end at the crease, so
+                        // they stand on the upright half and its calls start on the flat one.
+                        val headerFloor = (posture as? FoldPosture.Tabletop)?.let { tabletopHeroHeight(it) } ?: 0.dp
+                        Column(verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+                            bands.forEach { (band, open) ->
+                                if (open) {
+                                    val day = band.single()
+                                    // Keyed by the run in front, so that re-sorting the list, or a new
+                                    // run arriving for this session, cannot hand one day's page to another.
+                                    key(day.first().id) {
+                                        SavedRunStack(
+                                            runs = day,
+                                            openRunId = openRun,
+                                            modifier = Modifier.fillMaxWidth().bringIntoViewRequester(reveal),
+                                        ) { saved, expanded, stackAt, onBringForward, cardModifier ->
+                                            card(saved, expanded, stackAt, onBringForward, cardModifier, headerFloor)
+                                        }
+                                    }
+                                } else {
+                                    ResponsiveRows(band, columns) { day, cardModifier ->
+                                        key(day.first().id) { stack(day, open = false, cardModifier) }
+                                    }
+                                }
+                            }
+                            showOlder()
+                        }
                 }
             }
         }
@@ -534,41 +628,22 @@ internal fun SavedAnalysis.channelNames(): List<String> =
 @Composable
 private fun UnreadableNotice(count: Int) {
     if (count <= 0) return
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-        shape = MaterialTheme.shapes.large,
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(Space.l),
-            horizontalArrangement = Arrangement.spacedBy(Space.m),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Outlined.Warning,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.size(IconSize.Action),
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                Text(
-                    if (count == 1) "1 saved analysis cannot be read" else "$count saved analyses cannot be read",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                )
-                Text(
-                    if (count == 1) {
-                        "Its stored report is damaged, so it is missing from the list below and " +
-                            "the newest report here may be an earlier run."
-                    } else {
-                        "Their stored reports are damaged, so they are missing from the list " +
-                            "below and the newest report here may be an earlier run."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                )
-            }
-        }
+    Tile(Modifier.fillMaxWidth(), tone = TileTone.ALERT) {
+        Text(
+            if (count == 1) "1 saved analysis cannot be read" else "$count saved analyses cannot be read",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            if (count == 1) {
+                "Its stored report is damaged, so it is missing from the list below and the newest " +
+                    "report here may be an earlier run."
+            } else {
+                "Their stored reports are damaged, so they are missing from the list below and the " +
+                    "newest report here may be an earlier run."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = Space.xs),
+        )
     }
 }
 
@@ -665,7 +740,7 @@ internal fun SavedRunStack(
     // The page's own colour, laid under every card in the deck so that its glass resolves over the
     // page rather than over the reading behind it. See this function's note on why a deck is opaque.
     val backing = MaterialTheme.colorScheme.background
-    val cardShape = MaterialTheme.shapes.large
+    val cardShape = Kit.TileShape
     // This page's own width, so a drag that runs past the deck's last card can be handed to the
     // destination pager but never by more than the one page this deck fills - the same overshoot
     // `sidewaysGesturesStayOnThePage` exists to prevent, measured locally because this connection
@@ -900,6 +975,15 @@ private fun SavedAnalysisCard(
      * press can honestly mean.
      */
     onBringForward: (() -> Unit)? = null,
+    /**
+     * How tall the open report's heading and figures stand at least - the height down to the crease
+     * in tabletop, so the calls start on the flat half. Zero everywhere else.
+     */
+    headerMinHeight: Dp = 0.dp,
+    /** The shut tile's fill. An open report is always the white card, whatever it was shut. */
+    tone: TileTone = TileTone.CARD,
+    /** How the run's calls have turned out so far, for the counts and the bar. */
+    outcomes: RunOutcomes = RunOutcomes(0, 0, 0, 0),
     /** Records what the user did about the calls in this run. */
     trades: TradeBook,
     /** Corrects what the model read off the cards in this run. */
@@ -927,7 +1011,7 @@ private fun SavedAnalysisCard(
     /** Holding a call's ticker offers this; narrows the page's own stock filter to it. */
     onFilterToTicker: (String) -> Unit = {},
 ) {
-    // Stays local and dies with the card, deliberately: a dropdown left hanging over a page that has
+    // Stays local and dies with the card, deliberately: a menu left hanging over a page that has
     // just been rebuilt into a different shape is not where the reader left anything.
     var menuOpen by remember { mutableStateOf(false) }
     // Asked for, because deleting is no longer local: it removes the report from the sync channel
@@ -949,290 +1033,179 @@ private fun SavedAnalysisCard(
         .flatMap { stock -> stock.dataPoints.mapNotNull { trades.heldFor(stock, it)?.position?.id } }
         .distinct()
         .size
+    val p = palette
+    val shownTone = if (expanded) TileTone.CARD else tone
+    val flash = arrivalFlash(highlighted, onHighlightShown)
 
-    val press = remember { MutableInteractionSource() }
-    Card(
-        // The whole card opens the run, and the same whole card closes it again once it is open -
-        // one press path, whichever direction it means. A tap landing in a gap between the report's
-        // own content (its call cards, its table, the space around them) closes it same as pressing
-        // the footer button does; only the interactive pieces inside - buttons, the menu, table
-        // rows - capture their own tap first and never reach this one.
-        //
-        // Behind another reading in its deck, the same press means come forward rather than toggle:
-        // one press path, so a card cannot be pressable in one place and dead in another.
-        onClick = onBringForward ?: { onExpandedChange(!expanded) },
-        // Gives under a finger only while it is shut. Open, the card is a screenful of other
-        // controls and the whole of it shrinking for a press in a gap would be the page flinching.
-        modifier = modifier.fillMaxWidth().then(if (expanded) Modifier else Modifier.pressScale(press)),
-        interactionSource = press,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-        // Tonal with no edge since the 2026-11 redesign; the arrival flash still takes one.
-        border = arrivalFlash(highlighted, onHighlightShown),
-        shape = MaterialTheme.shapes.large,
+    Tile(
+        // The whole tile opens the run. Open, a press in a gap of the report closes it again, the
+        // same one press path the card always had - but without giving under the finger, since an
+        // open report is a screenful of other controls and all of it shrinking would be the page
+        // flinching. Behind another reading in its deck, the press means come forward instead.
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (flash != null) Modifier.border(flash, Kit.TileShape) else Modifier)
+            .then(
+                if (expanded) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClickLabel = "Hide report",
+                    ) { onExpandedChange(false) }
+                } else {
+                    Modifier
+                },
+            ),
+        tone = shownTone,
+        onClick = if (expanded) null else (onBringForward ?: { onExpandedChange(true) }),
+        onClickLabel = if (expanded) null else "Open report",
+        contentPadding = PaddingValues(Space.l),
     ) {
-        // Local rather than shared, so the shut layout (a Box pinning a footer to the card's own
-        // bottom edge) and the open one (a plain top-to-bottom flow) can each call the same content
-        // without restating it. See the branch on `expanded` below.
-        @Composable
-        fun header() {
-            // Top-aligned: the heading below runs to two lines and a menu centred against both sits
-            // level with neither. The floor is what keeps two cards in a grid row level: a report
-            // older than a week gets no relative word, and would otherwise stand a line shorter
-            // than the one beside it.
-            Row(Modifier.heightIn(min = RunHeaderHeight), verticalAlignment = Alignment.Top) {
-                // Spaced rather than butted together. Three lines of type at three sizes with
-                // nothing between them read as one block to be picked apart, which is what made
-                // the head of the card feel packed while the foot sat empty.
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    // The session the report is about, which is the first thing anyone reads a
-                    // card for and was previously the raw stored date.
-                    Text(
-                        saved.result.recommendationTargetDate?.format(TARGET_FORMAT)
-                            ?: "Target not recorded",
-                        style = MaterialTheme.typography.titleLarge,
-                    )
-                    // Always its own line, never beside the date. Sharing a line meant the date was
-                    // measured first and the word took what was left, which broke "Yesterday" in
-                    // half on the narrower cards.
-                    saved.result.recommendationTargetDate?.let(::relativeSession)?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.labelMedium,
-                            // Ink, not the accent: this line is not pressable (2026-11 redesign).
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                        )
-                    }
-                    // Two lines, each one line, rather than one line that gave up its tail. The model's
-                    // version date is the part that tells two runs of the same model apart, and the
-                    // single line ended exactly there (`...-07-1...`, `ran 5 Oct...`; seen
-                    // 2026-10-05 at both widths). Split, the run time always has a line of its own
-                    // and the model name loses its middle when it must lose something, which keeps
-                    // its version suffix. Each is still one line, so nothing wraps mid-word.
-                    Text(
-                        "${saved.provider.displayName} · ${saved.model}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.MiddleEllipsis,
-                    )
-                    Text(
-                        "ran " + saved.result.completedAt.atZone(ZoneId.systemDefault())
-                            .format(COMPLETED_FORMAT),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Box {
-                    MoreButton(onClick = { menuOpen = true })
-                    AppMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        AppMenuItem(
-                            "Share as text",
-                            Icons.Outlined.Share,
-                            onClick = { menuOpen = false; onShare() },
-                        )
-                        AppMenuItem(
-                            "Share as Excel",
-                            Icons.Outlined.TableChart,
-                            onClick = { menuOpen = false; onExport() },
-                        )
-                        AppMenuItem(
-                            "Save Excel to Downloads",
-                            Icons.Outlined.Download,
-                            onClick = { menuOpen = false; onSaveLocally() },
-                        )
+        val ink = LocalContentColor.current
+        val soft = ink.copy(alpha = 0.66f)
+        Column(Modifier.heightIn(min = if (expanded) headerMinHeight else 0.dp)) {
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                // A name a person would give the run, then its number and exact time in figures.
+                Text(
+                    runTitle(saved.result.completedAt),
+                    style = MaterialTheme.typography.headlineSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "#${saved.id} · " + saved.result.completedAt.atZone(ScheduleClock.ZONE).format(RUN_META_FORMAT),
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
+                    color = soft,
+                    maxLines = 1,
+                )
+            }
+            Box {
+                KitIconButton(
+                    Icons.Outlined.MoreVert,
+                    label = "Report options",
+                    onClick = { menuOpen = true },
+                    filled = shownTone == TileTone.CARD,
+                    size = 40.dp,
+                )
+                KitMenu(
+                    expanded = menuOpen,
+                    onDismiss = { menuOpen = false },
+                    items = listOfNotNull(
+                        MenuItem("Share as text") { onShare() },
+                        MenuItem("Share as Excel") { onExport() },
+                        MenuItem("Save Excel to Downloads") { onSaveLocally() },
                         // Only where there is something to undo, and its own confirmation rather
-                        // than the quiet Undo a single correction gets: this throws away every
-                        // correction in the report at once, not the one the reader just made.
-                        if (editor.hasEdits) {
-                            AppMenuItem(
-                                "Undo all corrections",
-                                Icons.Outlined.Undo,
-                                onClick = { menuOpen = false; confirmUndoAll = true },
-                            )
-                        }
-                        // Everything above can be done again; this is the one thing on the menu
-                        // that cannot, which is why it is last and the only one that asks first.
-                        AppMenuItem(
-                            "Delete",
-                            Icons.Outlined.Delete,
-                            onClick = { menuOpen = false; confirmDelete = true },
-                            destructive = true,
-                        )
-                    }
-                }
+                        // than the quiet Undo a single correction gets.
+                        if (editor.hasEdits) MenuItem("Undo all corrections") { confirmUndoAll = true } else null,
+                        // The one thing on the menu that cannot be done again, so it is last, red,
+                        // and the only one that asks first.
+                        MenuItem("Delete", danger = true) { confirmDelete = true },
+                    ),
+                )
             }
         }
 
-        // What the run actually read, above the figures rather than under them. Set in the same
-        // small grey as the provider line and placed below the counts, it read as a caption on
-        // them - and which chats a report came out of is the one thing that decides whether its
-        // calls are worth anything. Same size and ink as body copy now, and the icon is what stops
-        // a line of chat names reading as another date.
-        @Composable
-        fun channelRow() {
-            saved.channelNames().takeIf(List<String>::isNotEmpty)?.let { names ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Outlined.Forum,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        // Three names and a count: on its own line above a full-width row it has
-                        // the room the old position under the figures did not.
-                        if (names.size <= 3) {
-                            names.joinToString(" · ")
-                        } else {
-                            names.take(3).joinToString(" · ") + " +${names.size - 3}"
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
+        // The session the calls are for, which is what decides whether they are still live.
+        val target = saved.result.recommendationTargetDate
+        Text(
+            if (target == null) {
+                "Target not recorded"
+            } else {
+                "For " + target.format(TARGET_FORMAT) + (relativeSession(target)?.let { " · $it" } ?: "")
+            },
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.padding(top = Space.m),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        // Which chats a report came out of is the one thing that decides whether its calls are worth
+        // anything, so it is body type rather than a caption.
+        saved.channelNames().takeIf(List<String>::isNotEmpty)?.let { names ->
+            Text(
+                if (names.size <= 3) {
+                    names.joinToString(" · ")
+                } else {
+                    names.take(3).joinToString(" · ") + " +${names.size - 3}"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = soft,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = Space.xs),
+            )
         }
+        Text(
+            saved.provider.displayName + " · " + saved.model,
+            style = MaterialTheme.typography.bodySmall,
+            color = soft,
+            maxLines = 1,
+            overflow = TextOverflow.MiddleEllipsis,
+        )
 
-        @Composable
-        fun figures() {
+        if (expanded) {
+            // Takes up whatever the tabletop floor leaves, so the figures sit on the crease.
+            Spacer(Modifier.weight(1f))
             ReportFigures(
                 stocks = stockCount,
                 calls = callCount,
                 sources = saved.result.sources.size,
                 traded = tradedCount,
+                modifier = Modifier.padding(top = Space.m),
             )
+        } else {
+            // Shut, what a run amounts to is how its calls went: the count, the hits and the stops
+            // in figures, and the bar under them.
+            Text(
+                buildString {
+                    append(if (callCount == 1) "1 call" else "$callCount calls")
+                    if (outcomes.hit > 0) append(" · ${outcomes.hit} hit")
+                    if (outcomes.stopped > 0) append(" · ${outcomes.stopped} stopped")
+                },
+                style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                modifier = Modifier.padding(top = Space.m),
+                maxLines = 1,
+            )
+            if (outcomes.total > 0) {
+                val strip = Outcomes(outcomes.hit, outcomes.stopped, outcomes.expired, outcomes.open)
+                // On the cobalt tile the bar's own open colour is the tile's, so it sits on a white
+                // track there rather than vanishing into its ground.
+                if (shownTone == TileTone.HERO) {
+                    Box(
+                        Modifier
+                            .padding(top = Space.s)
+                            .fillMaxWidth()
+                            .clip(Kit.Capsule)
+                            .background(p.card)
+                            .padding(3.dp),
+                    ) { OutcomeStrip(strip) }
+                } else {
+                    OutcomeStrip(strip, Modifier.padding(top = Space.s))
+                }
+            }
+        }
         }
 
-        // A plain hint rather than a button, now that the whole card is the one thing that opens
-        // and closes it: a second tappable control doing the same job as the card under it was a
-        // control that only sometimes mattered. This is a label, not a control - no clickable of
-        // its own - so the tap it names is answered by the card.
-        @Composable
-        fun tapHint() {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
+        // Which reading of the session this card is, under the figures.
+        stack?.let {
+            val showing by remember(it) { derivedStateOf { it.position().roundToInt() + 1 } }
+            Column(
+                Modifier.fillMaxWidth().padding(top = Space.m),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
             ) {
-                val ink = MaterialTheme.colorScheme.primary
+                PageDots(it.count, it.position)
                 Text(
-                    if (expanded) "Tap to hide report" else "Tap to open report",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ink,
+                    "Run $showing/${it.count}",
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                    color = soft,
                     maxLines = 1,
                 )
-                Icon(
-                    if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                    contentDescription = null,
-                    tint = ink,
-                    modifier = Modifier.padding(start = Space.xs).size(IconSize.Hint),
-                )
             }
         }
 
-        // Which reading of the session this card is. Text under dots reads as one object, where
-        // dots beside text read as two things sharing a line.
-        @Composable
-        fun dots() {
-            stack?.let {
-                // Which run the words name, which is the one more than half in front. Derived
-                // rather than read: the position moves every frame of a drag and this changes
-                // once, so the line recomposes when it has something new to say and not before.
-                val showing by remember(it) {
-                    derivedStateOf { it.position().roundToInt() + 1 }
-                }
-                Column(
-                    Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(Space.xs),
-                ) {
-                    PageDots(it.count, it.position)
-                    Text(
-                        "Run $showing/${it.count}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                    )
-                }
-            }
-        }
-
-        Column(
-            Modifier.padding(Space.m),
-            verticalArrangement = Arrangement.spacedBy(Space.s),
-        ) {
-            if (expanded) {
-                // Open, this card answers to nothing else - only shut cards in a stack are held
-                // to a shared floor (see SavedRunStack.tallest) - so it is a plain top-to-bottom
-                // flow with nothing to pin.
-                header()
-                channelRow()
-                figures()
-                tapHint()
-                dots()
-            } else {
-                // Shut, this card may need to be stretched taller than its own content to match
-                // the tallest shut card in its stack, with the surplus landing above the footer
-                // rather than below it. A `Box` aligning a top group and a bottom group was tried
-                // first and overlapped them: a `Box`'s own height is the *taller* of its children,
-                // not their sum, so whenever the floor fell short of this card's own header-plus-
-                // footer height the footer landed on top of the header instead of below it - which
-                // is exactly what shipped in 3.8.7. A plain sequential `Column` can only ever place
-                // the footer after the header, so it cannot overlap; the one thing left to get
-                // right is how tall the gap between them is, and that is measured rather than
-                // asked for, for the same reason `tallest` above is: intrinsic measurement of a
-                // `SubcomposeLayout` is unsupported, and these cards contain one.
-                //
-                // Each half reports its own natural height - never the gap, which would feed a
-                // figure back into itself - so a card already at or past the floor reports a
-                // number `tallest` already covers and changes nothing, and only a card that turns
-                // out taller than every other reading pushes the floor up to meet it.
-                var topHeightPx by remember { mutableIntStateOf(0) }
-                var footerHeightPx by remember { mutableIntStateOf(0) }
-                // No longer stretched up to the deck's floor (2026-10-05). The surplus used to land
-                // here, so a run in a deck of six sat above a footer with a block of nothing between
-                // them. Each card is its own height now and the footer stays under its figures; the
-                // deck still reads every card's height through `reportHeight` below.
-                val gap = 0.dp
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .onSizeChanged {
-                            topHeightPx = it.height
-                            stack?.reportHeight?.invoke(topHeightPx + footerHeightPx)
-                        },
-                    verticalArrangement = Arrangement.spacedBy(Space.s),
-                ) {
-                    header()
-                    channelRow()
-                    figures()
-                }
-                Spacer(Modifier.height(gap))
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .onSizeChanged {
-                            footerHeightPx = it.height
-                            stack?.reportHeight?.invoke(topHeightPx + footerHeightPx)
-                        },
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(Space.xs),
-                ) {
-                    tapHint()
-                    dots()
-                }
-            }
-
-            AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {
+        AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {
+            Column(Modifier.padding(top = Space.m)) {
                 ResultDetail(
                     saved,
                     peakFor,
@@ -1248,79 +1221,75 @@ private fun SavedAnalysisCard(
         }
     }
 
+    val posture = LocalFoldPosture.current
     if (confirmDelete) {
-        AlertDialog(
-            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-            onDismissRequest = { confirmDelete = false },
-            title = { Text("Delete this analysis?") },
-            text = {
-                Text(
-                    "It will be removed from this device and from your Telegram sync channel, so " +
-                        "every device drops it too, along with any Ask AI answers saved on its " +
-                        "calls. Its calls also stop counting toward every rate on Insights. This " +
-                        "cannot be undone.",
-                )
+        KitDialog(
+            title = "Delete this analysis?",
+            text = "It will be removed from this device and from your Telegram sync channel, so " +
+                "every device drops it too, along with any Ask AI answers saved on its calls. Its " +
+                "calls also stop counting toward every rate on Insights. This cannot be undone.",
+            confirmLabel = "Delete everywhere",
+            onConfirm = {
+                confirmDelete = false
+                onDelete()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmDelete = false
-                        onDelete()
-                    },
-                ) { Text("Delete everywhere") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
-            },
+            dismissLabel = "Keep",
+            onDismiss = { confirmDelete = false },
+            posture = posture,
+            destructive = true,
         )
     }
     if (confirmUndoAll) {
-        AlertDialog(
-            containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-            onDismissRequest = { confirmUndoAll = false },
-            title = { Text("Undo every correction in this report?") },
-            text = {
-                Text(
-                    "Every call goes back to exactly what the model read, and any trade a " +
-                        "correction moved moves back with it. This cannot be undone.",
-                )
+        KitDialog(
+            title = "Undo every correction in this report?",
+            text = "Every call goes back to exactly what the model read, and any trade a correction " +
+                "moved moves back with it. This cannot be undone.",
+            confirmLabel = "Undo all",
+            onConfirm = {
+                confirmUndoAll = false
+                editor.undoAll()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmUndoAll = false
-                        editor.undoAll()
-                    },
-                ) { Text("Undo all") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmUndoAll = false }) { Text("Keep") }
-            },
+            dismissLabel = "Keep",
+            onDismiss = { confirmUndoAll = false },
+            posture = posture,
+            glyph = "↺",
         )
     }
 }
 
 /**
- * What the run amounts to, as one instrument rather than four loose numbers.
- *
- * The instrument itself is [StatStrip], which this used to be: it was lifted into `CommonUi` when
- * the token usage section wanted the same shape, so what is left here is only which four figures a
- * report puts in it. The stock count leads and so takes the page's hue - it is the figure that says
- * how much report there is.
+ * What the open run amounts to: four figures in one panel, each a mono number over its key.
  *
  * [traded] is dropped entirely when the user is in none of the run's calls, rather than shown as a
  * zero: a nought under a label is a figure to work out, where an absent cell is nothing to read.
  */
 @Composable
-private fun ReportFigures(stocks: Int, calls: Int, sources: Int, traded: Int) {
-    StatStrip(
-        buildList {
-            add(stocks.toString() to "stocks")
-            add(calls.toString() to "calls")
-            add(sources.toString() to "sources")
-            if (traded > 0) add(traded.toString() to "traded")
-        },
-    )
+private fun ReportFigures(stocks: Int, calls: Int, sources: Int, traded: Int, modifier: Modifier = Modifier) {
+    val cells = buildList {
+        add(stocks to "stocks")
+        add(calls to "calls")
+        add(sources to "sources")
+        if (traded > 0) add(traded to "traded")
+    }
+    Panel(modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth()) {
+            cells.forEach { (value, label) ->
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        value.toString(),
+                        style = MaterialTheme.typography.headlineMedium.copy(fontFamily = TabularFigures),
+                        maxLines = 1,
+                    )
+                    Text(
+                        label.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = palette.muted,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -1481,22 +1450,10 @@ private fun ResultDetail(
                 Box(Modifier.weight(1f)) {
                     FilterRow(active = narrowed && !compact, onClearAll = clearFilters) {
                         if (compact) {
-                            FilterChip(
-                                selected = narrowed,
+                            KitChip(
+                                label = if (narrowed) "Filters on" else "Filters",
+                                selected = narrowed || filtersOpen,
                                 onClick = { filtersOpen = !filtersOpen },
-                                shape = PillShape,
-                                label = { Text(if (narrowed) "Filters on" else "Filters") },
-                                trailingIcon = {
-                                    Icon(
-                                        if (filtersOpen) {
-                                            Icons.Outlined.ExpandLess
-                                        } else {
-                                            Icons.Outlined.ExpandMore
-                                        },
-                                        contentDescription = null,
-                                        modifier = Modifier.size(IconSize.Inline),
-                                    )
-                                },
                             )
                         } else {
                             Controls()
@@ -1506,12 +1463,10 @@ private fun ResultDetail(
                 // Only beside the table. The compact layout draws cards, which carry every figure
                 // already, so a toggle for four of them would report a state nothing acts on.
                 if (!compact) {
-                    FilterChip(
+                    KitChip(
+                        label = "Context",
                         selected = showContext,
                         onClick = { showContext = !showContext },
-                        shape = PillShape,
-                        label = { Text("Context") },
-                        modifier = Modifier.height(FilterControlHeight),
                     )
                 }
                 // Hard against the right edge and apart from the filters: it closes the report
@@ -1519,12 +1474,7 @@ private fun ResultDetail(
                 // slot - the one the eye starts at, which belongs to what the table is searched by.
                 // A button rather than a text link, and short: it sits beside the filters all the
                 // way down a long table, so every pixel it takes is one the controls lose.
-                OutlinedButton(
-                    onClick = onHide,
-                    shape = PillShape,
-                    contentPadding = PaddingValues(horizontal = Space.m),
-                    modifier = Modifier.height(FilterControlHeight),
-                ) { Text("Hide") }
+                KitButton("Hide", onClick = onHide, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
             }
             if (compact) {
                 AnimatedVisibility(filtersOpen, enter = ExpandIn, exit = CollapseOut) {
@@ -1539,7 +1489,7 @@ private fun ResultDetail(
             Text(
                 "Nothing in this report matches those filters.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = palette.muted,
             )
         }
         // Analyses saved before the consolidated contract have no nested occurrences, so they fall
@@ -1587,10 +1537,12 @@ private fun ResultDetail(
             saved.result.recommendations.forEach { LegacyDetail(it) }
         }
 
-        DisclosureButton(
+        KitButton(
             if (showTrace) "Hide source trace" else "Source trace and diagnostics",
-            expanded = showTrace,
-        ) { showTrace = !showTrace }
+            onClick = { showTrace = !showTrace },
+            kind = ButtonKind.SECONDARY,
+            size = ButtonSize.SMALL,
+        )
         AnimatedVisibility(showTrace, enter = ExpandIn, exit = CollapseOut) { TraceAndDiagnostics(saved, traceRoot) }
     }
 
@@ -1625,17 +1577,17 @@ private fun ResultDetail(
 @Composable
 private fun TraceAndDiagnostics(saved: SavedAnalysis, traceRoot: File) {
     val diagnostics = saved.result.diagnostics
-    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+    Panel(Modifier.fillMaxWidth()) {
         Text("Sources", style = MaterialTheme.typography.titleSmall)
         saved.result.sources.forEach { source ->
             Text(
                 "${source.channelName} · ${source.contentType} · ${source.preview.take(60)}",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = palette.muted,
             )
         }
         if (saved.result.modelExclusions.isNotEmpty()) {
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.height(Space.s))
             // What the model says it dropped. Worth as much attention as what it kept: an
             // over-eager exclusion is invisible everywhere else.
             Text("Excluded by the model", style = MaterialTheme.typography.titleSmall)
@@ -1647,12 +1599,12 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis, traceRoot: File) {
                         dropped.reason.replace('_', ' '),
                     ).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.muted,
                 )
             }
         }
         if (diagnostics.unaccountedImages.isNotEmpty()) {
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.height(Space.s))
             // Neither kept nor rejected. The gap is shown because its absence is what let a card
             // headed with the target session disappear from a report without a word.
             Text("Images the model never mentioned", style = MaterialTheme.typography.titleSmall)
@@ -1660,11 +1612,11 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis, traceRoot: File) {
                 Text(
                     "Image ${missing.reference}: ${missing.caption?.take(80) ?: "no caption"}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.muted,
                 )
             }
         }
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.height(Space.s))
         Text("Diagnostics", style = MaterialTheme.typography.titleSmall)
         Text(
             "${diagnostics.acceptedInputCount}/${diagnostics.inputCount} inputs accepted · " +
@@ -1672,7 +1624,7 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis, traceRoot: File) {
                 "${diagnostics.validationWarnings.size} warnings · " +
                 "${diagnostics.durationMilliseconds} ms",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = palette.muted,
         )
         val traceDirectory = File(traceRoot, saved.result.requestId)
         if (traceDirectory.isDirectory) {
@@ -1681,12 +1633,12 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis, traceRoot: File) {
             Text(
                 "Request trace: ${traceDirectory.listFiles()?.size ?: 0} file(s)",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = palette.muted,
             )
             Text(
                 traceDirectory.path,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = palette.muted,
             )
         }
         if (diagnostics.requestCount > 0) {
@@ -1700,25 +1652,25 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis, traceRoot: File) {
                 "${diagnostics.requestCount} model requests · ${diagnostics.imagesSent} images sent · " +
                     "${diagnostics.unaccountedImages.size} unaccounted$reused",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = palette.muted,
             )
         }
         tokenLine(diagnostics)?.let {
             Text(
                 it,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = palette.muted,
             )
         }
         diagnostics.excludedSources.forEach {
             Text(
                 "Excluded ${it.sourceId}: ${it.reason}",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = palette.muted,
             )
         }
         diagnostics.validationWarnings.forEach {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text(it, style = MaterialTheme.typography.bodySmall, color = palette.loss)
         }
     }
 }
@@ -1726,7 +1678,7 @@ private fun TraceAndDiagnostics(saved: SavedAnalysis, traceRoot: File) {
 /** Detail for analyses saved before the consolidated contract existed. */
 @Composable
 private fun LegacyDetail(recommendation: RecommendationResult) {
-    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+    Panel(Modifier.fillMaxWidth()) {
         Text(
             "${recommendation.ticker} · ${recommendation.companyName}",
             style = MaterialTheme.typography.titleSmall,
@@ -1735,7 +1687,7 @@ private fun LegacyDetail(recommendation: RecommendationResult) {
             "${recommendation.signal}" +
                 (recommendation.confidence?.let { " · ${"%.0f".format(it * 100)}%" } ?: ""),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = palette.ink,
         )
         recommendation.entryLow?.let {
             Text(
@@ -1753,22 +1705,16 @@ private fun LegacyDetail(recommendation: RecommendationResult) {
             Text(it, style = MaterialTheme.typography.bodySmall)
         }
     }
-    HorizontalDivider()
 }
-
-/**
- * A card header's floor, so two of them in a grid row line up.
- *
- * The worst case at default font scale, which every card is then held to: the 28dp target date, the
- * 16dp relative word under it, and 32dp for the provider line where it wraps to its second.
- */
-private val RunHeaderHeight = 76.dp
 
 /** Weekday first: which session a report is about is read as a day before it is read as a date. */
 private val TARGET_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM yyyy")
 
-/** Sits inside a sentence now, so the interpunct that used to separate it would read as a divider. */
-private val COMPLETED_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm")
+/** The run's number and exact time on its tile: `#31 · 9 Nov 09:12`. */
+private val RUN_META_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM HH:mm")
+
+/** The fills the run tiles cycle through, in list order. */
+private val RunTones = listOf(TileTone.HERO, TileTone.HIGHLIGHT, TileTone.CARD)
 
 /** IMAGE_REF is one-based over the images sent with the request. */
 internal fun AnalysisResult.imagePathFor(reference: Int?): String? =

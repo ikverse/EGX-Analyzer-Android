@@ -1,5 +1,9 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.outlined.Close
+import com.ikverse.egxanalyzer.ui.theme.palette
+
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.Image
@@ -117,11 +121,18 @@ internal fun SourceImageThumbnail(
 ) {
     val bitmap = rememberTelegramImage(path, maxPixels = 256)
     if (bitmap == null) {
-        Text(
-            reference?.let { "#$it" } ?: "—",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // The photo has gone from Telegram's cache: the number the model cited, on a ground block
+        // the size the thumbnail would have been, so the row keeps its shape.
+        Box(
+            Modifier.size(size).clip(RoundedCornerShape(12.dp)).background(palette.ground),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                reference?.let { "#$it" } ?: "—",
+                style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                color = palette.muted,
+            )
+        }
         return
     }
     Image(
@@ -130,8 +141,8 @@ internal fun SourceImageThumbnail(
         contentScale = ContentScale.Crop,
         modifier = Modifier
             .size(size)
-            .clip(MaterialTheme.shapes.extraSmall)
-            .clickable(onClick = onOpen),
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClickLabel = "Open the source image", onClick = onOpen),
     )
 }
 
@@ -152,7 +163,8 @@ internal fun SourceImageViewer(path: String?, reference: Int?, onDismiss: () -> 
         Box(
             Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.92f)),
+                // Deep navy ink in both themes: a screenshot is read against dark, whatever the page.
+                .background(ViewerGround),
             contentAlignment = Alignment.Center,
         ) {
             if (bitmap != null) {
@@ -224,12 +236,18 @@ internal fun SourceImageViewer(path: String?, reference: Int?, onDismiss: () -> 
                 )
             }
 
-            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd).padding(Space.m)) {
-                Text("Close", color = Color.White)
-            }
+            com.ikverse.egxanalyzer.ui.kit.KitIconButton(
+                androidx.compose.material.icons.Icons.Outlined.Close,
+                label = "Close",
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(Space.m),
+            )
         }
     }
 }
+
+/** The viewer's ground: the light palette's ink, kept in the dark theme too. */
+private val ViewerGround = Color(0xF2101828)
 
 private const val MaxScale = 6f
 private const val DoubleTapScale = 2.5f

@@ -1,5 +1,22 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import com.ikverse.egxanalyzer.ui.kit.ButtonKind
+import com.ikverse.egxanalyzer.ui.kit.ButtonSize
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.kit.KitCheckbox
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.KitTextField
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.SegmentedControl
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.ui.kit.TileTone
+import com.ikverse.egxanalyzer.ui.theme.palette
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,18 +36,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Undo
 import androidx.compose.material.icons.outlined.Warning
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -97,95 +107,62 @@ internal fun EditCallSheet(
         mutableStateOf(held != null && held.takenFrom(editor.channelOf(point)))
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = SheetShape,
-        containerColor = MaterialTheme.colorScheme.background,
-        dragHandle = { SheetHandle() },
+    // Typed input, so a stray tap outside or a swipe down must not throw two prices and a date
+    // away: only Cancel, Save and back close it.
+    KitSheet(
+        onDismiss = onDismiss,
+        posture = LocalFoldPosture.current,
+        title = "Edit call",
+        dismissOnOutside = false,
     ) {
-        Column(Modifier.fillMaxWidth()) {
-            Column(
-                Modifier
-                    .weight(1f, fill = false)
-                    .sheetDragSlop()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = Space.l),
-                verticalArrangement = Arrangement.spacedBy(Space.l),
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    Text("Edit call", style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        listOfNotNull(
-                            draft.anchor,
-                            timing(point),
-                            editor.sessionOf(point)?.let({ shortDate(it) }),
-                        ).joinToString(" · "),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = PriceRole.muted,
-                    )
-                }
+        SheetTitle(
+            "Edit call",
+            listOfNotNull(
+                draft.anchor,
+                timing(point),
+                editor.sessionOf(point)?.let({ shortDate(it) }),
+            ).joinToString(" · "),
+        )
 
-                StockSection(draft, catalog, clash)
-                LevelsSection(draft)
-                TimingSection(draft)
-                EvidenceSection(draft)
-                ConsequenceSection(
-                    stock = stock,
-                    point = point,
-                    draft = draft,
-                    editor = editor,
-                    held = held,
-                    correctTrade = correctTrade,
-                    onCorrectTrade = { correctTrade = it },
-                )
-            }
+        StockSection(draft, catalog, clash)
+        LevelsSection(draft)
+        TimingSection(draft)
+        EvidenceSection(draft)
+        ConsequenceSection(
+            stock = stock,
+            point = point,
+            draft = draft,
+            editor = editor,
+            held = held,
+            correctTrade = correctTrade,
+            onCorrectTrade = { correctTrade = it },
+        )
 
-            HorizontalDivider()
-            FlowRow(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Space.l, vertical = Space.m),
-                horizontalArrangement = Arrangement.spacedBy(Space.s, Alignment.End),
-                verticalArrangement = Arrangement.spacedBy(Space.xs),
-                itemVerticalAlignment = Alignment.CenterVertically,
-            ) {
-                // The one thing the card's own ⋮ menu used to offer that this sheet didn't: with
-                // that menu gone from the card, undoing a correction is reached from here instead,
-                // where the correction itself is made. Absent when there is nothing on this call to
-                // undo - guarded on this call's own edit, not the report's, so fixing one call does
-                // not offer to throw away a correction made on a different one.
-                if (editor.editFor(stock, point) != null) {
-                    TextButton(
-                        onClick = {
-                            editor.undo(stock, point)
-                            onDismiss()
-                        },
-                    ) {
-                        Icon(
-                            Icons.Outlined.Undo,
-                            contentDescription = null,
-                            modifier = Modifier.size(IconSize.Inline),
-                        )
-                        Spacer(Modifier.width(Space.xs))
-                        Text("Undo this call's edits")
-                    }
-                }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-                ActionPill(
-                    label = "Save",
-                    icon = Icons.Outlined.Check,
-                    // Refused while a field holds something that cannot be read. Saved anyway, the
-                    // field would simply be left out - and if it was the only change, the edit
-                    // would come out empty, which is how a correction is removed.
-                    enabled = draft.hasChanges && draft.isValid,
-                    onClick = {
-                        editor.save(draft.toEdit(), correctTrade)
-                        onDismiss()
-                    },
-                )
-            }
+        // Undoing a correction is reached from here, where the correction itself is made - and only
+        // where this call has one, so fixing one call does not offer to throw away another's.
+        if (editor.editFor(stock, point) != null) {
+            KitButton(
+                "Undo this call's edits",
+                onClick = {
+                    editor.undo(stock, point)
+                    onDismiss()
+                },
+                kind = ButtonKind.SECONDARY,
+                size = ButtonSize.SMALL,
+            )
         }
+        // Refused while a field holds something that cannot be read. Saved anyway, the field would
+        // simply be left out - and if it was the only change, the edit would come out empty, which
+        // is how a correction is removed.
+        SheetButtons(
+            confirmLabel = "Save",
+            enabled = draft.hasChanges && draft.isValid,
+            onConfirm = {
+                editor.save(draft.toEdit(), correctTrade)
+                onDismiss()
+            },
+            onDismiss = onDismiss,
+        )
     }
 }
 
@@ -525,20 +502,17 @@ private fun StockSection(draft: CallDraft, catalog: List<CatalogStock>, clash: S
     }
 
     SheetSection("Stock") {
-        OutlinedTextField(
-            shape = FieldShape,
+        KitTextField(
             value = draft.ticker,
             onValueChange = {
                 draft.ticker = it
                 searching = true
             },
-            label = { Text("Ticker") },
-            singleLine = true,
+            label = "Ticker",
+            was = draft.originalTicker.takeIf { draft.normalizedTicker != it },
+            onPutBack = { draft.ticker = draft.originalTicker },
             modifier = Modifier.fillMaxWidth(),
         )
-        if (draft.normalizedTicker != draft.originalTicker) {
-            WasLine("was ${draft.originalTicker}") { draft.ticker = draft.originalTicker }
-        }
         // Free text is allowed - a listing this build's catalog has never heard of is a real thing,
         // and refusing it would make a new listing uncorrectable - but it is said out loud, because
         // an unknown code is also exactly what a typo looks like and it will not price.
@@ -591,28 +565,25 @@ private fun NameField(
     onType: (String) -> Unit,
     onReset: () -> Unit,
 ) {
-    Column {
-        OutlinedTextField(
-            shape = FieldShape,
-            value = shown,
-            onValueChange = onType,
-            label = { Text(label) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (typed) {
-            WasLine(if (automatic.isBlank()) "catalog has none" else "catalog: $automatic", onReset)
-        }
-    }
+    KitTextField(
+        value = shown,
+        onValueChange = onType,
+        label = label,
+        // What the catalog would have said, under a name the reader typed over.
+        was = if (!typed) null else automatic.ifBlank { "empty in the catalog" },
+        onPutBack = onReset,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable
 private fun CatalogRow(stock: CatalogStock, onPick: () -> Unit) {
-    Surface(
-        onClick = onPick,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.small,
-        modifier = Modifier.fillMaxWidth(),
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(Kit.FieldShape)
+            .background(palette.card)
+            .clickable(onClick = onPick),
     ) {
         Row(
             Modifier.padding(horizontal = Space.m, vertical = Space.s),
@@ -676,15 +647,14 @@ private fun LevelsSection(draft: CallDraft) {
 @Composable
 private fun TimingSection(draft: CallDraft) {
     SheetSection("Timing") {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            TIMING_BASES.forEach { (value, label) ->
-                FilterChip(
-                    selected = draft.basis == value,
-                    onClick = { draft.basis = if (draft.basis == value) null else value },
-                    label = { Text(label) },
-                )
-            }
-        }
+        // One of four, side by side: none of the three bases, or one of them.
+        SegmentedControl(
+            options = listOf<String?>(null) + TIMING_BASES.map { it.first },
+            selected = draft.basis,
+            onSelect = { draft.basis = it },
+            label = { value -> TIMING_BASES.firstOrNull { it.first == value }?.second ?: "None" },
+            modifier = Modifier.fillMaxWidth(),
+        )
         DraftTextField(draft.visibleSourceDate, "Source date, as printed")
         // The occurrence's own target date. It usually decides nothing - a call is dated by the
         // session the run was aimed at, and this is only read where that is absent - which is
@@ -699,10 +669,12 @@ private fun TimingSection(draft: CallDraft) {
 private fun EvidenceSection(draft: CallDraft) {
     var open by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        DisclosureButton(
+        KitButton(
             if (open) "Hide notes and evidence" else "Notes and evidence",
-            expanded = open,
-        ) { open = !open }
+            onClick = { open = !open },
+            kind = ButtonKind.SECONDARY,
+            size = ButtonSize.SMALL,
+        )
         AnimatedVisibility(open, enter = ExpandIn, exit = CollapseOut) {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                 DraftTextField(draft.recommendationType, "Recommendation type")
@@ -746,16 +718,10 @@ private fun ConsequenceSection(
     val staying = editor.callsUnder(stock.stockCode) - 1
     val joining = editor.callsUnder(target)
     val blocked = moved && held != null && editor.holds(target, session)
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            Modifier.padding(Space.m),
-            verticalArrangement = Arrangement.spacedBy(Space.xs),
-        ) {
-            SectionLabel("What saving changes")
+    // Sunflower, the tile a warning about what happens elsewhere is drawn on.
+    Tile(Modifier.fillMaxWidth(), tone = TileTone.TILE1) {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            SectionLabel("What saving changes", LocalContentColor.current.copy(alpha = 0.7f))
             if (moved) {
                 Consequence("This call moves from ${stock.stockCode} to $target.")
                 if (joining > 0) {
@@ -799,7 +765,11 @@ private fun ConsequenceSection(
                     horizontalArrangement = Arrangement.spacedBy(Space.s),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Checkbox(checked = correctTrade, onCheckedChange = onCorrectTrade)
+                    KitCheckbox(
+                        checked = correctTrade,
+                        onCheckedChange = onCorrectTrade,
+                        label = "Also correct the trade taken on it",
+                    )
                     Column(Modifier.weight(1f)) {
                         Text(
                             "Also correct the trade taken on it",
@@ -808,7 +778,7 @@ private fun ConsequenceSection(
                         Text(
                             trade.describe(),
                             style = MaterialTheme.typography.labelMedium,
-                            color = PriceRole.muted,
+                            color = LocalContentColor.current.copy(alpha = 0.7f),
                         )
                     }
                 }
@@ -822,7 +792,7 @@ private fun Consequence(text: String, tone: Color? = null) {
     Text(
         text,
         style = MaterialTheme.typography.bodyMedium,
-        color = tone ?: MaterialTheme.colorScheme.onSurface,
+        color = tone ?: LocalContentColor.current,
     )
 }
 
@@ -835,13 +805,13 @@ private fun Caution(text: String) {
         Icon(
             Icons.Outlined.Warning,
             contentDescription = null,
-            tint = extraColors.expired,
+            tint = palette.loss,
             modifier = Modifier.size(IconSize.Inline),
         )
         Text(
             text,
             style = MaterialTheme.typography.labelMedium,
-            color = extraColors.expired,
+            color = LocalContentColor.current,
         )
     }
 }
@@ -855,11 +825,11 @@ private fun SheetSection(title: String, content: @Composable ColumnScope.() -> U
 }
 
 @Composable
-private fun SectionLabel(text: String) {
+private fun SectionLabel(text: String, color: Color = palette.muted) {
     Text(
         text.uppercase(),
         style = MaterialTheme.typography.labelSmall,
-        color = PriceRole.muted,
+        color = color,
         fontWeight = FontWeight.Bold,
     )
 }
@@ -883,23 +853,15 @@ private fun DraftTextField(
     modifier: Modifier = Modifier,
     unreadable: String = "Can't be read",
 ) {
-    Column(modifier) {
-        OutlinedTextField(
-            shape = FieldShape,
-            value = field.text,
-            onValueChange = { field.text = it },
-            label = { Text(label) },
-            singleLine = true,
-            isError = !field.isValid,
-            supportingText = if (field.isValid) null else { { Text(unreadable) } },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (field.changed) {
-            WasLine(if (field.original.isBlank()) "was empty" else "was ${field.original}") {
-                field.reset()
-            }
-        }
-    }
+    KitTextField(
+        value = field.text,
+        onValueChange = { field.text = it },
+        label = label,
+        error = unreadable.takeUnless { field.isValid },
+        was = if (!field.changed) null else field.original.ifBlank { "empty" },
+        onPutBack = { field.reset() },
+        modifier = modifier.fillMaxWidth(),
+    )
 }
 
 @Composable
@@ -911,15 +873,14 @@ private fun DraftNumberField(
     percent: (() -> Double?)? = null,
 ) {
     Column(modifier) {
-        OutlinedTextField(
-            shape = FieldShape,
+        KitTextField(
             value = field.text,
             onValueChange = { field.text = it },
-            label = { Text(label) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            isError = !field.isValid,
-            supportingText = if (field.isValid) null else { { Text("Not a number") } },
+            label = label,
+            figure = true,
+            error = "Not a number".takeUnless { field.isValid },
+            was = if (!field.changed) null else field.original.ifBlank { "empty" },
+            onPutBack = { field.reset() },
             modifier = Modifier.fillMaxWidth(),
         )
         // Recomputed as the reader types, through the scorer's own basis, so a figure and the
@@ -927,41 +888,11 @@ private fun DraftNumberField(
         percent?.invoke()?.let {
             Text(
                 signedPercent(it),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
                 color = (tone ?: PriceRole.muted).copy(alpha = DERIVED_ALPHA),
-                modifier = Modifier.padding(start = Space.m),
+                modifier = Modifier.padding(top = Space.xs),
             )
         }
-        if (field.changed) {
-            WasLine(if (field.original.isBlank()) "was empty" else "was ${field.original}") {
-                field.reset()
-            }
-        }
-    }
-}
-
-/**
- * What the model read, under the field that has replaced it.
- *
- * The muted grey a derived figure is already drawn in, because it is the same kind of statement -
- * this number did not come from where the numbers beside it came from. Pressing it puts the field
- * back, which is what makes trying a correction free.
- */
-@Composable
-private fun WasLine(text: String, onReset: () -> Unit) {
-    Row(
-        Modifier
-            .clickable(onClick = onReset)
-            .padding(start = Space.m, top = Space.xs),
-        horizontalArrangement = Arrangement.spacedBy(Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(text, style = MaterialTheme.typography.labelMedium, color = PriceRole.muted)
-        Text(
-            "undo",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-        )
     }
 }
 
@@ -973,13 +904,8 @@ internal fun EditedChip(onClick: () -> Unit) {
     // stacked they were the tallest thing on the card. Tertiary rather than primary: the pill under
     // it may already be the app's own T+1, and two primary rings in one column read as one control
     // split in half.
-    val tone = MaterialTheme.colorScheme.tertiary
-    OutlinePill(
-        "Edited",
-        outline = tone,
-        textColor = MaterialTheme.colorScheme.onTertiaryContainer,
-        onClick = onClick,
-    )
+    // Filled, so a corrected call is told apart from the hairline timing chip beside it.
+    com.ikverse.egxanalyzer.ui.kit.KitChip(label = "Edited", selected = true, onClick = onClick)
 }
 
 private fun signedPercent(value: Double): String =

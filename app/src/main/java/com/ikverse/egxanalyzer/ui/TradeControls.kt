@@ -1,5 +1,27 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.material3.LocalContentColor
+import com.ikverse.egxanalyzer.ui.theme.palette
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.TileTone
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.ui.kit.SegmentedControl
+import com.ikverse.egxanalyzer.ui.kit.KitStepper
+import com.ikverse.egxanalyzer.ui.kit.KitTextField
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.KitDialog
+import com.ikverse.egxanalyzer.ui.kit.ButtonSize
+import com.ikverse.egxanalyzer.ui.kit.ButtonKind
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.kit.Kit
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -180,7 +202,7 @@ internal fun TradeAction(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (held == null) {
-            ActionPill("Bought", Icons.Outlined.AddShoppingCart, onClick = { buying = true })
+            KitButton("I bought it", onClick = { buying = true }, size = ButtonSize.SMALL, icon = Icons.Outlined.AddShoppingCart)
         } else {
             PositionStatusChip(held)
             // The same warning the Portfolio card carries, on the card the trade was taken from:
@@ -299,11 +321,12 @@ internal fun KeepOpenButton(
     modifier: Modifier = Modifier,
 ) {
     var asking by remember { mutableStateOf(false) }
-    ActionPill(
+    KitButton(
         "Keep open",
-        Icons.Outlined.HourglassEmpty,
         onClick = { asking = true },
         modifier = modifier,
+        kind = ButtonKind.SECONDARY,
+        size = ButtonSize.SMALL,
     )
 
     if (asking) {
@@ -327,39 +350,27 @@ internal fun KeepOpenButton(
 @Composable
 private fun KeepOpenDialog(onDismiss: () -> Unit, onConfirm: (String?) -> Unit) {
     var note by remember { mutableStateOf("") }
-
-    AlertDialog(
-        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-        onDismissRequest = onDismiss,
-        title = { Text("Keep this trade open?") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Text(
-                    "It stops closing on its own. The deadline, target 1 and the stop all stop " +
-                        "ending it, and it stays open until you record a sale with Sold - or " +
-                        "until it reaches target 2, which finishes any trade. What the call " +
-                        "itself did is still tracked and still shown.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    shape = FieldShape,
-                    value = note,
-                    onValueChange = { note = it },
-                    label = { Text("Why (optional)") },
-                    singleLine = true,
-                    supportingText = { Text("Shown on the card, so the reason outlives the decision.") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(note.trim().takeIf(String::isNotBlank)) },
-            ) { Text("Keep open") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    KitDialog(
+        title = "Keep this trade open?",
+        text = "It stops closing on its own. The deadline, target 1 and the stop all stop ending " +
+            "it, and it stays open until you record a sale with Sold - or until it reaches target " +
+            "2, which finishes any trade. What the call itself did is still tracked and still shown.",
+        confirmLabel = "Keep open",
+        onConfirm = { onConfirm(note.trim().takeIf(String::isNotBlank)) },
+        dismissLabel = "Cancel",
+        onDismiss = onDismiss,
+        posture = LocalFoldPosture.current,
+        tone = TileTone.TILE3,
+        glyph = "‖",
+    ) {
+        KitTextField(note, { note = it }, label = "Why (optional)", modifier = Modifier.padding(top = Space.m).fillMaxWidth())
+        Text(
+            "Shown on the card, so the reason outlives the decision.",
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.muted,
+            modifier = Modifier.padding(top = Space.xs),
+        )
+    }
 }
 
 /**
@@ -395,7 +406,7 @@ internal fun SellButton(
             onOpened()
         }
     }
-    ActionPill("Sold", Icons.Outlined.Sell, onClick = { selling = true }, modifier = modifier)
+    KitButton("Sold", onClick = { selling = true }, modifier = modifier, size = ButtonSize.SMALL)
     if (selling) {
         SellDialog(
             held = held,
@@ -455,6 +466,10 @@ internal fun SellDialog(
     var split by remember {
         mutableStateOf(formatPrice(existing?.splitPct ?: HALF_SPLIT_PCT))
     }
+    // The mode is its own choice, not worked out from the number. Worked out from it, emptying the
+    // field to type a new split made the split "not two parts" for one keystroke, and the field the
+    // reader was typing into left the screen with the keyboard still up.
+    var twoParts by remember { mutableStateOf((existing?.splitPct ?: HALF_SPLIT_PCT) < FULL_SPLIT_PCT) }
     var date1 by remember { mutableStateOf((existing?.date1 ?: LocalDate.now()).toString()) }
     var date2 by remember { mutableStateOf((existing?.date2 ?: LocalDate.now()).toString()) }
 
@@ -465,126 +480,161 @@ internal fun SellDialog(
     val parsedDate2 = remember(date2) { runCatching { LocalDate.parse(date2.trim()) }.getOrNull() }
     // The whole lot at one price is the sale this dialog collapses to, and it asks two fewer
     // questions rather than asking them and ignoring the answers.
-    val inTwoParts = parsedSplit != null && parsedSplit < FULL_SPLIT_PCT
+    val inTwoParts = twoParts
     // Rejected rather than silently reordered. The two parts are typed together, so a second date
     // before the first is a typo, and a dialog that quietly swapped them would store a day the
     // user never gave.
     val datesInOrder = !inTwoParts || parsedDate1 == null || parsedDate2 == null ||
         !parsedDate2.isBefore(parsedDate1)
     val sale = when {
-        parsedPrice1 == null || parsedSplit == null || parsedDate1 == null -> null
+        parsedPrice1 == null || parsedDate1 == null -> null
         !inTwoParts -> Sale(price1 = parsedPrice1, date1 = parsedDate1)
+        parsedSplit == null -> null
+        // A split of the whole holding is one price, however the mode was reached.
+        parsedSplit >= FULL_SPLIT_PCT -> Sale(price1 = parsedPrice1, date1 = parsedDate1)
         parsedPrice2 == null || parsedDate2 == null || !datesInOrder -> null
         else -> Sale(parsedPrice1, parsedDate1, parsedPrice2, parsedDate2, parsedSplit)
     }
 
-    AlertDialog(
-        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-        onDismissRequest = onDismiss,
-        // Tapping outside used to close this and lose whatever had been typed. Only Cancel does now.
-        properties = DialogProperties(dismissOnClickOutside = false),
-        title = { Text(if (existing != null) "Edit the sale" else "Record the sale") },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(Space.m),
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-            ) {
-                Text(
-                    if (existing != null) {
-                        "The prices you actually sold at. A call names two targets and the " +
-                            "usual way out is half at the first and the rest at the second, so " +
-                            "both are offered - set the share to 100% where the whole holding " +
-                            "went at one price. Every figure this trade reports is measured " +
-                            "from what is saved here."
-                    } else {
-                        "The prices you actually sold at. A call names two targets and the " +
-                            "usual way out is half at the first and the rest at the second, so " +
-                            "both are offered - set the share to 100% where the whole holding " +
-                            "went at one price. The position closes now, whether or not the " +
-                            "recommendation's sessions have run out."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    val p = palette
+    // **A kit sheet since 5.0**, as on the canvas: one price or two parts, the split drawn as a bar,
+    // each part's price and day, and what the position closes at before it is saved. A tap outside
+    // or a swipe does not close it, so two typed prices cannot be lost by accident.
+    KitSheet(
+        onDismiss = onDismiss,
+        posture = LocalFoldPosture.current,
+        title = if (existing != null) "Edit the sale" else "Record the sale",
+        dismissOnOutside = false,
+    ) {
+        SheetTitle(
+            if (existing != null) "Edit the sale" else "Record the sale",
+            "${position.ticker} · bought ${formatPrice(position.entryPrice)} on ${shortDate(position.entryDate)}",
+        )
+        SegmentedControl(
+            options = listOf(false, true),
+            selected = inTwoParts,
+            onSelect = { chosen ->
+                twoParts = chosen
+                // A fresh half only where there is no usable split already, so switching back and
+                // forth does not throw away a figure the reader typed.
+                if (chosen && (parsedSplit == null || parsedSplit >= FULL_SPLIT_PCT)) split = formatPrice(HALF_SPLIT_PCT)
+            },
+            label = { if (it) "In two parts" else "At one price" },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (inTwoParts) {
+            Tile(modifier = Modifier.fillMaxWidth()) {
+                Text("How the holding was split", style = MaterialTheme.typography.labelMedium, color = p.muted)
+                // The bar follows a figure it can draw; the field under it stays put either way.
+                if (parsedSplit != null) Row(Modifier.padding(top = Space.s).fillMaxWidth().height(44.dp).clip(Kit.PanelShape), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Box(Modifier.weight(parsedSplit.toFloat()).fillMaxHeight().background(p.highlight), contentAlignment = Alignment.Center) {
+                        Text("${formatPrice(parsedSplit)}%", style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures), color = p.onTile)
+                    }
+                    Box(Modifier.weight((FULL_SPLIT_PCT - parsedSplit).toFloat().coerceAtLeast(0.01f)).fillMaxHeight().background(p.hero), contentAlignment = Alignment.Center) {
+                        Text("${formatPrice(FULL_SPLIT_PCT - parsedSplit)}%", style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures), color = p.onHero)
+                    }
+                }
+                KitTextField(
+                    split, { split = it },
+                    label = "Sold at the target 1 price (%)",
+                    figure = true,
+                    error = if (parsedSplit == null) "Between 1 and 100." else null,
+                    modifier = Modifier.padding(top = Space.m).fillMaxWidth(),
                 )
-                OutlinedTextField(
-                    shape = FieldShape,
-                    value = price1,
-                    onValueChange = { price1 = it },
-                    label = { Text(if (inTwoParts) "Target 1 price" else "Selling price") },
-                    singleLine = true,
-                    isError = price1.isNotBlank() && parsedPrice1 == null,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+            Tile(modifier = Modifier.weight(1f), tone = if (inTwoParts) TileTone.HIGHLIGHT else TileTone.CARD) {
+                if (inTwoParts) Text("First part", style = MaterialTheme.typography.titleSmall)
+                KitTextField(
+                    price1, { price1 = it },
+                    label = if (inTwoParts) "Target 1 price" else "Selling price",
+                    figure = true,
+                    error = if (price1.isNotBlank() && parsedPrice1 == null) "Not a price" else null,
+                    modifier = Modifier.padding(top = Space.s).fillMaxWidth(),
                 )
                 DateField(
-                    label = if (inTwoParts) "Target 1 date" else "Selling date",
+                    label = if (inTwoParts) "Date" else "Selling date",
                     value = date1,
                     onValueChange = { date1 = it },
                     isError = parsedDate1 == null,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.padding(top = Space.s).fillMaxWidth(),
                 )
-                OutlinedTextField(
-                    shape = FieldShape,
-                    value = split,
-                    onValueChange = { split = it },
-                    label = { Text("Sold at this price (%)") },
-                    singleLine = true,
-                    isError = parsedSplit == null,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    supportingText = {
-                        Text(
-                            when {
-                                parsedSplit == null -> "Between 1 and 100."
-                                inTwoParts -> "The rest went at the target 2 price below."
-                                else -> "The whole holding, at the one price above."
-                            },
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (inTwoParts) {
-                    OutlinedTextField(
-                        shape = FieldShape,
-                        value = price2,
-                        onValueChange = { price2 = it },
-                        label = { Text("Target 2 price") },
-                        singleLine = true,
-                        isError = price2.isNotBlank() && parsedPrice2 == null,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth(),
+            }
+            if (inTwoParts) {
+                Tile(modifier = Modifier.weight(1f), tone = TileTone.HERO) {
+                    Text("Second part", style = MaterialTheme.typography.titleSmall)
+                    KitTextField(
+                        price2, { price2 = it },
+                        label = "Target 2 price",
+                        figure = true,
+                        error = if (price2.isNotBlank() && parsedPrice2 == null) "Not a price" else null,
+                        modifier = Modifier.padding(top = Space.s).fillMaxWidth(),
                     )
                     DateField(
-                        label = "Target 2 date",
+                        label = "Date",
                         value = date2,
                         onValueChange = { date2 = it },
                         isError = parsedDate2 == null || !datesInOrder,
-                        supportingText = "The second part cannot have gone before the first."
-                            .takeIf { !datesInOrder },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                // What the position will actually carry, before it carries it. Every figure on the
-                // card is measured from this one number, and a reader who has just typed two
-                // prices has no way to check it otherwise.
-                sale?.takeIf(Sale::inTwoParts)?.let { pending ->
-                    Text(
-                        "Closes at ${formatPrice(pending.blended)} - the two prices weighted " +
-                            "${formatPrice(pending.splitPct)} / " +
-                            "${formatPrice(FULL_SPLIT_PCT - pending.splitPct)}.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = Space.s).fillMaxWidth(),
                     )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = sale != null,
-                onClick = { onConfirm(sale ?: return@TextButton) },
-            ) { Text(if (existing != null) "Save" else "Close position") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+        }
+        if (!datesInOrder) {
+            Text("The second part cannot have gone before the first.", style = MaterialTheme.typography.labelMedium, color = p.loss)
+        }
+        // What the position will actually carry, before it carries it. Every figure on the card is
+        // measured from this one number, and a reader who has just typed two prices has no way to
+        // check it otherwise.
+        sale?.let { pending ->
+            Tile(modifier = Modifier.fillMaxWidth(), tone = TileTone.INK) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Closes at ${formatPrice(pending.blended)}", style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures))
+                        if (pending.inTwoParts) {
+                            Text(
+                                "the two prices weighted ${formatPrice(pending.splitPct)} / ${formatPrice(FULL_SPLIT_PCT - pending.splitPct)}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                    val ret = (pending.blended - position.entryPrice) / position.entryPrice * 100
+                    Text(formatPercent(ret), style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures), color = if (ret < 0) p.loss else p.highlight)
+                }
+            }
+        }
+        Text(
+            if (existing != null) "Every figure this trade reports is measured from what is saved here."
+            else "The position closes now, whether or not the recommendation's sessions have run out.",
+            style = MaterialTheme.typography.bodySmall,
+            color = p.muted,
+        )
+        SheetButtons(
+            confirmLabel = if (existing != null) "Save" else "Close position",
+            enabled = sale != null,
+            onConfirm = { sale?.let(onConfirm) },
+            onDismiss = onDismiss,
+        )
+    }
+}
+
+/** A sheet's own heading: the title, and one line saying what it is about. */
+@Composable
+internal fun SheetTitle(title: String, subtitle: String) {
+    Column(Modifier.padding(horizontal = Space.xs)) {
+        Text(title, style = MaterialTheme.typography.headlineMedium, color = palette.ink)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = palette.muted)
+    }
+}
+
+/** Cancel and the sheet's one confirming action, at its foot, the confirming one wider. */
+@Composable
+internal fun SheetButtons(confirmLabel: String, enabled: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(top = Space.s), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+        KitButton("Cancel", onClick = onDismiss, kind = ButtonKind.SECONDARY, size = ButtonSize.LARGE, modifier = Modifier.weight(1f))
+        KitButton(confirmLabel, onClick = onConfirm, enabled = enabled, size = ButtonSize.LARGE, modifier = Modifier.weight(2f))
+    }
 }
 
 /**
@@ -596,7 +646,6 @@ internal fun SellDialog(
  * reader gets there. Read-only rather than disabled, so it keeps the same look as the fields
  * beside it instead of greying out.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DateField(
     label: String,
@@ -607,48 +656,41 @@ private fun DateField(
     modifier: Modifier = Modifier,
 ) {
     var picking by remember { mutableStateOf(false) }
-    Box(modifier) {
-        OutlinedTextField(
-            shape = FieldShape,
-            value = value,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text(label) },
-            singleLine = true,
-            isError = isError,
-            supportingText = supportingText?.let { { Text(it) } },
-            trailingIcon = { Icon(Icons.Outlined.CalendarMonth, contentDescription = null) },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        // A read-only field still claims its own clicks for focus and a cursor it will never show,
-        // so the picker is opened from a transparent layer above it rather than the field's own
-        // onClick - there isn't one.
-        Box(Modifier.matchParentSize().clickable(onClick = { picking = true }))
+    val p = palette
+    // A kit field the calendar fills: the same white field and label as the price beside it, with
+    // the date set in figures and the calendar glyph saying how it is changed.
+    Column(modifier) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = LocalContentColor.current.copy(alpha = 0.8f))
+        Row(
+            Modifier
+                .padding(top = 6.dp)
+                .fillMaxWidth()
+                .height(52.dp)
+                .clip(Kit.FieldShape)
+                .background(p.card)
+                .border(BorderStroke(if (isError) 2.dp else 1.5.dp, if (isError) p.loss else p.line), Kit.FieldShape)
+                .clickable(role = Role.Button, onClickLabel = "Choose $label") { picking = true }
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val shown = runCatching { LocalDate.parse(value.trim()) }.getOrNull()?.let { shortDate(it) } ?: value
+            Text(shown, style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures), color = p.ink, modifier = Modifier.weight(1f))
+            Icon(Icons.Outlined.CalendarMonth, contentDescription = null, tint = p.muted, modifier = Modifier.size(20.dp))
+        }
+        supportingText?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = p.loss, modifier = Modifier.padding(top = 4.dp)) }
     }
     if (picking) {
-        val initial = runCatching { LocalDate.parse(value.trim()) }.getOrNull() ?: LocalDate.now()
-        val state = rememberDatePickerState(
-            initialSelectedDateMillis = initial.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
-        )
-        DatePickerDialog(
-            onDismissRequest = { picking = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        state.selectedDateMillis?.let { millis ->
-                            onValueChange(
-                                Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
-                                    .toString(),
-                            )
-                        }
-                        picking = false
-                    },
-                ) { Text("OK") }
+        // The kit's own calendar since 5.0, in a sheet over the one this field sits in.
+        com.ikverse.egxanalyzer.ui.kit.KitCalendarSheet(
+            title = label,
+            selected = runCatching { LocalDate.parse(value.trim()) }.getOrNull() ?: LocalDate.now(),
+            onPick = { picked ->
+                onValueChange(picked.toString())
+                picking = false
             },
-            dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } },
-        ) {
-            DatePicker(state = state)
-        }
+            onDismiss = { picking = false },
+            posture = com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture.current,
+        )
     }
 }
 
@@ -702,30 +744,23 @@ internal fun TradeDialog(
     // is one thing and the app believes is another, and they would not find out for a month.
     val parsedWindow = remember(window) { window.toWindowOrNull() }
     val windowValid = initialWindow == null || parsedWindow != null
+    val p = palette
 
-    AlertDialog(
-        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-        onDismissRequest = onDismiss,
-        // Tapping outside used to close this and lose whatever had been typed. Only Cancel does now.
-        properties = DialogProperties(dismissOnClickOutside = false),
-        title = { Text(title) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                Text(
-                    explanation,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    shape = FieldShape,
-                    value = price,
-                    onValueChange = { price = it },
-                    label = { Text(priceLabel) },
-                    singleLine = true,
-                    isError = price.isNotBlank() && parsedPrice == null,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+    // **A kit sheet since 5.0**: the price large on a cobalt tile, the day and the window beside each
+    // other under it, and what the window means said underneath. A tap outside does not close it.
+    KitSheet(onDismiss = onDismiss, posture = LocalFoldPosture.current, title = title, dismissOnOutside = false) {
+        SheetTitle(title, explanation.substringBefore(". ") + ".")
+        Tile(modifier = Modifier.fillMaxWidth(), tone = TileTone.HERO) {
+            KitTextField(
+                price, { price = it },
+                label = priceLabel,
+                figure = true,
+                error = if (price.isNotBlank() && parsedPrice == null) "Not a price" else null,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+            Tile(modifier = Modifier.weight(1f)) {
                 DateField(
                     label = dateLabel,
                     value = date,
@@ -733,42 +768,43 @@ internal fun TradeDialog(
                     isError = parsedDate == null,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (initialWindow != null) {
-                    OutlinedTextField(
-                        shape = FieldShape,
-                        value = window,
-                        onValueChange = { window = it },
-                        label = { Text("Trade window") },
-                        singleLine = true,
-                        isError = parsedWindow == null,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        supportingText = {
-                            Text(
-                                if (parsedWindow == null) {
-                                    "Between ${Scoring.MIN_WINDOW_SESSIONS} and " +
-                                        "${Scoring.MAX_WINDOW_SESSIONS} trading sessions."
-                                } else {
-                                    windowHelp
-                                },
-                            )
-                        },
-                        modifier = Modifier.fillMaxWidth(),
+            }
+            if (initialWindow != null) {
+                Tile(modifier = Modifier.weight(1f)) {
+                    Text("Trade window", style = MaterialTheme.typography.labelMedium, color = p.muted)
+                    KitStepper(
+                        value = parsedWindow ?: initialWindow,
+                        onValueChange = { window = it.toString() },
+                        range = Scoring.MIN_WINDOW_SESSIONS..Scoring.MAX_WINDOW_SESSIONS,
+                        label = "Trade window",
+                        modifier = Modifier.padding(top = Space.s),
+                    )
+                    Text(
+                        "sessions · ${Scoring.MIN_WINDOW_SESSIONS} to ${Scoring.MAX_WINDOW_SESSIONS}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = p.muted,
+                        modifier = Modifier.padding(top = Space.xs),
                     )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = parsedPrice != null && parsedDate != null && windowValid,
-                onClick = {
-                    val value = parsedPrice ?: return@TextButton
-                    val on = parsedDate ?: return@TextButton
-                    onConfirm(value, on, parsedWindow)
-                },
-            ) { Text(confirmLabel) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+        }
+        if (initialWindow != null && windowHelp.isNotBlank()) {
+            Tile(modifier = Modifier.fillMaxWidth(), tone = TileTone.TILE3) {
+                Text(windowHelp, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Text(explanation, style = MaterialTheme.typography.bodySmall, color = p.muted)
+        SheetButtons(
+            confirmLabel = confirmLabel,
+            enabled = parsedPrice != null && parsedDate != null && windowValid,
+            onConfirm = {
+                val value = parsedPrice ?: return@SheetButtons
+                val on = parsedDate ?: return@SheetButtons
+                onConfirm(value, on, parsedWindow)
+            },
+            onDismiss = onDismiss,
+        )
+    }
 }
 
 /**

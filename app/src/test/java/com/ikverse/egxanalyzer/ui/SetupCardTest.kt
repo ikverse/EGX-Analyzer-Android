@@ -21,6 +21,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * The card that tells a stranger what this app still needs.
@@ -32,6 +33,8 @@ import org.robolectric.RobolectricTestRunner
  * shipped switched off. Neither shows up in a build.
  */
 @RunWith(RobolectricTestRunner::class)
+// The cover screen's real size: the 5.0 checklist is taller than Robolectric's default window.
+@Config(qualifiers = "w411dp-h891dp")
 class SetupCardTest {
 
     @get:Rule

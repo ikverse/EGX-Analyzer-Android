@@ -1,41 +1,48 @@
 package com.ikverse.egxanalyzer.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import com.ikverse.egxanalyzer.model.RuleRejection
 import com.ikverse.egxanalyzer.model.RuleKind
 import com.ikverse.egxanalyzer.model.RuleOrigin
+import com.ikverse.egxanalyzer.model.RuleRejection
 import com.ikverse.egxanalyzer.model.RuleScope
 import com.ikverse.egxanalyzer.model.RuleSlot
 import com.ikverse.egxanalyzer.model.WordingRule
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.kit.KitDialog
+import com.ikverse.egxanalyzer.ui.kit.KitExpandable
+import com.ikverse.egxanalyzer.ui.kit.KitIconButton
+import com.ikverse.egxanalyzer.ui.kit.KitRule
+import com.ikverse.egxanalyzer.ui.kit.KitSwitch
+import com.ikverse.egxanalyzer.ui.kit.KitTextField
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.ui.kit.TileTone
 import java.util.UUID
 
 /**
@@ -51,7 +58,7 @@ internal fun AnalysisRulesSection(appState: AppState) {
     var editing by remember { mutableStateOf<WordingRule?>(null) }
     val rules = appState.ruleSet.all
 
-    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         RuleKind.entries.forEach { kind ->
             WordingList(
                 kind = kind,
@@ -118,66 +125,67 @@ private fun WordingList(
     val mine = rules.filter { it.origin == RuleOrigin.USER }
     val shipped = rules.filter { it.origin == RuleOrigin.BUILT_IN }
     var showShipped by remember { mutableStateOf(false) }
+    val include = kind == RuleKind.INCLUDE
+    val title = if (include) "Included wordings" else "Excluded wordings"
 
-    val title = if (kind == RuleKind.INCLUDE) "Included wordings" else "Excluded wordings"
-    SectionCard(
-        title = title,
-        about = infoNote(
-            title,
-            if (kind == RuleKind.INCLUDE) {
-                "A message carrying one of these is analysed whatever else it says, and the model " +
-                    "is told to prioritise it."
-            } else {
-                "A message carrying one of these is dropped before anything is sent, and the model " +
-                    "is told to exclude it."
-            },
-        ),
-    ) {
-        if (mine.isEmpty()) {
-            Text(
-                "Nothing added yet.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        mine.forEach { rule ->
-            HorizontalDivider()
-            RuleRow(rule, onEdit = { onEdit(rule) }, onDelete = { onDelete(rule) }) { on ->
-                onToggle(rule, on)
-            }
-        }
-
-        SettingsButton(onClick = onAdd, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(IconSize.Inline))
-            Spacer(Modifier.width(Space.s))
-            Text("Add wording")
-        }
-
-        // Out of the way but never hidden: these are load bearing, and one of them misfiring on a
-        // newly added channel is exactly the moment someone needs to find them.
-        if (shipped.isNotEmpty()) {
-            HorizontalDivider()
-            TextButton(onClick = { showShipped = !showShipped }) {
+    // Lime for what keeps a message, coral for what drops one: the two lists are told apart by
+    // their tile before a word on them is read.
+    Tile(Modifier.fillMaxWidth(), tone = if (include) TileTone.HIGHLIGHT else TileTone.ALERT) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                 Text(
-                    if (showShipped) {
-                        "Hide the ${shipped.size} phrases the app ships with"
-                    } else {
-                        "${shipped.size} phrases the app ships with · " +
-                            "${shipped.count(WordingRule::enabled)} on"
-                    },
+                    if (include) "a message must say one" else "a message saying one is skipped",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = 0.78f),
                 )
             }
-            AnimatedVisibility(showShipped, enter = ExpandIn, exit = CollapseOut) {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            InfoButton(
+                infoNote(
+                    title,
+                    if (include) {
+                        "A message carrying one of these is analysed whatever else it says, and the model " +
+                            "is told to prioritise it."
+                    } else {
+                        "A message carrying one of these is dropped before anything is sent, and the model " +
+                            "is told to exclude it."
+                    },
+                ),
+            )
+        }
+        Column(Modifier.padding(top = Space.s)) {
+            if (mine.isEmpty()) {
+                Text(
+                    "Nothing added yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = 0.78f),
+                    modifier = Modifier.padding(vertical = 6.dp),
+                )
+            }
+            mine.forEach { rule ->
+                KitRule(color = LocalContentColor.current.copy(alpha = 0.14f))
+                RuleRow(rule, onEdit = { onEdit(rule) }, onDelete = { onDelete(rule) }) { on -> onToggle(rule, on) }
+            }
+
+            // Out of the way but never hidden: these are load bearing, and one of them misfiring on
+            // a newly added channel is exactly the moment someone needs to find them.
+            if (shipped.isNotEmpty()) {
+                KitExpandable(
+                    title = if (showShipped) {
+                        "The ${shipped.size} phrases the app ships with"
+                    } else {
+                        "${shipped.size} phrases the app ships with · ${shipped.count(WordingRule::enabled)} on"
+                    },
+                    expanded = showShipped,
+                    onExpandedChange = { showShipped = it },
+                    modifier = Modifier.padding(top = Space.s),
+                    fill = LocalContentColor.current.copy(alpha = 0.08f),
+                ) {
                     // One reason per group of shipped wording, printed once rather than under every
                     // row, where it buried the phrases it was meant to explain.
                     shipped.groupBy(WordingRule::note).forEach { (note, group) ->
                         note?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = LocalContentColor.current.copy(alpha = 0.72f))
                         }
                         group.forEach { rule ->
                             RuleRow(rule, onEdit = {}, onDelete = {}) { on -> onToggle(rule, on) }
@@ -185,6 +193,13 @@ private fun WordingList(
                     }
                 }
             }
+
+            KitButton(
+                "Add wording",
+                onClick = onAdd,
+                modifier = Modifier.fillMaxWidth().padding(top = Space.s),
+                icon = Icons.Outlined.Add,
+            )
         }
     }
 }
@@ -196,44 +211,40 @@ private fun RuleRow(
     onDelete: () -> Unit,
     onToggle: (Boolean) -> Unit,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-            if (rule.origin == RuleOrigin.BUILT_IN) {
-                Icon(
-                    Icons.Outlined.Lock,
-                    contentDescription = "Built in",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp),
-                )
-                Spacer(Modifier.width(Space.xs))
-            }
-            Column {
+    val quiet = LocalContentColor.current.copy(alpha = 0.72f)
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (rule.origin == RuleOrigin.BUILT_IN) {
+            Icon(Icons.Outlined.Lock, contentDescription = "Built in", tint = quiet, modifier = Modifier.size(14.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            // Right to left whatever the phone's language: these are Arabic phrases, and set left
+            // to right they read from the wrong end.
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                 Text(
                     rule.phrase,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (rule.enabled) {
-                        MaterialTheme.colorScheme.onSurface
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (rule.enabled) LocalContentColor.current else quiet,
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                rule.note?.takeIf { rule.origin == RuleOrigin.USER }?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
+            Text(
+                listOfNotNull(
+                    if (rule.origin == RuleOrigin.USER) "yours" else null,
+                    rule.note?.takeIf { rule.origin == RuleOrigin.USER },
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = quiet,
+            )
         }
-        Switch(checked = rule.enabled, onCheckedChange = onToggle)
+        KitSwitch(checked = rule.enabled, onCheckedChange = onToggle, label = rule.phrase)
         if (rule.origin == RuleOrigin.USER) {
-            IconButton(onClick = onEdit) {
-                Icon(Icons.Outlined.Edit, contentDescription = "Edit", modifier = Modifier.size(IconSize.Inline))
-            }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Outlined.Delete, contentDescription = "Delete", modifier = Modifier.size(IconSize.Inline))
-            }
+            KitIconButton(Icons.Outlined.Edit, "Edit", onClick = onEdit, size = 36.dp)
+            KitIconButton(Icons.Outlined.Delete, "Delete", onClick = onDelete, size = 36.dp)
         }
     }
 }
@@ -248,51 +259,39 @@ private fun RuleEditor(
     var phrase by remember(rule.id) { mutableStateOf(rule.phrase) }
     var note by remember(rule.id) { mutableStateOf(rule.note.orEmpty()) }
     var rejection by remember(rule.id) { mutableStateOf<String?>(null) }
+    val include = rule.kind == RuleKind.INCLUDE
 
-    AlertDialog(
-        containerColor = Glass.solid(MaterialTheme.colorScheme.surfaceContainerHigh),
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                (if (existing) "Edit" else "Add") +
-                    if (rule.kind == RuleKind.INCLUDE) " included wording" else " excluded wording",
+    KitDialog(
+        title = (if (existing) "Edit" else "Add") + if (include) " included wording" else " excluded wording",
+        text = if (include) "A message saying this is kept and analysed." else "A message saying this is skipped before anything is sent.",
+        confirmLabel = "Save",
+        onConfirm = {
+            val refused = onSave(rule.copy(phrase = phrase, note = note.trim().ifBlank { null }))
+            if (refused == null) onDismiss() else rejection = refused.message
+        },
+        dismissLabel = "Cancel",
+        onDismiss = onDismiss,
+        posture = LocalFoldPosture.current,
+        tone = if (include) TileTone.HIGHLIGHT else TileTone.ALERT,
+        glyph = if (include) "+" else "−",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            KitTextField(
+                value = phrase,
+                onValueChange = {
+                    phrase = it
+                    rejection = null
+                },
+                label = "Phrase",
+                modifier = Modifier.fillMaxWidth(),
+                error = rejection,
             )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                OutlinedTextField(
-                    shape = FieldShape,
-                    value = phrase,
-                    onValueChange = {
-                        phrase = it
-                        rejection = null
-                    },
-                    label = { Text("Phrase") },
-                    isError = rejection != null,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    shape = FieldShape,
-                    value = note,
-                    onValueChange = { note = it },
-                    label = { Text("Note (optional)") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                rejection?.let {
-                    Text(
-                        it,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val refused = onSave(rule.copy(phrase = phrase, note = note.trim().ifBlank { null }))
-                if (refused == null) onDismiss() else rejection = refused.message
-            }) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+            KitTextField(
+                value = note,
+                onValueChange = { note = it },
+                label = "Note (optional)",
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
 }

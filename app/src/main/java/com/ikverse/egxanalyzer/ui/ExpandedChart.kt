@@ -7,33 +7,29 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -44,11 +40,15 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -56,6 +56,19 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.ikverse.egxanalyzer.model.FoldPosture
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import com.ikverse.egxanalyzer.ui.kit.KitDialog
+import com.ikverse.egxanalyzer.ui.kit.KitIconButton
+import com.ikverse.egxanalyzer.ui.kit.KitMenu
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.KitSwitchFace
+import com.ikverse.egxanalyzer.ui.kit.KitTextField
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.MenuItem
+import com.ikverse.egxanalyzer.ui.kit.SegmentedControl
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.ui.theme.palette
 import com.ikverse.egxanalyzer.model.DailySession
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -82,7 +95,6 @@ import org.json.JSONObject
  * Indicators sheet opens, when the chart closes, and when the app is put in the background, and
  * keeps them through [onIndicators] and [onDrawings]. Device-local, never synced or backed up.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ExpandedChart(
     ticker: String,
@@ -98,19 +110,28 @@ internal fun ExpandedChart(
     drawings: String?,
     onDrawings: (String?) -> Unit,
     onClose: () -> Unit,
+    /** The newest call's session, which is where the Call range starts. Null with no call. */
+    newestCall: LocalDate? = null,
 ) {
     var style by remember { mutableStateOf(ChartStyle.CANDLES) }
     var on by remember { mutableStateOf(ChartIndicator.known(indicators)) }
-    // Handed to the page once, on its first payload; after that the page holds the drawings and the
-    // app only ever reads them back.
-    val firstDrawings = remember { drawings }
+    // Handed to a page on its first payload; after that the page holds the drawings and the app only
+    // reads them back. Kept current from every read rather than frozen at opening, because a fold
+    // rebuilds the web view, and the new page is seeded from this - frozen, it lost every line drawn
+    // since the chart was opened.
+    var seedDrawings by remember { mutableStateOf(drawings) }
     var drawOpen by remember { mutableStateOf(false) }
     var armed by remember { mutableStateOf<ChartTool?>(null) }
     var askNote by remember { mutableStateOf(false) }
     var indicatorsOpen by remember { mutableStateOf(false) }
+    var styleMenu by remember { mutableStateOf(false) }
     val bridge = remember { ChartBridge() }
-    val visible = remember(history, range) { history.within(range) }
+    // A stored Call range on a stock nobody has called is a month, never an empty box.
+    val effective = if (range == ChartRange.CALL && newestCall == null) ChartRange.MONTH else range
+    val visible = remember(history, effective, newestCall) { history.within(effective, newestCall) }
     val move = remember(history) { history.lastMove() }
+    val posture = LocalFoldPosture.current
+    val p = palette
 
     val keepIndicators by rememberUpdatedState(onIndicators)
     val keepDrawings by rememberUpdatedState(onDrawings)
@@ -122,7 +143,10 @@ internal fun ExpandedChart(
                 if (next != on) on = next
                 keepIndicators(next)
             }
-            state.optJSONArray("drawings")?.let { keepDrawings(it.toString()) }
+            state.optJSONArray("drawings")?.let {
+                seedDrawings = it.toString()
+                keepDrawings(it.toString())
+            }
         }
         then()
     }
@@ -140,7 +164,13 @@ internal fun ExpandedChart(
     LaunchedEffect(armed) {
         while (armed != null) {
             delay(350)
-            bridge.pull { state -> if (state != null && !state.optBoolean("drawing")) armed = null }
+            bridge.pull { state ->
+                if (state != null && !state.optBoolean("drawing")) {
+                    // The tool's last point has landed: take the finished line into keeping now.
+                    keep(state)
+                    armed = null
+                }
+            }
         }
     }
     fun arm(tool: ChartTool) {
@@ -156,207 +186,420 @@ internal fun ExpandedChart(
             }
         }
     }
+    val undo = {
+        bridge.run("egxChart.undo()")
+        armed = null
+        bridge.pull { keep(it) }
+    }
+    val clearAll = {
+        bridge.run("egxChart.clearDrawings()")
+        armed = null
+        bridge.pull { keep(it) }
+    }
+    fun toggleIndicator(indicator: ChartIndicator, checked: Boolean) {
+        on = if (checked) on + indicator.id else on - indicator.id
+        onIndicators(on)
+    }
+    val openIndicators = { bridge.pull { keep(it) { indicatorsOpen = !indicatorsOpen } } }
 
-    Dialog(
-        onDismissRequest = close,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.fillMaxSize()) {
-                Row(
-                    Modifier.fillMaxWidth().padding(end = Space.l),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // A round tonal button, as in the page header (2026-11 redesign).
-                    IconButton(
-                        onClick = close,
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            contentColor = MaterialTheme.colorScheme.onSurface,
-                        ),
-                        modifier = Modifier.padding(Space.xs),
-                    ) {
-                        Icon(Icons.Outlined.Close, contentDescription = "Close chart")
-                    }
-                    Text(ticker, style = MaterialTheme.typography.titleLarge)
-                    // The last close and the day it made, as TradingView's symbol header has them.
-                    if (move != null) {
-                        Spacer(Modifier.width(Space.m))
-                        Text(
-                            formatPrice(move.close),
-                            style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
-                        )
-                        Spacer(Modifier.width(Space.s))
-                        Text(
-                            (if (move.change > 0) "+" else "") + formatPrice(move.change) + " (" + formatPercent(move.percent) + ")",
-                            style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
-                            color = PriceRole.forReturn(move.change),
-                        )
-                    }
+    @Composable
+    fun header(withRange: Boolean) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            KitIconButton(Icons.Outlined.Close, label = "Close chart", onClick = close, size = 44.dp)
+            Column(Modifier.weight(1f)) {
+                Text(ticker, style = MaterialTheme.typography.headlineSmall, color = p.ink)
+                if (move != null) {
+                    Text(
+                        formatPrice(move.close) + " · " + (if (move.change > 0) "+" else "") + formatPrice(move.change) +
+                            " (" + formatPercent(move.percent) + ")",
+                        style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                        color = if (move.change >= 0) p.gain else p.loss,
+                    )
                 }
-                Row(
-                    Modifier.fillMaxWidth().scrollableRow().padding(horizontal = Space.m),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ChartRange.entries.forEach { option ->
-                        CompactFilterChip(
-                            label = option.label,
-                            selected = option == range,
-                            onClick = { onRange(option) },
-                        )
-                    }
-                    Spacer(Modifier.width(Space.m))
-                    Box {
-                        var menu by remember { mutableStateOf(false) }
-                        CompactFilterChip(label = style.label + " ▾", selected = false, onClick = { menu = true })
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            ChartStyle.entries.forEach { option ->
-                                DropdownMenuItem(
-                                    text = { Text(option.label, style = MaterialTheme.typography.bodyMedium) },
-                                    onClick = {
-                                        style = option
-                                        menu = false
-                                    },
-                                    trailingIcon = if (option == style) ({ Text("✓") }) else null,
+            }
+            if (withRange) RangeRow(effective, newestCall != null, onRange, compact = true)
+        }
+    }
+
+    @Composable
+    fun toolbar() {
+        Row(
+            Modifier.fillMaxWidth().scrollableRow().padding(horizontal = 14.dp).padding(bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box {
+                ToolChip(style.label + " ▾", fill = p.highlight, ink = p.onTile, bold = true) { styleMenu = true }
+                KitMenu(
+                    expanded = styleMenu,
+                    onDismiss = { styleMenu = false },
+                    items = ChartStyle.entries.map { option ->
+                        MenuItem(option.label + if (option == style) "  ✓" else "") { style = option }
+                    },
+                )
+            }
+            ToolChip(
+                if (on.isEmpty()) "Indicators" else "Indicators · ${on.size}",
+                fill = if (indicatorsOpen) p.ink else p.raised,
+                ink = if (indicatorsOpen) p.onInk else p.ink,
+                onClick = openIndicators,
+            )
+            ToolChip(
+                "Draw",
+                fill = if (drawOpen) p.ink else p.raised,
+                ink = if (drawOpen) p.onInk else p.ink,
+            ) {
+                if (drawOpen && armed != null) {
+                    bridge.run("egxChart.cancel()")
+                    armed = null
+                }
+                drawOpen = !drawOpen
+            }
+            // Absent rather than disabled where there is nothing to draw, as in the sheet.
+            if (levels != null) {
+                ToolChip(
+                    if (showLevels) "Levels ✓" else "Levels",
+                    fill = if (showLevels) p.hero else p.raised,
+                    ink = if (showLevels) p.onHero else p.ink,
+                ) { onLevels(!showLevels) }
+            }
+            ToolChip("Undo", fill = p.raised, ink = p.ink, onClick = undo)
+            ToolChip("Clear all", fill = p.raised, ink = p.ink, onClick = clearAll)
+        }
+    }
+
+    @Composable
+    fun chart(modifier: Modifier) {
+        val theme = chartTheme()
+        val payload = remember(visible, levels, calls, style, showLevels, theme, ticker, effective, on) {
+            ExpandedChartJson.build(
+                sessions = visible,
+                levels = levels,
+                calls = calls,
+                style = style,
+                showLevels = showLevels && levels != null,
+                theme = theme,
+                key = "$ticker|${effective.name}|${style.id}|$showLevels",
+                indicators = on,
+                drawings = seedDrawings,
+            )
+        }
+        if (LocalInspectionMode.current) {
+            Box(modifier, contentAlignment = Alignment.Center) {
+                Text("Chart: $ticker, ${visible.size} sessions", style = MaterialTheme.typography.bodySmall, color = p.muted)
+            }
+        } else {
+            ChartWebView(payload, theme.surface, bridge, modifier)
+        }
+    }
+
+    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        CompositionLocalProvider(LocalContentColor provides p.ink) {
+            Box(Modifier.fillMaxSize().background(p.ground)) {
+                when (posture) {
+                    is FoldPosture.Tabletop -> {
+                        // The chart stands on the upright half; every control lies on the flat one.
+                        val crease = posture.hingeStartFraction.coerceIn(0.3f, 0.8f)
+                        Column(Modifier.fillMaxSize()) {
+                            Column(Modifier.fillMaxWidth().weight(crease)) {
+                                header(withRange = false)
+                                chart(Modifier.fillMaxWidth().weight(1f))
+                            }
+                            Column(
+                                Modifier.fillMaxWidth().weight(1f - crease).scrollableColumn().padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                RangeGrid(effective, newestCall != null, onRange, levels != null, showLevels, onLevels)
+                                SegmentedControl(
+                                    options = ChartStyle.entries,
+                                    selected = style,
+                                    onSelect = { style = it },
+                                    label = { it.label.substringBefore(" ") },
+                                    modifier = Modifier.fillMaxWidth(),
                                 )
+                                ToolChip(
+                                    if (on.isEmpty()) "Indicators" else "Indicators · ${on.size}",
+                                    fill = p.raised,
+                                    ink = p.ink,
+                                    onClick = openIndicators,
+                                )
+                                Text("DRAW", style = MaterialTheme.typography.labelSmall, color = p.muted)
+                                ToolGrid(armed, ::arm, undo, clearAll)
                             }
                         }
                     }
-                    CompactFilterChip(
-                        label = if (on.isEmpty()) "Indicators" else "Indicators · ${on.size}",
-                        selected = false,
-                        onClick = { bridge.pull { keep(it) { indicatorsOpen = true } } },
-                    )
-                    CompactFilterChip(
-                        label = "Draw",
-                        selected = drawOpen,
-                        toggle = true,
-                        onClick = {
-                            if (drawOpen && armed != null) {
-                                bridge.run("egxChart.cancel()")
-                                armed = null
+                    is FoldPosture.Unfolded, is FoldPosture.Book -> {
+                        // The chart with its toolbar on one side; the indicators docked on the other
+                        // while they are open, the split falling on the hinge in book posture.
+                        val side = if (posture is FoldPosture.Book) 1f - posture.hingeEndFraction else 0.33f
+                        Row(Modifier.fillMaxSize()) {
+                            Column(Modifier.weight(1f - if (indicatorsOpen) side else 0f).fillMaxHeight()) {
+                                header(withRange = true)
+                                toolbar()
+                                if (drawOpen) Box(Modifier.padding(horizontal = 14.dp).padding(bottom = 10.dp)) { ToolGrid(armed, ::arm, undo, clearAll) }
+                                chart(Modifier.fillMaxWidth().weight(1f))
                             }
-                            drawOpen = !drawOpen
-                        },
-                    )
-                    // Absent rather than disabled where there is nothing to draw, as in the sheet.
-                    if (levels != null) {
-                        CompactFilterChip(
-                            label = "Levels",
-                            selected = showLevels,
-                            toggle = true,
-                            onClick = { onLevels(!showLevels) },
-                        )
-                    }
-                }
-                if (drawOpen) {
-                    Row(
-                        Modifier.fillMaxWidth().scrollableRow().padding(horizontal = Space.m),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        ChartTool.entries.forEach { tool ->
-                            CompactFilterChip(label = tool.label, selected = armed == tool, onClick = { arm(tool) })
+                            if (indicatorsOpen) {
+                                Column(
+                                    Modifier
+                                        .weight(side)
+                                        .fillMaxHeight()
+                                        .background(p.raised.copy(alpha = 0.5f))
+                                        .scrollableColumn()
+                                        .padding(16.dp),
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Indicators", style = MaterialTheme.typography.headlineSmall, color = p.ink, modifier = Modifier.weight(1f))
+                                        KitIconButton(Icons.Outlined.Close, label = "Close indicators", onClick = { indicatorsOpen = false }, size = 36.dp)
+                                    }
+                                    IndicatorRows(on, ::toggleIndicator)
+                                }
+                            }
                         }
-                        Spacer(Modifier.width(Space.m))
-                        CompactFilterChip(label = "Undo", selected = false, onClick = {
-                            bridge.run("egxChart.undo()")
-                            armed = null
-                        })
-                        CompactFilterChip(label = "Clear all", selected = false, onClick = {
-                            bridge.run("egxChart.clearDrawings()")
-                            armed = null
-                        })
                     }
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                val theme = chartTheme()
-                val payload = remember(visible, levels, calls, style, showLevels, theme, ticker, range, on) {
-                    ExpandedChartJson.build(
-                        sessions = visible,
-                        levels = levels,
-                        calls = calls,
-                        style = style,
-                        showLevels = showLevels && levels != null,
-                        theme = theme,
-                        key = "$ticker|${range.name}|${style.id}|$showLevels",
-                        indicators = on,
-                        drawings = firstDrawings,
-                    )
-                }
-                if (LocalInspectionMode.current) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Chart: $ticker, ${visible.size} sessions", style = MaterialTheme.typography.bodySmall)
+                    else -> {
+                        Column(Modifier.fillMaxSize()) {
+                            header(withRange = false)
+                            toolbar()
+                            if (drawOpen) Box(Modifier.padding(horizontal = 14.dp).padding(bottom = 10.dp)) { ToolGrid(armed, ::arm, undo, clearAll) }
+                            chart(Modifier.fillMaxWidth().weight(1f))
+                            Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                                RangeRow(effective, newestCall != null, onRange, compact = false)
+                            }
+                        }
                     }
-                } else {
-                    ChartWebView(payload, theme.surface, bridge, Modifier.fillMaxSize())
                 }
             }
         }
-        if (indicatorsOpen) {
-            ModalBottomSheet(
-                onDismissRequest = { indicatorsOpen = false },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                shape = SheetShape,
-                containerColor = MaterialTheme.colorScheme.background,
-                dragHandle = { SheetHandle() },
-            ) {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .scrollableColumn()
-                        .padding(horizontal = Space.l)
-                        .padding(bottom = Space.xl),
-                    verticalArrangement = Arrangement.spacedBy(Space.s),
-                ) {
-                    Text("Indicators", style = MaterialTheme.typography.headlineSmall)
-                    listOf(true to "On the price", false to "Below the price").forEach { (overPrice, heading) ->
-                        Text(
-                            heading,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = Space.s),
-                        )
-                        ChartIndicator.entries.filter { it.overPrice == overPrice }.forEach { indicator ->
-                            SettingToggle(
-                                label = indicator.label,
-                                checked = indicator.id in on,
-                                onCheckedChange = { checked ->
-                                    on = if (checked) on + indicator.id else on - indicator.id
-                                    onIndicators(on)
-                                },
-                            )
-                        }
-                    }
-                }
+        // Folded and in tabletop the indicators are a sheet; unfolded they are docked beside.
+        if (indicatorsOpen && posture !is FoldPosture.Unfolded && posture !is FoldPosture.Book) {
+            KitSheet(onDismiss = { indicatorsOpen = false }, posture = posture, title = "Indicators") {
+                Text("Indicators", style = MaterialTheme.typography.headlineMedium, color = p.ink)
+                Tile(Modifier.fillMaxWidth()) { IndicatorRows(on, ::toggleIndicator) }
             }
         }
         if (askNote) {
             var text by remember { mutableStateOf("") }
-            AlertDialog(
-                onDismissRequest = { askNote = false },
-                title = { Text("Note") },
-                text = {
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it.take(80) },
-                        singleLine = true,
-                        placeholder = { Text("Then tap the chart where it goes") },
-                    )
+            KitDialog(
+                title = "Note",
+                text = "Type the note, then tap the chart where it goes.",
+                confirmLabel = "Place",
+                onConfirm = {
+                    if (text.isNotBlank()) {
+                        bridge.run("egxChart.draw('note', ${JSONObject.quote(text.trim())})")
+                        armed = ChartTool.NOTE
+                    }
+                    askNote = false
                 },
-                confirmButton = {
-                    TextButton(
-                        enabled = text.isNotBlank(),
-                        onClick = {
-                            bridge.run("egxChart.draw('note', ${JSONObject.quote(text.trim())})")
-                            armed = ChartTool.NOTE
-                            askNote = false
-                        },
-                    ) { Text("Place") }
-                },
-                dismissButton = { TextButton(onClick = { askNote = false }) { Text("Cancel") } },
-            )
+                dismissLabel = "Cancel",
+                onDismiss = { askNote = false },
+                posture = posture,
+                glyph = "✎",
+            ) {
+                KitTextField(
+                    value = text,
+                    onValueChange = { text = it.take(80) },
+                    label = "Note",
+                    modifier = Modifier.fillMaxWidth().padding(top = Space.m),
+                )
+            }
+        }
+    }
+}
+
+/** A chip on the chart's toolbar: a capsule in [fill], its word in [ink]. */
+@Composable
+private fun ToolChip(label: String, fill: Color, ink: Color, bold: Boolean = false, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
+    Box(
+        Modifier
+            .minimumInteractiveComponentSize()
+            .pressScale(press)
+            .height(40.dp)
+            .clip(Kit.Capsule)
+            .background(fill)
+            .clickable(interactionSource = press, indication = null, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (bold) FontWeight.Bold else FontWeight.SemiBold,
+            color = ink,
+            maxLines = 1,
+        )
+    }
+}
+
+/** The ranges as one row of capsules, the chosen one in ink. [compact] sizes them for a header. */
+@Composable
+private fun RangeRow(range: ChartRange, hasCall: Boolean, onRange: (ChartRange) -> Unit, compact: Boolean) {
+    val p = palette
+    Row(horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp)) {
+        ChartRange.entries.filter { hasCall || it != ChartRange.CALL }.forEach { option ->
+            val chosen = option == range
+            val press = remember { MutableInteractionSource() }
+            Box(
+                Modifier
+                    .then(if (compact) Modifier else Modifier.weight(1f))
+                    .minimumInteractiveComponentSize()
+                    .pressScale(press)
+                    .height(40.dp)
+                    .clip(Kit.Capsule)
+                    .background(if (chosen) p.ink else p.raised)
+                    .clickable(interactionSource = press, indication = null, role = Role.Button) { onRange(option) }
+                    .semantics { selected = chosen }
+                    .padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    option.label,
+                    style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                    fontWeight = if (chosen) FontWeight.Bold else FontWeight.Medium,
+                    color = if (chosen) p.onInk else p.ink,
+                )
+            }
+        }
+    }
+}
+
+/** Tabletop's ranges: a grid of tall capsules, with Levels as its last cell where there are levels. */
+@Composable
+private fun RangeGrid(
+    range: ChartRange,
+    hasCall: Boolean,
+    onRange: (ChartRange) -> Unit,
+    hasLevels: Boolean,
+    showLevels: Boolean,
+    onLevels: (Boolean) -> Unit,
+) {
+    val p = palette
+    val cells = ChartRange.entries.filter { hasCall || it != ChartRange.CALL }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        cells.forEach { option ->
+            val chosen = option == range
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .clip(Kit.Capsule)
+                    .background(if (chosen) p.ink else p.raised)
+                    .clickable(role = Role.Button) { onRange(option) }
+                    .semantics { selected = chosen },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    option.label,
+                    style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                    color = if (chosen) p.onInk else p.ink,
+                )
+            }
+        }
+        if (hasLevels) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .clip(Kit.Capsule)
+                    .background(if (showLevels) p.hero else p.raised)
+                    .clickable(role = Role.Button) { onLevels(!showLevels) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Levels", style = MaterialTheme.typography.labelLarge, color = if (showLevels) p.onHero else p.ink)
+            }
+        }
+    }
+}
+
+/**
+ * The drawing tools as a grid of tiles, four across: the tool's glyph over its name, the armed one
+ * in sunflower, then Undo, and Clear all in the loss colour.
+ */
+@Composable
+private fun ToolGrid(armed: ChartTool?, onArm: (ChartTool) -> Unit, onUndo: () -> Unit, onClear: () -> Unit) {
+    val p = palette
+    data class Cell(val glyph: String, val label: String, val lit: Boolean, val danger: Boolean, val onClick: () -> Unit)
+    val cells = ChartTool.entries.map { tool ->
+        Cell(tool.glyph(), tool.label, armed == tool, false) { onArm(tool) }
+    } + listOf(
+        Cell("↶", "Undo", false, false, onUndo),
+        Cell("⌫", "Clear all", false, true, onClear),
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        cells.chunked(4).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { cell ->
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .height(56.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(
+                                when {
+                                    cell.lit -> p.tile1
+                                    cell.danger -> p.loss.copy(alpha = 0.14f)
+                                    else -> p.raised
+                                },
+                            )
+                            .clickable(role = Role.Button, onClick = cell.onClick)
+                            .semantics { selected = cell.lit },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        val ink = when {
+                            cell.lit -> p.onTile
+                            cell.danger -> p.loss
+                            else -> p.ink
+                        }
+                        Text(cell.glyph, style = MaterialTheme.typography.titleMedium, color = ink)
+                        Text(cell.label, style = MaterialTheme.typography.labelSmall, color = ink, maxLines = 1)
+                    }
+                }
+                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+/** A drawing tool's glyph on its tile. */
+private fun ChartTool.glyph(): String = when (this) {
+    ChartTool.TREND -> "╱"
+    ChartTool.RAY -> "↗"
+    ChartTool.HLINE -> "━"
+    ChartTool.HRAY -> "→"
+    ChartTool.VLINE -> "┃"
+    ChartTool.CHANNEL -> "⫽"
+    ChartTool.FIB -> "≡"
+    ChartTool.NOTE -> "✎"
+}
+
+/** The indicators, over the price and under it, each with a kit switch. */
+@Composable
+private fun IndicatorRows(on: Set<String>, onToggle: (ChartIndicator, Boolean) -> Unit) {
+    val p = palette
+    listOf(true to "ON THE PRICE", false to "BELOW THE PRICE").forEach { (overPrice, heading) ->
+        Text(heading, style = MaterialTheme.typography.labelSmall, color = p.muted, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
+        ChartIndicator.entries.filter { it.overPrice == overPrice }.forEach { indicator ->
+            val checked = indicator.id in on
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(p.ground)
+                    .toggleable(value = checked, role = Role.Switch, onValueChange = { onToggle(indicator, it) })
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(indicator.label, style = MaterialTheme.typography.bodyMedium, color = p.ink, modifier = Modifier.weight(1f), maxLines = 1)
+                KitSwitchFace(checked)
+            }
         }
     }
 }
@@ -479,7 +722,9 @@ private fun ChartWebView(payload: String, background: Color, bridge: ChartBridge
                 }
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, url: String?) {
-                        bridge.loaded = true
+                        // Only the view the bridge holds: a page finishing in a view already
+                        // being replaced must not mark the new one ready before it is.
+                        if (bridge.view === view) bridge.loaded = true
                     }
 
                     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
@@ -491,22 +736,28 @@ private fun ChartWebView(payload: String, background: Color, bridge: ChartBridge
 
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = true
                 }
-                loadUrl("file:///android_asset/chart/chart.html")
+                bridge.loaded = false
                 bridge.view = this
+                loadUrl("file:///android_asset/chart/chart.html")
             }
         },
         onRelease = {
-            bridge.view = null
-            bridge.loaded = false
+            // A fold moves the chart into another branch of the layout, so a new web view is built
+            // and this one released - in either order. Only the view the bridge still holds is
+            // taken off it; clearing it unconditionally left the bridge empty and the chart blank.
+            if (bridge.view === it) {
+                bridge.view = null
+                bridge.loaded = false
+            }
             it.destroy()
         },
     )
 }
 
 /** The sessions inside [range], counted back from the newest one held rather than from today. */
-internal fun List<DailySession>.within(range: ChartRange): List<DailySession> {
+internal fun List<DailySession>.within(range: ChartRange, callOn: LocalDate? = null): List<DailySession> {
     val anchor = lastOrNull()?.date ?: return this
-    val since = range.since(anchor)
+    val since = range.since(anchor, callOn)
     return filter { !it.date.isBefore(since) }
 }
 
@@ -523,24 +774,31 @@ internal data class ChartTheme(
     val target: String,
     val entry: String,
     val paid: String,
+    /** The page's own buttons: their fill, and the ink of the one that is on. */
+    val raised: String = "#E2DFD5",
+    val onInk: String = "#FFFFFF",
 )
 
 @Composable
 private fun chartTheme(): ChartTheme {
-    val scheme = MaterialTheme.colorScheme
+    // The kit palette in force, so the chart follows the app's light or dark theme: the page's
+    // ground, ink and muted grey, the hairline, gain and loss, cobalt for the line, and the levels
+    // in the colours the sheet draws them in.
+    val p = palette
     return ChartTheme(
-        surface = scheme.surface,
-        text = hex(scheme.onSurface),
-        muted = hex(scheme.onSurfaceVariant),
-        rule = hex(scheme.outlineVariant),
-        // The same two colours the sheet draws a gain and a loss in.
-        up = hex(PriceRole.target),
-        down = hex(PriceRole.stop),
-        line = hex(PriceRole.market),
-        stop = hex(PriceRole.stop),
-        target = hex(PriceRole.target),
-        entry = hex(PriceRole.entry),
-        paid = hex(scheme.outline),
+        surface = p.ground,
+        text = hex(p.ink),
+        muted = hex(p.muted),
+        rule = hex(p.line),
+        up = hex(p.gain),
+        down = hex(p.loss),
+        line = hex(p.hero),
+        stop = hex(p.loss),
+        target = hex(p.gain),
+        entry = hex(p.ink),
+        paid = hex(p.muted),
+        raised = hex(p.raised),
+        onInk = hex(p.onInk),
     )
 }
 
@@ -619,7 +877,8 @@ internal object ExpandedChartJson {
                     .put("text", theme.text).put("muted", theme.muted).put("rule", theme.rule)
                     .put("up", theme.up).put("down", theme.down).put("line", theme.line)
                     .put("stop", theme.stop).put("target", theme.target)
-                    .put("entry", theme.entry).put("paid", theme.paid),
+                    .put("entry", theme.entry).put("paid", theme.paid)
+                    .put("raised", theme.raised).put("onInk", theme.onInk),
             )
             .toString()
     }

@@ -19,7 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import com.ikverse.egxanalyzer.ui.theme.palette
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -239,15 +242,16 @@ private fun StockBlock(
     // It was a full-bleed `surfaceContainerHighest` band under a 2dp rule - the heaviest divider in
     // the app - which is what made a page of these read as a spreadsheet rather than as the report
     // it sits inside.
-    Surface(
-        Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        // Tonal with no edge since the 2026-11 redesign.
-        shape = MaterialTheme.shapes.medium,
+    // A block of the page's ground inside the report's white tile, with the tile's own corners.
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(Kit.TileShape)
+            .background(palette.ground),
     ) {
         Column {
             StockHeading(stock, latest, onFilterToTicker)
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Hairline()
             ColumnHeader()
             stock.dataPoints.forEachIndexed { index, point ->
                 CallRow(
@@ -317,7 +321,7 @@ private fun StockHeading(
                 style = MaterialTheme.typography.titleMedium,
                 // Ink since the 2026-11 redesign: a column of vermilion tickers would be the accent
                 // spent as a figure. Still pressable, with the logo, to open the stock sheet.
-                color = MaterialTheme.colorScheme.onSurface,
+                color = palette.ink,
             )
             // Inside the press target with the logo and the code, as it is on the recommendation
             // card: the badge is a fact about this stock, so it belongs to the thing that opens it.
@@ -353,7 +357,7 @@ private fun StockHeading(
                 Text(
                     it,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -371,12 +375,7 @@ private fun StockHeading(
             // [OutlinePill], which is the one pill in the app: this drew its own ring at its own
             // corner and its own padding, so the table's marks and the cards' marks were two
             // families of one thing seen a scroll apart.
-            OutlinePill(
-                "Watch list",
-                // Neutral: a label, not a control (2026-11 redesign).
-                outline = MaterialTheme.colorScheme.outline,
-                textColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            TableTag("Watch list")
         }
         // Last, so the price closes the row's trailing edge whether or not the pill is there. The
         // pill moves and the price does not, which is the way round that keeps the one figure the
@@ -389,7 +388,7 @@ private fun StockHeading(
                 Text(
                     if (latest.provisional) "LATEST PRICE" else "LAST CLOSE",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.muted,
                 )
                 Text(
                     formatPrice(latest.session.close),
@@ -416,7 +415,7 @@ private fun ColumnHeader() {
         HeaderLabel("Resistance", Modifier.weight(1f), TextAlign.End)
         Spacer(Modifier.width(ChevronWidth))
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Hairline()
 }
 
 /**
@@ -453,7 +452,7 @@ private fun HeaderLabel(label: String, modifier: Modifier, align: TextAlign) {
                 AutoSizeText(
                     word,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.muted,
                     textAlign = align,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -463,7 +462,7 @@ private fun HeaderLabel(label: String, modifier: Modifier, align: TextAlign) {
         AutoSizeText(
             label,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = palette.muted,
             textAlign = align,
             modifier = modifier.fillMaxWidth().padding(horizontal = Space.xs),
         )
@@ -498,7 +497,7 @@ private fun CallRow(
                     // from any surface tier in both themes, so a low-alpha tint of it moves the
                     // stripe a comparable amount either way: lighter in dark theme, darker in
                     // light - the same state-layer trick Material uses for hover and press.
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
+                    palette.ink.copy(alpha = 0.04f)
                 } else {
                     Color.Transparent
                 },
@@ -532,7 +531,7 @@ private fun CallRow(
             Icon(
                 Icons.AutoMirrored.Outlined.KeyboardArrowRight,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = palette.muted,
                 modifier = Modifier.width(ChevronWidth).height(IconSize.Inline),
             )
         }
@@ -586,12 +585,7 @@ private fun SourceCell(channel: String?, point: RecommendationDataPoint, modifie
             // Tappable since 2026-09-24, like the same pill on the card: a reader who has never
             // seen "Watching" or "T+1" before had no way to ask what either meant.
             var showing by remember(point) { mutableStateOf(false) }
-            FilledPill(
-                it,
-                container = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f),
-                content = MaterialTheme.colorScheme.onSurfaceVariant,
-                onClick = { showing = true },
-            )
+            TableTag(it, filled = true, onClick = { showing = true })
             if (showing) {
                 InfoSheet(InfoNote(it, listOf(timingExplanation(point)))) { showing = false }
             }
@@ -751,5 +745,24 @@ private fun entry(point: RecommendationDataPoint): String {
     return when {
         low != null && high != null && low != high -> "${formatPrice(low)} – ${formatPrice(high)}"
         else -> formatPrice(point.buyPrice ?: low ?: high)
+    }
+}
+
+/**
+ * A word on a row of the table - the watch list, a timing - at the height of a line of figures
+ * rather than a chip's 48dp touch target, so a row with one stands no taller than a row without.
+ * [filled] is the timing, which opens an explanation; the hairline is a plain label.
+ */
+@Composable
+private fun TableTag(text: String, filled: Boolean = false, onClick: (() -> Unit)? = null) {
+    val p = palette
+    Box(
+        Modifier
+            .clip(Kit.Capsule)
+            .then(if (filled) Modifier.background(p.ink.copy(alpha = 0.08f)) else Modifier.border(1.dp, p.line, Kit.Capsule))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    ) {
+        Text(text, style = MaterialTheme.typography.labelMedium, color = p.muted, maxLines = 1)
     }
 }

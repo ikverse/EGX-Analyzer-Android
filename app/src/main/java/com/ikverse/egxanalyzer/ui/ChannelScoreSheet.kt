@@ -1,6 +1,18 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.text.style.TextAlign
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.OutcomeStrip
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.ui.kit.TileTone
+import com.ikverse.egxanalyzer.ui.kit.rememberDrawIn
+import com.ikverse.egxanalyzer.ui.theme.palette
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -12,12 +24,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,71 +69,53 @@ import com.ikverse.egxanalyzer.ui.theme.extraColors
  * It states no verdict of its own and adds no figure the card does not already carry. Everything
  * here is either a rule or one of this channel's own numbers put into a sentence.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ChannelScoreSheet(channel: ChannelScore, onDismiss: () -> Unit) {
+internal fun ChannelScoreSheet(channel: ChannelScore, photoPath: String? = null, onDismiss: () -> Unit) {
     val thin = channel.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = SheetShape,
-        containerColor = MaterialTheme.colorScheme.background,
-        dragHandle = { SheetHandle() },
-    ) {
+    val p = palette
+    KitSheet(onDismiss = onDismiss, posture = LocalFoldPosture.current, title = "How ${channel.channel} is scored") {
         // One counter for the whole sheet, so the reveal runs down the page in one sweep rather
         // than restarting in every section. Read and bumped during composition on purpose: it is
         // derived from position in the list and nothing else, so a recomposition rebuilds the same
         // sequence.
         var step = 0
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .sheetDragSlop()
-                .scrollableColumn()
-                .padding(horizontal = Space.l)
-                .padding(bottom = Space.xl),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                Text(
-                    "HOW THIS SOURCE IS SCORED",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                // A first-strong isolate, exactly as the hero does it: the name is Arabic and the
-                // figures under it are not, and without it a digit drifts into the name.
+        // The ink head: who this is, and the three figures the rest of the sheet explains.
+        Tile(Modifier.fillMaxWidth(), tone = TileTone.INK) {
+            Text(
+                "HOW THIS SOURCE IS SCORED",
+                style = MaterialTheme.typography.labelSmall,
+                color = p.highlight,
+            )
+            Row(
+                Modifier.padding(top = Space.s),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
+            ) {
+                ChannelAvatar(channel.channel, photoPath, 48.dp)
+                // A first-strong isolate: the name is Arabic and the figures under it are not, and
+                // without it a digit drifts into the name.
                 Text(
                     "⁨${channel.channel}⁩",
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.headlineMedium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                channel.winRateSplit(SheetRateSecondary),
-                style = MaterialTheme.typography.headlineMedium.copy(fontFamily = TabularFigures),
-                color = if (thin) MaterialTheme.colorScheme.onSurfaceVariant else {
-                    channel.anyTargetRate.rateTone()
-                },
-            )
-            Text(
-                "reached target 1 / target 2, over ${channel.judged} settled " +
-                    "${if (channel.judged == 1) "call" else "calls"}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // The same picture the card carries, so the sheet is plainly about that card. The
-            // legend comes with it here: on the page it is drawn once above a column of cards, and
-            // a sheet opened on top of that page covers it. Both are absent for a source with
-            // nothing settled - an empty bar is nothing to key, and a key to it is four words
-            // about a picture that is not there.
-            if (channel.judged > 0) {
-                OutcomeBar(channel, on = MaterialTheme.colorScheme.surfaceContainerLow)
-                OutcomeLegend()
+            Row(Modifier.padding(top = Space.m), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                HeadFigure(
+                    formatPercent(channel.anyTargetRate, signed = false),
+                    "reached target 1",
+                    if (thin) null else p.highlight,
+                )
+                HeadFigure(formatPercent(channel.fullHitRate, signed = false), "reached target 2")
+                HeadFigure(channel.judged.toString(), if (channel.judged == 1) "settled call" else "settled calls")
             }
+            // The same picture the ranking row carries, so the sheet is plainly about that row.
+            val split = channel.outcomes()
+            if (split.total > 0) OutcomeStrip(split, Modifier.padding(top = Space.m))
+        }
 
-            HorizontalDivider()
-            ExplainerSection("How a call is judged") {
+            ExplainerSection(1, "How a call is judged") {
                 Bullet(step++, PriceRole.entry, "The price has to trade into the buy zone first.") {
                     "Until it does there is no call to judge. If it never gets there, the call is " +
                         "set aside - it counts neither for nor against this source."
@@ -149,9 +139,17 @@ internal fun ChannelScoreSheet(channel: ChannelScore, onDismiss: () -> Unit) {
                 }
             }
 
-            HorizontalDivider()
-            ExplainerSection("What the numbers on the card mean") {
-                Bullet(step++, MaterialTheme.colorScheme.primary, "The two rates are nested.") {
+            ExplainerSection(2, "What the numbers on the ranking mean") {
+                // The figures the ranking row has no room for, read against the rules below them.
+                FigureGrid(
+                    listOf(
+                        Triple(formatPercent(channel.averageReturn), "per judged call", PriceRole.forReturn(channel.averageReturn)),
+                        Triple(channel.averageRiskReward.asRatio(), "risk : reward", null),
+                        Triple(formatPrice(channel.medianSessionsToHit), "sessions to target 1", PriceRole.target),
+                        Triple(formatPrice(channel.medianSessionsToStop), "sessions to a stop", PriceRole.stop),
+                    ),
+                )
+                Bullet(step++, p.hero, "The two rates are nested.") {
                     "${channel.reachedTarget1} of ${channel.judged} settled calls reached " +
                         "target 1 - ${formatPercent(channel.anyTargetRate, signed = false)} - and " +
                         "${channel.fullHits} of those ran on to target 2, which is " +
@@ -192,8 +190,10 @@ internal fun ChannelScoreSheet(channel: ChannelScore, onDismiss: () -> Unit) {
                 }
             }
 
-            HorizontalDivider()
-            ExplainerSection("Sell at target 1, or let half run?") {
+            ExplainerSection(3, "Sell at target 1, or let half run?") {
+                if (channel.policyCalls > 0) {
+                    PolicyBars(channel.sellAtTarget1Return, channel.splitReturn)
+                }
                 Bullet(step++, PriceRole.target, "How often holding paid.") {
                     channel.continuationRate?.let {
                         "${formatPercent(it, signed = false)} of the calls that reached target 1 " +
@@ -243,8 +243,15 @@ internal fun ChannelScoreSheet(channel: ChannelScore, onDismiss: () -> Unit) {
                 }
             }
 
-            HorizontalDivider()
-            ExplainerSection("Where this source stands") {
+            ExplainerSection(4, "Where this source stands") {
+                FigureGrid(
+                    listOf(
+                        Triple(channel.calls.toString(), "calls posted", null),
+                        Triple(channel.judged.toString(), "settled", null),
+                        Triple(channel.repeats.toString(), "re-posted, counted once", null),
+                        Triple(channel.notTradable.toString(), "not tradable", null),
+                    ),
+                )
                 if (thin) {
                     Bullet(step++, extraColors.expired, "Too few settled calls to rank.") {
                         "${channel.judged} of this source's calls have finished, and it takes " +
@@ -277,8 +284,7 @@ internal fun ChannelScoreSheet(channel: ChannelScore, onDismiss: () -> Unit) {
                 }
             }
 
-            HorizontalDivider()
-            ExplainerSection("What is deliberately left out") {
+            ExplainerSection(5, "What is deliberately left out", tone = TileTone.TILE1) {
                 Bullet(step++, PriceRole.muted, "A split or a bonus issue.") {
                     "The levels were printed in the old money and the prices after it are in the " +
                         "new, so the call cannot be judged at all. It is set aside rather than " +
@@ -291,26 +297,97 @@ internal fun ChannelScoreSheet(channel: ChannelScore, onDismiss: () -> Unit) {
                 }
             }
 
-            HorizontalDivider()
             Text(
                 "Every figure here is measured from real closing prices. None of it is a " +
                     "prediction, and none of it is advice.",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = p.muted,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = Space.s),
             )
-        }
     }
 }
 
 @Composable
-private fun ExplainerSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+private fun HeadFigure(value: String, label: String, tone: Color? = null) {
+    Column {
         Text(
-            title.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            value,
+            style = MaterialTheme.typography.headlineMedium.copy(fontFamily = TabularFigures),
+            color = tone ?: LocalContentColor.current,
         )
-        content()
+        Text(label, style = MaterialTheme.typography.labelMedium, color = LocalContentColor.current.copy(alpha = 0.75f))
+    }
+}
+
+/** Two figures a row, in ground cells. */
+@Composable
+private fun FigureGrid(cells: List<Triple<String, String, Color?>>) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.padding(bottom = Space.xs)) {
+        cells.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                row.forEach { (value, label, tone) -> FigureCell(value, label, Modifier.weight(1f), tone) }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/**
+ * What each rule returned a call, as two bars on one scale: all out at target 1, and half out with
+ * half left running. The longer bar is the better rule over the calls both could be priced on.
+ */
+@Composable
+private fun PolicyBars(sellAll: Double?, split: Double?) {
+    val p = palette
+    val most = listOfNotNull(sellAll, split).maxOfOrNull { kotlin.math.abs(it) }?.takeIf { it > 0 } ?: 1.0
+    val grow = rememberDrawIn(key = sellAll to split, durationMs = 800)
+    Column(verticalArrangement = Arrangement.spacedBy(Space.xs), modifier = Modifier.padding(bottom = Space.s)) {
+        listOf("Sell all at target 1" to sellAll, "Half at target 1, half runs" to split).forEach { (label, value) ->
+            Row(Modifier.fillMaxWidth()) {
+                Text(label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Text(
+                    formatPercent(value) + " / call",
+                    style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                    color = PriceRole.forReturn(value),
+                )
+            }
+            Box(Modifier.fillMaxWidth().height(10.dp).clip(Kit.Capsule).background(p.ground)) {
+                val share = ((value?.let { kotlin.math.abs(it) } ?: 0.0) / most).toFloat().coerceIn(0f, 1f)
+                Box(
+                    Modifier
+                        .fillMaxWidth(share * grow.value)
+                        .height(10.dp)
+                        .clip(Kit.Capsule)
+                        .background(if ((value ?: 0.0) < 0) p.loss else p.gain),
+                )
+            }
+        }
+    }
+}
+
+/** A numbered section of the sheet: a white tile (or [tone]), its number on a cobalt disc. */
+@Composable
+private fun ExplainerSection(
+    number: Int,
+    title: String,
+    tone: TileTone = TileTone.CARD,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val p = palette
+    Tile(Modifier.fillMaxWidth(), tone = tone) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            val (disc, onDisc) = if (tone == TileTone.CARD) p.hero to p.onHero else p.ink to p.onInk
+            Box(Modifier.size(24.dp).clip(CircleShape).background(disc), contentAlignment = Alignment.Center) {
+                Text(number.toString(), style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures), color = onDisc)
+            }
+            Text(title, style = MaterialTheme.typography.titleMedium)
+        }
+        Column(
+            Modifier.padding(start = 32.dp, top = Space.s),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+            content = content,
+        )
     }
 }
 
@@ -350,7 +427,7 @@ private fun Bullet(index: Int, tone: Color, claim: String, detail: () -> String)
                 Text(
                     detail(),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = LocalContentColor.current.copy(alpha = 0.72f),
                 )
             }
         }

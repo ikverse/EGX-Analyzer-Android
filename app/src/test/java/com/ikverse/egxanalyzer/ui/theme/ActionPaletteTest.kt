@@ -156,6 +156,20 @@ class ActionPaletteTest {
     }
 
     /**
+     * The accent is the palette's cobalt, since 5.0: the fill is the hero colour in both themes, and
+     * the ink is the shade the palette says reads as text on that theme's page.
+     */
+    @Test
+    fun `the accent is the palette's cobalt`() {
+        assertEquals(LightPalette.hero, accentFor(AccentKey.CYAN, dark = false).base)
+        assertEquals(LightPalette.heroInk, accentFor(AccentKey.CYAN, dark = false).ink)
+        assertEquals(DarkPalette.hero, accentFor(AccentKey.CYAN, dark = true).base)
+        assertEquals(DarkPalette.heroInk, accentFor(AccentKey.CYAN, dark = true).ink)
+        assertEquals(LightPalette.heroInk, LightColors.primary)
+        assertEquals(DarkPalette.heroInk, DarkColors.primary)
+    }
+
+    /**
      * A loss and a fault are two reds.
      *
      * When the loss red became brick in 4.7.0 it was exactly Material's own light-theme `error`, the

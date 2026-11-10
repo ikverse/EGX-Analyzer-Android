@@ -119,4 +119,34 @@ object ScheduleClock {
 
     /** 24-hour, because 18:00 cannot be read as the morning and "6:00 PM" is three characters longer. */
     fun clock(time: LocalTime): String = "%02d:%02d".format(time.hour, time.minute)
+
+    /**
+     * The bell that ends trading, Cairo time. [sessionEnd] is a quarter of an hour later because the
+     * day's figures settle after it; this is the time a reader is told the market closes.
+     */
+    val sessionClose: LocalTime = LocalTime.of(14, 30)
+
+    /**
+     * Whether the market is trading at [now], and the next time that changes: when it closes if it
+     * is open, when it next opens if it is not.
+     *
+     * Holidays are not known to the app, so on one this answers as for any trading day. The header
+     * that reads it says "open" during hours on a holiday; nothing that scores or schedules reads it.
+     */
+    fun sessionState(now: Instant = Instant.now(), zone: ZoneId = ZONE): SessionState {
+        val here = now.atZone(zone)
+        val time = here.toLocalTime()
+        val tradingToday = here.dayOfWeek in tradingDays
+        if (tradingToday && time >= sessionStart && time < sessionClose) {
+            return SessionState(open = true, nextChange = here.toLocalDate().atTime(sessionClose).atZone(zone).toInstant())
+        }
+        val opens = nextFire(sessionStart, tradingDays, now, zone)
+        return SessionState(open = false, nextChange = opens)
+    }
 }
+
+/**
+ * The market at one moment: [open] or not, and when that next changes. [nextChange] is null only
+ * if no trading day exists at all, which [ScheduleClock.tradingDays] never allows.
+ */
+data class SessionState(val open: Boolean, val nextChange: Instant?)

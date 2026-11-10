@@ -56,7 +56,8 @@ class WatchlistNotifier(private val context: Context) {
                 NOTIFICATION_BASE + (ticker.hashCode() and 0xFFFF),
                 NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_egx_notification)
-                    .setColor(NotificationAccent)
+                    .setColor(NotificationTone.BUY_ZONE.argb)
+                    .setLargeIcon(stockBadgeBitmap(context, ticker))
                     .setContentTitle(title)
                     .setContentText(detail)
                     .setStyle(NotificationCompat.BigTextStyle().bigText(detail))

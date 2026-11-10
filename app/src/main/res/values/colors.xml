@@ -1,15 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      Both sampled from the launcher artwork's own backdrop. The foreground tile is opaque, so the
-      launcher background only shows in the parallax band; the splash one is what the faded edge of
-      the splash icon dissolves into, and a mismatch there draws the tile's outline.
+      The 5.0 palette's colours that resources need, for the surfaces drawn outside Compose: the
+      launcher icon, the shortcut icons and the notifications. The same values as LightPalette in
+      ui/theme/Palette.kt, and if those move these move with them.
     -->
-    <color name="ic_launcher_background">#000812</color>
+    <color name="egx_cobalt">#1E2BFF</color>
+    <color name="egx_lime">#C8FF4D</color>
+    <color name="egx_coral">#FF6B4A</color>
+    <color name="egx_ink">#101828</color>
+
+    <!-- The launcher icon's ground: cobalt, under the lime mark. -->
+    <color name="ic_launcher_background">#1E2BFF</color>
     <!--
-      The launch screen's ground since the 2026-11 redesign: the app's own paper here and its ink in
-      values-night, so a cold start in light mode no longer flashes the old navy. The splash icon's
-      edge fades to transparency, so on paper it reads as a dark disc with a soft edge.
+      The launch screen's ground since 5.0: the app's paper here and its graphite in values-night,
+      so a cold start opens on the same ground the first page is drawn on.
     -->
-    <color name="splash_background">#F5F3EE</color>
+    <color name="splash_background">#EFEDE6</color>
 </resources>

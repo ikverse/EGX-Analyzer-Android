@@ -2,20 +2,28 @@
 
 ## Fonts
 
-Two families are bundled in `app/src/main/res/font/` and drawn by `ui/theme/Type.kt`. Both are
+Four families are bundled in `app/src/main/res/font/` and drawn by `ui/theme/Type.kt`. All are
 licensed under the **SIL Open Font License, Version 1.1**, which permits bundling in an
 application, modification, and redistribution, and asks that the licence travel with the fonts —
 which is what this file is for. The full text is at <https://openfontlicense.org>.
 
 | Family | Files | Source |
 |---|---|---|
-| **Inter Tight** | `inter_tight.ttf` (the upstream variable font, unmodified) | [google/fonts `ofl/intertight`](https://github.com/google/fonts/tree/main/ofl/intertight) |
+| **Bricolage Grotesque** | `bricolage_grotesque.ttf` (the upstream variable font, axes `opsz`, `wdth`, `wght`, unmodified) | [google/fonts `ofl/bricolagegrotesque`](https://github.com/google/fonts/tree/main/ofl/bricolagegrotesque) |
+| **JetBrains Mono** | `jetbrains_mono.ttf` (the upstream variable font, axis `wght`, unmodified), in `res/font` and a second copy in `assets/chart` for the full-screen chart's page | [google/fonts `ofl/jetbrainsmono`](https://github.com/google/fonts/tree/main/ofl/jetbrainsmono) |
 | **IBM Plex Sans Arabic** | `plex_arabic_regular.ttf`, `plex_arabic_medium.ttf`, `plex_arabic_semibold.ttf` | [google/fonts `ofl/ibmplexsansarabic`](https://github.com/google/fonts/tree/main/ofl/ibmplexsansarabic) |
 
-Copyright: Inter Tight — the Inter Project Authors. IBM Plex Sans Arabic — IBM Corp.
+Copyright: Bricolage Grotesque — 2022 The Bricolage Grotesque Project Authors
+(<https://github.com/ateliertriay/bricolage>). JetBrains Mono — 2020 The JetBrains Mono Project
+Authors (<https://github.com/JetBrains/JetBrainsMono>). IBM Plex Sans Arabic — IBM Corp.
 
-All four files are upstream, byte for byte. Inter Tight is instanced per weight at runtime through
-its variation axis rather than as separate files, so nothing here is a modified version.
+Every file is upstream, byte for byte. The variable fonts are instanced per weight (and, for
+Bricolage, per optical size) at runtime through their variation axes rather than as separate
+files, so nothing here is a modified version.
+
+**Since 5.0**, Bricolage Grotesque sets names, headings and text, JetBrains Mono sets every figure,
+and IBM Plex Sans Arabic is the fallback that carries every Arabic letter, since neither of the
+other two has Arabic. What follows describes the 4.x arrangement.
 
 ### Why these two
 

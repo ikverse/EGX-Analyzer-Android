@@ -1,5 +1,14 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.minimumInteractiveComponentSize
+
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.ui.theme.palette
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,10 +26,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -83,11 +90,12 @@ internal fun InfoButton(
     dense: Boolean = false,
 ) {
     var open by remember { mutableStateOf(false) }
+    // The kit's look since 5.0: a muted glyph on a raised disc, at a row's own height.
     val glyph = @Composable {
         Icon(
             Icons.AutoMirrored.Outlined.HelpOutline,
             contentDescription = note.title,
-            tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = tint ?: palette.muted,
             modifier = Modifier.size(IconSize.Inline),
         )
     }
@@ -99,7 +107,15 @@ internal fun InfoButton(
             contentAlignment = Alignment.Center,
         ) { glyph() }
     } else {
-        IconButton(onClick = { open = true }, modifier = modifier) { glyph() }
+        Box(
+            modifier
+                .minimumInteractiveComponentSize()
+                .size(32.dp)
+                .clip(com.ikverse.egxanalyzer.ui.kit.Kit.Capsule)
+                .background(palette.raised)
+                .clickable(role = Role.Button, onClickLabel = "Explain") { open = true },
+            contentAlignment = Alignment.Center,
+        ) { glyph() }
     }
     if (open) InfoSheet(note) { open = false }
 }
@@ -118,38 +134,31 @@ internal fun InfoButton(
  *   lambda, and a defaulted parameter after it would have to be named at every one of those
  *   call sites to keep compiling.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun InfoSheet(
     note: InfoNote,
     content: (@Composable ColumnScope.() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = SheetShape,
-        containerColor = MaterialTheme.colorScheme.background,
-        dragHandle = { SheetHandle() },
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .sheetDragSlop()
-                .scrollableColumn()
-                .padding(horizontal = Space.l)
-                .padding(bottom = Space.xl),
-            verticalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            Text(note.title, style = MaterialTheme.typography.headlineSmall)
-            note.paragraphs.forEach {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+    val p = palette
+    // The kit's sheet: from the bottom folded, beside the page unfolded. The title on the page's
+    // ground, the words in one white tile, and whatever a particular sheet adds under them.
+    KitSheet(onDismiss = onDismiss, posture = LocalFoldPosture.current, title = note.title) {
+        Text(
+            note.title,
+            style = MaterialTheme.typography.headlineMedium,
+            color = p.ink,
+            modifier = Modifier.padding(horizontal = Space.xs),
+        )
+        Tile(Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                note.paragraphs.forEach {
+                    Text(it, style = MaterialTheme.typography.bodyMedium, color = p.ink)
+                }
             }
-            content?.invoke(this)
+        }
+        content?.let { extra ->
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s), content = extra)
         }
     }
 }
@@ -265,7 +274,7 @@ internal fun SettingToggle(
             onValueChange = onCheckedChange,
         ),
         about,
-        trailing = { Switch(checked = checked, onCheckedChange = null, enabled = enabled) },
+        trailing = { com.ikverse.egxanalyzer.ui.kit.KitSwitchFace(checked = checked, enabled = enabled) },
     ) {
         Text(
             label,

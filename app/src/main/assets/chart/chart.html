@@ -5,12 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>EGX chart</title>
 <style>
+  /* The app's figures face, bundled beside this page so it stays offline. */
+  @font-face { font-family: "EGX Mono"; src: url("jetbrains_mono.ttf"); font-weight: 100 900; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #000; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
   #chart { position: absolute; inset: 0; touch-action: none; }
-  #empty { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font: 14px Roboto, sans-serif; color: #868993; display: none; }
+  #empty { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font: 14px "EGX Mono", monospace; color: var(--muted); display: none; }
   .ctl { position: absolute; display: flex; gap: 4px; z-index: 5; }
-  .ctl button { font: 500 12px Roboto, sans-serif; min-width: 28px; height: 24px; padding: 0 6px; border-radius: 6px; border: 1px solid var(--rule); background: var(--bg); color: var(--muted); }
-  .ctl button.on { color: var(--text); border-color: var(--text); }
+  /* The kit's capsules: a raised fill, the ink word, and ink with the ground's word when on. */
+  .ctl button { font: 600 12px "EGX Mono", monospace; min-width: 32px; height: 28px; padding: 0 10px; border-radius: 999px; border: 0; background: var(--raised); color: var(--text); }
+  .ctl button.on { background: var(--text); color: var(--onInk); }
   #latest { display: none; }
   #latest button { font-size: 14px; }
 </style>
@@ -27,9 +30,13 @@
   // The app draws the toolbar and owns the data; this page draws the chart and the controls that sit on it. The app tells it things through
   // egxChart.setData / draw / undo / clearDrawings, and reads back what the reader changed here through egxChart.state().
   var PANE = 'candle_pane';
-  var FONT = 'Roboto, "Helvetica Neue", Arial, sans-serif';
+  var FONT = '"EGX Mono", monospace';
   var theme = null, style = 'candles', scaleType = 'normal', manual = false, lastRows = [], lastLevels = [], showLevels = true, lastCalls = [], lastKey = null;
   var chart = klinecharts.init('chart', { locale: 'en-US' });
+  // The canvas draws with the face only once it has loaded, so the chart is redrawn when it lands.
+  if (document.fonts && document.fonts.load) {
+    document.fonts.load('12px "EGX Mono"').then(function () { try { chart.resize(); } catch (e) {} });
+  }
   try { chart.setTimezone('UTC'); } catch (e) { /* the app sends each session at noon UTC, so the day is the same in every timezone anyway */ }
 
   // A session is a day, so the crosshair and the tooltip say the day and not the hour the library would append.
@@ -149,8 +156,10 @@
     document.body.style.background = t.bg;
     var root = document.documentElement.style;
     root.setProperty('--bg', t.bg); root.setProperty('--rule', t.rule); root.setProperty('--muted', t.muted); root.setProperty('--text', t.text);
+    root.setProperty('--raised', t.raised || t.rule); root.setProperty('--onInk', t.onInk || t.bg);
     var LINE = { style: 'solid', smooth: false, size: 1, dashedValue: [2, 2] };
-    var palette = [t.line, '#FF9600', '#935EBD', '#E11D74', '#01C5C4'];
+    // The indicators' lines: cobalt first, then the kit's tile hues taken deep enough to read on paper.
+    var palette = [t.line, '#D49A00', '#7C5CFF', '#FF6B4A', '#2E9BE6'];
     var fill = style === 'area' ? t.line + '40' : 'rgba(0,0,0,0)';
     chart.setStyles({
       grid: { horizontal: { color: t.rule }, vertical: { color: t.rule } },

@@ -1,5 +1,9 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.animation.core.animateFloat
+
+import com.ikverse.egxanalyzer.ui.theme.palette
+
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
@@ -63,13 +67,20 @@ import kotlin.math.roundToInt
  */
 internal enum class ChartRange(val label: String, private val period: Period) {
     WEEK("1W", Period.ofWeeks(1)),
+    /**
+     * Since the newest call on the stock, with a few sessions before it so the line arrives at the
+     * call rather than starting on it. Offered only where there is a call; without one it falls back
+     * to a month, so a stored choice can never draw an empty box.
+     */
+    CALL("Call", Period.ofMonths(1)),
     MONTH("1M", Period.ofMonths(1)),
     TWO_MONTHS("2M", Period.ofMonths(2)),
     THREE_MONTHS("3M", Period.ofMonths(3)),
     SIX_MONTHS("6M", Period.ofMonths(6)),
     ;
 
-    fun since(today: LocalDate): LocalDate = today.minus(period)
+    fun since(today: LocalDate, callOn: LocalDate? = null): LocalDate =
+        if (this == CALL && callOn != null) callOn.minusDays(CallLeadDays) else today.minus(period)
 
     companion object {
         /**
@@ -84,6 +95,9 @@ internal enum class ChartRange(val label: String, private val period: Period) {
 
         /** What the sheet fetches, so no press ever waits on a query. */
         val Widest = SIX_MONTHS
+
+        /** The days of line drawn before the call, so the reader sees what it was called into. */
+        const val CallLeadDays = 7L
     }
 }
 
@@ -206,6 +220,11 @@ internal fun PriceChart(
     onSelect: (DailySession) -> Unit,
     modifier: Modifier = Modifier,
     height: Dp = ChartHeight,
+    /**
+     * Drawn on the cobalt tile the stock sheet carries it on: a white line, the targets in lime and
+     * the stop in coral, every mark white, and a lime dot on the latest close that breathes.
+     */
+    onHero: Boolean = false,
 ) {
     val points = remember(sessions) { sessions.filter { it.close != null } }
     if (points.size < 2) return
@@ -223,17 +242,36 @@ internal fun PriceChart(
     val high = minOf(priceHigh + room, maxOf(priceHigh, wanted.maxOrNull() ?: priceHigh))
     val span = (high - low).takeIf { it > 0.0 } ?: 1.0
 
-    val lineColor = PriceRole.market
-    val stopColor = PriceRole.stop
-    val targetColor = PriceRole.target
-    val entryColor = MaterialTheme.colorScheme.onSurface
-    val paidColor = MaterialTheme.colorScheme.outline
-    val markColor = MaterialTheme.colorScheme.onSurfaceVariant
+    // The palette's own since 5.0: a cobalt line, the stop in loss red, the targets in gain green,
+    // the entry in ink, what was paid in the muted grey, and the call rings in ink.
+    val kit = palette
+    val lineColor = if (onHero) kit.onHero else kit.hero
+    val stopColor = if (onHero) kit.alert else kit.loss
+    val targetColor = if (onHero) kit.highlight else kit.gain
+    val entryColor = if (onHero) kit.onHero else kit.ink
+    val paidColor = if (onHero) kit.onHero.copy(alpha = 0.7f) else kit.muted
+    val markColor = if (onHero) kit.onHero else kit.ink
+    val latestColor = if (onHero) kit.highlight else lineColor
+    // The latest close breathes on the tile, a market's motion rather than an arrival's; still with
+    // reduce motion on.
+    val breath = if (onHero && !LocalReduceMotion.current) {
+        androidx.compose.animation.core.rememberInfiniteTransition(label = "latest").animateFloat(
+            initialValue = 1f,
+            targetValue = 1.4f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                tween(900, easing = UiEase),
+                androidx.compose.animation.core.RepeatMode.Reverse,
+            ),
+            label = "breath",
+        ).value
+    } else {
+        1f
+    }
 
     // Right-aligned against the chart's own edge, in the colour of the line each names. Measured
     // here rather than in the draw, which cannot compose.
     val measurer = rememberTextMeasurer()
-    val labelStyle = MaterialTheme.typography.labelSmall
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures)
     val labels = remember(levels, low, high, labelStyle, measurer, stopColor, targetColor, entryColor, paidColor) {
         buildList {
             levels ?: return@buildList
@@ -404,8 +442,8 @@ internal fun PriceChart(
         }
         // Where it stands now, which is the point on the line every distance is measured from.
         drawCircle(
-            color = lineColor,
-            radius = LatestDot.toPx(),
+            color = latestColor,
+            radius = LatestDot.toPx() * breath,
             center = Offset(size.width, y(closes.last())),
         )
 
@@ -588,9 +626,11 @@ internal fun DayRange(session: DailySession, modifier: Modifier = Modifier) {
     val high = session.high
     val close = session.close
     if (low == null || high == null || close == null || high <= low) return
-    val track = MaterialTheme.colorScheme.surfaceContainerHighest
-    val closeMark = PriceRole.market
-    val openMark = MaterialTheme.colorScheme.outline
+    // The kit's day bar since 5.0: a raised track, the day's move from the open to the close as an
+    // ink wash across it, and the close an ink marker standing taller than the track.
+    val track = palette.raised
+    val closeMark = palette.ink
+    val openMark = palette.ink.copy(alpha = 0.18f)
     val at = ((close - low) / (high - low)).coerceIn(0.0, 1.0).toFloat()
     val openAt = session.open?.let { ((it - low) / (high - low)).coerceIn(0.0, 1.0).toFloat() }
     // The close slides to its place from the open (or the low) the first time the bar is drawn
@@ -623,10 +663,13 @@ internal fun DayRange(session: DailySession, modifier: Modifier = Modifier) {
             fun x(fraction: Float) =
                 (fraction * (size.width - markWidth)).coerceIn(0f, size.width - markWidth)
             if (openAt != null) {
-                drawRect(
+                val from = minOf(x(openAt), x(slid.value.coerceIn(0f, 1f)))
+                val to = maxOf(x(openAt), x(slid.value.coerceIn(0f, 1f))) + markWidth
+                drawRoundRect(
                     color = openMark,
-                    topLeft = Offset(x(openAt), middle),
-                    size = Size(markWidth, bar),
+                    topLeft = Offset(from, middle),
+                    size = Size(to - from, bar),
+                    cornerRadius = CornerRadius(bar / 2),
                 )
             }
             // Taller than the track it sits in, because it is the figure being read: the open is
@@ -639,9 +682,9 @@ internal fun DayRange(session: DailySession, modifier: Modifier = Modifier) {
             )
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            RangeCaption("low " + formatPrice(low))
-            session.open?.let { RangeCaption("open " + formatPrice(it)) }
-            RangeCaption("high " + formatPrice(high))
+            RangeCaption("LOW " + formatPrice(low))
+            RangeCaption(session.open?.let { "OPEN " + formatPrice(it) } ?: "TODAY")
+            RangeCaption("HIGH " + formatPrice(high))
         }
     }
 }
@@ -650,8 +693,8 @@ internal fun DayRange(session: DailySession, modifier: Modifier = Modifier) {
 private fun RangeCaption(text: String) {
     Text(
         text,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+        color = palette.muted,
     )
 }
 

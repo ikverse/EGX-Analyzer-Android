@@ -82,7 +82,7 @@ class AttentionNotifier(private val context: Context) {
             FEED_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_egx_notification)
-                .setColor(NotificationAccent)
+                .setColor(NotificationTone.ATTENTION.argb)
                 .setContentTitle(what)
                 .setContentText(detail)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
@@ -111,7 +111,7 @@ class AttentionNotifier(private val context: Context) {
             BACKUP_ID,
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_egx_notification)
-                .setColor(NotificationAccent)
+                .setColor(NotificationTone.ATTENTION.argb)
                 .setContentTitle("The daily backup can't reach its folder")
                 .setContentText(detail)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(detail))

@@ -4,6 +4,34 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.0.0] — 2026-11-11
+
+**A new design, everywhere.** Every tab, sheet and dialog is redrawn as rounded tiles on paper (graphite at night), in cobalt, lime, coral, sunflower, lilac and sky, with every figure in a monospaced face. Nothing from the old look is left.
+
+- **Every Fold posture.** Folded, unfolded, half-folded flat on a table, and held like a book each get their own layout. Unfolded and in book posture, lists and the thing you opened sit side by side, split on the hinge in book posture. In tabletop, what you read stands on the upright half and what you press lies on the flat half.
+- **Tabs in the header.** There is no bottom bar or floating button any more; the tabs are at the top of every page, and the Analyze button is on the Analyze page.
+- **Portfolio.** A hero tile with your trades against EGX30, what needs you, open positions, today's session and your record.
+- **Analyze.** Sources, content types and the target date as tiles, with a progress fill while a run reads.
+- **Results.** Each run is a tile with its figures and outcomes. Unfolded, the runs list sits beside the open report.
+- **Insights.** A podium of the best sources, the ranking, calls still in play and the session's figures.
+- **The stock sheet.**
+  - The price is set large.
+  - A chart on cobalt with a new **Call** range, which starts a week before the newest call.
+  - **I bought it** on the newest call still in play, and Ask AI behind the usual confirmation.
+  - A price-alert sheet, and a levels tile showing how far each level is from now.
+- **The full-screen chart.**
+  - Five chart types, eight indicators and eight drawing tools.
+  - It follows the app's light or dark theme, and its text is the app's figure face.
+- **Settings.**
+  - A hub of tiles, each opening its own page.
+  - Steppers instead of sliders, and a Light / Dark / Follow system control.
+  - A four-step Telegram sign-in.
+  - Wording rules on lime and coral tiles.
+  - Prices moved to General.
+- **Notifications** carry a colour for each kind and the stock's logo on the right.
+- **The home-screen widget** is redrawn, and gains a taller size with three counts: hit a target, stopped and overdue.
+- **The app icon, the launch screen and the shortcut icons** are redrawn: a lime rising mark on cobalt, with a monochrome layer for themed icons.
+
 ## [4.8.1] — 2026-11-09
 
 - Sheets that slide up from the bottom, such as the stock sheet, no longer close when you flick back up to the top of them. A drag that scrolled the sheet's content can't pull the sheet down; to close it from there, let go at the top and pull down again. The handle and the sheet's fixed top still close it as before.
