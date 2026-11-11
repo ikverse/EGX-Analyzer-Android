@@ -4,6 +4,19 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.1.1] — 2026-11-11
+
+Fixes for 5.1.0.
+
+- **Unfolded and half-folded, Portfolio now answers links to a trade.** Record sale from a notification opens the sale, and a trade opened from Insights or a notification opens beside the table. Before, nothing happened until the phone was folded.
+- **Arriving at a finished trade no longer keeps scrolling back to it** each time prices refresh.
+- **Deleting the report you have open closes it**, so the first back press afterwards is not lost. The same goes for a report a filter hides.
+- **Settings no longer says prices need a look on a weekend or before the market opens.** Prices count as late only once a trading session has closed since they last arrived. Public holidays may still be flagged.
+- Opening a report from "Your report is ready" no longer leaves it waiting to open again later.
+- The "read by an earlier run" note on Analyze updates when a report is deleted and another run is saved.
+
+---
+
 ## [5.1.0] — 2026-11-11
 
 **Plainer, everywhere.** Every tab says what is happening in ordinary words, shows less at first, and keeps the rest one press away.

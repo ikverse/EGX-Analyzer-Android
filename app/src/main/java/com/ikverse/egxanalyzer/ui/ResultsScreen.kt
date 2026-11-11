@@ -301,6 +301,9 @@ internal fun ResultsScreen(appState: AppState) {
                         visibleCount = (index / PAGE_SIZE + 1) * PAGE_SIZE
                     }
                     appState.pages.openReport(id)
+                    // Opening the report is the arrival. Left pending, it would wait for a tile the
+                    // open report has replaced, and open the report again on the next visit.
+                    appState.consumePendingResult()
                 }
             }
             // The run tiles fade in one after another the first time the tab draws them, and only
@@ -381,6 +384,11 @@ internal fun ResultsScreen(appState: AppState) {
 
                 val posture = LocalFoldPosture.current
                 val openSaved = shown.firstOrNull { it.id == openRun }
+                // A report deleted while open, or hidden by a filter, is closed rather than left
+                // open off screen, where the first back press would close it and seem to do nothing.
+                LaunchedEffect(openRun, openSaved == null) {
+                    if (openRun != null && openSaved == null) appState.pages.openReport(null)
+                }
                 val closeReport = { appState.pages.openReport(null) }
                 val reportModifier = Modifier.fillMaxWidth().bringIntoViewRequester(reveal)
 

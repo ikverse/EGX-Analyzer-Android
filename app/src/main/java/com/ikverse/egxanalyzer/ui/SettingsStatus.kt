@@ -57,8 +57,15 @@ internal fun settingsStatus(
         else -> {
             val at = Instant.ofEpochMilli(lastPriceRefreshAt)
             val today = now.atZone(zone).toLocalDate()
-            if (at.atZone(zone).toLocalDate() < today) {
+            val fetched = at.atZone(zone).toLocalDate()
+            // Late only once a trading session has closed since: a Saturday, a Sunday morning or a
+            // weekday before the bell has nothing new to fetch. Holidays are not known here.
+            var owed = ScheduleClock.lastFinalSession(now, zone)
+            while (owed.dayOfWeek !in ScheduleClock.tradingDays) owed = owed.minusDays(1)
+            if (at < owed.atTime(ScheduleClock.sessionEnd).atZone(zone).toInstant()) {
                 StatusLine("Prices last arrived ${whenLabel(at, now, zone)}", false, SettingsSection.GENERAL)
+            } else if (fetched < today) {
+                StatusLine("Prices last arrived ${whenLabel(at, now, zone)}", true, SettingsSection.GENERAL)
             } else {
                 StatusLine("Prices arrived ${whenLabel(at, now, zone)}", true, SettingsSection.GENERAL)
             }
