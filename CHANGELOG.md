@@ -4,6 +4,24 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.1.2] — 2026-11-11
+
+Dark mode, and colours that disagreed.
+
+- **Names and headings no longer vanish in dark mode.** Stock names on Portfolio and Results cards, the Open now and Finished headings and finished-trade rows were drawn black on the dark page. All text now defaults to the app's own ink.
+- **Portfolio cards have no coloured left edge and no coloured outline.** The status pill says how a trade stands.
+- **One status pill everywhere:** Portfolio's outlined pill is now the filled one Results and Insights use.
+- **The price marker and "how far it went" line use a lighter blue at night**, so they can be read on a dark card.
+- **The price ladder prints each figure once**: no "You paid" on Portfolio (the card already says it), and a price equal to the entry is not printed twice. The current price always sits under the bar.
+- **"Close to its stop" is no longer shown on a trade already past its stop** (the same for target 2).
+- **Insights' day tile counts only running calls as running**, and says how many are not counted, so it agrees with its chips.
+- A disabled button, like Ask AI, fades as a whole instead of keeping a full fill.
+- "0 trading days left" is no longer shown on a trade that has ended.
+- The stock chart's level labels sit just above their dashed lines, on a patch of the chart's colour, so no line runs through them.
+- The Insights note says "blue line", which is what it is.
+
+---
+
 ## [5.1.1] — 2026-11-11
 
 Fixes for 5.1.0.

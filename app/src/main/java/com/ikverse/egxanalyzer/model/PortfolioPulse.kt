@@ -151,6 +151,10 @@ fun needsYou(positions: List<PositionView>, thresholdPercent: Int): List<NeedsYo
             val level = if (reason == NeedReason.NEAR_STOP) view.position.stopLoss else view.position.target2
             val price = view.currentPrice
             if (level == null || price == null || price <= 0.0) return@forEach
+            // Close to a level only on the way to it: a price at or past the stop has already
+            // broken it, and "close to its stop" beside "Stopped out" contradicts itself.
+            val entry = view.position.entryPrice
+            if (level != entry && (price - level) * (level - entry) >= 0.0) return@forEach
             val distance = abs(level - price) / price * 100.0
             if (distance <= thresholdPercent) {
                 near += NeedsYouItem(view, reason, distance)

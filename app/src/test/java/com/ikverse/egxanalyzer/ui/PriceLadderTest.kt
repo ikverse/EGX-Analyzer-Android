@@ -207,4 +207,32 @@ class PriceLadderTest {
         assertTrue(texts.filterIndexed { i, _ -> i != 1 }.none { it.contains("You paid") })
         assertTrue(ladderLabelTexts(listOf(9.0, 10.0), compact = true, entryIndex = 1, entryLabel = "You paid").isEmpty())
     }
+
+    @Test
+    fun `where the price stands has the row under the line first and others make room`() {
+        // The stop at 40 would take the row under the line first in axis order; pinned, the price
+        // at 50 keeps it and the stop, which would overlap it, goes above.
+        val slots = layoutPriceLabels(
+            centers = listOf(40f, 50f, 250f),
+            widths = listOf(30f, 30f, 30f),
+            trackWidth = 300f,
+            gap = 6f,
+            pinnedBelow = 1,
+        )
+        assertEquals(LabelSlot(35f, row = 0, above = false), slots[1])
+        assertTrue(slots[0].above)
+        assertTrue(!slots[2].above)
+    }
+
+    @Test
+    fun `a level printing the same figure as the price stands blank so it is read once`() {
+        val texts = ladderLabelTexts(listOf(300.0, 320.0, 360.0, 320.0), compact = false, entryIndex = 1, reachedIndex = 3)
+        assertEquals(listOf("300", "", "360", "320"), texts.map { it.replace(".00", "") })
+    }
+
+    @Test
+    fun `a blank label takes no room and never costs a row`() {
+        val slots = layoutPriceLabels(listOf(50f, 52f), listOf(0f, 30f), 300f, 6f, pinnedBelow = 1)
+        assertTrue(slots.none { it.above })
+    }
 }

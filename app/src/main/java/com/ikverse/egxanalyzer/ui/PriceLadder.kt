@@ -100,13 +100,14 @@ internal fun PriceLadder(
     if (span <= 0.0) return
 
     // The palette's own since 5.0: loss red for the stop, ink for the entry the rest are read
-    // against, gain green for the targets, cobalt for how far the market actually got.
+    // against, gain green for the targets, cobalt for how far the market actually got - the
+    // lighter cobalt the palette keeps for text at night, since the deep one sinks into a dark card.
     val p = palette
     val stopColor = p.loss
     val entryColor = p.ink
     val targetColor = p.gain
     val trackColor = p.raised
-    val reachedColor = p.hero
+    val reachedColor = p.heroInk
     val grow = com.ikverse.egxanalyzer.ui.kit.rememberDrawIn(key = listOf(levels, reached, travelled), durationMs = 900)
     val zones = ladderZones(stopLoss, entryLow, entryHigh, target1, target2)
     val travelledOnAxis = travelled?.let { clampToAxis(it, low, high) }
@@ -132,6 +133,7 @@ internal fun PriceLadder(
         compact,
         entryIndex = marks.indexOfFirst { it.group == ENTRY_GROUP }.takeIf { it >= 0 },
         entryLabel = entryLabel,
+        reachedIndex = marks.indexOfFirst { it.group == REACHED_GROUP }.takeIf { it >= 0 },
     ).mapIndexed { index, text ->
         measurer.measure(text, labelStyle) to marks[index].color
     }
@@ -153,15 +155,14 @@ internal fun PriceLadder(
             widthPx,
             with(density) { LabelGap.toPx() },
             marks.map { it.group },
+            pinnedBelow = marks.indexOfFirst { it.group == REACHED_GROUP }.takeIf { it >= 0 },
         )
         val rowsAbove = slots.filter { it.above }.maxOfOrNull { it.row + 1 } ?: 0
         val rowsBelow = slots.filterNot { it.above }.maxOfOrNull { it.row + 1 } ?: 0
 
-        // The arrow goes on the side its own price printed on, so the two are read together
-        // rather than pointing at each other across the line.
-        val reachedAbove = reached?.let { value ->
-            slots.getOrNull(marks.indexOfFirst { it.value == value })?.above
-        } ?: false
+        // Where the price stands is always under the line, arrow and figure together, so it is
+        // found in the same place on every card rather than wherever the levels left room.
+        val reachedAbove = false
 
         val band = if (compact) CompactTrackBand else TrackBand
         val rowHeight = with(density) { LabelRowHeight.toPx() }
@@ -225,7 +226,7 @@ internal fun PriceLadder(
                 val start = min(axis(entryLow), axis(entryHigh))
                 val end = max(axis(entryLow), axis(entryHigh))
                 drawRoundRect(
-                    color = p.hero.copy(alpha = 0.28f),
+                    color = p.heroInk.copy(alpha = 0.28f),
                     topLeft = Offset(start, y - BAND_HEIGHT / 2),
                     // A single entry price collapses to zero width, so keep it visible.
                     size = Size(max(end - start, 2f), BAND_HEIGHT),
@@ -277,13 +278,21 @@ internal fun ladderLabelTexts(
     compact: Boolean,
     entryIndex: Int? = null,
     entryLabel: String? = null,
+    reachedIndex: Int? = null,
 ): List<String> =
     if (compact) {
         emptyList()
     } else {
+        // A level that prints the same figure as where the price stands is left blank: its tick is
+        // still drawn, and the figure is read once, under the arrow.
+        val reachedText = reachedIndex?.let { values.getOrNull(it) }?.let(::formatPrice)
         values.mapIndexed { index, value ->
             val price = formatPrice(value)
-            if (index == entryIndex && entryLabel != null) "$entryLabel $price" else price
+            when {
+                index != reachedIndex && price == reachedText -> ""
+                index == entryIndex && entryLabel != null -> "$entryLabel $price"
+                else -> price
+            }
         }
     }
 
@@ -330,7 +339,8 @@ internal data class LabelSlot(val left: Float, val row: Int, val above: Boolean 
 /**
  * Places each label beside its mark, with no two ever touching.
  *
- * One row below the line, and everything that will not fit in it goes above. There is deliberately
+ * One row below the line, and everything that will not fit in it goes above. [pinnedBelow] - where
+ * the price stands - takes that row first, so it is always in the same place. There is deliberately
  * no second row below: a label pushed down sits further from the mark it belongs to than from its
  * neighbour's, and the eye reads it as belonging to the wrong price.
  *
@@ -354,12 +364,24 @@ internal fun layoutPriceLabels(
     trackWidth: Float,
     gap: Float,
     groups: List<Int> = centers.indices.toList(),
+    pinnedBelow: Int? = null,
 ): List<LabelSlot> {
     val slots = arrayOfNulls<LabelSlot>(centers.size)
 
-    // The single row under the line, and as many above it as the crowding needs.
-    var belowEnd = 0f
+    // The single row under the line, as the stretches already taken, and as many rows above it as
+    // the crowding needs.
+    val below = mutableListOf<ClosedFloatingPointRange<Float>>()
     val aboveEnds = mutableListOf<Float>()
+
+    // A blank label takes no room and sits under the line, so it never costs the ladder a row.
+    centers.indices.filter { widths[it] <= 0f }.forEach { slots[it] = LabelSlot(centers[it], row = 0) }
+
+    // The pinned label has the row under the line first, so everything else makes room for it.
+    pinnedBelow?.takeIf { slots[it] == null }?.let { index ->
+        val left = (centers[index] - widths[index] / 2f).coerceIn(0f, max(0f, trackWidth - widths[index]))
+        slots[index] = LabelSlot(left, row = 0, above = false)
+        below += left..(left + widths[index] + gap)
+    }
 
     // Groups in the order their earliest mark sits on the axis, so the ladder still reads
     // left to right.
@@ -367,7 +389,9 @@ internal fun layoutPriceLabels(
         .groupBy { groups.getOrElse(it) { _ -> it } }
         .values
         .sortedBy { members -> members.minOf { centers[it] } }
-        .forEach { members ->
+        .forEach { group ->
+            val members = group.filter { slots[it] == null }
+            if (members.isEmpty()) return@forEach
             val ordered = members.sortedBy { centers[it] }
             // Packed once and then placed as a unit, so the group occupies one row wherever it
             // lands. The row below takes the whole block or none of it: half a range down there is
@@ -375,11 +399,11 @@ internal fun layoutPriceLabels(
             val packed = packGroup(ordered, centers, widths, trackWidth, gap)
             val blockLeft = packed.first()
             val blockEnd = packed.last() + widths[ordered.last()] + gap
-            if (blockLeft >= belowEnd) {
+            if (below.none { blockLeft < it.endInclusive && blockEnd > it.start }) {
                 ordered.forEachIndexed { position, index ->
                     slots[index] = LabelSlot(packed[position], row = 0, above = false)
                 }
-                belowEnd = blockEnd
+                below += blockLeft..blockEnd
                 return@forEach
             }
             var row = 0

@@ -7,6 +7,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.SideEffect
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
@@ -607,8 +608,11 @@ fun EgxAnalyzerTheme(
             },
             shapes = AppShapes,
             typography = rememberAppTypography(),
-            content = content,
-        )
+        ) {
+            // Text outside a tile or a surface takes the palette's ink, not Material's black: in
+            // dark mode that default drew names and headings black on the graphite page.
+            CompositionLocalProvider(LocalContentColor provides palette.ink, content = content)
+        }
     }
 }
 

@@ -3,8 +3,6 @@ package com.ikverse.egxanalyzer.ui
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.outlined.MoreVert
@@ -127,7 +125,7 @@ internal fun TradeActions.menu(view: PositionView): List<MenuItem> = buildList {
 
 /**
  * A trade, short: what it is, what was paid against where it is now, the return, its tags, and its
- * ladder marked "You paid". A tap opens it in full; a hold opens what can be done about it.
+ * ladder. A tap opens it in full; a hold opens what can be done about it.
  *
  * Until 5.1 this card was the whole trade - a chart toggle, two figure panels, a menu, the Sold and
  * Keep open buttons. All of that is in [TradeDetail] now, a press away, so a list of open trades can
@@ -157,9 +155,8 @@ internal fun PositionCard(
         }
     }
     val items = actions.map { if (it.danger) it.copy(onClick = { leaving = true }) else it }
-    // The arrival flash takes the edge for as long as it runs, then the status outline has it back.
-    val border = arrivalFlash(highlighted, onHighlightShown, view.status.tone()) ?: heldBorder(view)
-    val edge = view.status.tone()
+    // Only the arrival flash outlines the card; its status is said by the pill, never by an edge.
+    val border = arrivalFlash(highlighted, onHighlightShown, view.status.tone())
     AnimatedVisibility(visible = !leaving, exit = CollapseOut) {
         HoldMenu(items = items, modifier = modifier.fillMaxWidth(), onTap = onOpen) {
             Column(
@@ -168,9 +165,6 @@ internal fun PositionCard(
                     .clip(Kit.TileShape)
                     .background(palette.card)
                     .then(if (border != null) Modifier.border(border, Kit.TileShape) else Modifier)
-                    // The trade's status as a coloured edge down its left side - the one edge a
-                    // card keeps, because it means something.
-                    .drawBehind { drawRect(edge, size = Size(StatusEdge.toPx(), size.height)) }
                     .padding(Space.m),
                 verticalArrangement = Arrangement.spacedBy(Space.s),
             ) {
@@ -196,7 +190,7 @@ internal fun PositionCard(
                     verticalArrangement = Arrangement.spacedBy(Space.xs),
                 ) {
                     PositionStatusChip(view)
-                    if (view.open) {
+                    if (view.open && view.sessionsRemaining > 0) {
                         KitTag(
                             "${view.sessionsRemaining} trading ${if (view.sessionsRemaining == 1) "day" else "days"} left",
                             tone = palette.muted,
@@ -220,7 +214,7 @@ internal fun PositionCard(
 }
 
 /**
- * The trade's ladder: the price paid as the entry, marked "You paid", and the arrow where it stands -
+ * The trade's ladder: the price paid as the entry, unnamed because the card says it just above, and the arrow where it stands -
  * today's close while it runs, where it ended once it has. Nothing is plotted across a change of
  * scale: the levels are in the old money and the price in the new.
  */
@@ -236,7 +230,6 @@ private fun TradeLadder(view: PositionView, modifier: Modifier = Modifier, compa
         modifier = modifier,
         reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
         compact = compact,
-        entryLabel = if (compact) null else "You paid",
     )
 }
 
@@ -786,4 +779,3 @@ private fun DeadlineSteps(view: PositionView, modifier: Modifier = Modifier) {
 private const val MaxDeadlineSteps = 20
 
 /** The status edge down the left of a trade card. */
-private val StatusEdge = 5.dp
