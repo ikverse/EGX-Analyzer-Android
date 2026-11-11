@@ -6,6 +6,11 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -140,10 +145,98 @@ class PageHeaderTest {
     }
 
     /**
-     * The icons are on screen and pressable at the top of the scroll, not only once the header has
-     * collapsed - they shrink into the collapsed bar's icons rather than fading in there. Without
-     * this, a page at the top of a long list gave no sign that it could be searched or filtered at
-     * all until the reader had scrolled.
+     * A change of tab, as the shell does it since 2026-11-11: the page - header included - is
+     * built afresh under a [TabTravel] that outlives it. The name pressed becomes the selected
+     * one, the buttons are still there on the new page, and pressing the name already showing asks
+     * for the top of that page rather than navigating again.
+     */
+    @Test
+    fun `pressing a tab's name lands on that tab, and pressing it again asks for the top`() {
+        var destination by mutableStateOf(AppDestination.INSIGHTS)
+        var toTop by mutableStateOf<AppDestination?>(null)
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.DARK) {
+                val travel = remember { TabTravel(destination) }
+                LaunchedEffect(destination) { travel.goTo(destination, still = false) }
+                CompositionLocalProvider(LocalTabTravel provides travel) {
+                    key(destination) {
+                        PageHeader(
+                            destination = destination,
+                            collapse = { 0f },
+                            search = box,
+                            current = true,
+                            filters = mutableStateOf(false),
+                            filtered = false,
+                            stocksOnPage = { emptySet() },
+                            onNavigate = { destination = it },
+                            onScrollToTop = { toTop = it },
+                        )
+                    }
+                }
+            }
+        }
+
+        compose.onNodeWithText("Results").performClick()
+        compose.waitForIdle()
+
+        assertEquals(AppDestination.RESULTS, destination)
+        compose.onNode(hasText("Results") and isSelected()).assertIsDisplayed()
+        compose.onNode(hasText("Insights") and isSelected()).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Filters").assertIsDisplayed()
+
+        compose.onNodeWithText("Results").performClick()
+
+        assertEquals(AppDestination.RESULTS, toTop)
+        assertEquals(AppDestination.RESULTS, destination)
+    }
+
+    /** With reduce motion on a travel lands at once: no frame draws a name part-way between sizes. */
+    @Test
+    fun `a travel told to hold still is already there`() = kotlinx.coroutines.test.runTest {
+        val travel = TabTravel(AppDestination.PORTFOLIO)
+
+        // A page composes a frame before the travel hears of it, and is drawn as the old one was.
+        assertEquals(1f, travel.emphasis(AppDestination.PORTFOLIO, current = AppDestination.RESULTS))
+        assertEquals(0f, travel.emphasis(AppDestination.RESULTS, current = AppDestination.RESULTS))
+
+        travel.goTo(AppDestination.RESULTS, still = true)
+
+        assertEquals(1f, travel.emphasis(AppDestination.RESULTS, current = AppDestination.RESULTS))
+        assertEquals(0f, travel.emphasis(AppDestination.PORTFOLIO, current = AppDestination.RESULTS))
+        assertEquals(AppDestination.PORTFOLIO, travel.from)
+    }
+
+    /** Unfolded the buttons close the tab row rather than sitting on the session line. */
+    @Test
+    fun `the buttons are there and pressable unfolded too`() {
+        val filters = mutableStateOf(false)
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.DARK) {
+                CompositionLocalProvider(LocalWindowWidth provides WindowWidth.EXPANDED) {
+                    PageHeader(
+                        destination = AppDestination.INSIGHTS,
+                        collapse = { 0f },
+                        search = box,
+                        current = true,
+                        filters = filters,
+                        filtered = false,
+                        stocksOnPage = { emptySet() },
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithContentDescription("Filter by stock").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Filters").performClick()
+
+        assertTrue(filters.value)
+    }
+
+    /**
+     * The buttons are on screen and pressable at the top of the scroll, not only once the header
+     * has collapsed: on the cover screen they sit on the session line there, and stay pinned at the
+     * right as that line folds away. Without this, a page at the top of a long list gave no sign
+     * that it could be searched or filtered at all until the reader had scrolled.
      */
     @Test
     fun `an unfiltered page at the top of its scroll still shows and presses its icons`() {

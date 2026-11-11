@@ -38,8 +38,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -57,7 +63,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
@@ -81,7 +86,7 @@ import kotlin.math.roundToInt
  * title out and a small one in, which is two titles briefly drawn over each other. Here the size,
  * the letter spacing and the icon are interpolated on [collapse], so what a reader sees is the page
  * name getting smaller and staying put - and the header can never be caught showing two of them.
- * That costs a recomposition of this row per frame of the first [HeaderCollapseTravel] of a scroll,
+ * That costs a recomposition of this row per frame of the first [headerCollapseTravel] of a scroll,
  * which is one glyph and one word; the page below is untouched, because nothing here is read from
  * inside it.
  *
@@ -197,7 +202,19 @@ internal fun PageHeader(
     // narrowing them - would otherwise expand the title back over the control being typed into.
     val fraction = if (searching) 1f else collapse()
 
-    Column(
+    // **Where the two buttons sit** (the mockups, 2026-11-11). On the cover screen they are at the
+    // right of the session line, so the tab names have the whole row beneath them; unfolded they
+    // are at the right end of the tab row. The mockups only draw a page at the top of its scroll,
+    // and the session line folds away as a page is read - so on the cover screen the buttons are
+    // laid over the header rather than inside the session row, and stay pinned at the right while
+    // that row goes, coming to rest beside the collapsed tab names.
+    val compact = LocalWindowWidth.current == WindowWidth.COMPACT
+    val actionCount = (if (search != null) 1 else 0) + (if (filters != null) 1 else 0)
+    val actionsWidth = SearchTarget * actionCount + ActionGap * (actionCount - 1).coerceAtLeast(0)
+    val overlaid = compact && actionCount > 0
+    val sessionRow = sessionRowHeight(compact)
+
+    Box(
         modifier
             .fillMaxWidth()
             // The top inset, held by the header rather than by the shell. `safeDrawing` rather than
@@ -205,14 +222,15 @@ internal fun PageHeader(
             // keyboard's inset out of it.
             .padding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top).asPaddingValues()),
     ) {
+    Column(Modifier.fillMaxWidth()) {
         // **The session line, folding away as the page is read** (5.0). It takes the first part of
         // the collapse, so the tab row underneath keeps its place on screen while it goes.
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(lerp(SessionRowHeight, 0.dp, fraction))
+                .height(lerp(sessionRow, 0.dp, fraction))
                 .graphicsLayer { alpha = 1f - fraction }
-                .padding(horizontal = Space.l),
+                .padding(start = Space.l, end = Space.l + if (overlaid) actionsWidth + Space.s else 0.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
             if (fraction < 1f) SessionLine()
@@ -285,10 +303,54 @@ internal fun PageHeader(
                     filtered = filtered,
                     onNavigate = onNavigate,
                     onScrollToTop = onScrollToTop,
+                    actionsInRow = !compact,
+                    // The names give way to the buttons early in the collapse, before the buttons
+                    // have come down far enough to sit over them.
+                    endReserve = if (overlaid) {
+                        lerp(0.dp, actionsWidth + Space.m, (fraction * 3f).coerceAtMost(1f))
+                    } else {
+                        0.dp
+                    },
                 )
             }
         }
     }
+    }
+        if (overlaid && !searching) {
+            Row(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = Space.l)
+                    .offset(y = lerp((sessionRow - SearchTarget) / 2, (CollapsedHeight - SearchTarget) / 2, fraction)),
+                horizontalArrangement = Arrangement.spacedBy(ActionGap),
+            ) {
+                HeaderActions(
+                    onSearch = if (search == null) null else ::open,
+                    onFilters = if (filters == null) null else ({ filters.value = true }),
+                    filtered = filtered,
+                )
+            }
+        }
+    }
+}
+
+/** The search and filter buttons, in whichever row the width puts them. */
+@Composable
+private fun HeaderActions(
+    onSearch: (() -> Unit)?,
+    onFilters: (() -> Unit)?,
+    filtered: Boolean,
+) {
+    if (onSearch != null) {
+        HeaderAction(glyph = HeaderGlyph.SEARCH, description = "Filter by stock", onClick = onSearch)
+    }
+    if (onFilters != null) {
+        HeaderAction(
+            glyph = HeaderGlyph.FILTERS,
+            description = if (filtered) "Filters, on" else "Filters",
+            dot = filtered,
+            onClick = onFilters,
+        )
     }
 }
 
@@ -303,10 +365,14 @@ private fun TitleRow(
     filtered: Boolean,
     onNavigate: (AppDestination) -> Unit,
     onScrollToTop: (AppDestination) -> Unit,
+    /** Unfolded: the buttons close this row. On the cover screen [PageHeader] lays them over it. */
+    actionsInRow: Boolean,
+    /** Room kept clear at the row's end for buttons laid over it. */
+    endReserve: Dp,
 ) {
     Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Space.m),
+        horizontalArrangement = Arrangement.spacedBy(ActionGap),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // **The tab row since 5.0**: this page's name large and the other four small beside it,
@@ -316,73 +382,61 @@ private fun TitleRow(
             collapse = collapse,
             onSelect = onNavigate,
             onReselect = onScrollToTop,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).padding(end = endReserve),
         )
-        // **The icons are there from the first frame, sized on the same curve as the page's own
-        // icon beside them** - `lerp(ExpandedIcon, CollapsedIcon, collapse)`, the exact 30dp-to-22dp
-        // travel the destination glyph already makes. They used to fade in over the last 40% of the
-        // shrink instead, at one fixed size throughout, which is two different animations answering
-        // one gesture: the title shrinking continuously and the icons cutting in late. Now a page at
-        // the top of its scroll shows both controls large, in the header a reader is actually
-        // looking at, and they shrink into the collapsed bar's icons rather than appearing there.
-        // Always pressable, because there is no longer a partial-fade frame for a stray tap to land
-        // on. `filtered` no longer needs to force early arrival - every page arrives early now - and
-        // stays only to light the dot on the filter icon.
-        val searchIconSize = lerp(ExpandedIcon, CollapsedIcon, collapse)
-        if (onSearch != null) {
-            HeaderAction(
-                icon = Icons.Outlined.Search,
-                description = "Filter by stock",
-                size = searchIconSize,
-                onClick = onSearch,
-            )
-        }
-        if (onFilters != null) {
-            HeaderAction(
-                icon = Icons.Outlined.FilterList,
-                description = if (filtered) "Filters, on" else "Filters",
-                size = searchIconSize,
-                dot = filtered,
-                onClick = onFilters,
-            )
-        }
+        if (actionsInRow) HeaderActions(onSearch, onFilters, filtered)
     }
 }
 
+/** The two drawings the header's buttons carry. */
+private enum class HeaderGlyph { SEARCH, FILTERS }
+
 /**
- * One of the header's two glyphs, shrinking with the title as the header collapses.
+ * One of the header's two buttons, as the mockups draw it: a 44dp round button in the raised tone
+ * holding an 18dp glyph that does not change size with the collapse.
  *
- * @param size the glyph's edge, lerped by the caller on the same curve as the destination icon
- *   beside it - see [TitleRow]. The touch target stays [SearchTarget] throughout; only the glyph
- *   inside it grows and shrinks.
+ * **The glyphs are drawn here rather than taken from Material's icon set**, which is what they were
+ * until 2026-11-11 and why they read as the old ones: the design's are 2.2-wide strokes on a 24
+ * grid - a ring with a short tail, and three centred lines of shrinking width.
+ *
  * @param dot a mark in the corner saying this control is doing something right now. Only the
  *   filters carry one: the search box reports itself by being open.
  */
 @Composable
 private fun HeaderAction(
-    icon: ImageVector,
+    glyph: HeaderGlyph,
     description: String,
-    size: Dp,
     onClick: () -> Unit,
     dot: Boolean = false,
 ) {
-    // A round tonal button (2026-11 redesign): something you press sits in a container.
     val press = remember { MutableInteractionSource() }
+    val ink = palette.ink
     Box(
         Modifier
             .size(SearchTarget)
             .pressScale(press)
             .clip(CircleShape)
             .background(palette.raised)
-            .clickable(interactionSource = press, indication = null, onClick = onClick),
+            .clickable(interactionSource = press, indication = null, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            icon,
-            contentDescription = description,
-            tint = palette.ink,
-            modifier = Modifier.size(size),
-        )
+        Canvas(Modifier.size(GlyphSize)) {
+            // The mockup's own coordinates, on its 24-unit grid.
+            val u = size.minDimension / 24f
+            val width = 2.2f * u
+            when (glyph) {
+                HeaderGlyph.SEARCH -> {
+                    drawCircle(ink, radius = 7f * u, center = Offset(11f * u, 11f * u), style = Stroke(width))
+                    drawLine(ink, Offset(20f * u, 20f * u), Offset(16.5f * u, 16.5f * u), strokeWidth = width)
+                }
+                HeaderGlyph.FILTERS -> {
+                    drawLine(ink, Offset(4f * u, 6f * u), Offset(20f * u, 6f * u), strokeWidth = width)
+                    drawLine(ink, Offset(7f * u, 12f * u), Offset(17f * u, 12f * u), strokeWidth = width)
+                    drawLine(ink, Offset(10f * u, 18f * u), Offset(14f * u, 18f * u), strokeWidth = width)
+                }
+            }
+        }
         if (dot) {
             Box(
                 Modifier
@@ -458,12 +512,9 @@ private fun SearchField(
     // **up** by the window manager - back over the header it hangs from.
     var anchorTop by remember { mutableIntStateOf(-1) }
     val spaceBelow = if (anchorTop < 0) 0 else windowHeight - keyboard - (anchorTop + anchorOffset)
-    // The box was opened by somebody who wants to type in it - but only once the pages have stopped
-    // moving and this is the one in front of them. `LocalTabsSettled` is the shell's own answer to
-    // "has the reader arrived", written by the pager and true beside a rail.
-    val settled = LocalTabsSettled.current
-    LaunchedEffect(focusable, settled.value) {
-        if (focusable && settled.value) focus.requestFocus()
+    // The box was opened by somebody who wants to type in it.
+    LaunchedEffect(focusable) {
+        if (focusable) focus.requestFocus()
     }
     // The list is anchored to this box rather than to the row, so it stands under the field
     // wherever the field is laid out.
@@ -616,20 +667,26 @@ private fun PickedStock(
 private val ExpandedHeight = 60.dp
 private val CollapsedHeight = 52.dp
 
-/** The session line above the tabs, which folds to nothing as the page is read. */
-private val SessionRowHeight = 28.dp
+/**
+ * The session line above the tabs, which folds to nothing as the page is read. As tall as the
+ * buttons on the cover screen, where it holds them; a line of text's worth unfolded.
+ */
+private fun sessionRowHeight(compact: Boolean): Dp = if (compact) SearchTarget else 28.dp
 
 /**
  * How far the page scrolls into the header before it has finished shrinking: the session line,
  * and the tab row going from its large size to its small one.
  */
-internal val HeaderCollapseTravel: Dp = SessionRowHeight + ExpandedHeight - CollapsedHeight
+internal fun headerCollapseTravel(width: WindowWidth): Dp =
+    sessionRowHeight(width == WindowWidth.COMPACT) + ExpandedHeight - CollapsedHeight
 
-/** The glyphs of the search and filter buttons, at either end of the collapse. */
-private val ExpandedIcon = 22.dp
-private val CollapsedIcon = 20.dp
+/** The glyph inside a header button: the mockups' 18, at every point of the collapse. */
+private val GlyphSize = 18.dp
 
-/** A press target for the glyph, not the size of it - the glyph itself is [ExpandedIcon]/[CollapsedIcon]. */
+/** Between the two header buttons. */
+private val ActionGap = 6.dp
+
+/** A header button, and the press target of the two X's in the search box. */
 private val SearchTarget = 44.dp
 
 /**

@@ -386,10 +386,9 @@ internal fun ResultsScreen(appState: AppState) {
                 // Opening a report puts its top at the top of the view, rather than leaving you
                 // halfway down a table you just asked for.
                 val reveal = remember { BringIntoViewRequester() }
-                val settled = LocalTabsSettled.current
                 LaunchedEffect(openRun) {
                     if (openRun != null) {
-                        reveal.revealIfOnScreen(appState, AppDestination.RESULTS, settled)
+                        reveal.revealIfOnScreen(appState, AppDestination.RESULTS)
                     }
                 }
                 @Composable
@@ -741,6 +740,10 @@ internal fun SavedRunStack(
     // page rather than over the reading behind it. See this function's note on why a deck is opaque.
     val backing = MaterialTheme.colorScheme.background
     val cardShape = Kit.TileShape
+    // **Since 2026-11-11 there is no destination pager above this deck** - tabs change in place, see
+    // `DestinationSwitch` - so what this connection lets through now reaches nothing and a drag past
+    // the deck's last card simply stops. The note below is how it stood while there was one.
+    //
     // This page's own width, so a drag that runs past the deck's last card can be handed to the
     // destination pager but never by more than the one page this deck fills - the same overshoot
     // `sidewaysGesturesStayOnThePage` exists to prevent, measured locally because this connection

@@ -168,7 +168,7 @@ import com.ikverse.egxanalyzer.ui.kit.KitRule
  * which explains the shrink, and `AppContent`, which explains why there is no chrome above it any
  * more.
  *
- * **The header eats the scroll before the page moves.** [HeaderCollapseTravel] of every downward
+ * **The header eats the scroll before the page moves.** [headerCollapseTravel] of every downward
  * gesture goes into the collapse first and is not passed on, which is the whole reason there is a
  * `NestedScrollConnection` here rather than an arithmetic on `scroll.value`: a header that merely
  * shrank *as* the page scrolled would move the content at twice the speed of the finger for the
@@ -211,13 +211,15 @@ internal fun Screen(
     // Where the scrolling area begins on screen, so anything inside it can pin itself there. A
     // table header has no other way to know how far it has been scrolled past.
     var viewportTop by remember { mutableFloatStateOf(0f) }
-    // How much of the header has been taken, in pixels, between 0 and [HeaderCollapseTravel].
+    // How much of the header has been taken, in pixels, between 0 and [headerCollapseTravel].
     //
     // Written from the scroll callback below and read in two places: [PageHeader]'s own
     // composition. Never read in this function's composition - the page
     // under it would then recompose on every frame of a collapse.
-    val travel = with(LocalDensity.current) { HeaderCollapseTravel.toPx() }
-    val taken = remember { mutableFloatStateOf(0f) }
+    val travel = with(LocalDensity.current) { headerCollapseTravel(LocalWindowWidth.current).toPx() }
+    // Seeded like the scroll above it: a page is built afresh every time its tab is pressed, and
+    // one left part-way down comes back with its header as it was left, collapsed.
+    val taken = remember { mutableFloatStateOf(if (savedScroll.value > 0) travel else 0f) }
     val headerScroll = remember(travel, scroll) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -369,18 +371,6 @@ internal fun Screen(
  * or a pull-to-refresh indicator is in the way.
  */
 internal val LocalViewportTop = compositionLocalOf { 0f }
-
-/**
- * Whether the pager holding the five tabs has come to rest.
- *
- * Owned by the shell and written by `DestinationPager`: something outside every screen knows this,
- * and a page has no other way to ask.
- *
- * Read by [revealIfOnScreen], which is the only thing that needs it - see the trap written up
- * there. A page composing is not the same event as a reader arriving on it: on a phone the two are
- * a whole travel apart.
- */
-internal val LocalTabsSettled = staticCompositionLocalOf { mutableStateOf(true) }
 
 /**
  * How many times this page has been asked to return to the top, or zero.
@@ -706,43 +696,21 @@ internal const val REVEAL_SETTLE_MS = 320L
 /**
  * Scrolls to a card, unless the reader has left the tab it is drawn on.
  *
- * A [BringIntoViewRequester]'s request travels up through every scrollable ancestor, and on a phone
- * the outermost one is the pager holding the five tabs. Fired from a page the reader is no longer
- * looking at, it scrolls that page back into view - which is the pager travelling back to the tab
- * they had just left. The pager keeps its neighbours composed, so a page walked away from is still
- * alive and still running the effect that reveals a card on it. See `DestinationPager`.
- *
- * It won against a tab press rather than losing to one: a press animates the pager at the same
- * priority a reveal scrolls it, so the later of the two wins, and the reveal was the later one. A
- * swipe survived, which is what made this look like the bar alone was broken - a drag holds the
- * pager at a priority no reveal can take.
- *
  * Dropped rather than held for the reader's return, which is the rule [NavStop] already states
  * about the trip back: revealing the wrong card is worse than revealing none, and a press answered
  * minutes late is a card flashing for a reason nobody remembers. The section holding it is left
  * unfolded either way, which is most of what the reveal was for.
  *
- * **The tab alone was not enough, and that is the whole of [settled].** A destination names where
- * the reader is going, not whether they have got there: a press sets it in the same breath it
- * starts the travel, so a page arriving *during* that travel passes the check and cancels the very
- * scroll that is carrying the reader to it. The pager, barely off the tab they pressed from, then
- * snaps back to it. Only a tab two or more pages away can do this - a neighbour is already
- * composed and its effects do not run again - which is why the Portfolio reached Insights and
- * never Results. So the request waits out the pager and asks again on the other side, rather than
- * being dropped: an arrival that should reveal, a notification opening a saved report among them,
- * composes its page mid-travel too, and dropping the request would answer the notification with a
- * page scrolled to wherever it was left.
+ * Until 2026-11-11 the tabs were pages in a sideways pager, which kept the neighbouring pages
+ * composed and was itself a scrollable ancestor a reveal could turn - so this also waited for the
+ * pager to come to rest. Only the page the reader is on is composed now, and nothing above a page
+ * scrolls sideways, so the check on the tab is all that is left of it.
  */
 @OptIn(ExperimentalFoundationApi::class)
 internal suspend fun BringIntoViewRequester.revealIfOnScreen(
     appState: AppState,
     tab: AppDestination,
-    settled: State<Boolean>,
 ) {
-    if (appState.destination != tab) return
-    snapshotFlow { settled.value }.first { it }
-    // Asked again on the other side of the wait: a travel is long enough for the reader to press
-    // somewhere else, and the tab this was for may no longer be the tab on screen.
     if (appState.destination != tab) return
     bringIntoView()
 }

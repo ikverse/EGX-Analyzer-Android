@@ -51,8 +51,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Assessment
@@ -91,6 +89,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.snapshotFlow
@@ -201,9 +200,7 @@ fun EgxAnalyzerApp(appState: AppState) {
 
     // **One shell at every width since 5.0.** The rail and the floating bar are gone; every page
     // carries its own tab row in its header, so the wide layout and the narrow one are the same
-    // composition and a fold no longer swaps one subtree for another. Read by exactly one thing -
-    // see LocalTabsSettled. The pager below writes it.
-    val tabsSettled = remember { mutableStateOf(true) }
+    // composition and a fold no longer swaps one subtree for another.
     // Above the shells and not inside either of them: back means the same thing whichever one is
     // drawn, and a handler in each would be one rule written twice. Enabled only when there is
     // something to undo, so a reader with nothing outstanding gets the system's own behaviour -
@@ -212,8 +209,7 @@ fun EgxAnalyzerApp(appState: AppState) {
     // list: Compose's own ModalBottomSheet takes back before this ever sees it.
     BackHandler(enabled = appState.canGoBack) { appState.goBack() }
     // A look at Insights ends when the reader leaves it, so the mark is taken on the way out and
-    // never on the way in - the pager composes the neighbouring pages, so arriving is not evidence
-    // anybody turned to the tab. `MainActivity` takes the same mark when the app goes to the
+    // never on the way in. `MainActivity` takes the same mark when the app goes to the
     // background, which is the other way a look ends. See AppState.markInsightsSeen.
     val destination = appState.destination
     LaunchedEffect(destination) {
@@ -230,7 +226,6 @@ fun EgxAnalyzerApp(appState: AppState) {
     CompositionLocalProvider(
         LocalFoldPosture provides posture,
         LocalWindowWidth provides windowWidth,
-        LocalTabsSettled provides tabsSettled,
         // Remembered on the state rather than rebuilt each frame: a new lambda every recomposition
         // is a new value for a static local, which invalidates every reader of it - and the readers
         // here are every ticker on every card on the page.
@@ -250,9 +245,7 @@ fun EgxAnalyzerApp(appState: AppState) {
               // band down the rail. One flat ground for the whole window still means no seam.
               .background(MaterialTheme.colorScheme.background),
       ) {
-        // Swiping between tabs on the cover screen only: unfolded, a sideways drag belongs to the
-        // tables that scroll sideways, and the tabs are a press away in the header.
-        AppContent(appState, swipeBetweenTabs = windowWidth == WindowWidth.COMPACT)
+        AppContent(appState)
       }
     }
 }
@@ -446,7 +439,7 @@ private fun StatusGlyph(stage: StatusStage) {
 private val StatusGlyphSize = 16.dp
 
 @Composable
-private fun AppContent(appState: AppState, swipeBetweenTabs: Boolean) {
+private fun AppContent(appState: AppState) {
     // How long the header keeps a message. A confirmation gets out of the way on its own; a failure
     // does not, because it is the one kind worth reading twice and the one kind that can arrive
     // while the reader is looking somewhere else - a provider's refusal is often the only account
@@ -472,178 +465,44 @@ private fun AppContent(appState: AppState, swipeBetweenTabs: Boolean) {
             WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
         ),
     ) {
-        DestinationPager(appState, swipeBetweenTabs)
+        DestinationSwitch(appState)
     }
 }
 
 /**
- * The destinations laid out side by side, swiped through as well as tapped.
+ * The page the reader is on, changed in place.
  *
- * The bar's items and the pager are two ways of moving the same pointer, so each follows the other:
- * a tap animates the pager to the page, and a swipe names the page it lands on. One rule keeps the
- * two from chasing each other round - **the bar follows every page turn except the ones a travel
- * started here passes over.** Nothing else is held back, and nothing else needs to be: a page the
- * reader turned is an arrival however it turned, under their hand, on the fling, or as the pager
- * settled.
+ * **No pager since 2026-11-11.** The five pages used to sit side by side in a `HorizontalPager`: a
+ * press slid the whole window sideways across every page in between, header and all, and on the
+ * cover screen a finger could drag them. That was the pre-5.0 navigation carried over untouched,
+ * and it is not what the design draws. The mockups show one header, identical on every page, with
+ * only the large name moving, and a page whose tiles pop in - and nothing anywhere that slides
+ * sideways. So a change of tab is now two things happening in place: the emphasis travels along
+ * the tab row ([TabTravel]), and the page is built afresh so its tiles arrive on `popIn`.
  *
- * **The guard names the travel and not the gesture, and that is the heart of it.** It used to name
- * the gesture - a flag raised on `DragInteraction.Start` and lowered when the pager reported itself
- * at rest - and that cannot be read reliably from where this code stands. Compose runs a swipe as
- * two scroll sessions, the finger's and the settling fling's, and `isScrollInProgress` reads false
- * in the gap between them. The flag came down in that gap, so a flick - where the page is decided by
- * velocity on the fling rather than by crossing the halfway mark under the hand - turned its page
- * with the guard already closed. The turn was swallowed and the bar stayed lit on the tab the reader
- * had just left, while a slow drag past the halfway mark still worked, which is what made it look
- * intermittent. The same flag dropped a tap made while a swipe was still settling.
+ * **Only the current page is composed**, keyed on the destination so the one being left is
+ * disposed whole. That is what makes the tiles pop on every arrival rather than only the first,
+ * and it is why nothing a page holds may live in a `remember` - see `PageState`, whose rule this
+ * now leans on at every press rather than only at a fold. The scroll position comes back from
+ * there too.
  *
- * Keyed on the pager rather than on the destination, which is the older half of the same lesson:
- * keyed on the destination, a swipe restarted the very effect that does the scrolling - because a
- * swipe publishes its own arrival - and the restarted copy compared a target read at recomposition
- * against a page read a frame or more later, so a second swipe arriving inside that window scrolled
- * the reader back to the page they had just left.
- *
- * **Every width since 5.0, swiped on the cover screen only** ([swipe]). Unfolded, the pager still
- * carries the travel between tabs - a press on a tab's name in the header - but takes no drag: a
- * page-wide horizontal drag there belongs to the tables that scroll sideways.
+ * With one page composed there is no neighbour to answer a press meant for another tab, and no
+ * sideways scroller above a page for a `bringIntoView` or a child's leftover fling to turn - the
+ * guards that existed for both went with the pager.
  */
 @Composable
-private fun DestinationPager(appState: AppState, swipe: Boolean) {
-    val destinations = AppDestination.entries
-    val pager = rememberPagerState(
-        initialPage = destinations.indexOf(appState.destination),
-        pageCount = { destinations.size },
-    )
-    // The page a travel started here is heading for, and null whenever nothing in this shell is
-    // moving the pager. The one thing held back from the bar, and the only thing that has to be:
-    // the pages a tap crosses on its way are not arrivals, and neither is the page a travel is
-    // abandoned on when a second send replaces it - left to speak, that one wins the race against
-    // the send that cancelled it and takes the reader somewhere neither send named.
-    //
-    // Written by the only coroutine that scrolls, before it suspends. Nothing about how Compose
-    // splits a gesture into scroll sessions can reach it, which is exactly what the flag it replaces
-    // could not say - see the note above.
-    val travelling = remember { mutableStateOf<Int?>(null) }
-    // Whether the pages have stopped moving, for the one thing outside this function that has to
-    // know a page composing is not a reader arriving on it. Every way the pager moves is covered,
-    // a travel and a hand alike, because it is read off the pager itself rather than off the flags
-    // above. Put back on the way out: folding the phone disposes this whole subtree for the rail's
-    // AnimatedContent, and a flag left false there would hold every later reveal forever.
-    val settled = LocalTabsSettled.current
-    LaunchedEffect(pager, settled) {
-        snapshotFlow { pager.isScrollInProgress }.collect { settled.value = !it }
-    }
-    DisposableEffect(settled) { onDispose { settled.value = true } }
-
-    LaunchedEffect(pager) {
-        launch {
-            // Every page turn but a travel's. Under the reader's hand the current page turns over at
-            // the halfway mark, so the bar lights up the tab being dragged towards rather than
-            // waiting for the pages to settle; on a flick it turns over during the fling; and either
-            // way the page it comes to rest on is the last one published.
-            //
-            // The page and the guard are read in the same snapshot, so a turn can never be delivered
-            // against a guard that changed after the turn was taken.
-            snapshotFlow { pager.currentPage to travelling.value }.collect { (page, travel) ->
-                if (travel == null) appState.navigate(destinations[page])
-            }
-        }
-        // Tapped, or sent here by the app itself - a run finishing, a card carrying a press to its
-        // counterpart. `collectLatest` so a second tap during the first one's travel wins rather than
-        // being undone when the first arrives, and so a cancelled travel always has a replacement
-        // scroll to snap it rather than being left parked between two pages.
-        snapshotFlow { destinations.indexOf(appState.destination) }.collectLatest { target ->
-            // Already there, and settled rather than mid-travel: nothing to do, and this is also what
-            // keeps first composition from scrolling the pager to the page it opened on.
-            if (pager.currentPage == target && pager.currentPageOffsetFraction == 0f) {
-                return@collectLatest
-            }
-            // Raised before anything here suspends. `collectLatest` starts each block undispatched,
-            // so a replacement raises it again in the same continuation that the cancelled block
-            // lowered it in, and the page an abandoned travel was parked on never gets a frame in
-            // which to name itself an arrival.
-            travelling.value = target
-            try {
-                // A travel this shell starts outranks nothing and is outranked by nothing except a
-                // hand: it takes the pager from its own predecessor's settling, and from the reader's
-                // fling, so a tab tapped while the pages are still coasting is answered rather than
-                // dropped.
-                pager.animateScrollToPage(target)
-            } catch (_: CancellationException) {
-                // Refused rather than interrupted: a drag holds the pager at a priority a scroll
-                // started here cannot take. A real cancellation still has to pass.
-                currentCoroutineContext().ensureActive()
-                // Let them have it - but the send still has to end somewhere the bar and the pager
-                // agree on. Their gesture names where they land, unless it puts the pager back on the
-                // page it set out from: that turns no page and so names nothing, and the bar would be
-                // left lit on a tab the pager never travelled to. So the guard comes down first, and
-                // then wherever the gesture comes to rest is published whether it turned a page or
-                // not. Read in the gap between the finger and the fling this publishes early, and the
-                // page the fling then turns is published after it - either way the two agree.
-                travelling.value = null
-                snapshotFlow { pager.isScrollInProgress }.first { !it }
-                appState.navigate(destinations[pager.currentPage])
-            } finally {
-                travelling.value = null
+private fun DestinationSwitch(appState: AppState) {
+    val destination = appState.destination
+    val still = LocalReduceMotion.current
+    val travel = remember { TabTravel(destination) }
+    LaunchedEffect(destination) { travel.goTo(destination, still) }
+    CompositionLocalProvider(LocalTabTravel provides travel) {
+        key(destination) {
+            Box(Modifier.fillMaxSize()) {
+                DestinationScreen(destination, appState)
             }
         }
     }
-    HorizontalPager(
-        pager,
-        Modifier.fillMaxSize(),
-        // The neighbours are built while the reader is sitting still rather than on the first frame
-        // of their drag. A screen's first composition is expensive - measured at 150ms and worse on
-        // a cold start, against a budget of 8ms - and with nothing held beyond the viewport that
-        // whole cost landed in the middle of the gesture. It is the same work either way; this only
-        // moves it somewhere there is no gesture for it to stutter.
-        beyondViewportPageCount = 1,
-        userScrollEnabled = swipe,
-    ) { page ->
-        Box(Modifier.fillMaxSize().sidewaysGesturesStayOnThePage()) {
-            DestinationScreen(destinations[page], appState)
-        }
-    }
-}
-
-/**
- * Keeps a sideways gesture that began on something inside the page from becoming a page turn.
- *
- * **This is the fix of 2026-09-12 - "results to insights I have to scroll a long distance and it
- * jumps two pages to portfolio".** A page here is full of things that scroll sideways in their own
- * right: the stack of readings behind a session (`SavedRunStack`), the tables a wide row is read in
- * (`scrollableRow`), the outcome chips on Insights, the sparkline in a recommendation. Compose hands
- * whatever a child scroller could not use **to its parent within the same gesture** - the leftover
- * distance through `onPostScroll`, and the leftover velocity of the fling through `onPostFling` -
- * and the pager's own `scrollable` takes both. So a swipe that started on one of those spent its
- * first inches running that thing to its end, which is the long distance, and then poured the rest
- * of the finger's travel into the pager. A drag is not clamped to one page, so the remainder plus
- * the child's leftover fling carried the reader past the tab they were swiping towards and onto the
- * one after it.
- *
- * **Only what comes up from inside the page is eaten, and only sideways.** A swipe over ordinary
- * page content never passes through here at all - the pager's own gesture detector owns it, above
- * this connection - so page swiping is untouched, and what stops is one gesture doing two jobs.
- * Vertical is passed on whole, because three things upstream live on it: the header's collapse, the
- * navigation bar getting out of the way, and pull to refresh.
- *
- * Every source is eaten rather than just `UserInput`. A child flung to its end goes on dispatching
- * leftovers for the length of its own settling animation, and those are the same gesture arriving a
- * few frames later.
- */
-@Composable
-private fun Modifier.sidewaysGesturesStayOnThePage(): Modifier {
-    val connection = remember {
-        object : NestedScrollConnection {
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource,
-            ): Offset = Offset(available.x, 0f)
-
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
-                Velocity(available.x, 0f)
-        }
-    }
-    return this.nestedScroll(connection)
 }
 
 @Composable
@@ -651,10 +510,9 @@ private fun DestinationScreen(
     destination: AppDestination,
     appState: AppState,
 ) {
-    // The one place both shells build a page, and so the only place that knows which destination is
-    // being composed. Published from here rather than read from `AppState` inside `Screen`, because
-    // the pager keeps the neighbouring pages composed: a page that read the request directly would
-    // answer a press meant for the tab beside it and throw away a scroll position nobody touched.
+    // The one place a page is built, and so the only place that knows which destination is being
+    // composed. Published from here rather than read from `AppState` inside `Screen`, so a page only
+    // ever sees a press meant for it.
     val request = appState.scrollToTopRequest
     CompositionLocalProvider(
         LocalScrollToTop provides (request?.takeIf { it.first == destination }?.second ?: 0),
