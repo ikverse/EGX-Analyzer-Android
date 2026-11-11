@@ -1,6 +1,5 @@
 package com.ikverse.egxanalyzer.ui
 
-import com.ikverse.egxanalyzer.ui.kit.KitRefreshIndicator
 
 import com.ikverse.egxanalyzer.ui.kit.TickerTape
 import com.ikverse.egxanalyzer.ui.theme.palette
@@ -95,7 +94,6 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -178,7 +176,7 @@ import com.ikverse.egxanalyzer.ui.kit.KitRule
  * **It grows back only with the page at its top.** Expanding on any upward delta would pop the
  * title open in the middle of a long page, and - on the three screens that pull to refresh - would
  * fight the gesture: this connection is the outer one, so it sees a downward drag before
- * `PullToRefreshBox` does. Gated on `scroll.value == 0` the two take their turns in the order a
+ * [PullToFetch] does. Gated on `scroll.value == 0` the two take their turns in the order a
  * reader expects, the header first and then the refresh.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -193,9 +191,11 @@ internal fun Screen(
      * the navigation cannot drift apart: there is one of each, on [AppDestination].
      */
     destination: AppDestination,
-    /** Given, the page pulls down to refresh. Its spinner is [refreshing]. */
+    /** Given, the page pulls down to refresh. While [refreshing], a pull says so and does nothing. */
     onRefresh: (() -> Unit)? = null,
     refreshing: Boolean = false,
+    /** What the band a pull opens says. Prices on three pages, the chat list on Analyze. */
+    pullWords: PullWords = PullWords.Prices,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     // Seeded from PageState rather than starting at 0, so a fold restores exactly where the
@@ -355,14 +355,16 @@ internal fun Screen(
                 if (onRefresh == null) {
                     page()
                 } else {
-                    // The gesture wraps only the scrolling page: a floating button that slid down
-                    // with the indicator would look like it had come loose.
-                    val pull = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
-                    PullToRefreshBox(
-                        isRefreshing = refreshing,
+                    // The page comes down with the finger and the band it uncovers says what the
+                    // pull will do. It goes back on release: the status line above reports the
+                    // work, so nothing stays open over the tiles. See PullToFetch.
+                    PullToFetch(
+                        words = pullWords,
+                        detail = {
+                            if (pullWords.showsPriceAge) pricesAsOfLabel(appState.lastPriceRefreshAt) else null
+                        },
+                        refreshing = refreshing,
                         onRefresh = onRefresh,
-                        state = pull,
-                        indicator = { KitRefreshIndicator(pull, refreshing) },
                     ) { page() }
                 }
             }

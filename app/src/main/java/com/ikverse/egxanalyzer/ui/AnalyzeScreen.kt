@@ -181,6 +181,7 @@ internal fun AnalyzeScreen(appState: AppState) {
             null
         },
         refreshing = appState.chatsRefreshing,
+        pullWords = PullWords.Chats,
     ) {
         // The day the calls are for, picked on the kit's calendar. Never later than today: the
         // target runs ahead of today on a Friday, a Saturday or after the close, and a historical

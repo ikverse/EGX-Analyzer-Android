@@ -37,7 +37,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
-import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.MutableState
@@ -251,41 +250,52 @@ fun KitSpinner(modifier: Modifier = Modifier, color: Color = LocalContentColor.c
 }
 
 /**
- * Pull-to-refresh, drawn in the kit: an ink disc that comes down with the pull, a cobalt arc that
- * fills with it and turns while the refresh runs.
+ * The band a pulled page opens above itself: what the pull will do, a fact beside it (how old the
+ * prices are), and a bar that fills as the pull nears the point where a release acts.
+ *
+ * [fraction] is read while drawing, so following a finger recomposes nothing. [lit] is the moment
+ * the pull has gone far enough: the words take their weight.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BoxScope.KitRefreshIndicator(state: PullToRefreshState, refreshing: Boolean) {
+fun KitPullBand(
+    label: String,
+    detail: String?,
+    fraction: () -> Float,
+    lit: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val p = palette
-    val pulled = state.distanceFraction.coerceIn(0f, 1.4f)
-    if (!refreshing && pulled <= 0f) return
-    val shown = if (refreshing) 1f else pulled
-    Box(
-        Modifier
-            .align(Alignment.TopCenter)
-            .graphicsLayer {
-                translationY = (56.dp.toPx() * shown) - 20.dp.toPx()
-                alpha = shown.coerceIn(0f, 1f)
-            }
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(p.ink),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (refreshing) {
-            KitSpinner(color = p.hero, size = 20.dp)
-        } else {
-            Canvas(Modifier.size(20.dp)) {
-                drawArc(
-                    color = p.hero,
-                    startAngle = -90f,
-                    sweepAngle = 360f * pulled.coerceAtMost(1f),
-                    useCenter = false,
-                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = if (lit) FontWeight.Bold else FontWeight.Normal,
+                color = p.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (detail != null) {
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                    color = p.muted,
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = 12.dp),
                 )
             }
         }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(CircleShape)
+                .background(p.line)
+                .drawBehind {
+                    drawRect(p.hero, size = size.copy(width = size.width * fraction().coerceIn(0f, 1f)))
+                },
+        )
     }
 }
 
