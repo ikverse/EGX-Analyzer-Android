@@ -503,3 +503,14 @@ no higher. **The two tabs share the arithmetic and not the scope** — see the f
   scorer might never produce — the one way a test about what the market did passes while the card
   stays empty.
 
+## The trade card reads the trade (2026-11-11)
+
+`PositionCard` used to print facts and leave the reader to pick the one that mattered. `model/TradeBrief.kt` does the picking, as a pure function of a `PositionView` and the page's own "close to a level" reading, and the card only draws what it returns.
+
+- **One sentence, the first of these that is true:** the prices changed scale; the stop is broken and the trade kept open; the deadline has passed; close to the stop; close to target 2; target 1 reached; otherwise the distance to the next target, or to what was paid where the call named no target. Distances are in percent of the last close, as the timeline and the notifications measure them.
+- **`near` is passed in, not recomputed.** It is `nearLevel(needsYou(...))`, so the sentence and the approach notification agree about what close means.
+- **Days are segments** (`DaySegments`): used out of the window, all filled and in the alert colour once `sessionsRemaining` is zero. Past 20 sessions the card draws one bar instead.
+- **Pace** is the share of the way from the entry to target 1 against the share of the window used, within 15 points of each other being on pace. It is read only inside the window, after at least one session, with a first target above the entry that has not been reached and a stop that has not been broken.
+- **The tags that left the card** (close to its stop, close to target 2, overdue, the days-left pill, kept open past the deadline) are said by the sentence and the segments. "Kept open" stays while the deadline is still ahead, because nothing else says it then.
+- **The two prices are a content description on the ladder**, since the ladder is drawn and the line that used to say them is gone. `PortfolioPageTest` finds a card by it.
+- `TradeBriefTest` holds the sentences, their order and the pace thresholds. Not checked on a device.

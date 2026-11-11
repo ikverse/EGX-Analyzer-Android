@@ -6,6 +6,10 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ## [Unreleased]
 
+- **A trade's card on Portfolio says what the trade needs.** One sentence leads it, the most urgent thing true of the trade: "Past its deadline by 3 days", "1.2% above its stop", "Target 1 reached, 3.6% to target 2", or how far it is to the next target. It replaces the "You paid · now" line, whose two prices are on the ladder.
+- **The call's trading days are a row of segments** on that card, filled as they are used, with how many are left beside them. Once the deadline has passed they are all filled in the alert colour.
+- **The card says whether the price is keeping pace with the clock.** It compares how far the price has come toward target 1 with how much of the call's time is used: "Ahead of pace", "On pace", or "Behind pace: 70% of the time used, 20% of the way".
+- The card's tags are down to the status, "Kept open" before the deadline, T+1 and a change of price scale. The return is larger.
 - **The price ladder is redrawn.** One plain line with four upright ticks: red for the stop, dark for the entry, green for the two targets. A round blue dot sits on the line where the price is, with the price above it, and every level's price is on one row beneath. The coloured zones between the levels and the arrow under the line are gone. It is the same ladder everywhere: Portfolio, Results, Insights and the call and trade sheets.
 - **A trade's ladder on Portfolio shows where the stock has been.** A pale stripe runs from the lowest to the highest price since you bought, and the entry is labelled "You paid".
 

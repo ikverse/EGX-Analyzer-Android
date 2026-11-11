@@ -4,6 +4,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -79,7 +80,7 @@ class PortfolioPageTest {
         show(FoldPosture.Cover)
         compose.onNodeWithText("Your trades so far").assertExists()
         compose.onNodeWithText("Open now").performScrollTo().assertIsDisplayed()
-        compose.onAllNodesWithText("You paid", substring = true).onFirst().assertExists()
+        compose.onAllNodesWithContentDescription("You paid", substring = true).onFirst().assertExists()
         assertEquals(2, compose.onAllNodesWithText("Running").fetchSemanticsNodes().size)
     }
 
@@ -171,7 +172,7 @@ class PortfolioPageTest {
     @Test
     fun `holding a trade opens its menu`() {
         show(FoldPosture.Cover)
-        compose.onAllNodesWithText("You paid", substring = true).onFirst().performScrollTo().performTouchInput { longClick() }
+        compose.onAllNodesWithContentDescription("You paid", substring = true).onFirst().performScrollTo().performTouchInput { longClick() }
         compose.onNodeWithText("Fix the trade").assertIsDisplayed()
     }
 
@@ -179,7 +180,7 @@ class PortfolioPageTest {
     fun `a trade close to its stop says so and one clear of it does not`() {
         show(FoldPosture.Cover)
         // ABUK is 1.2% above its stop; COMI is well clear.
-        assertEquals(1, compose.onAllNodesWithText("Close to its stop").fetchSemanticsNodes().size)
+        assertEquals(1, compose.onAllNodesWithText("above its stop", substring = true).fetchSemanticsNodes().size)
     }
 
     private fun finished(ticker: String, ret: Double) = comi.copy(
