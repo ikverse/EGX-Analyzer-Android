@@ -198,8 +198,9 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   and `TabularFigures`. `ActionPill`, `DisclosureButton`, `SettingsButton`, `AppMenu`, `MoreButton`,
   `StatStrip`, `ShareBar`, `FloatingSurface`, `Glass` and `PillShape` were deleted in 5.0.
 - `ui/kit/` — the 5.0 component kit. See **Design language**.
-- `ui/SettingsScreen.kt` — the Settings hub and its seven pages (`SettingsSection`), the open one held
-  in `PageState.settingsSection` so a fold keeps it.
+- `ui/SettingsScreen.kt` — the Settings hub and its eight parts (`SettingsSection`), the open one held
+  in `PageState.settingsSection` so a fold keeps it. It is the one page whose columns scroll on
+  their own: `Screen` takes a `paneScroll` and draws a frame, and each column is a `ScrollPane`.
 - `ui/PageHeader.kt` — the page's own name and icon at the top of every screen, shrinking as the
   page is read, and the two controls that arrive with the collapsed bar: the page's stock filter,
   and the icon that opens the rest of its filters. It replaced the `EGX Analyzer` band on
@@ -399,7 +400,7 @@ floating bar, this section is what is true now.
 - **Tiles on a ground.** Paper `#EFEDE6` (graphite `#141518` at night, true black in the pure-black
   mode) with rounded tiles on it (`Kit.TileCorner`, 30dp; `Kit.TileGap`, 10dp). A tile's tone says
   what it is: ink for what leads a page, cobalt `#1E2BFF` for the hero, lime `#C8FF4D` for the
-  highlight, coral `#FF6B4A` for alerts, and sunflower, lilac and sky (`tile1`–`tile3`) for the rest.
+  highlight, coral `#FFB8A3` for alerts (lightened on 2026-11-12; it was `#FF6B4A`), and sunflower, lilac and sky (`tile1`–`tile3`) for the rest.
   `TileTone` names them; `tileColors` gives the ink that goes on each. Gain and loss are their own
   colours (`#0B8A4A` / `#C62020`) and never a tile fill.
 - **The kit is `ui/kit/`, and it is the only place allowed to build on Material.** `Tile`, `Panel`,

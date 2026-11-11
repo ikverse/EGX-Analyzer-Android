@@ -106,6 +106,14 @@ fun KitSheet(
     dismissOnOutside: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // A question mark inside a sheet opens its own sheet, whatever the page under it does with
+    // them: Settings in tabletop shows notes on the upright half, which a sheet is covering.
+    val pageContent = content
+    val content: @Composable ColumnScope.() -> Unit = {
+        androidx.compose.runtime.CompositionLocalProvider(com.ikverse.egxanalyzer.ui.LocalInfoNoteSink provides null) {
+            pageContent()
+        }
+    }
     val p = palette
     if (posture.opensSheetsAsPanel) {
         SidePanel(onDismiss = onDismiss, title = title, splitAtFraction = posture.panelStartFraction, dismissOnOutside = dismissOnOutside, content = content)

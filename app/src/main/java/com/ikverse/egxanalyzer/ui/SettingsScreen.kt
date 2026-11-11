@@ -12,6 +12,14 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.FlowRow
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -96,10 +104,15 @@ import java.time.ZoneId
  * screen meant the switch somebody came for was under three other open cards. The hub now says what
  * each part holds and pressing it opens that part on its own; unfolded, the parts are a column down
  * the left and the open one fills the right.
+ *
+ * **Reader was split in two in 5.3.** It held the AI and its key, what to send, both wording lists,
+ * the prompt and the company names: four pages' worth down one scroll. The connection stayed under
+ * Reader and what a run is told to read moved to Reading rules.
  */
 internal enum class SettingsSection(val title: String) {
     TELEGRAM("Telegram"),
     ANALYSIS("Reader"),
+    READING_RULES("Reading rules"),
     ASK_AI("Ask AI"),
     NOTIFICATIONS("Notifications"),
     GENERAL("Prices and trades"),
@@ -107,6 +120,21 @@ internal enum class SettingsSection(val title: String) {
     ABOUT("About"),
 }
 
+/**
+ * Settings, laid out for the posture the phone is in.
+ *
+ * **Nothing here scrolls as one page.** [Screen] is given a `paneScroll`, so it draws a frame and
+ * each column brings its own scroll. Until 5.3 the list of parts and the open part shared the
+ * page's single scroll, so reading down a long part took the list away with it and left half the
+ * unfolded screen empty, with nothing saying which part was open.
+ *
+ * - **Cover**: the hub, or an open part under its back button and name, which stay put.
+ * - **Unfolded and book**: the parts on the left, still; the open part on the right, scrolling
+ *   under its own name. Book splits on the hinge and has room for each part's full summary.
+ * - **Tabletop**: what is read stands on the upright half and never scrolls away; the parts and
+ *   the controls lie on the flat half. A question mark sends its note up to the upright half
+ *   rather than opening a sheet over the half being pressed.
+ */
 @Composable
 internal fun SettingsScreen(appState: AppState) {
     // In PageState rather than a remember, so folding the phone does not drop the reader back on
@@ -115,74 +143,166 @@ internal fun SettingsScreen(appState: AppState) {
     val posture = LocalFoldPosture.current
     val wide = posture is FoldPosture.Unfolded || posture is FoldPosture.Book
     // Back closes a part and returns to the hub, where a part covers the whole page. Only on this
-    // tab: the pager keeps its neighbours composed, and a Settings page left open one swipe away
-    // must not answer the back press of the page on screen.
+    // tab, so a Settings part left open never answers the back press of another page.
     BackHandler(enabled = open != null && !wide && appState.destination == AppDestination.SETTINGS) {
         open = null
     }
     val summaries = settingsSummaries(appState)
+    val briefs = settingsBriefs(appState)
+    val status = currentStatus(appState)
+    val faults = remember(status) { status.lines.filter { it.ok == false }.map { it.section }.toSet() }
 
-    Screen(appState = appState, destination = AppDestination.SETTINGS) {
+    // The open part's own scroll, which is also what the header's collapse and a press on the tab
+    // already showing answer to. Back at the top whenever the part changes.
+    val paneScroll = rememberScrollState(initial = appState.pages.scrollOffset(AppDestination.SETTINGS).value)
+    val navScroll = rememberScrollState()
+    var scrolledFor by remember { mutableStateOf(open) }
+    LaunchedEffect(open) {
+        if (open != scrolledFor) {
+            scrolledFor = open
+            paneScroll.scrollTo(0)
+        }
+    }
+
+    Screen(appState = appState, destination = AppDestination.SETTINGS, paneScroll = paneScroll) {
         when (posture) {
             is FoldPosture.Unfolded, is FoldPosture.Book -> {
                 val shown = open ?: SettingsSection.TELEGRAM
-                SplitColumns(posture, unfoldedStart = 0.34f, start = {
-                        SettingsStatusTile(appState, onOpen = { open = it }, compact = true)
-                        SettingsSection.entries.forEach { section ->
-                            SectionNavTile(section, summaries.getValue(section), selected = section == shown) {
-                                open = section
-                            }
-                        }
-                    }, end = {
-                        Text(
-                            shown.title,
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.padding(start = 4.dp),
-                        )
+                val book = posture is FoldPosture.Book
+                SplitColumns(posture, unfoldedStart = 0.34f, modifier = Modifier.weight(1f), start = {
+                    ScrollPane(navScroll, Modifier.weight(1f), gap = Kit.TileGap) {
+                        SettingsStatusTile(status, onOpen = { open = it }, compact = true)
+                        ThemeControl(appState)
+                        // One line a part unfolded, where the column is a third of the screen; the
+                        // whole summary in book posture, where it is half.
+                        PartsList(shown, faults, if (book) summaries else briefs, stacked = book) { open = it }
+                    }
+                }, end = {
+                    PartTitle(shown, summaries.getValue(shown))
+                    ScrollPane(paneScroll, Modifier.weight(1f), gap = Kit.TileGap) {
                         SectionPage(shown, appState)
-                    })
+                    }
+                })
             }
 
             is FoldPosture.Tabletop -> {
-                // What is read on the upright half, to the crease: the status, or on Notifications
-                // the one chosen and what it looks like. What is pressed lies on the flat half.
                 val shown = open ?: SettingsSection.TELEGRAM
                 var kind by appState.pages.settingsNotification
+                // The note a question mark below last sent up. Dropped when the part changes: an
+                // explanation of a switch that is no longer on the flat half explains nothing.
+                var explained by remember(shown) { mutableStateOf<InfoNote?>(null) }
                 Column(
-                    Modifier.fillMaxWidth().heightIn(min = tabletopHeroHeight(posture)),
+                    Modifier
+                        .fillMaxWidth()
+                        .height(tabletopHeroHeight(posture))
+                        .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(Kit.TileGap),
                 ) {
-                    if (shown == SettingsSection.NOTIFICATIONS) {
-                        NotificationExplainer(kind)
-                    } else {
-                        SettingsStatusTile(appState, onOpen = { open = it })
+                    val note = explained
+                    when {
+                        shown == SettingsSection.NOTIFICATIONS -> NotificationExplainer(kind)
+                        note != null -> NoteExplainer(shown, note)
+                        else -> {
+                            SettingsStatusTile(status, onOpen = { open = it })
+                            Text(
+                                "Press ? on a line below and its explanation shows here.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = palette.muted,
+                                modifier = Modifier.padding(start = 4.dp),
+                            )
+                        }
                     }
                 }
-                // Wrapped rather than scrolled sideways: a sideways scroller would fight the page.
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    SettingsSection.entries.forEach { section ->
-                        KitChip(section.title, selected = section == shown, onClick = { open = section })
+                Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+                    ScrollPane(navScroll, Modifier.width(TabletopPartsWidth).fillMaxHeight(), gap = Kit.TileGap) {
+                        PartsList(shown, faults, lines = null, stacked = false) { open = it }
+                        ThemeControl(appState)
                     }
-                }
-                if (shown == SettingsSection.NOTIFICATIONS) {
-                    NotificationKeys(appState, selected = kind, onSelect = { kind = it })
-                } else {
-                    SectionPage(shown, appState)
+                    CompositionLocalProvider(LocalInfoNoteSink provides { explained = it }) {
+                        ScrollPane(paneScroll, Modifier.weight(1f).fillMaxHeight(), gap = Kit.TileGap) {
+                            if (shown == SettingsSection.NOTIFICATIONS) {
+                                NotificationKeys(appState, selected = kind, onSelect = { kind = it })
+                            } else {
+                                SectionPage(shown, appState)
+                            }
+                        }
+                    }
                 }
             }
 
             else -> {
                 val section = open
                 if (section == null) {
-                    SettingsHub(appState, summaries) { open = it }
+                    ScrollPane(paneScroll, Modifier.weight(1f), gap = Kit.TileGap) {
+                        SettingsHub(appState, status, faults, summaries) { open = it }
+                    }
                 } else {
                     SectionHeader(section) { open = null }
-                    SectionPage(section, appState)
+                    ScrollPane(paneScroll, Modifier.weight(1f), gap = Kit.TileGap) {
+                        SectionPage(section, appState)
+                    }
                 }
             }
         }
     }
+}
+
+/** How wide the parts stand on the flat half in tabletop: a name and a dot, and the theme control. */
+private val TabletopPartsWidth = 212.dp
+
+/** Whether the three things this app cannot work without are working, read off the state. */
+@Composable
+private fun currentStatus(appState: AppState): SettingsStatus = settingsStatus(
+    telegramReady = appState.telegramAuthState.step == TelegramAuthStep.READY,
+    credentialVerified = appState.credentialVerified,
+    hasCredential = appState.cloudConfiguration.hasCredential,
+    model = appState.cloudConfiguration.model,
+    lastPriceRefreshAt = appState.lastPriceRefreshAt,
+    pricesRefreshing = appState.pricesRefreshing,
+    feedClean = appState.priceHealth.clean,
+    feedFaults = appState.priceHealth.faults.size,
+    stocksNamed = appState.priceHealth.stocksNamed,
+    now = java.time.Instant.now(),
+)
+
+/** Which prompt a run is sent with, as the parts say it: "Prompt v3", or the shipped one. */
+private fun promptLabel(appState: AppState): String = if (appState.useDefaultPromptOnly) {
+    "Default prompt"
+} else {
+    "Prompt v" + (appState.promptVersions.firstOrNull { it.id == appState.activePrompt.id }?.sequence ?: 1)
+}
+
+/**
+ * A part in two or three words, for the single-line rows beside an open part unfolded, where the
+ * column is a third of the screen and the whole summary wrapped to three lines.
+ */
+@Composable
+private fun settingsBriefs(appState: AppState): Map<SettingsSection, String> {
+    val askSearching = remember(appState.opinionSettingsRevision) { appState.opinionSearchEnabled() }
+    val signedIn = appState.telegramAuthState.step == TelegramAuthStep.READY
+    val health = appState.priceHealth
+    return mapOf(
+        SettingsSection.TELEGRAM to if (signedIn) "${appState.channels.size} chats" else "signed out",
+        SettingsSection.ANALYSIS to when (appState.credentialVerified) {
+            true -> "key working"
+            false -> "key rejected"
+            null -> if (appState.cloudConfiguration.hasCredential) "key not checked" else "no key"
+        },
+        SettingsSection.READING_RULES to promptLabel(appState).replaceFirstChar(Char::lowercase),
+        SettingsSection.ASK_AI to if (askSearching) "web search on" else "no web search",
+        SettingsSection.NOTIFICATIONS to "${notificationSwitches(appState).count { it }} of $NOTIFICATION_COUNT on",
+        SettingsSection.GENERAL to when {
+            !health.clean -> "${health.faults.size} quiet"
+            appState.marketRefreshEnabled -> "all session"
+            else -> "once a day"
+        },
+        SettingsSection.DATA to if (appState.telegramSyncEnabled) "sync on" else "sync off",
+        SettingsSection.ABOUT to when (val state = appState.updateState) {
+            is UpdateState.Available -> "${state.update.versionName} available"
+            is UpdateState.Ready -> "${state.update.versionName} ready"
+            else -> BuildConfig.VERSION_NAME
+        },
+    )
 }
 
 /** The one line each part carries on the hub and in the column beside an open part. */
@@ -200,9 +320,13 @@ private fun settingsSummaries(appState: AppState): Map<SettingsSection, String> 
             false -> "key rejected"
             null -> if (config.hasCredential) "key not checked" else "no key"
         },
+        SettingsSection.READING_RULES to promptLabel(appState) + " · " +
+            appState.ruleSet.all.count { it.origin == RuleOrigin.USER }.let { mine ->
+                if (mine == 0) "built-in wording only" else "$mine wording added"
+            },
         SettingsSection.ASK_AI to if (askSearching) "Searches the web · $askWindow days back" else "No web search",
         SettingsSection.NOTIFICATIONS to "${notificationSwitches(appState).count { it }} of $NOTIFICATION_COUNT on",
-        SettingsSection.GENERAL to "${prefs.themeMode.displayName} · " +
+        SettingsSection.GENERAL to
             (if (appState.marketRefreshEnabled) "Fresh all session" else "Fetched once a day") +
             " · ${prefs.defaultTradeWindowSessions}-session trades",
         SettingsSection.DATA to "${appState.savedResults.size} reports · " +
@@ -230,108 +354,92 @@ private fun notificationSwitches(appState: AppState): List<Boolean> =
 @Composable
 private fun SettingsHub(
     appState: AppState,
+    status: SettingsStatus,
+    faults: Set<SettingsSection>,
     summaries: Map<SettingsSection, String>,
     onOpen: (SettingsSection) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
         // What is working leads: nothing else on this page matters while one of the three is not.
-        SettingsStatusTile(appState, onOpen, modifier = Modifier.popIn(0))
-        // Every part the same shape now, in two columns, its value and detail read off the same
+        SettingsStatusTile(status, onOpen, modifier = Modifier.popIn(0))
+        // The theme, on the hub itself since 5.3. It was a card inside Prices and trades, whose
+        // summary had to lead with "Light" for anybody to find it.
+        ThemeControl(appState, Modifier.popIn(1))
+        // Every part the same shape, in two columns, its value and detail read off the same
         // summary the column beside an open part shows - so the two cannot disagree.
+        val update = appState.updateState is UpdateState.Available || appState.updateState is UpdateState.Ready
         HubTones.chunked(2).forEachIndexed { row, pair ->
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
                 pair.forEachIndexed { column, (section, tone) ->
                     val summary = summaries.getValue(section)
+                    val about = section == SettingsSection.ABOUT
                     HubTile(
                         section,
-                        tone,
+                        // An update waiting is the one thing the hub says in cobalt.
+                        if (about && update) TileTone.HERO else tone,
                         value = summary.substringBefore(" · "),
-                        detail = summary.substringAfter(" · ", ""),
-                        index = 1 + row * 2 + column,
+                        detail = if (about && update) "this build ${BuildConfig.VERSION_NAME}" else summary.substringAfter(" · ", ""),
+                        fault = section in faults,
+                        index = 2 + row * 2 + column,
                         onOpen = onOpen,
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                 }
             }
         }
-        val update = appState.updateState is UpdateState.Available || appState.updateState is UpdateState.Ready
-        Tile(
-            Modifier.fillMaxWidth().popIn(7),
-            tone = if (update) TileTone.HIGHLIGHT else TileTone.CARD,
-            onClick = { onOpen(SettingsSection.ABOUT) },
-            onClickLabel = "Open About",
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp, vertical = 14.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "EGX Analyzer ${BuildConfig.VERSION_NAME}",
-                    style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    if (update) summaries.getValue(SettingsSection.ABOUT) else "About",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-        }
     }
 }
 
-/** The hub's six parts, in order, and the fill each one stands on. About is its own row. */
+/** The hub's eight parts, in order, and the fill each one stands on. */
 private val HubTones = listOf(
     SettingsSection.TELEGRAM to TileTone.TILE3,
     SettingsSection.ANALYSIS to TileTone.TILE2,
-    SettingsSection.NOTIFICATIONS to TileTone.TILE1,
+    SettingsSection.READING_RULES to TileTone.CARD,
     SettingsSection.ASK_AI to TileTone.CARD,
+    SettingsSection.NOTIFICATIONS to TileTone.TILE1,
     SettingsSection.GENERAL to TileTone.HIGHLIGHT,
     SettingsSection.DATA to TileTone.CARD,
+    SettingsSection.ABOUT to TileTone.CARD,
 )
 
 /**
- * Whether the three things this app cannot work without are working, on one ink tile. A press
- * opens the first part with something wrong; with nothing wrong there is nothing to press.
+ * Whether the three things this app cannot work without are working. Coral while one of them is
+ * not, and then a press opens the first part with something wrong; ink while all is well, with
+ * nothing to press.
  *
- * The icons are tinted with the ink tile's own signals rather than sat on a lime disc: lime on the
- * ink tile is 1.03:1 in the dark theme, the fault the old Telegram tile had.
+ * It was ink either way until 5.3, beside a part marked as open in the same ink - so a warning and
+ * a selection were the same dark tile, one above the other.
  *
- * @param compact the column beside an open part, unfolded: one line rather than three.
+ * @param compact the column beside an open part, unfolded: the headline, and under it only what is
+ *   not working rather than all three lines.
  */
 @Composable
 private fun SettingsStatusTile(
-    appState: AppState,
+    status: SettingsStatus,
     onOpen: (SettingsSection) -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
 ) {
-    val status = settingsStatus(
-        telegramReady = appState.telegramAuthState.step == TelegramAuthStep.READY,
-        credentialVerified = appState.credentialVerified,
-        hasCredential = appState.cloudConfiguration.hasCredential,
-        model = appState.cloudConfiguration.model,
-        lastPriceRefreshAt = appState.lastPriceRefreshAt,
-        pricesRefreshing = appState.pricesRefreshing,
-        feedClean = appState.priceHealth.clean,
-        feedFaults = appState.priceHealth.faults.size,
-        stocksNamed = appState.priceHealth.stocksNamed,
-        now = java.time.Instant.now(),
-    )
     val fault = status.firstFault
-    val signals = tileSignals(TileTone.INK)
+    val tone = if (fault != null) TileTone.ALERT else TileTone.INK
+    val signals = tileSignals(tone)
     Tile(
         modifier.fillMaxWidth(),
-        tone = TileTone.INK,
+        tone = tone,
         onClick = fault?.let { { onOpen(it) } },
         onClickLabel = fault?.let { "Open ${it.title}" },
     ) {
         Text(status.headline, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
         if (compact) {
-            Text(
-                status.lines.joinToString(" · ") { it.text },
-                style = MaterialTheme.typography.bodySmall,
-                color = LocalContentColor.current.copy(alpha = 0.72f),
-                modifier = Modifier.padding(top = 4.dp),
-            )
+            val unsettled = status.lines.filter { it.ok != true }
+            if (unsettled.isNotEmpty()) {
+                Text(
+                    unsettled.joinToString(" · ") { it.text },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         } else {
             Column(Modifier.padding(top = Space.s), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 status.lines.forEach { line ->
@@ -350,12 +458,64 @@ private fun SettingsStatusTile(
                             },
                             modifier = Modifier.size(20.dp),
                         )
-                        Text(line.text, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            line.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (line.ok == false) FontWeight.Bold else null,
+                        )
                     }
                 }
             }
         }
     }
+}
+
+/**
+ * Light, dark or the phone's own, on the hub and beside an open part. Pure black sits under it
+ * while the choice can be dark, and nowhere while it cannot.
+ */
+@Composable
+private fun ThemeControl(appState: AppState, modifier: Modifier = Modifier) {
+    val prefs = appState.appPreferences
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+        SegmentedControl(
+            options = listOf(ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.SYSTEM),
+            selected = prefs.themeMode,
+            onSelect = appState::updateThemeMode,
+            // "Follow system" does not fit a third of a narrow column.
+            label = { if (it == ThemeMode.SYSTEM) "System" else it.displayName },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (prefs.themeMode != ThemeMode.LIGHT) {
+            Tile(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
+                SettingToggle(
+                    label = "Pure black background",
+                    checked = prefs.pureBlackDarkMode,
+                    onCheckedChange = appState::updatePureBlackDarkMode,
+                    about = infoNote(
+                        "Pure black background",
+                        "Replaces dark mode's graphite ground and cards with true black.",
+                        "Only visible while dark mode is actually showing - under System it takes " +
+                            "effect whenever the phone's own setting lands on dark.",
+                        "The theme is applied immediately on the outer and inner displays. Motion " +
+                            "is separate: it follows the system's remove-animations setting.",
+                    ),
+                )
+            }
+        }
+    }
+}
+
+/** The mark on a part with something wrong in it. Red, and said aloud as what it means. */
+@Composable
+private fun FaultDot(color: Color) {
+    Box(
+        Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(color)
+            .semantics { contentDescription = "Needs a look" },
+    )
 }
 
 @Composable
@@ -364,10 +524,10 @@ private fun HubTile(
     tone: TileTone,
     value: String,
     detail: String,
+    fault: Boolean,
     index: Int,
     onOpen: (SettingsSection) -> Unit,
     modifier: Modifier = Modifier,
-    bigValue: Boolean = false,
 ) {
     Tile(
         modifier.popIn(index),
@@ -375,11 +535,13 @@ private fun HubTile(
         onClick = { onOpen(section) },
         onClickLabel = "Open ${section.title}",
     ) {
-        Text(section.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (fault) FaultDot(tileSignals(tone).loss)
+            Text(section.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        }
         Text(
             value,
-            style = (if (bigValue) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleSmall)
-                .copy(fontFamily = TabularFigures),
+            style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures),
             fontWeight = FontWeight.Bold,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -398,34 +560,97 @@ private fun HubTile(
     }
 }
 
-/** One part in the column beside an open part, unfolded, and in the grid above it in tabletop. */
+/**
+ * The parts as rows in one tile: beside an open part unfolded and in book posture, and on the flat
+ * half in tabletop.
+ *
+ * The open part is a lighter row, not the ink tile it was until 5.3, so it cannot be read as a
+ * second warning under the status. A part with something wrong carries a dot.
+ *
+ * @param lines what each part says after its name, or null for the names alone.
+ * @param stacked the line under the name, wrapping, rather than beside it on one line.
+ */
 @Composable
-private fun SectionNavTile(
-    section: SettingsSection,
-    summary: String,
-    selected: Boolean,
-    modifier: Modifier = Modifier.fillMaxWidth(),
-    onClick: () -> Unit,
+private fun PartsList(
+    shown: SettingsSection?,
+    faults: Set<SettingsSection>,
+    lines: Map<SettingsSection, String>?,
+    stacked: Boolean,
+    onOpen: (SettingsSection) -> Unit,
 ) {
-    Tile(
-        modifier,
-        tone = if (selected) TileTone.INK else TileTone.CARD,
-        onClick = onClick,
-        onClickLabel = "Open ${section.title}",
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-    ) {
-        Text(section.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    Tile(Modifier.fillMaxWidth(), contentPadding = PaddingValues(8.dp)) {
+        SettingsSection.entries.forEach { section ->
+            val selected = section == shown
+            val line = lines?.get(section)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(if (selected) palette.raised else Color.Transparent)
+                    .selectable(selected = selected, role = Role.Tab, onClick = { onOpen(section) })
+                    .heightIn(min = 48.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (section in faults) FaultDot(palette.loss)
+                    Text(
+                        section.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (!stacked && line != null) {
+                        Text(line, style = MaterialTheme.typography.bodySmall, color = palette.muted, maxLines = 1)
+                    }
+                }
+                if (stacked && line != null) {
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.muted,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The open part's name over its column, unfolded and in book posture. It does not scroll. */
+@Composable
+private fun PartTitle(section: SettingsSection, summary: String) {
+    Column(Modifier.padding(start = 4.dp)) {
+        Text(section.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
         Text(
             summary,
             style = MaterialTheme.typography.bodySmall,
-            color = LocalContentColor.current.copy(alpha = 0.72f),
-            maxLines = 2,
+            color = palette.muted,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
-/** An open part's own heading on the cover screen and in tabletop: the way back, and its name. */
+/** Tabletop's upper half once a question mark below has been pressed: that note, in full. */
+@Composable
+private fun NoteExplainer(section: SettingsSection, note: InfoNote) {
+    Tile(Modifier.fillMaxWidth()) {
+        Text("${section.title} · explained", style = MaterialTheme.typography.labelMedium, color = palette.muted)
+        Text(note.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+        Column(Modifier.padding(vertical = Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            note.paragraphs.forEach {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted)
+            }
+        }
+        note.sample?.let { NotificationPreview(it) }
+    }
+}
+
+/** An open part's own heading on the cover screen: the way back, and its name. It does not scroll. */
 @Composable
 private fun SectionHeader(section: SettingsSection, onBack: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -495,6 +720,7 @@ private fun SectionPage(section: SettingsSection, appState: AppState) {
         when (section) {
             SettingsSection.TELEGRAM -> TelegramPage(appState)
             SettingsSection.ANALYSIS -> AnalysisPage(appState)
+            SettingsSection.READING_RULES -> ReadingRulesPage(appState)
             SettingsSection.ASK_AI -> AskAiPage(appState)
             SettingsSection.NOTIFICATIONS -> NotificationsPage(appState)
             SettingsSection.GENERAL -> GeneralPage(appState)
@@ -563,7 +789,6 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
     val posture = LocalFoldPosture.current
     var providerMenuOpen by remember { mutableStateOf(false) }
     var endpointMenuOpen by remember { mutableStateOf(false) }
-    var languageMenuOpen by remember { mutableStateOf(false) }
     var credential by remember { mutableStateOf("") }
     var confirmRemoveCredential by remember { mutableStateOf(false) }
     var confirmResetProvider by remember { mutableStateOf(false) }
@@ -605,9 +830,8 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
     // thing about the key alone.
     ReaderStatusTile(appState)
 
-    // The model that reads the cards, on its own tile, in the order a run uses things: which
-    // model, what is sent to it, the wording it is told about, the prompt that carries it, and
-    // what is checked afterwards. Everything only a careful reader needs is under Advanced.
+    // The model that reads the cards, then who is paid for it. What a run is told to read is its
+    // own part, Reading rules; everything only a careful reader needs is under Advanced.
     AnalysisModelCard(appState)
 
     Group(
@@ -673,107 +897,6 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
         }
     }
 
-    Group(
-        "What to send",
-        summary = "${appState.appPreferences.analysisLanguage.displayName} · " +
-            // Counted over what is offered, not over what is stored: a preference saved while
-            // voice was still on the screen still carries it.
-            "${appState.appPreferences.defaultContentTypes.count { it in AnalysisContentType.OFFERED }} content types",
-        about = infoNote(
-            "What to send",
-            "Which parts of a chat leave this phone, and in what language the answer " +
-                "comes back. These are the defaults a run starts from; the Analyze " +
-                "screen can still change them for one run.",
-            "Every type ticked here is content sent to the AI provider, so this is also " +
-                "the setting that decides what a run costs: images are the expensive " +
-                "half, and a channel that posts only text needs none of them.",
-        ),
-    ) {
-        Box {
-            KitButton(
-                "Output language: ${appState.appPreferences.analysisLanguage.displayName}",
-                onClick = { languageMenuOpen = true },
-                kind = ButtonKind.SECONDARY,
-                size = ButtonSize.SMALL,
-            )
-            KitMenu(
-                expanded = languageMenuOpen,
-                onDismiss = { languageMenuOpen = false },
-                items = AnalysisLanguage.entries.map { language ->
-                    MenuItem(language.displayName) { appState.updateAnalysisLanguage(language) }
-                },
-            )
-        }
-        SettingLabel("Default Telegram content")
-        AnalysisContentType.OFFERED.forEach { type ->
-            SettingToggle(
-                label = when (type) {
-                    AnalysisContentType.TEXT -> "Text messages"
-                    AnalysisContentType.IMAGES -> "Images and photos"
-                    AnalysisContentType.AUDIO -> "Voice messages"
-                },
-                checked = type in appState.appPreferences.defaultContentTypes,
-                onCheckedChange = { appState.toggleDefaultContentType(type) },
-            )
-        }
-    }
-
-    // A heading on the page rather than a tile round the two lists, because the lists are tiles of
-    // their own - lime for what keeps a message, coral for what drops one.
-    Row(Modifier.padding(start = 4.dp, top = Space.s), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("Wording", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-            Text(
-                appState.ruleSet.all.count { it.origin == RuleOrigin.USER }.let { mine ->
-                    if (mine == 0) "Built-in wording only" else "$mine added"
-                } + " · read on this phone before anything is sent",
-                style = MaterialTheme.typography.bodySmall,
-                color = palette.muted,
-            )
-        }
-        InfoButton(WordingFlowNote)
-    }
-    AnalysisRulesSection(appState)
-
-    Group(
-        "Prompt",
-        about = GeneratedPromptNote,
-        summary = if (appState.useDefaultPromptOnly) {
-            "Default only"
-        } else {
-            "v" + (appState.promptVersions.firstOrNull { it.id == appState.activePrompt.id }?.sequence ?: 1)
-        },
-    ) {
-        GeneratedPromptSection(appState)
-    }
-
-    Group(
-        "Validation",
-        summary = if (appState.appPreferences.catalogEnrichmentEnabled) "Company names added" else "Company names not added",
-        about = infoNote(
-            "Validation",
-            "The catalog is the list of Cairo listings held on this phone. Enriching " +
-                "against it fills in a company's names and codes from that list rather " +
-                "than from the model, so a ticker read off a screenshot is checked " +
-                "against something that cannot be misremembered. It costs nothing and " +
-                "sends nothing.",
-        ),
-    ) {
-        SettingToggle(
-            label = "Enrich results with the on-device EGX catalog",
-            checked = appState.appPreferences.catalogEnrichmentEnabled,
-            onCheckedChange = appState::updateCatalogEnrichment,
-        )
-        KitButton(
-            "Refresh EGX catalog",
-            onClick = { appState.startAction { appState.refreshEgxCatalog() } },
-            kind = ButtonKind.SECONDARY,
-            size = ButtonSize.SMALL,
-            icon = Icons.Outlined.CloudDownload,
-        )
-        Text(appState.catalogMessage, style = MaterialTheme.typography.bodySmall, color = palette.muted)
-    }
-
     // What only a careful reader needs, closed until asked for, on PageState so a fold while
     // editing the endpoint does not shut it.
     MoreRow(
@@ -781,12 +904,17 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
         appState.pages.settingsAdvancedOpen,
         summary = "Connection, waiting time, retries and usage",
     ) {
+        // Wrapped rather than held to one line: an address is longer than the field, and on one
+        // line it was sliced mid-word with nothing to say there was more. An address holds no
+        // spaces or line breaks, so none typed into a field that now takes them is kept.
         KitTextField(
             value = appState.cloudConfiguration.endpoint,
-            onValueChange = appState::updateEndpoint,
+            onValueChange = { appState.updateEndpoint(it.filterNot(Char::isWhitespace)) },
             label = "HTTPS API endpoint",
             modifier = Modifier.fillMaxWidth(),
             keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+            singleLine = false,
+            imeAction = androidx.compose.ui.text.input.ImeAction.Done,
         )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             if (appState.cloudConfiguration.provider.endpointPresets.isNotEmpty()) {
@@ -835,10 +963,14 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
                     "is another paid request, which is why the ceiling is two.",
             ),
         )
-        Group(
-            "Token usage",
-            summary = tokenUsageSummary(appState.modelUsage),
-            about = infoNote(
+        // A heading on the row's own inset rather than a tile inside the tile, which set every
+        // figure a second margin in from the settings above it.
+        Row(Modifier.padding(top = Space.s), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Token usage", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                Text(tokenUsageSummary(appState.modelUsage), style = MaterialTheme.typography.bodySmall, color = palette.muted)
+            }
+            InfoButton(infoNote(
                 "Token usage",
                 "Every request comes back with the token count the provider billed it at. " +
                     "This is those counts added up per model, on this phone alone - it is " +
@@ -846,10 +978,121 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
                 "A record, not a limit: nothing here stops or slows a run. Clearing it " +
                     "forgets the record and not the spending, and the provider's own billing " +
                     "page remains the account that matters.",
-            ),
-        ) {
-            ModelUsageSection(appState)
+            ))
         }
+        ModelUsageSection(appState)
+    }
+}
+
+// ── Reading rules ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What a run is told to read, in the order a run uses it: what is sent, the wording it keeps and
+ * drops, the prompt that carries it, and the names checked afterwards. Split out of Reader in 5.3.
+ */
+@Composable
+private fun ColumnScope.ReadingRulesPage(appState: AppState) {
+    var languageMenuOpen by remember { mutableStateOf(false) }
+
+    Group(
+        "What to send",
+        summary = "${appState.appPreferences.analysisLanguage.displayName} · " +
+            // Counted over what is offered, not over what is stored: a preference saved while
+            // voice was still on the screen still carries it.
+            "${appState.appPreferences.defaultContentTypes.count { it in AnalysisContentType.OFFERED }} content types",
+        about = infoNote(
+            "What to send",
+            "Which parts of a chat leave this phone, and in what language the answer " +
+                "comes back. These are the defaults a run starts from; the Analyze " +
+                "screen can still change them for one run.",
+            "Every type ticked here is content sent to the AI provider, so this is also " +
+                "the setting that decides what a run costs: images are the expensive " +
+                "half, and a channel that posts only text needs none of them.",
+        ),
+    ) {
+        Box {
+            KitButton(
+                "Output language: ${appState.appPreferences.analysisLanguage.displayName}",
+                onClick = { languageMenuOpen = true },
+                kind = ButtonKind.SECONDARY,
+                size = ButtonSize.SMALL,
+            )
+            KitMenu(
+                expanded = languageMenuOpen,
+                onDismiss = { languageMenuOpen = false },
+                items = AnalysisLanguage.entries.map { language ->
+                    MenuItem(language.displayName) { appState.updateAnalysisLanguage(language) }
+                },
+            )
+        }
+        SettingLabel("Default Telegram content")
+        AnalysisContentType.OFFERED.forEach { type ->
+            SettingToggle(
+                label = when (type) {
+                    AnalysisContentType.TEXT -> "Text messages"
+                    AnalysisContentType.IMAGES -> "Images and photos"
+                    AnalysisContentType.AUDIO -> "Voice messages"
+                },
+                checked = type in appState.appPreferences.defaultContentTypes,
+                onCheckedChange = { appState.toggleDefaultContentType(type) },
+            )
+        }
+    }
+
+    // A heading on the page rather than a tile round the two lists, because the lists are tiles of
+    // their own.
+    Row(Modifier.padding(start = 4.dp, top = Space.s), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Wording", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+            Text(
+                appState.ruleSet.all.count { it.origin == RuleOrigin.USER }.let { mine ->
+                    if (mine == 0) "Built-in wording only" else "$mine added"
+                } + " · read on this phone before anything is sent",
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.muted,
+            )
+        }
+        InfoButton(WordingFlowNote)
+    }
+    AnalysisRulesSection(appState)
+
+    Group(
+        "Prompt",
+        about = GeneratedPromptNote,
+        summary = if (appState.useDefaultPromptOnly) {
+            "Default only"
+        } else {
+            "v" + (appState.promptVersions.firstOrNull { it.id == appState.activePrompt.id }?.sequence ?: 1)
+        },
+    ) {
+        GeneratedPromptSection(appState)
+    }
+
+    Group(
+        "Company names",
+        summary = if (appState.appPreferences.catalogEnrichmentEnabled) "Added from the list on this phone" else "Not added",
+        about = infoNote(
+            "Company names",
+            "The catalog is the list of Cairo listings held on this phone. Enriching " +
+                "against it fills in a company's names and codes from that list rather " +
+                "than from the model, so a ticker read off a screenshot is checked " +
+                "against something that cannot be misremembered. It costs nothing and " +
+                "sends nothing.",
+        ),
+    ) {
+        SettingToggle(
+            label = "Enrich results with the on-device EGX catalog",
+            checked = appState.appPreferences.catalogEnrichmentEnabled,
+            onCheckedChange = appState::updateCatalogEnrichment,
+        )
+        KitButton(
+            "Refresh EGX catalog",
+            onClick = { appState.startAction { appState.refreshEgxCatalog() } },
+            kind = ButtonKind.SECONDARY,
+            size = ButtonSize.SMALL,
+            icon = Icons.Outlined.CloudDownload,
+        )
+        Text(appState.catalogMessage, style = MaterialTheme.typography.bodySmall, color = palette.muted)
     }
 }
 
@@ -865,12 +1108,26 @@ private fun ReaderStatusTile(appState: AppState) {
         else -> "Ready to read" to TileTone.HIGHLIGHT
     }
     Tile(Modifier.fillMaxWidth(), tone = tone) {
-        Text(text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-        Text(
-            config.model.ifBlank { config.provider.displayName },
-            style = MaterialTheme.typography.bodySmall,
-            color = LocalContentColor.current.copy(alpha = 0.72f),
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(end = Space.s)) {
+                Text(text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                Text(
+                    config.model.ifBlank { config.provider.displayName },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = 0.72f),
+                )
+            }
+            // A saved key that has never been tried: the tile says so, and this tries it. Saving
+            // with nothing typed keeps the stored key and sends the one free request that checks it.
+            if (config.hasCredential && config.model.isNotBlank() && appState.credentialVerified == null) {
+                KitButton(
+                    "Check key",
+                    onClick = { appState.startAction { appState.saveSettings("") } },
+                    size = ButtonSize.SMALL,
+                    enabled = appState.busyLabel == null,
+                )
+            }
+        }
     }
 }
 
@@ -887,27 +1144,22 @@ private fun ColumnScope.AskAiPage(appState: AppState) {
     val askDeep = remember(appState.opinionSettingsRevision) { appState.opinionDeepSearch() }
     val askResults = remember(appState.opinionSettingsRevision) { appState.opinionSearchResults() }
 
+    // One heading and one question mark. The card used to name its single field three times -
+    // "Model", "Which model to name", "Model" - with a question mark on two of them.
     Group(
-        "Model",
-        tone = TileTone.TILE1,
+        "Ask AI model",
         about = infoNote(
-            "Ask AI",
+            "Ask AI model",
             "The button on a call card in Insights. It asks what the model makes of the " +
                 "stock at today's price and what it makes of the levels the channel " +
                 "printed, and it answers in Arabic.",
             "Each press is one paid request, confirmed first, and the answer is kept on " +
                 "the card - opening it again costs nothing.",
+            "Name a text model, not the vision one a run needs. The analysis reads " +
+                "screenshots; this request carries no image, and paying vision " +
+                "rates for it buys nothing.",
         ),
     ) {
-        SettingLabel(
-            "Which model to name",
-            infoNote(
-                "Which model to name",
-                "A text model, not the vision one a run needs. The analysis reads " +
-                    "screenshots; this request carries no image, and paying vision " +
-                    "rates for it buys nothing.",
-            ),
-        )
         KitTextField(
             value = askModel,
             onValueChange = appState::updateOpinionModel,
@@ -916,7 +1168,7 @@ private fun ColumnScope.AskAiPage(appState: AppState) {
             figure = true,
             keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
         )
-        KitButton("Choose model", onClick = { askModelMenuOpen = true }, kind = ButtonKind.ON_TONE, size = ButtonSize.SMALL)
+        KitButton("Choose model", onClick = { askModelMenuOpen = true }, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
         if (askModelMenuOpen) {
             ModelPickerSheet(
                 appState = appState,
@@ -1228,36 +1480,6 @@ private fun NotificationKeys(appState: AppState, selected: NotificationKind, onS
 
 @Composable
 private fun ColumnScope.GeneralPage(appState: AppState) {
-    Group(
-        "Appearance",
-        tone = TileTone.HIGHLIGHT,
-        about = infoNote("Appearance", "The choice is applied immediately on outer and inner displays."),
-    ) {
-        SegmentedControl(
-            options = ThemeMode.entries.toList(),
-            selected = appState.appPreferences.themeMode,
-            onSelect = appState::updateThemeMode,
-            label = { it.displayName },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        SettingToggle(
-            label = "Pure black background",
-            checked = appState.appPreferences.pureBlackDarkMode,
-            onCheckedChange = appState::updatePureBlackDarkMode,
-            about = infoNote(
-                "Pure black background",
-                "Replaces dark mode's graphite ground and cards with true black.",
-                "Only visible while dark mode is actually showing - under System it takes " +
-                    "effect whenever the phone's own setting lands on dark.",
-            ),
-        )
-        Text(
-            "Motion follows the system's remove-animations setting.",
-            style = MaterialTheme.typography.bodySmall,
-            color = LocalContentColor.current.copy(alpha = 0.78f),
-        )
-    }
-
     // Prices here since 5.0: refreshing them and keeping their history are things the phone does
     // on its own, which is what this part is about, rather than data to be backed up.
     Tile(Modifier.fillMaxWidth()) {
@@ -1326,7 +1548,6 @@ private fun ColumnScope.DataPage(appState: AppState) {
 
     Group(
         "Sync",
-        tone = TileTone.TILE1,
         summary = if (appState.telegramSyncEnabled) "${appState.savedResults.size} reports on this device" else "Sync off",
         about = infoNote(
             "Sync",
@@ -1544,6 +1765,9 @@ private fun UpdateControls(appState: AppState, onHero: Boolean) {
     val busy = state is UpdateState.Checking || state is UpdateState.Downloading
     val quiet = LocalContentColor.current.copy(alpha = 0.78f)
     val second = if (onHero) ButtonKind.ON_TONE else ButtonKind.SECONDARY
+    // The one thing the card is asking for - Download, Install - is the filled button, and it
+    // leads the row the others sit on. It was an outline alone on a line of its own, above them.
+    val lead = ButtonKind.PRIMARY
 
     // Re-read on the way back rather than only at composition. The permission is granted on a
     // system page, and returning from one does not recompose a card on its own.
@@ -1572,7 +1796,6 @@ private fun UpdateControls(appState: AppState, onHero: Boolean) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            KitButton("Download", onClick = { appState.downloadUpdate(state.update) }, kind = ButtonKind.ON_TONE, size = ButtonSize.SMALL)
         }
         is UpdateState.Downloading -> {
             KitProgress(
@@ -1599,33 +1822,38 @@ private fun UpdateControls(appState: AppState, onHero: Boolean) {
                     color = quiet,
                 )
             }
-            KitButton(
-                // Two taps, and the label says which one this is. "Install" on a button that opens
-                // a settings page is how someone grants the permission, comes back, and believes
-                // the install has silently failed.
-                if (canInstall) "Install" else "Allow installs",
-                onClick = {
-                    // Read at the tap as well as on resume: whichever way the permission was
-                    // granted, the button must do the right thing the moment it is pressed.
-                    if (appState.canInstallUpdates()) {
-                        appState.installUpdate(state.file)
-                    } else {
-                        runCatching { appState.installPermissionIntent()?.let(context::startActivity) }
-                            .onFailure { error ->
-                                appState.reportUpdateProblem(
-                                    error.message?.takeIf(String::isNotBlank) ?: "Android would not open the installer.",
-                                )
-                            }
-                    }
-                },
-                kind = ButtonKind.ON_TONE,
-                size = ButtonSize.SMALL,
-            )
         }
         is UpdateState.Failed -> Text(state.reason, color = if (onHero) LocalContentColor.current else palette.loss)
     }
 
     FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        if (state is UpdateState.Available) {
+            KitButton("Download", onClick = { appState.downloadUpdate(state.update) }, kind = lead, size = ButtonSize.SMALL)
+        }
+        if (state is UpdateState.Ready) {
+        KitButton(
+            // Two taps, and the label says which one this is. "Install" on a button that opens
+            // a settings page is how someone grants the permission, comes back, and believes
+            // the install has silently failed.
+            if (canInstall) "Install" else "Allow installs",
+            onClick = {
+                // Read at the tap as well as on resume: whichever way the permission was
+                // granted, the button must do the right thing the moment it is pressed.
+                if (appState.canInstallUpdates()) {
+                    appState.installUpdate(state.file)
+                } else {
+                    runCatching { appState.installPermissionIntent()?.let(context::startActivity) }
+                        .onFailure { error ->
+                            appState.reportUpdateProblem(
+                                error.message?.takeIf(String::isNotBlank) ?: "Android would not open the installer.",
+                            )
+                        }
+                }
+            },
+            kind = lead,
+            size = ButtonSize.SMALL,
+        )
+        }
         KitButton(
             if (state is UpdateState.Idle) "Check for updates" else "Check again",
             onClick = appState::checkForUpdate,
@@ -1650,6 +1878,7 @@ private fun UpdateControls(appState: AppState, onHero: Boolean) {
         label = "Check for updates when the app opens",
         checked = appState.appPreferences.updateChecksEnabled,
         onCheckedChange = appState::updateAutomaticUpdateChecks,
+        onHero = onHero,
         about = infoNote(
             "Check for updates when the app opens",
             "One request to GitHub, and it says nothing unless there is a newer build. " +

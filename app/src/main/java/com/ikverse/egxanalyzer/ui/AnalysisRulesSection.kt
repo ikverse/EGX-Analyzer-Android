@@ -128,9 +128,10 @@ private fun WordingList(
     val include = kind == RuleKind.INCLUDE
     val title = if (include) "Included wordings" else "Excluded wordings"
 
-    // Lime for what keeps a message, coral for what drops one: the two lists are told apart by
-    // their tile before a word on them is read.
-    Tile(Modifier.fillMaxWidth(), tone = if (include) TileTone.HIGHLIGHT else TileTone.ALERT) {
+    // White, like every other card on a settings page since 5.3: colour there is kept for a
+    // status, an update and a deletion. The two lists are told apart by their titles and the line
+    // under each; they were lime and coral.
+    Tile(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)

@@ -95,7 +95,7 @@ internal val LightPalette = AppPalette(
     onHero = Color(0xFFFFFFFF),
     heroInk = Color(0xFF1E2BFF),
     highlight = Color(0xFFC8FF4D),
-    alert = Color(0xFFFF6B4A),
+    alert = Color(0xFFFFB8A3),
     tile1 = Color(0xFFFFD12E),
     tile2 = Color(0xFFE2D4FF),
     tile3 = Color(0xFFBFE3FF),
@@ -129,7 +129,7 @@ internal val DarkPalette = AppPalette(
     // Cobalt itself is 2.4:1 on Graphite; links and selected labels need the lifted shade.
     heroInk = Color(0xFF8E97FF),
     highlight = Color(0xFFC8FF4D),
-    alert = Color(0xFFFF6B4A),
+    alert = Color(0xFFFFB8A3),
     tile1 = Color(0xFFFFD12E),
     tile2 = Color(0xFFE2D4FF),
     tile3 = Color(0xFFBFE3FF),

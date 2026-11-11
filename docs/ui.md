@@ -532,37 +532,78 @@ app's.
 ### How Settings is grouped
 
 Settings is a hub of tiles, each opening its part as a page of its own - `SettingsSection` in
-`SettingsScreen.kt`: **Telegram**, **Reader**, **Ask AI**, **Notifications**, **Prices and trades**,
-**Backup and sync** and **About**. The names were made plain in 5.1 (they were Analysis, General and
-Data & backup). Pressing a tile opens its part with a back button over its title; phone back returns
-to the hub. The open part is `PageState.settingsSection`, so a fold keeps it.
+`SettingsScreen.kt`: **Telegram**, **Reader**, **Reading rules**, **Ask AI**, **Notifications**,
+**Prices and trades**, **Backup and sync** and **About**. The names were made plain in 5.1 (they
+were Analysis, General and Data & backup). Pressing a tile opens its part with a back button over
+its title; phone back returns to the hub. The open part is `PageState.settingsSection`, so a fold
+keeps it. It was rethought on 2026-11-12, from screenshots of the unfolded Fold; what follows is
+what is true since.
 
-- **A status tile leads the hub** (since 5.1): "Everything is working", or "N things need a look",
-  over three lines - Telegram, the reader, prices - each with a tick or a warning. Pressing it opens
-  the first part that is wrong. `settingsStatus` in `ui/SettingsStatus.kt` works it out without
-  composing, so `SettingsStatusTest` checks every line as plain text. The prices line reads
+- **Nothing on this page scrolls as one page.** `Screen` is given a `paneScroll`, draws a frame
+  that does not scroll, and each column is a `ScrollPane` with a scroll of its own. Until then the
+  list of parts and the open part rode the page's single scroll: reading down Reader took the list
+  away and left half the unfolded screen empty, with nothing saying which part was open. The pane
+  that is "the page" for the header's collapse and for a press on the tab already showing is the
+  open part's, and it returns to the top whenever the part changes.
+- **A status tile leads the hub**: "Everything is working", or "N things need a look", over three
+  lines - Telegram, the reader, prices - each with a tick or a warning. **Coral while something is
+  wrong, ink while nothing is.** It was ink either way, beside an open part marked in the same ink,
+  so a warning and a selection were the same dark tile. Pressing it opens the first part that is
+  wrong. `settingsStatus` in `ui/SettingsStatus.kt` works it out without composing, so
+  `SettingsStatusTest` checks every line as plain text. The prices line reads
   `AppState.lastPriceRefreshAt`, which is written only when prices actually arrived, so a failed
   refresh can never be reported as fresh. A key saved but not yet checked, and prices never fetched,
   are said but are not faults.
-- **The six other parts are tiles in two columns**, each in its own tone with a one-line summary.
-  The ink Telegram tile with its lime circle went in 5.1: in dark mode it was a light tile carrying
-  a lime meant for dark ones, 1.03:1.
-- **Postures.** Unfolded and in book posture the parts are a column of tiles on the left, under a
-  one-line form of the status, with the open part beside them. In tabletop the status - or, on
-  Notifications, the chosen notification and its example - stands above the crease; below it are the
-  parts as chips and, on Notifications, a grid where a tap picks what is explained and only the
-  switch toggles anything.
-- **Reader opens on its own status tile** ("Ready to read", "The key was rejected" and so on), then
-  **Which AI**. The settings few people need - the endpoint and region, Reset provider, the timeout,
-  correction retries, and Token usage - are behind a closed **Advanced** row at the foot.
-  `PageState.settingsAdvancedOpen` holds it open through a rebuild.
+- **A part with something wrong carries a dot**, on its hub tile and on its row in the list. The
+  dot is the status tile's own fault lines read per part, so the two cannot disagree.
+- **The theme is on the hub**, and beside an open part: Light, Dark or System, with Pure black
+  under it while the choice can be dark. It was a card inside Prices and trades, whose summary had
+  to lead with "Light" for anybody to find it.
+- **The eight parts are tiles in two columns** on the cover screen, each in its own tone with a
+  one-line summary. About is one of them, and turns cobalt while an update is waiting.
+- **Reader was split in two.** It held the AI and its key, what to send, both wording lists, the
+  prompt and the company names - four pages' worth down one scroll. **Reader** keeps the status
+  tile ("Ready to read", "The key was rejected" and so on, with a **Check key** button while a
+  saved key has never been tried), **Which AI**, the provider and key, and a closed **Advanced**
+  row holding the endpoint and region, Reset provider, the timeout, correction retries and Token
+  usage. **Reading rules** holds what a run is told to read: what to send, the wording it keeps and
+  drops, the prompt, and company names. `PageState.settingsAdvancedOpen` holds Advanced open
+  through a rebuild.
+- **Postures.**
+  - *Cover*: the hub, or an open part under its back button and name, which stay put.
+  - *Unfolded*: the parts as single-line rows in one tile down the left third - a name, two or
+    three words, a dot - and the open part scrolling on the right under its own name. The open
+    part's row is a lighter fill. `settingsBriefs` is the two-or-three-word form; the whole
+    summary wrapped to three lines there and put About under the fold.
+  - *Book*: the same two columns split on the hinge, with each part's whole summary under its
+    name, because the column is half the screen.
+  - *Tabletop*: what is read stands on the upright half and never scrolls away - the status, or
+    on Notifications the chosen notification and its example. The flat half holds the parts in a
+    narrow column and the controls beside them, each scrolling on its own. **A question mark
+    sends its note up to the upright half** rather than opening a sheet over the half being
+    pressed: `LocalInfoNoteSink`, which `InfoButton` reads, and which `KitSheet` clears for its
+    own contents so a question mark inside a sheet still opens a sheet.
+- **Colour on a settings page means something.** Cards are white. A fill is kept for a part's own
+  status tile, an update that is waiting, and the delete-everything tile. The Ask AI model card
+  was sunflower, Sync was sunflower, Appearance was lime and the two wording lists were lime and
+  coral; none of those said anything the title did not.
+- **The marks down a card stand in one column**, just inboard of the switches. A row with no
+  control holds open a switch's width after its mark (`SwitchGutter` in `InfoSheet.kt`), where it
+  used to hold open a chevron's, 28dp to the right of the marks on rows with switches. A card's
+  own heading keeps its mark at the edge.
+- **An open row turns a chevron.** `KitExpandable` drew a "+" that became a "−" and then turned
+  the disc a quarter, which stood the minus on its end: every open row in the app showed a lone
+  "I". It is a drawn chevron now, down when shut and up when open.
+- **A switch on the cobalt tile can be seen.** The ordinary track is cobalt when on and the
+  outline when off, and on cobalt both vanished and left a knob. `KitSwitchFace(onHero = true)`
+  is lime under a navy knob when on and a pale wash when off; About's update switch uses it.
 - **Notifications are seven, one `NotificationKind` each** (`ui/NotificationSamples.kt`): a plain
   label, a second line saying when it comes, and a sample. Every `?` ends with **What it looks
   like** and a drawn notification built from that sample, so the reader can see what a switch means
   before turning it on. The seventh, **A report is ready**, is new in 5.1, on its own channel.
 - **Each part's groups are tiles**, titled, with the group's `about` on its heading and a summary
-  under it. The wording rules are two tiles of their own - lime for what keeps a message, coral for
-  what drops one - under a heading, because a tile drawn round two tiles reads as a mistake.
+  under it. The wording rules are two tiles of their own under a heading, because a tile drawn
+  round two tiles reads as a mistake.
 - **Whole numbers are steppers, not sliders.** Every slider here set a small whole number - a
   timeout in half-minutes, retries, a percentage, a session count - and a stepper is exact where a
   slider needed dragging. The news window and the result count are segmented controls.

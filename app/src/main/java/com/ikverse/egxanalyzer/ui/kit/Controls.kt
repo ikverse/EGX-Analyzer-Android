@@ -172,10 +172,29 @@ fun KitSwitch(
  * screen reader hears one switch - the row, named by its words - rather than two.
  */
 @Composable
-fun KitSwitchFace(checked: Boolean, modifier: Modifier = Modifier, enabled: Boolean = true) {
+fun KitSwitchFace(
+    checked: Boolean,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    /**
+     * Drawn on the cobalt tile. The ordinary track is cobalt when on and the outline when off, and
+     * on cobalt both disappear and leave a knob floating on the tile. There the track is lime when
+     * on, under a navy knob, and a pale wash when off.
+     */
+    onHero: Boolean = false,
+) {
     val p = palette
     val still = LocalReduceMotion.current
-    val track by animateColorAsState(if (checked) p.hero else MaterialTheme.colorScheme.outline, label = "switchFaceTrack")
+    val track by animateColorAsState(
+        when {
+            onHero && checked -> p.highlight
+            onHero -> Color.White.copy(alpha = 0.32f)
+            checked -> p.hero
+            else -> MaterialTheme.colorScheme.outline
+        },
+        label = "switchFaceTrack",
+    )
+    val knobColor by animateColorAsState(if (onHero && checked) p.onTile else Color.White, label = "switchFaceKnobColor")
     val knob by animateDpAsState(
         if (checked) 24.dp else 4.dp,
         animationSpec = if (still) androidx.compose.animation.core.snap() else uiSpring(),
@@ -193,7 +212,7 @@ fun KitSwitchFace(checked: Boolean, modifier: Modifier = Modifier, enabled: Bool
                 .offset(x = knob, y = 4.dp)
                 .size(24.dp)
                 .clip(Kit.Capsule)
-                .background(Color.White),
+                .background(knobColor),
         )
     }
 }
