@@ -4,6 +4,18 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.2.0] — 2026-11-12
+
+- **A new first tab, Home, and the app opens on it.** It shows the market before your trades: the EGX30 with its level, its move on the day and a line over a week, a month or three months, then EGX70 EWI, EGX100 EWI and the Shariah 33 on a row of their own.
+- **Your book is on Home in three tiles.** One says what your open trades are making on average, and its colour follows the sign of that figure: deep teal when ahead, soft sage when flat, maroon when behind. One names the trades close to a stop or to target 2, or past their deadline, and a press opens that trade. One counts the calls published for the session.
+- **The market in one tile:** how many stocks rose, held and fell in the last session, then the five that rose most and the five that fell most. A press on one opens its sheet.
+- **The dollar, gold and Brent oil** each have a small tile with their move on the day.
+- **News.** Headlines about the Egyptian exchange in Arabic first, then English ones from Enterprise, Daily News Egypt and Amwal Al Ghad. Each shows its source and its age, and a press opens the article in your browser. They refresh when Home opens if they are more than half an hour old, and on a pull.
+- **Ask AI for a market brief.** A button on Home sends the index figures, the session's movers and the headlines' titles to your Ask AI model and shows a short read of the day. It asks before sending, it is the only thing on Home that uses credits, and nothing from Telegram and none of your trades are sent.
+- Home is laid out for all three ways the Fold is held: one column on the cover screen, two when unfolded or held as a book, and the indices above the crease with the news below it when half folded.
+
+---
+
 ## [5.1.9] — 2026-11-12
 
 - **The trades table on the unfolded Portfolio is rebuilt in numbers.** Four columns: the stock with what it is doing under its ticker, what you paid and where the price is, a bar, and what the trade has made with its time under it. The compact ladder it replaces printed no prices.

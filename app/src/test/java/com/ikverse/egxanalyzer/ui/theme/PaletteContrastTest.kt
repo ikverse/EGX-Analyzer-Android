@@ -95,6 +95,9 @@ class PaletteContrastTest {
         TileTone.TILE1 -> p.tile1
         TileTone.TILE2 -> p.tile2
         TileTone.TILE3 -> p.tile3
+        TileTone.BOOK_UP -> p.bookUp
+        TileTone.BOOK_FLAT -> p.bookFlat
+        TileTone.BOOK_DOWN -> p.bookDown
     }
 
     @Test

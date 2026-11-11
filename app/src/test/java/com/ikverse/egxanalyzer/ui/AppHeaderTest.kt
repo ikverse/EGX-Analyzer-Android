@@ -43,9 +43,9 @@ class AppHeaderTest {
     private fun cairo(text: String): Instant = LocalDateTime.parse(text).atZone(ScheduleClock.ZONE).toInstant()
 
     @Test
-    fun `the tabs run Portfolio first`() {
+    fun `the tabs run Home first, then Portfolio`() {
         assertEquals(
-            listOf("Portfolio", "Analyze", "Results", "Insights", "Settings"),
+            listOf("Home", "Portfolio", "Analyze", "Results", "Insights", "Settings"),
             AppDestination.entries.map(AppDestination::label),
         )
     }
@@ -80,7 +80,7 @@ class AppHeaderTest {
             }
             compose.onNodeWithText("Results").performScrollTo().performClick()
         }
-        assertEquals(8, navigated.size)
+        assertEquals(10, navigated.size)
         assertEquals(2, toTop)
     }
 

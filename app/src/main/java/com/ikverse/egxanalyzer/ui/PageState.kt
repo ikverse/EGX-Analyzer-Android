@@ -330,6 +330,13 @@ class PageState {
     private val portfolioScroll: MutableState<Int> = mutableStateOf(0)
     private val analyzeScroll: MutableState<Int> = mutableStateOf(0)
     private val settingsScroll: MutableState<Int> = mutableStateOf(0)
+    private val homeScroll: MutableState<Int> = mutableStateOf(0)
+
+    /** How far back Home's EGX30 line reaches. Here so a fold keeps the range that was pressed. */
+    val homeRange: MutableState<HomeRange> = mutableStateOf(HomeRange.MONTH)
+
+    /** Whether Home's news tile is showing every headline rather than its lead few. */
+    val homeNewsOpen: MutableState<Boolean> = mutableStateOf(false)
 
     fun scrollOffset(destination: AppDestination): MutableState<Int> = when (destination) {
         AppDestination.RESULTS -> resultsScroll
@@ -337,6 +344,7 @@ class PageState {
         AppDestination.PORTFOLIO -> portfolioScroll
         AppDestination.ANALYZE -> analyzeScroll
         AppDestination.SETTINGS -> settingsScroll
+        AppDestination.HOME -> homeScroll
     }
 
     // ── What is narrowing a tab ──────────────────────────────────────────────────────────────
@@ -358,7 +366,7 @@ class PageState {
         AppDestination.INSIGHTS -> insightsStockBox
         AppDestination.PORTFOLIO -> portfolioStockBox
         AppDestination.ANALYZE -> analyzeStockBox
-        AppDestination.SETTINGS -> null
+        AppDestination.SETTINGS, AppDestination.HOME -> null
     }
 
     /**
@@ -382,7 +390,7 @@ class PageState {
         AppDestination.RESULTS -> resultsFiltersOpen
         AppDestination.INSIGHTS -> insightsFiltersOpen
         AppDestination.PORTFOLIO -> portfolioFiltersOpen
-        AppDestination.ANALYZE, AppDestination.SETTINGS -> null
+        AppDestination.ANALYZE, AppDestination.SETTINGS, AppDestination.HOME -> null
     }
 
     /**
@@ -401,7 +409,7 @@ class PageState {
         AppDestination.INSIGHTS ->
             insightsChannels.value.isNotEmpty() || insightsOutcomes.value.isNotEmpty()
         AppDestination.PORTFOLIO -> portfolioDate.value != null
-        AppDestination.ANALYZE, AppDestination.SETTINGS -> false
+        AppDestination.ANALYZE, AppDestination.SETTINGS, AppDestination.HOME -> false
     }
 
     /**
@@ -427,7 +435,7 @@ class PageState {
                 insightsStock.value.isNotBlank()
         AppDestination.PORTFOLIO ->
             portfolioDate.value != null || portfolioStock.value.isNotBlank()
-        AppDestination.ANALYZE, AppDestination.SETTINGS -> false
+        AppDestination.ANALYZE, AppDestination.SETTINGS, AppDestination.HOME -> false
     }
 
     /** Opens [destination] back up to everything it holds. */
@@ -447,7 +455,7 @@ class PageState {
                 portfolioDate.value = null
                 portfolioStockBox.clear()
             }
-            AppDestination.ANALYZE, AppDestination.SETTINGS -> Unit
+            AppDestination.ANALYZE, AppDestination.SETTINGS, AppDestination.HOME -> Unit
         }
     }
 }

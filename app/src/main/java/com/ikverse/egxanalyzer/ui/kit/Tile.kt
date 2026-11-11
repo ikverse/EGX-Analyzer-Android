@@ -23,7 +23,7 @@ import com.ikverse.egxanalyzer.ui.theme.AppPalette
 import com.ikverse.egxanalyzer.ui.theme.palette
 
 /** Which fill a [Tile] takes. Each names the palette colour and what is drawn on it. */
-enum class TileTone { CARD, INK, HERO, HIGHLIGHT, ALERT, TILE1, TILE2, TILE3 }
+enum class TileTone { CARD, INK, HERO, HIGHLIGHT, ALERT, TILE1, TILE2, TILE3, BOOK_UP, BOOK_FLAT, BOOK_DOWN }
 
 /** The fill and the content colour of [tone] in the palette in force. */
 @Composable
@@ -38,6 +38,9 @@ fun tileColors(tone: TileTone): Pair<Color, Color> {
         TileTone.TILE1 -> p.tile1 to p.onTile
         TileTone.TILE2 -> p.tile2 to p.onTile
         TileTone.TILE3 -> p.tile3 to p.onTile
+        TileTone.BOOK_UP -> p.bookUp to Color.White
+        TileTone.BOOK_FLAT -> p.bookFlat to p.onTile
+        TileTone.BOOK_DOWN -> p.bookDown to Color.White
     }
 }
 
@@ -68,6 +71,8 @@ internal fun tileSignalsFor(p: AppPalette, tone: TileTone): TileSignals {
         TileTone.TILE1, TileTone.TILE2, TileTone.TILE3 -> OnPastelFill
         TileTone.ALERT -> TileSignals(p.onTile, p.onTile, p.onTile)
         TileTone.HERO -> TileSignals(p.highlight, p.tile1, Color.White)
+        TileTone.BOOK_UP, TileTone.BOOK_DOWN -> OnDeepFill
+        TileTone.BOOK_FLAT -> OnPastelFill
     }
 }
 
@@ -79,6 +84,12 @@ private val OnPaleFill = TileSignals(Color(0xFF087A40), Color(0xFFC62020), Color
  * to 4.3:1 on them. A step deeper holds 5:1 on sunflower, the worst of the three.
  */
 private val OnPastelFill = TileSignals(Color(0xFF05642F), Color(0xFFA81B1B), Color(0xFF1E2BFF))
+
+/**
+ * Pale green and pale red for the deep teal and the maroon of the Home page's book tile: 4.8:1 or
+ * better on both, where the page's own green and red disappear into either.
+ */
+private val OnDeepFill = TileSignals(Color(0xFFB9F5C8), Color(0xFFFFC2B8), Color.White)
 
 /** The dark theme's bright green and red, and lime, for the light theme's navy ink tile. */
 private val OnDarkFill = TileSignals(Color(0xFF4ADE80), Color(0xFFFF4D4D), Color(0xFFC8FF4D))

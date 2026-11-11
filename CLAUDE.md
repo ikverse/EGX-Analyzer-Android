@@ -263,6 +263,15 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   other phone, and an on-device import all arrive with no path.
 - `data/EgxCatalog.kt` + `data/EgxSeedStocks.kt` — what a stock is called, and the table it is
   called from. See **What a stock is called** below.
+- `ui/HomeScreen.kt` + `ui/HomeTiles.kt` + `ui/HomeFeed.kt` — the Home tab, its tiles, and the
+  sub-interface of `AppState` it reads. See **The Home page** below.
+- `state/LiveHome.kt` — what is behind `HomeFeed`, outside `LiveAppState` by the `LiveUpdates`
+  pattern.
+- `model/HomeMarket.kt` — Home's pure rules: `marketMovers`, `mergeHeadlines`, `leadHeadlines`,
+  `headlineAge`, and `bookMood`, which colours the book tile.
+- `data/HomeMarketRepository.kt` + `data/NewsRepository.kt` + `data/HomeCacheStore.kt` +
+  `data/MarketBriefPrompt.kt` — four indices and three outside numbers off the chart feed, four RSS
+  feeds, the one file Home keeps between launches, and the paid brief's question and answer.
 - `ui/` — one file per screen, plus `CommonUi.kt` and `DesignSystem.kt` for shared pieces.
 
 ## The UI and the engine
@@ -319,6 +328,55 @@ rest cannot go is worth writing down so it is not rediscovered.
 - The pattern is now here for the next region that earns it: sub-interface on `AppState`, a class in
   `state/`, everything it needs as a parameter, `by` at the declaration.
 
+
+## The Home page
+
+The first tab since 2026-11-12, and the page the app opens on (`LiveAppState.destination` starts at
+`HOME`; notifications and launcher shortcuts that name Portfolio still go to Portfolio). The owner
+asked for the market, its indices, the news and their own book in one place.
+
+- **Everything on it is free or already on the phone, except one button.** Four index series and
+  three outside numbers come off the same public chart feed as the prices; the headlines are four
+  RSS feeds; the movers and the breadth are read off `lastTwoCloses`; the book tiles read
+  `portfolio` and `sessionDigest`. The brief is the one paid thing, and it is asked only through
+  the `KitDialog` its button opens - `HomePageTest` holds that the press alone sends nothing.
+  **Never press it on the owner's device**, for the same reason as never starting a run.
+- **The brief sends public figures and headline titles and nothing else.** No Telegram content, no
+  call, no trade, no ticker the owner holds. `MarketBriefPrompt.question` takes no portfolio
+  argument on purpose. It rides `AnalysisRepository.ask`, so it uses the Ask AI model and that
+  request's `json_object` response format, and its tokens land in the same usage tally.
+- **EGX indices are asked for hourly bars.** The daily endpoint answers `^CASE30`,
+  `^EGX70EWI.CA`, `^EGX100EWI.CA` and `^SHARIAH.CA` with one session each; `interval=1h&range=3mo`
+  answered all four with 320 bars over 64 sessions (measured 2026-11-12). `parseIndexQuote`
+  aggregates them with `DailyFromIntraday`, and falls back to the header's level with no move and
+  no chart where the bars cannot be used. The symbols without `.CA` (`^EGX70EWI`) are a 404.
+- **Indices are not listings.** They stay out of `daily_prices`, the catalog, the feed-health
+  checks and the scoring, the way the EGX30 line on the Portfolio chart does. `LiveAppState` still
+  fetches its own EGX30 history for that chart; the two are separate on purpose, because that one
+  reaches back to the first trade and Home's reaches three months.
+- **The feeds were checked, and three that look obvious do not answer**: Mubasher, Arab Finance and
+  Ahram Online publish no working RSS (404 / 410). The Arabic feed is a Google News search for the
+  exchange by its Arabic name; its titles arrive as `Headline - Publisher`, which `parseRss` splits.
+- **`parseRss` is patterns, not an XML parser, deliberately.** A feed is somebody else's document:
+  nothing is resolved, followed or rendered, markup inside a field is removed, and only an
+  `http(s)` link ever reaches `openHeadline` or the system.
+- **`home_cache.json` in `filesDir` is the only thing Home stores.** Device-local, replaced whole,
+  outside the database, every backup, the sync channel and Save diagnostics. No schema version.
+- **Three new tile tones, for one tile.** `BOOK_UP` (deep teal `#1F5F5B`), `BOOK_FLAT` (soft sage
+  `#DCE6D2`) and `BOOK_DOWN` (maroon `#6E1B27`) colour "Your book" by `bookMood`, which judges the
+  figure **as printed** - under 0.05% either way is flat, so the colour cannot contradict a `0.0%`.
+  The owner chose them on 2026-11-12 in place of lime. They are the same fills in all three themes,
+  like every other tile colour, and `PaletteContrastTest` sweeps their signals.
+- **The EGX30 tile is the stock sheet's chart tile** (`chartTileColors`): navy in light, the raised
+  card at night. Not a kit tone, so `IndexHeroTile` sets its own fill and draws its own range
+  track - the kit's `SegmentedControl` is drawn for the page's ground.
+- **The outside numbers' moves are in the page's ink, not green and red.** A dearer dollar is not a
+  gain to somebody holding Egyptian stocks.
+- **Home has no stock box and no filter sheet**, like Settings: `PageState.stockBox` and
+  `filtersOpen` answer null for it. `homeRange` and `homeNewsOpen` are in `PageState` so a fold
+  keeps them.
+- **Shipped in 5.2.0 untested on a device.** Built and unit-tested only; no emulator and no
+  screenshot was taken before the release.
 
 ## Feature documentation
 

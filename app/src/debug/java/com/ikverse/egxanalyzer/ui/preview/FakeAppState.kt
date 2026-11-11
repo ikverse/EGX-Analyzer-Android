@@ -88,6 +88,14 @@ class FakeAppState(
     override val opinionPending: String? = null,
     override val opinionSettingsRevision: Int = 0,
     override val updateState: UpdateState = UpdateState.Idle,
+    override val homeIndices: List<com.ikverse.egxanalyzer.model.IndexQuote> = emptyList(),
+    override val homeOutside: List<com.ikverse.egxanalyzer.model.OutsideQuote> = emptyList(),
+    override val homeMovers: com.ikverse.egxanalyzer.model.MarketMovers? = null,
+    override val homeHeadlines: List<com.ikverse.egxanalyzer.model.Headline> = emptyList(),
+    override val homeNewsLoading: Boolean = false,
+    override val homeNewsAt: Long = 0L,
+    override val homeBrief: com.ikverse.egxanalyzer.model.MarketBrief? = null,
+    override val homeBriefPending: Boolean = false,
     override val canGoBack: Boolean = false,
     override val scrollToTopRequest: Pair<AppDestination, Int>? = null,
     override val tradeWatchWanted: Boolean = false,
@@ -303,6 +311,10 @@ class FakeAppState(
     override fun enterForeground() = Unit
 
     override fun checkForUpdate() = Unit
+    override fun refreshHomeMarket(force: Boolean) = Unit
+    override fun refreshHomeNews(force: Boolean) = Unit
+    override fun askMarketBrief() = Unit
+    override fun openHeadline(headline: com.ikverse.egxanalyzer.model.Headline) = Unit
 
     override fun downloadUpdate(update: AvailableUpdate) = Unit
 
