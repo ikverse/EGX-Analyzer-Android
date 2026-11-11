@@ -985,7 +985,7 @@ private fun FinishedCallCard(
                 horizontalArrangement = Arrangement.spacedBy(Space.xs),
                 verticalArrangement = Arrangement.spacedBy(Space.xs),
             ) {
-                KitTag(call.outcome.plainWord(), tone = call.outcome.cardTone(), filled = true, ink = palette.ink)
+                KitTag(call.outcome.plainWord(), tone = call.outcome.cardTone())
                 KitTag(call.channel, tone = palette.muted)
                 TimingLabel(call)
             }
@@ -1049,7 +1049,7 @@ private fun CallSheet(
             CallReturn(call)
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-            KitTag(call.outcome.plainWord(), tone = call.outcome.cardTone(), filled = true, ink = palette.ink)
+            KitTag(call.outcome.plainWord(), tone = call.outcome.cardTone())
             KitTag(call.channel, tone = palette.muted)
             TimingLabel(call)
         }
@@ -1730,7 +1730,7 @@ private fun TimingLabel(call: ScoredCall) {
     // the app a different colour from its neighbours for a reason none of them showed. The
     // wording is what says this call names its own deadline; the hue was saying it twice, in a
     // language the card spends on prices everywhere else. Asked for on 2026-09-11.
-    ToneTag("T+1", palette.muted, onClick = { showing = true })
+    KitTag("T+1", tone = palette.muted, onClick = { showing = true })
     if (showing) {
         InfoSheet(
             infoNote(
@@ -1775,10 +1775,9 @@ private fun ExtractionWarning(call: ScoredCall, appState: AppState) {
     var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
     var viewingImage by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
     var editing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
-    val amber = extraColors.expired
-    ToneTag(
+    KitTag(
         if (call.faults.size == 1) call.faults.first().label else "${call.faults.size} levels look misread",
-        amber,
+        tone = palette.loss,
         onClick = { showing = true },
     )
     val occurrence = remember(call, appState.savedResults) { appState.occurrenceFor(call) }
@@ -2165,23 +2164,6 @@ private val OutcomeFilters: Map<String, (ScoredCall) -> Boolean> = linkedMapOf(
     "Expired" to { call -> call.outcome == Outcome.EXPIRED },
     "Not judged" to { call -> !call.outcome.judged },
 )
-
-/**
- * A word on a call card - its outcome, T+1, a misread level - as a hairline capsule in the colour
- * that word already means. Pressed, each explains itself.
- */
-@Composable
-private fun ToneTag(text: String, tone: Color, onClick: (() -> Unit)? = null) {
-    Box(
-        Modifier
-            .clip(Kit.Capsule)
-            .border(1.dp, tone, Kit.Capsule)
-            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
-            .padding(horizontal = 10.dp, vertical = 3.dp),
-    ) {
-        Text(text, style = MaterialTheme.typography.labelMedium, color = tone, maxLines = 1)
-    }
-}
 
 /** A group of figures inside a call card: a white panel on the card's ground. */
 @Composable

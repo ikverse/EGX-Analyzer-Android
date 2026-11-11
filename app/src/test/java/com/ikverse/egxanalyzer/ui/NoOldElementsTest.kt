@@ -33,7 +33,7 @@ class NoOldElementsTest {
         "DropdownMenu", "DropdownMenuItem", "AppMenu", "AppMenuItem", "MoreButton", "ActionPill",
         "DisclosureButton", "SettingsButton", "HorizontalDivider", "CircularProgressIndicator",
         "LinearProgressIndicator", "Slider", "OutlinedTextField", "TextField", "RadioButton",
-        "StatStrip", "ShareBar", "FloatingSurface", "StatTile", "PillLabel", "pressCorner", "rememberSweep", "Scaffold", "NavigationRail", "NavigationBar",
+        "StatStrip", "ShareBar", "FloatingSurface", "StatTile", "PillLabel", "OutlinePill", "FilledPill", "StatusPill", "ToneTag", "pressCorner", "rememberSweep", "Scaffold", "NavigationRail", "NavigationBar",
     )
 
     private val call = Regex("(^|[^A-Za-z0-9_.])(${Old.joinToString("|")})\\(")
@@ -76,5 +76,17 @@ class NoOldElementsTest {
             assertTrue("$name should open the kit calendar", "KitCalendarSheet(" in text)
             assertTrue("$name still reaches the platform picker", "android.app.DatePickerDialog" !in text && "DatePickerDialog(\n        context" !in text)
         }
+    }
+
+    /**
+     * One pill style since 5.1.4: the kit's tag is always a wash of colour. An outlined pill - a
+     * hairline capsule round a word - was the pre-5.0 look; the helpers that drew one are in [Old],
+     * and this holds the outlined mode out of the kit's own tag.
+     */
+    @Test
+    fun `every pill is the kit's filled tag`() {
+        val tag = File(ui, "kit/Extras.kt").readText().replace("\r\n", "\n")
+            .substringAfter("fun KitTag(").substringBefore("\n}\n")
+        assertTrue("KitTag has an outlined mode again", "border(" !in tag && "filled" !in tag)
     }
 }

@@ -774,71 +774,6 @@ private val ShareBarCorner = 3.dp
  */
 private const val ShareRestAlpha = 0.22f
 
-internal enum class StatusTone { GOOD, BAD, NEUTRAL }
-
-/** Short status line, coloured by whether it reports something good, bad, or neutral. */
-@Composable
-internal fun StatusPill(text: String, tone: StatusTone = StatusTone.NEUTRAL) {
-    val p = palette
-    com.ikverse.egxanalyzer.ui.kit.KitTag(
-        text,
-        when (tone) {
-            StatusTone.GOOD -> p.gain
-            StatusTone.BAD -> p.loss
-            StatusTone.NEUTRAL -> p.muted
-        },
-    )
-}
-
-/**
- * Every label pill in the app. The shape and the height are [PillShape] and [LabelPillHeight],
- * beside the spacing scale, because the buttons and the badge are cut to them too.
- *
- * A ring rather than a block of colour. A card can carry three of these at once - what the position
- * did, how late it is, why it is still open - and three filled pills stacked beside the name were
- * competing with the figures they are supposed to annotate. The outline says the same thing in the
- * same colour without spending a colour's worth of area on it.
- *
- * [outline] is the hue the state means and [textColor] is the ink the filled pill already used, so
- * the wording keeps the weight it reads at while the colour moves to the edge. [onClick] is for the
- * one pill that explains itself when pressed; the rest are labels and take no press.
- */
-@Composable
-internal fun OutlinePill(
-    text: String,
-    outline: Color,
-    textColor: Color,
-    onClick: (() -> Unit)? = null,
-) {
-    // The kit's tag since 5.0: a hairline capsule in the colour the state means, its word in the
-    // same colour. [textColor] is kept for callers and no longer differs from the edge.
-    com.ikverse.egxanalyzer.ui.kit.KitTag(text, outline, onClick = onClick)
-}
-
-/**
- * The same pill with the colour inside the edge rather than on it.
- *
- * Two surfaces draw a pill as a block of colour - the stock sheet's flags, and the table's own
- * marks - and both were spelling their own corner, their own padding and their own text size. They
- * are not [OutlinePill] with a fill parameter, because a fill and a ring say different things here:
- * a ring annotates the call it sits on and a fill flags a standing fact about the stock. What they
- * must not differ in is their shape, and that is what this shares.
- *
- * [onClick] mirrors [OutlinePill]'s own: absent for the marks that are simply true of the stock -
- * a rank, a badge - and given for the table's own timing pill, which explains itself the same way
- * the card's [OutlinePill]-drawn one does.
- */
-@Composable
-internal fun FilledPill(
-    text: String,
-    container: Color,
-    content: Color,
-    onClick: (() -> Unit)? = null,
-) {
-    // A wash of the content colour, the kit's filled tag - a standing fact rather than a note.
-    com.ikverse.egxanalyzer.ui.kit.KitTag(text, content, filled = true, onClick = onClick)
-}
-
 /**
  * One choice in a row where exactly one is chosen - a price chart's range and its levels toggle.
  *
@@ -846,7 +781,7 @@ internal fun FilledPill(
  * ranges and a toggle need 290dp of scrolling room on a card that can have as little as 313dp to
  * give in total. Drawn at [PillHeight] and [PillShape] instead, the size every other pressed pill
  * on a card already carries, filled when chosen and ringed when not - the same two states
- * [FilledPill] and [OutlinePill] already draw, so choosing an option reads the same way reading one
+ * the kit's `KitTag` already draws, so choosing an option reads the same way reading one
  * does. [minimumInteractiveComponentSize] keeps the tap target at 48dp regardless, the same trick
  * [ActionPill] and [DisclosureButton] already rely on.
  */

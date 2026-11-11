@@ -168,7 +168,7 @@ private fun RecommendationCard(
                     horizontalArrangement = Arrangement.spacedBy(Space.xs),
                     verticalArrangement = Arrangement.spacedBy(Space.xs),
                 ) {
-                    KitTag(status.first, tone = status.second.tone(), filled = true, ink = palette.ink)
+                    KitTag(status.first, tone = status.second.tone())
                     channel?.takeIf(String::isNotBlank)?.let { KitTag(it, tone = palette.muted) }
                     if (point.isTPlusOne) KitTag("T+1", tone = palette.muted)
                     if (editor?.editFor(stock, point) != null) EditedChip { editing = true }
@@ -338,10 +338,10 @@ internal fun TimingChip(point: RecommendationDataPoint) {
     // Falls back to the signal only when the model recorded no basis at all, so the chip is
     // never blank.
     val label = timing(point) ?: point.recommendationType?.uppercase() ?: "-"
-    // [OutlinePill], which is what every other card in this app annotates itself with. As an
+    // `KitTag`, which is what every other card in this app annotates itself with. As an
     // AssistChip this stood 32dp tall in 14sp of filled surfaceVariant beside a 24dp button, so the
     // note about where a date came from was the largest object in the corner of the card and the
-    // heaviest thing on a header whose figures are the point. A ring at 20dp says the same word.
+    // heaviest thing on a header whose figures are the point. A small tag says the same word.
     //
     // Neutral, like every other note pill on this card. It was `primary` - the app's own voice,
     // on the reasoning that a T+1 changes what the reader has to do - and that made one pill in

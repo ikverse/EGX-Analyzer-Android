@@ -281,12 +281,7 @@ internal fun PurchaseDialog(
 @Composable
 internal fun OverdueChip(days: Long) {
     var showing by remember { mutableStateOf(false) }
-    OutlinePill(
-        "Overdue $days ${days.dayWord()}",
-        outline = extraColors.loss,
-        textColor = extraColors.onLossContainer,
-        onClick = { showing = true },
-    )
+    KitTag("Overdue $days ${days.dayWord()}", tone = palette.loss, onClick = { showing = true })
     if (showing) {
         InfoSheet(
             infoNote(
@@ -312,12 +307,7 @@ internal fun OverdueChip(days: Long) {
 @Composable
 internal fun PriceScaleChip() {
     var showing by remember { mutableStateOf(false) }
-    OutlinePill(
-        Outcome.PRICE_BREAK.label,
-        outline = MaterialTheme.colorScheme.outline,
-        textColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        onClick = { showing = true },
-    )
+    KitTag(Outcome.PRICE_BREAK.label, tone = palette.muted, onClick = { showing = true })
     if (showing) {
         InfoSheet(
             infoNote(
@@ -841,7 +831,7 @@ private fun String.toWindowOrNull(): Int? = trim().toIntOrNull()
 internal fun PositionStatusChip(view: PositionView) {
     var showing by remember(view.position.id) { mutableStateOf(false) }
     // The filled tag every other status in the app wears, so one status reads one way everywhere.
-    KitTag(view.status.plainWord(), tone = view.status.tone(), filled = true, ink = palette.ink, onClick = { showing = true })
+    KitTag(view.status.plainWord(), tone = view.status.tone(), onClick = { showing = true })
     if (showing) {
         // `InfoNote`'s own constructor rather than the checked `infoNote` factory: that helper's
         // callers are checked by InfoNoteTest for static prose, and both the label and its

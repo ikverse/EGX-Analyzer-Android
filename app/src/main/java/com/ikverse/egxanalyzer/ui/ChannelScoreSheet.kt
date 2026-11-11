@@ -189,7 +189,7 @@ internal fun ColumnScope.ChannelRecord(
                 ) {
                     StockLogo(call.ticker, LogoSize.Row)
                     Text(call.ticker, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                    KitTag(call.outcome.plainWord(), tone = call.outcome.recordTone(), filled = true, ink = p.ink)
+                    KitTag(call.outcome.plainWord(), tone = call.outcome.recordTone())
                     Text(
                         formatPercent(call.believableReturn),
                         style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),

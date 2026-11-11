@@ -1663,8 +1663,8 @@ private fun SelectedCallPane(call: ReportCall, latest: LatestPrice?, peak: Doubl
             Modifier.padding(top = Space.s),
             horizontalArrangement = Arrangement.spacedBy(Space.xs),
         ) {
-            KitTag(call.status.first, tone = LocalContentColor.current, filled = true)
-            call.channel?.let { KitTag(it, tone = LocalContentColor.current) }
+            KitTag(call.status.first, tone = LocalContentColor.current, ink = LocalContentColor.current)
+            call.channel?.let { KitTag(it, tone = LocalContentColor.current, ink = LocalContentColor.current) }
         }
     }
     Tile(Modifier.fillMaxWidth(), contentPadding = PaddingValues(Space.l)) {
