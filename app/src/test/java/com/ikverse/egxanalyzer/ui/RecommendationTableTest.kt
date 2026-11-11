@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
@@ -20,6 +21,7 @@ import java.time.LocalDate
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.ThemeMode
 import com.ikverse.egxanalyzer.ui.theme.EgxAnalyzerTheme
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,7 +36,7 @@ import org.robolectric.RobolectricTestRunner
  * showed 64%, the bigger screen truncating harder than the small one. The same mistake is on record
  * against the `TodayCard` tile grid before it.
  *
- * Only `StockWidth` and `StatusWidth` are fixed now and every figure column is weighted, which
+ * Only `ChannelWidth` and `StatusWidth` are fixed now and every figure column is weighted, which
  * makes "no width shows fewer columns than a narrower one" a property rather than a number - and a
  * property is a thing a test can hold. The three widths below are the real containers on the three
  * devices this app runs on, taken from the table at the top of `CLAUDE.md`: what is left of the
@@ -50,14 +52,14 @@ class RecommendationTableTest {
     private val containers = listOf(614, 682, 715)
 
     private val columns =
-        listOf("Stock", "Now", "Entry", "Stop", "Target 1", "Target 2", "Stop to target")
+        listOf("Channel", "Entry", "Stop", "Target 1", "Target 2", "Stop to target")
 
     @Composable
-    private fun Table(width: Int, point: RecommendationDataPoint = point()) {
+    private fun Table(width: Int, vararg points: RecommendationDataPoint = arrayOf(point())) {
         EgxAnalyzerTheme(themeMode = ThemeMode.DARK) {
             Box(Modifier.size(width.dp, 2000.dp)) {
                 RecommendationTable(
-                    stocks = listOf(stock(point)),
+                    stocks = listOf(stock(points.toList())),
                     channelFor = { it },
                     latestFor = { null },
                     onSelectPoint = { _, _ -> },
@@ -90,17 +92,45 @@ class RecommendationTableTest {
     fun `holding a row opens what can be done about the call`() {
         compose.setContent { Table(containers.min()) }
 
-        compose.onNodeWithText("AMOC").performTouchInput { longClick() }
+        compose.onNodeWithText("Nile Signals").performTouchInput { longClick() }
         compose.onNodeWithText("I bought this").assertIsDisplayed()
         compose.onNodeWithText("Fix a wrong number").assertIsDisplayed()
     }
 
     @Test
     fun `a watched stock says what it waits for instead of drawing a ladder`() {
-        compose.setContent { Table(containers.min(), point(watching = true)) }
+        compose.setContent { Table(containers.min(), point(basis = "watching")) }
 
-        compose.onNodeWithText("only above", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("buy only above 10.5").assertIsDisplayed()
         compose.onNodeWithTag(LadderCellTag, useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun `a watched stock shows the levels its post gave`() {
+        compose.setContent { Table(containers.min(), point(basis = "watching")) }
+
+        listOf("9.8", "11", "12").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+    }
+
+    @Test
+    fun `a watched stock with no entry falls back to its support and resistance`() {
+        assertEquals(
+            "support 9.5 · resistance 12.5",
+            watchingNote(point(basis = "watching").copy(buyPriceLow = null, buyPriceHigh = null)),
+        )
+    }
+
+    @Test
+    fun `two calls on one stock share one heading, and a T+1 call says so`() {
+        compose.setContent {
+            Table(containers.min(), point(), point(basis = "t_plus_1", channel = "Cairo Desk"))
+        }
+
+        assertEquals(1, compose.onAllNodesWithText("AMOC").fetchSemanticsNodes().size)
+        compose.onNodeWithText("2 calls · 2 channels", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Nile Signals").assertIsDisplayed()
+        compose.onNodeWithText("Cairo Desk").assertIsDisplayed()
+        assertEquals(1, compose.onAllNodesWithText("T+1").fetchSemanticsNodes().size)
     }
 
     @Test
@@ -110,23 +140,23 @@ class RecommendationTableTest {
         compose.onNodeWithTag(LadderCellTag, useUnmergedTree = true).assertExists()
     }
 
-    private fun stock(point: RecommendationDataPoint) = ConsolidatedRecommendation(
+    private fun stock(points: List<RecommendationDataPoint>) = ConsolidatedRecommendation(
         stockCode = "AMOC",
         stockNameEnglish = "Alexandria Mineral Oils",
         stockNameArabic = "أموك",
         mentionCount = 1,
         rank = 1,
         notesSummary = null,
-        dataPoints = listOf(point),
+        dataPoints = points,
     )
 
-    private fun point(watching: Boolean = false) = RecommendationDataPoint(
+    private fun point(basis: String = "explicit", channel: String = "Nile Signals") = RecommendationDataPoint(
         date = LocalDate.of(2026, 9, 1),
-        effectiveDateBasis = if (watching) "watching" else "explicit",
+        effectiveDateBasis = basis,
         visibleSourceDate = null,
         dateEvidence = null,
         timingEvidence = null,
-        sourceMessageId = null,
+        sourceMessageId = channel,
         sourceImageRef = null,
         recommendationEvidence = null,
         recommendationType = "buy",

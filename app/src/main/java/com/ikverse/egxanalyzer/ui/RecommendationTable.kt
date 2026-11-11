@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -29,24 +28,28 @@ import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.ui.kit.HoldMenu
 import com.ikverse.egxanalyzer.ui.kit.Kit
+import com.ikverse.egxanalyzer.ui.kit.KitTag
 import com.ikverse.egxanalyzer.ui.kit.MenuItem
 import com.ikverse.egxanalyzer.ui.theme.palette
 
 /**
- * The report's calls as one table, one row per call.
+ * The report's calls as one table, grouped by stock: a heading per stock, one row per call under it.
  *
- * **It fits, and that is the whole of the design.** It was sixteen fixed-width columns behind a
- * horizontal scroll until 2026-09-09, and the width they came to was a function of how many had
- * been added: crossing a breakpoint *appended* columns, so the tablet's 682dp showed 49% of a row
- * where the smaller Fold's 614dp showed 64%. Only [StockWidth] and [StatusWidth] are fixed now and
- * every other column is weighted, so a wider window widens the columns rather than adding more.
+ * **It is for comparing the calls on one stock.** Two channels calling RAYA print two entries, two
+ * stops and two pairs of targets, and the reader wants them one above the other. So each stock gets
+ * a heading - logo, ticker, name, how many calls from how many channels, and the latest price, said
+ * once - and each of its calls a row led by the channel that made it. The figure columns are the
+ * same down the whole table, so calls compare down within a stock and across stocks alike.
  *
- * Since 5.1 it is one flat block rather than a block per stock. The per-stock heading carried the
- * latest price, which is a column of its own now (`Now`); the percentages under each level and the
- * support and resistance went to the sheet a row opens, where a single call is the whole subject.
- * At the narrowest container that earns a table, 600dp, the row spends [Space].m either side, 132dp
- * on the stock and 92dp on the status, and divides the rest over 7.6 shares - about 46dp a share,
- * with [AutoSizeText] holding the figures.
+ * From 5.1 until 2026-11-11 this was one flat block: ticker and channel on every row, and a `Now`
+ * column repeating a stock's price on each of its rows. That read as a transcript of the posts and
+ * hid which rows belonged together.
+ *
+ * **It fits, and that is the rest of the design.** It was sixteen fixed-width columns behind a
+ * horizontal scroll until 2026-09-09, and crossing a breakpoint *appended* columns, so the tablet's
+ * 682dp showed less of a row than the smaller Fold's 614dp. Only [ChannelWidth] and [StatusWidth]
+ * are fixed and every other column is weighted, so a wider window widens the columns rather than
+ * adding more. `RecommendationTableTest` holds that.
  *
  * A tap opens the call; a hold opens [holdItems], the same menu a card offers.
  */
@@ -55,8 +58,8 @@ internal fun RecommendationTable(
     stocks: List<ConsolidatedRecommendation>,
     channelFor: (String?) -> String?,
     /**
-     * Where a stock is now, for the `Now` column and the ladder's arrow. A lambda rather than a map,
-     * so a price moving on one stock does not hand the table the whole record.
+     * Where a stock is now, for its heading and the ladder's arrow. A lambda rather than a map, so
+     * a price moving on one stock does not hand the table the whole record.
      */
     latestFor: (String) -> LatestPrice?,
     onSelectPoint: (ConsolidatedRecommendation, RecommendationDataPoint) -> Unit,
@@ -76,29 +79,30 @@ internal fun RecommendationTable(
     ) {
         Column {
             ColumnHeader()
-            var index = 0
-            stocks.forEach { stock ->
+            stocks.forEachIndexed { stockIndex, stock ->
                 val latest = latestFor(stock.stockCode)
-                stock.dataPoints.forEach { point ->
+                val channels = stock.dataPoints.map { channelFor(it.sourceMessageId) ?: it.sourceMessageId }
+                if (stockIndex > 0) Hairline()
+                StockHeading(stock, latest, calls = stock.dataPoints.size, channels = channels.filterNotNull().distinct().size)
+                stock.dataPoints.forEachIndexed { index, point ->
                     CallRow(
-                        stock = stock,
                         point = point,
-                        channel = channelFor(point.sourceMessageId) ?: point.sourceMessageId,
+                        channel = channels[index],
                         latest = latest,
                         status = statusFor(stock, point),
+                        // The stripes restart under each heading, so a stock's first call is plain.
                         striped = index % 2 == 1,
                         onClick = { onSelectPoint(stock, point) },
                         holdItems = holdItems(stock, point),
                     )
-                    index++
                 }
             }
         }
     }
 }
 
-/** The logo, the ticker, and the channel under it. The one column that holds words. */
-private val StockWidth = 132.dp
+/** The channel that made the call, and the T+1 tag where the call is one. The one column of words. */
+private val ChannelWidth = 132.dp
 
 /** The status word, unlabelled: the word says what it is. */
 private val StatusWidth = 92.dp
@@ -112,11 +116,8 @@ private const val EntryWeight = 1.6f
 /** The ladder's share: twice a figure, enough for the shape to read. */
 private const val LadderWeight = 2f
 
-/**
- * A minimum rather than a fixed height, so a large font scale grows the row instead of clipping it.
- * 64dp holds the tallest cell, an Arabic channel name under a ticker.
- */
-private val RowHeight = 64.dp
+/** A minimum rather than a fixed height, so a large font scale grows the row instead of clipping it. */
+private val RowHeight = 52.dp
 
 @Composable
 private fun ColumnHeader() {
@@ -124,8 +125,7 @@ private fun ColumnHeader() {
         Modifier.fillMaxWidth().padding(start = Space.m, end = Space.m, top = Space.s, bottom = Space.xs),
         verticalAlignment = Alignment.Bottom,
     ) {
-        HeaderLabel("Stock", Modifier.width(StockWidth), TextAlign.Start)
-        HeaderLabel("Now", Modifier.weight(1f), TextAlign.End)
+        HeaderLabel("Channel", Modifier.width(ChannelWidth), TextAlign.Start)
         HeaderLabel("Entry", Modifier.weight(EntryWeight), TextAlign.End)
         HeaderLabel("Stop", Modifier.weight(1f), TextAlign.End)
         HeaderLabel("Target 1", Modifier.weight(1f), TextAlign.End)
@@ -180,9 +180,46 @@ private fun HeaderLabel(label: String, modifier: Modifier, align: TextAlign) {
 /** The system font scale past which a several-word column name is stacked. */
 private const val StackHeadersAbove = 1.15f
 
+/**
+ * A stock's own line above its calls: who it is, how many calls from how many channels, and where
+ * it is now. The price is here once rather than on every row, because it is a fact about the stock.
+ */
+@Composable
+private fun StockHeading(stock: ConsolidatedRecommendation, latest: LatestPrice?, calls: Int, channels: Int) {
+    val close = latest?.session?.close
+    val count = buildString {
+        append(if (calls == 1) "1 call" else "$calls calls")
+        if (channels > 1) append(" · $channels channels")
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(start = Space.m, end = Space.m, top = Space.m, bottom = Space.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(start = Space.xs, end = Space.s))
+        Column(Modifier.weight(1f)) {
+            AutoSizeText(stock.stockCode, style = MaterialTheme.typography.titleMedium, color = palette.ink)
+            AutoSizeText(
+                listOfNotNull(stock.stockNameEnglish?.takeIf(String::isNotBlank), count).joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = palette.muted,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (close != null) {
+            Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(start = Space.s)) {
+                AutoSizeText(
+                    formatPrice(close),
+                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
+                    color = PriceRole.market,
+                )
+                AutoSizeText("now", style = MaterialTheme.typography.labelSmall, color = palette.muted)
+            }
+        }
+    }
+}
+
 @Composable
 private fun CallRow(
-    stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     channel: String?,
     latest: LatestPrice?,
@@ -204,20 +241,20 @@ private fun CallRow(
                 .padding(horizontal = Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            StockCell(stock, channel, Modifier.width(StockWidth))
-            FigureCell(Modifier.weight(1f), formatPrice(close), if (close == null) PriceRole.muted else PriceRole.market)
+            ChannelCell(channel, point.isTPlusOne, Modifier.width(ChannelWidth))
             FigureCell(Modifier.weight(EntryWeight), entryText(point), PriceRole.entry)
-            // A watched stock names no stop and no targets worth reading: the dash, not its levels.
-            FigureCell(Modifier.weight(1f), if (watching) Dash else formatPrice(point.stopLoss), PriceRole.stop)
-            FigureCell(Modifier.weight(1f), if (watching) Dash else formatPrice(point.target1), PriceRole.target)
-            FigureCell(Modifier.weight(1f), if (watching) Dash else formatPrice(point.target2), PriceRole.target)
+            // A watched stock shows whatever levels its post gave, like any call. They were dashes
+            // until 2026-11-11, which made a row that had data look empty.
+            FigureCell(Modifier.weight(1f), formatPrice(point.stopLoss), PriceRole.stop)
+            FigureCell(Modifier.weight(1f), formatPrice(point.target1), PriceRole.target)
+            FigureCell(Modifier.weight(1f), formatPrice(point.target2), PriceRole.target)
             Box(
                 Modifier.weight(LadderWeight).padding(horizontal = Space.xs),
                 contentAlignment = Alignment.Center,
             ) {
                 if (watching) {
                     AutoSizeText(
-                        watchLevel(point)?.let { "only above ${formatPrice(it)}" } ?: "watching",
+                        watchingNote(point),
                         style = MaterialTheme.typography.labelSmall,
                         color = palette.muted,
                         textAlign = TextAlign.Center,
@@ -232,32 +269,41 @@ private fun CallRow(
     }
 }
 
+/**
+ * What a watched stock says where a call draws its ladder: the level it has to clear, else its
+ * support and resistance, else the post's own note - so the cell is never a bare "watching".
+ */
+internal fun watchingNote(point: RecommendationDataPoint): String {
+    watchLevel(point)?.let { return "buy only above ${formatPrice(it)}" }
+    val levels = listOfNotNull(
+        point.support?.let { "support ${formatPrice(it)}" },
+        point.resistance?.let { "resistance ${formatPrice(it)}" },
+    )
+    if (levels.isNotEmpty()) return levels.joinToString(" · ")
+    return point.notesArabic?.takeIf(String::isNotBlank)
+        ?: point.recommendationEvidence?.takeIf(String::isNotBlank)
+        ?: "no levels given"
+}
+
 /** On the ladder cell, so a test can tell a row that draws one from a row that does not. */
 internal const val LadderCellTag = "call-ladder"
 
-/** The logo and the ticker on one line, the channel under them. */
+/** The channel that made the call, with the T+1 tag after it where the post named it one. */
 @Composable
-private fun StockCell(stock: ConsolidatedRecommendation, channel: String?, modifier: Modifier) {
-    Column(
-        modifier.padding(horizontal = Space.xs, vertical = Space.xs),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+private fun ChannelCell(channel: String?, tPlusOne: Boolean, modifier: Modifier) {
+    Row(
+        modifier.padding(horizontal = Space.xs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.xs))
-            AutoSizeText(
-                stock.stockCode,
-                style = MaterialTheme.typography.titleSmall,
-                color = palette.ink,
-            )
-        }
-        // The one place the shrink's floor is reached in practice: channel names run long and this
-        // column is fixed, so a name that will not fit still ends in a dot.
+        // Channel names run long and this column is fixed, so the name shrinks before it is cut.
         AutoSizeText(
             channel ?: Dash,
-            style = MaterialTheme.typography.labelSmall,
-            color = LocalContentColor.current.copy(alpha = 0.7f),
-            modifier = Modifier.fillMaxWidth(),
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.ink,
+            modifier = Modifier.weight(1f, fill = false),
         )
+        if (tPlusOne) KitTag("T+1", tone = palette.muted)
     }
 }
 
