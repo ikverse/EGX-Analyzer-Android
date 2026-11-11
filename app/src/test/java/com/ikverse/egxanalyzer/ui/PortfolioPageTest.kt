@@ -86,7 +86,9 @@ class PortfolioPageTest {
             override fun openPositionToSell(id: String) { sold += id }
         }
         show(FoldPosture.Cover, state)
-        compose.onNodeWithText("Needs you").performClick()
+        // Scrolled to first: the test window is short, and since the session line grew to hold the
+        // header's buttons (2026-11-11) this tile starts below its foot, where a press lands on nothing.
+        compose.onNodeWithText("Needs you").performScrollTo().performClick()
         compose.onNodeWithText("Needs you · 1").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Record sale").performScrollTo().performClick()
         assertEquals(listOf(abuk.position.id), sold)

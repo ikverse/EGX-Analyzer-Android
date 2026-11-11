@@ -4,6 +4,15 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [Unreleased]
+
+- **Tabs change in place.** Pressing a tab no longer slides the whole screen sideways through the tabs in between. The header stays where it is, the name you pressed grows while the old one shrinks, and the page's tiles pop in.
+- **No swiping between tabs** on the cover screen; tabs change from the header at every width.
+- **Search and filter buttons redrawn** to the design: round, one fixed size, with the design's own glyphs. On the cover screen they sit beside the session line, so the tab names have the full row.
+- The tab row keeps the previous tab's name visible to the left of the current one.
+
+---
+
 ## [5.0.0] — 2026-11-11
 
 **A new design, everywhere.** Every tab, sheet and dialog is redrawn as rounded tiles on paper (graphite at night), in cobalt, lime, coral, sunflower, lilac and sky, with every figure in a monospaced face. Nothing from the old look is left.

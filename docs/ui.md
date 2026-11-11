@@ -20,8 +20,7 @@ Two things the app could always have done and never did: go back, and put one st
   back through a morning's tab presses would take a dozen presses to leave. What was missing is the
   *last* jump the app made on the reader's behalf, and nothing else. A tab the reader chose is not a
   jump, so `navigate` clears the stack rather than adding to it — guarded on the destination actually
-  changing, because the pager publishes its own arrival at the end of every travel this class starts
-  and an unguarded clear there would throw the return away in the same breath as the jump.
+  changing, so a second `navigate` to the tab already showing cannot throw the return away.
 - **A notification records no return.** It arrives at a tab the reader was not on and usually at an
   app that was not running, so there is nowhere to go back to; recording one would land the first
   back press on the Analyze tab they never visited.
@@ -312,10 +311,9 @@ press. Worth writing down, because nothing in it was broken and every part behav
   plain cross-fade so the field is full width from its first frame, and the focus waits for the
   transition **and** the pager **and** the destination before it is requested. Either alone leaves
   the trap armed for the next person who animates this row.
-- It is the trap `revealIfOnScreen` is written against, arriving through the focus system rather
-  than through a reveal. **Guarding on the destination alone does not catch it** — that was the
-  first fix and it changed nothing, because the page is current and the tabs are settled at the
-  moment the icon is pressed. What was wrong was the frame, not the page.
+- **Since 2026-11-11 there is no pager for a focus request to turn** - tabs change in place, see
+  `DestinationSwitch` - so the focus now waits only for the cross-fade. The cross-fade stays, for
+  the reason above: a field laid out off the window's edge is a trap for any scroller.
 
 ### The system bars blend into the page
 

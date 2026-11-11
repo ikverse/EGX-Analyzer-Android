@@ -66,7 +66,7 @@ internal fun <T> popSpring() = spring<T>(dampingRatio = 0.62f, stiffness = Sprin
 /** How a line or bar draws in when the market moves it: a decelerating tween, no overshoot. */
 internal fun drawInSpec(durationMs: Int = 1_400) = tween<Float>(durationMs, easing = UiEase)
 
-private const val PopStepMs = 60L
+private const val PopStepMs = 80L
 private const val PopCap = 8
 private const val PopFromScale = 0.86f
 

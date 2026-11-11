@@ -94,8 +94,12 @@ is the net, and it costs seconds rather than an emulator.
 - **Find the field, not the placeholder.** `onNodeWithText("Search stocks")` reaches the `Text`
   drawn under an empty field, which has no `SetText` action and refuses `performTextInput`.
   `onNode(hasSetTextAction())` is the field.
-- **The header's icons arrive with the last of the collapse**, so a test that wants to press one
-  passes `collapse = 1f`. At `0f` there is nothing to press, which is the header working as designed.
+- **The header's buttons are there at every point of the collapse**, so a test may press one at
+  `collapse = 0f` or `1f`. Find them by content description (`Filter by stock`, `Filters`): they
+  are drawn on a `Canvas`, not an `Icon`.
+- **The test window is short.** Robolectric's default screen puts anything much below the header
+  under the fold, where `performClick` lands on nothing and says so only by the next assertion
+  failing. `performScrollTo()` first - `PortfolioPageTest` learned this when the header grew 16dp.
 
 ## Devices and their real geometry
 
@@ -359,8 +363,13 @@ floating bar, this section is what is true now.
   on the hinge; tabletop keeps what is read on the upright half and what is pressed on the flat
   half, using `tabletopHeroHeight`. Every page and sheet has a branch for each.
 - **One shell at every width.** No rail and no floating bar since 5.0: the tabs are in the page
-  header, and Analyze's button is on the Analyze page.
-- **Motion** is `popIn` on first show, `popSpring`, `rememberDrawIn` for lines and bars,
+  header, and Analyze's button is on the Analyze page. A tab changes in place - see the first
+  bullets under **Gotchas** on `DestinationSwitch`.
+- **The header's two buttons are the mockups' own**: 44dp round, raised tone, an 18dp glyph drawn
+  as 2.2-wide strokes on a 24 grid (`HeaderGlyph` in `PageHeader.kt`), never Material's icons and
+  never resized by the collapse. On the cover screen they sit at the right of the session line,
+  which is 44dp tall there to hold them; unfolded they close the tab row.
+- **Motion** is `popIn` on first show (tiles 80ms apart, the mockups' step), `popSpring`, `rememberDrawIn` for lines and bars,
   `pressScale` on a press, and all of it held still by `LocalReduceMotion`.
 - **Outside the app** the same palette is written out by hand, because those surfaces have no theme:
   `res/values/colors.xml` (launcher, splash, shortcut icons), `NotificationTone` and `StockBadge` in
@@ -518,53 +527,39 @@ floating bar, this section is what is true now.
   That has happened here — the ISIN migration — and nothing noticed at the time. Seven days, which
   clears the Friday–Saturday weekend plus a public holiday. Both are now standing state on Insights
   rather than a count in a toast — see **When the feed goes quiet**.
-- **The bar follows every page turn except the ones a travel started in the shell passes over, and
-  the effect that scrolls is keyed on the pager.** The bar and the pager move the same pointer, so
-  each follows the other, and all three ways that link can go wrong have now been shipped. Keyed on
-  `appState.destination`, the scrolling effect was restarted by the very thing it was meant to serve
-  — a swipe publishes its own arrival — and the restarted copy compared a target read at
-  recomposition against a page read a frame or more later, so a second swipe arriving inside that
-  window scrolled the reader **back to the page they had just left**. One `LaunchedEffect(pager)`
-  owns the whole link now; nothing the pager says can restart it, so no stale target survives to be
-  acted on. The guard against the write-back was the other two faults, and both came of the guard
-  naming the **gesture** rather than the travel. Raised *inside* the scrolling coroutine it went up a
-  frame after the scroll started and down a frame after it ended, and a page that turned over inside
-  either gap was swallowed. Read from the pager's own `interactionSource` instead — up on
-  `DragInteraction.Start`, down when the pager reported itself at rest — it was no better, because
-  **Compose runs a swipe as two scroll sessions**, the finger's and the settling fling's, and
-  `isScrollInProgress` reads false in the gap between them: the guard came down in that gap, so a
-  *flick* — where the page is decided by velocity on the fling rather than by crossing the halfway
-  mark under the hand — turned its page with the guard already closed and left the bar lit on the tab
-  the reader had just left. A slow drag past halfway still worked, which is what made it look
-  intermittent, and the same flag silently dropped a tap made while a swipe was still settling. The
-  guard is `travelling` now: the page a travel started here is heading for, `null` otherwise. It is
-  written by the only coroutine that scrolls, before it suspends, so nothing about how Compose splits
-  a gesture into sessions can reach it. Page and guard are read in **one** `snapshotFlow` pair, so a
-  turn is never delivered against a guard that changed after the turn was taken. What falls out of
-  that: every turn the reader causes is an arrival however it turned — under the hand, on the fling,
-  or as the pager settled — while the pages a travel crosses stay silent, and so does **the page a
-  travel is abandoned on when a second send replaces it**, which left to speak wins the race against
-  the send that cancelled it. Sends run through `collectLatest`, which starts each block
-  **undispatched**, so a replacement raises the guard in the same continuation the cancelled block
-  lowered it in and the abandoned page never gets a frame to name itself. A travel is outranked by
-  nothing but a hand, so a tab tapped while the pages are still coasting is answered rather than
-  dropped; a drag refuses it outright, and that refusal is swallowed — the guard comes down, the
-  gesture names where they land, and if it puts the pager back on the page it set out from, turning
-  no page and so naming nothing, the resting page is published so the bar cannot be left on a tab the
-  pager never travelled to.
+- **A tab changes in place; nothing slides sideways and nothing is swiped.** Until 2026-11-11 the
+  five pages sat in a `HorizontalPager` - the pre-5.0 navigation, carried into 5.0 untouched and
+  reported as "the old swiping animation". The mockups draw one header, identical on every page,
+  with only the large name moving, and pages whose tiles pop in. So `DestinationSwitch` in
+  `EgxAnalyzerApp.kt` composes **only the current page**, under `key(destination)`, and a change
+  of tab is two things: `TabTravel` (in `AppHeader.kt`, held by the shell, published as
+  `LocalTabTravel`) moves the emphasis along the tab row - the pressed name grows and takes the ink
+  while the one left shrinks and greys, on `popSpring` - and the page is built afresh, so `popIn`
+  runs on every arrival. `TabTravel` also holds the tab row's scroll position, because a header is
+  rebuilt with its page and would otherwise start the row from zero each time. The row is scrolled
+  so **the tab before the current one still shows**, as the mockups draw it.
+- **What the pager took with it.** The `travelling` guard and its `snapshotFlow` pair,
+  `sidewaysGesturesStayOnThePage`, `LocalTabsSettled`, the wait inside `revealIfOnScreen`, and the
+  `swipeBetweenTabs` switch. With one page composed there is no neighbour to answer a press meant
+  for another tab and no sideways scroller above a page for a `bringIntoView`, a focus request or
+  a child's leftover fling to turn. `revealIfOnScreen` still checks the tab, and that is all.
+  **The cost is that a page's first composition now happens on the press** rather than while the
+  reader sat still on its neighbour; `PageState` is what makes the rebuild lossless, and `Screen`
+  seeds the header's collapse from the saved scroll so a page left part-way down comes back that way.
+- **The design is silent on two things here, and both were decided on 2026-11-11 rather than read
+  off a mockup**: swiping between tabs (removed - a page that follows a finger cannot also pop in),
+  and where the header's buttons go once the session line has folded away (pinned at the right,
+  coming to rest beside the collapsed tab names).
 - **Pressing the destination already showing takes that page back to the top.** The press every
   bottom bar on this platform answers, and this app answered it with nothing — the way back from a
   session card deep inside Insights was to scroll all of it by hand. `AppState.scrollToTopRequest`
-  is a **destination and a counter**, and both halves are load-bearing: the destination because the
-  pager keeps the neighbouring pages composed, so a bare signal would take those to the top too and
-  throw away a scroll position on a tab nobody touched; the counter because a second press is a
+  is a **destination and a counter**, and both halves are load-bearing: the destination so a page only
+  ever answers a press meant for it; the counter because a second press is a
   second request, and a value that repeated would restart no effect. The shell publishes it through
   `LocalScrollToTop` from `DestinationScreen` — the one place both shells build a page and so the
   only place that knows which destination is being composed — and `Screen` animates the scroll, so
-  all five pages get it from one change. **Deliberately not folded into `navigate()`**: the pager
-  calls that on every swipe and its `snapshotFlow` reports the page it is already on the moment it
-  starts collecting, so a scroll-to-top in there would fire on first composition and again on every
-  settle, throwing the reader to the top for having swiped to a tab.
+  all five pages get it from one change. **Deliberately not folded into `navigate()`**, which is
+  called for every arrival and not only for a press on the tab already showing.
 - **Motion has one curve, one press, and a switch.** Written 2026-10-05 from an audit against the
   Emil Kowalski and Apple motion notes. `UiEase` in `DesignSystem.kt` is the curve every tween names
   (Compose's `FastOutSlowIn` starts gently, which is exactly when a finger is watching);
@@ -762,34 +757,10 @@ floating bar, this section is what is true now.
   holder before the leaving page has written to it, and on the way back it restores what the
   previous fold left there. `movableContentOf` cannot reach across `HorizontalPager`'s lazy
   subcomposition. `PageState`'s own comment carries the whole reasoning.
-- **A `bringIntoView` escapes the page it was asked from.** The request travels up through every
-  scrollable ancestor, and on a phone the outermost one is `DestinationPager` — so a reveal fired
-  from a page the reader has left scrolls *that page* back into view, which is the pager travelling
-  back to the tab they were leaving. `beyondViewportPageCount = 1` is what keeps the page alive to
-  fire it: the Portfolio is still composed, and still running the effect that reveals a trade, while
-  Insights is the tab on screen. It beat a tab press rather than losing to one — `animateScrollToPage`
-  and a reveal scroll run at the same `MutatePriority`, so the later of the two wins — while a swipe
-  survived, because a drag holds the pager at `UserInput` where no reveal can take it, which is what
-  made this read as the navigation bar alone being broken. Every reveal now goes through
-  `revealIfOnScreen`, which drops the request unless `AppState.destination` is the tab the page is
-  drawn on. Three call sites: the Portfolio's trade, Insights' call, the Results report. The card is
-  left unfolded either way, and a reveal the reader has walked away from is dropped rather than held
-  for their return — the rule `NavStop` already states, that revealing the wrong card is worse than
-  revealing none.
-- **The tab is not the arrival, and checking it alone fixed half of this.** A press sets
-  `AppState.destination` in the same breath it starts the pager travelling, so a page that composes
-  *during* that travel passes a destination check and cancels the very scroll carrying the reader to
-  it — the pager, barely off the tab they pressed from, snaps back to it. Only a tab two or more
-  pages away can do this: a neighbour is already composed and its effects do not run again. That is
-  the whole of why the Portfolio reached Insights, next door, and never Results, two along, and why
-  Results failed only once a report had been opened — `openRun` is `PageState.openResultId`, which
-  outlives the tab, so it is null at a cold start and non-null forever after. `revealIfOnScreen`
-  waits on `LocalTabsSettled` — written by `DestinationPager` off `pager.isScrollInProgress`, true
-  beside a rail, and put back to true on dispose so a fold cannot strand it — then asks about the
-  destination a second time on the other side of the wait. Waited out rather than dropped, because
-  an arrival that *should* reveal composes its page mid-travel too: a notification opening a saved
-  report is one, and dropping it would answer the notification with a page scrolled to wherever it
-  was last left.
+- **A reveal is dropped if the reader has left the tab it was for.** `revealIfOnScreen` checks
+  `AppState.destination` and nothing else since the pager went (2026-11-11). While the tabs were a
+  pager a `bringIntoView` could climb to it and turn the page, and a page composing mid-travel
+  could cancel the travel carrying the reader to it; both are history, in `git log` before that date.
 - Scrollbar overlays must be applied **outside** the scrolling node, or they are measured against
   the content and slide away with it.
 - `NavigationSuiteScaffoldLayout` does **not** consume window insets for its content; the full
