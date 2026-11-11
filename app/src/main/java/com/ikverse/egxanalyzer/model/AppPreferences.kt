@@ -137,6 +137,11 @@ data class AppPreferences(
      */
     val feedAlertsEnabled: Boolean = true,
     /**
+     * Whether the end of a run is announced: the report is ready, or the run did not finish. On by
+     * default - the reader left the app to wait for exactly this.
+     */
+    val reportReadyEnabled: Boolean = true,
+    /**
      * Whether a launch quietly asks GitHub whether a newer build exists.
      *
      * On by default and silent unless there is something new: the app is sideloaded, so a release

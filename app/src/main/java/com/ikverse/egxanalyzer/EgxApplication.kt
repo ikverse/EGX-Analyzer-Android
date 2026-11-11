@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer
 
 import android.app.Application
 import com.ikverse.egxanalyzer.data.AppShortcuts
+import com.ikverse.egxanalyzer.data.ReportReadyNotifier
 import com.ikverse.egxanalyzer.data.ApproachNotifier
 import com.ikverse.egxanalyzer.data.AttentionNotifier
 import com.ikverse.egxanalyzer.data.SessionDigestNotifier
@@ -141,11 +142,20 @@ class EgxApplication : Application() {
             },
             analysisFinished = { resultId, recommendations ->
                 AnalysisService.stop(this)
-                if (resultId != null) notifier.finished(recommendations, resultId)
+                notifier.cancelled()
+                // Wrapped: the report is saved by now, and losing that to a notification would
+                // trade the record for the announcement of it.
+                if (resultId != null && state.appPreferences.reportReadyEnabled) {
+                    runCatching { ReportReadyNotifier(this).ready(recommendations, resultId) }
+                }
             },
             analysisStopped = { reason ->
                 AnalysisService.stop(this)
-                if (reason == null) notifier.cancelled() else notifier.failed(reason)
+                notifier.cancelled()
+                // Cancelled by the reader is said by nothing: they pressed Stop, and know.
+                if (reason != null && state.appPreferences.reportReadyEnabled) {
+                    runCatching { ReportReadyNotifier(this).failed(reason) }
+                }
             },
             schedulesChanged = { marketRefresh, closeSweep, priceSeriesOn ->
                 JobScheduler(this).rebook(marketRefresh, closeSweep, priceSeriesOn)

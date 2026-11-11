@@ -20,6 +20,13 @@ import com.ikverse.egxanalyzer.ui.preview.FakeAppState
 import com.ikverse.egxanalyzer.ui.theme.EgxAnalyzerTheme
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
+import org.robolectric.annotation.Config
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -68,53 +75,62 @@ class PortfolioPageTest {
     }
 
     @Test
-    fun `the cover screen shows every tile and the record`() {
+    fun `the cover screen shows the record and the open trades`() {
         show(FoldPosture.Cover)
-        compose.onNodeWithText("Open trades · 2 · average return").assertExists()
-        compose.onNodeWithText("Hit rate · 5 weeks").assertExists()
-        compose.onNodeWithText("Needs you").assertExists()
-        compose.onNodeWithText("Open positions").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithContentDescription("COMI: 60% of the way to target 2").assertExists()
-        compose.onNodeWithText("All positions").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Your trades so far").assertExists()
+        compose.onNodeWithText("Open now").performScrollTo().assertIsDisplayed()
+        compose.onAllNodesWithText("You paid", substring = true).onFirst().assertExists()
+        assertEquals(2, compose.onAllNodesWithText("Running").fetchSemanticsNodes().size)
     }
 
+    /** COMI three days past a deadline that ran out, and ABUK still open. */
+    private val late = comi.copy(
+        status = PositionStatus.EXPIRED, marketStatus = PositionStatus.EXPIRED, open = false,
+        deadlineDate = called.plusDays(10), ranOutOfTime = true, overdueDays = 3,
+    )
+
+    private fun lateState(): FakeAppState = FakeAppState(
+        portfolio = Portfolio(groups = listOf(PortfolioGroup(called, listOf(late, abuk))), stats = portfolio.stats),
+    )
+
     @Test
-    fun `needs you opens the decision panel and Record sale goes to the sale`() {
+    fun `needs you names a late trade and I sold it goes to the sale`() {
         val sold = mutableListOf<String>()
-        val base = FakeAppState(portfolio = portfolio)
+        val base = lateState()
         val state = object : AppState by base {
             override fun openPositionToSell(id: String) { sold += id }
         }
         show(FoldPosture.Cover, state)
-        // Scrolled to first: the test window is short, and since the session line grew to hold the
-        // header's buttons (2026-11-11) this tile starts below its foot, where a press lands on nothing.
-        compose.onNodeWithText("Needs you").performScrollTo().performClick()
         compose.onNodeWithText("Needs you · 1").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Record sale").performScrollTo().performClick()
-        assertEquals(listOf(abuk.position.id), sold)
+        compose.onNodeWithText("COMI has run out of time").assertExists()
+        compose.onNodeWithText("I sold it").performScrollTo().performClick()
+        assertEquals(listOf(late.position.id), sold)
     }
 
     @Test
-    fun `unfolded, pressing a position opens its card beside the tiles`() {
-        show(FoldPosture.Unfolded)
-        compose.onNodeWithContentDescription("COMI: 60% of the way to target 2").performScrollTo().performClick()
-        compose.onNodeWithText("Selected trade").performScrollTo().assertIsDisplayed()
+    @Config(qualifiers = "w750dp-h891dp")
+    fun `unfolded, pressing a trade opens it beside the table`() {
+        val state = FakeAppState(portfolio = portfolio)
+        show(FoldPosture.Unfolded, state)
+        compose.onNodeWithText("COMI").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(comi.position.id, state.pages.portfolioSelectedTrade.value)
+        compose.onNodeWithText("since you bought").assertExists()
     }
 
     @Test
-    fun `book posture lays the tiles and the record side by side`() {
+    fun `book posture lays the list beside the trade in full`() {
         show(FoldPosture.Book(0.49f, 0.51f))
-        compose.onNodeWithText("Hit rate · 5 weeks").assertExists()
-        compose.onNodeWithText("All positions").assertExists()
+        compose.onNodeWithText("Open now").assertExists()
+        compose.onNodeWithText("Time left", substring = true).assertExists()
     }
 
     @Test
-    fun `tabletop draws the hero and everything below it`() {
+    fun `tabletop draws the record and the trade's actions`() {
         show(FoldPosture.Tabletop(0.5f, 0.51f))
-        compose.onNodeWithText("Open trades · 2 · average return").assertExists()
-        compose.onNodeWithText("Needs you").assertExists()
+        compose.onNodeWithText("Your trades so far").assertExists()
+        compose.onNodeWithText("I sold it").assertExists()
     }
-
     @Test
     fun `the filter sheet opens on the page's own title and still offers the order`() {
         val state = FakeAppState(portfolio = portfolio)
@@ -136,17 +152,111 @@ class PortfolioPageTest {
         show(FoldPosture.Cover, FakeAppState(portfolio = portfolio, returnByDay = recent, indexByDay = index))
         compose.onNodeWithText("EGX30").assertExists()
         compose.onNodeWithText("Your trades").assertExists()
+        compose.onNodeWithText("EGX30 did", substring = true).assertExists()
     }
 
     @Test
     fun `with no index fetched the hero has no legend`() {
         show(FoldPosture.Cover, FakeAppState(portfolio = portfolio, returnByDay = recent))
         compose.onNodeWithText("EGX30").assertDoesNotExist()
+        compose.onNodeWithText("EGX30 did", substring = true).assertDoesNotExist()
     }
 
     @Test
     fun `an empty record says how to start one`() {
         show(FoldPosture.Cover, FakeAppState(portfolio = Portfolio()))
         compose.onNodeWithText("No trades recorded yet").assertIsDisplayed()
+    }
+
+    @Test
+    fun `holding a trade opens its menu`() {
+        show(FoldPosture.Cover)
+        compose.onAllNodesWithText("You paid", substring = true).onFirst().performScrollTo().performTouchInput { longClick() }
+        compose.onNodeWithText("Fix the trade").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a trade close to its stop says so and one clear of it does not`() {
+        show(FoldPosture.Cover)
+        // ABUK is 1.2% above its stop; COMI is well clear.
+        assertEquals(1, compose.onAllNodesWithText("Close to its stop").fetchSemanticsNodes().size)
+    }
+
+    private fun finished(ticker: String, ret: Double) = comi.copy(
+        // A copy keeps the id it was built with, so each finished trade is given its own.
+        position = comi.position.copy(
+            ticker = ticker,
+            id = com.ikverse.egxanalyzer.model.positionId(ticker, called),
+            exitPrice = 80.0,
+            exitDate = called.plusDays(5),
+        ),
+        status = PositionStatus.CLOSED_MANUALLY, marketStatus = PositionStatus.CLOSED_MANUALLY, open = false,
+        realized = true, returnPct = ret,
+    )
+
+    private val fourDone = listOf(finished("SWDY", 4.0), finished("ETEL", 2.0), finished("HRHO", -1.0), finished("FWRY", 3.0))
+
+    private fun doneState(pending: String? = null) = FakeAppState(
+        portfolio = Portfolio(groups = listOf(PortfolioGroup(called, listOf(comi) + fourDone)), stats = portfolio.stats),
+        pendingPositionId = pending,
+    )
+
+    @Test
+    fun `see all reveals the fourth finished trade`() {
+        show(FoldPosture.Cover, doneState())
+        val fourth = fourDone.sortedWith(com.ikverse.egxanalyzer.model.PortfolioOrder.URGENT.positions).last().ticker
+        compose.onNodeWithText(fourth).assertDoesNotExist()
+        compose.onNodeWithText("See all 4").performScrollTo().performClick()
+        compose.onNodeWithText(fourth).assertExists()
+    }
+
+    @Test
+    @Config(qualifiers = "w750dp-h891dp")
+    fun `the scope chips filter the table`() {
+        show(FoldPosture.Unfolded, doneState())
+        compose.onNodeWithText("COMI").assertExists()
+        compose.onNodeWithText("Finished 4").performClick()
+        compose.onNodeWithText("COMI").assertDoesNotExist()
+        compose.onNodeWithText("SWDY").assertExists()
+    }
+
+    @Test
+    fun `more numbers shows the targets`() {
+        val state = FakeAppState(portfolio = portfolio)
+        state.pages.portfolioSelectedTrade.value = comi.position.id
+        show(FoldPosture.Cover, state)
+        compose.onNodeWithText("TARGET 2").assertDoesNotExist()
+        compose.onNodeWithText("More numbers").performScrollTo().performClick()
+        compose.onNodeWithText("TARGET 2").assertExists()
+    }
+
+    @Test
+    fun `a trade chosen before a fold into book posture is the one drawn in full`() {
+        val state = FakeAppState(portfolio = portfolio)
+        state.pages.portfolioSelectedTrade.value = abuk.position.id
+        show(FoldPosture.Book(0.49f, 0.51f), state)
+        // Its row in the list and its own header beside it.
+        assertEquals(2, compose.onAllNodesWithText("ABUK").fetchSemanticsNodes().size)
+        assertEquals(1, compose.onAllNodesWithText("COMI").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun `needs you's return takes the ink tile's own loss colour in the dark theme`() {
+        val signals = com.ikverse.egxanalyzer.ui.kit.tileSignalsFor(
+            com.ikverse.egxanalyzer.ui.theme.DarkPalette,
+            com.ikverse.egxanalyzer.ui.kit.TileTone.INK,
+        )
+        assertEquals(signals.loss, returnTone(-3.0, signals))
+        // The ink tile is light in the dark theme, so its loss is not the dark page's bright red.
+        assertNotEquals(com.ikverse.egxanalyzer.ui.theme.DarkPalette.loss, returnTone(-3.0, signals))
+    }
+
+    @Test
+    fun `arriving at a finished trade past the first three opens See all`() {
+        val fourth = fourDone.sortedWith(com.ikverse.egxanalyzer.model.PortfolioOrder.URGENT.positions).last()
+        val state = doneState(pending = fourth.position.id)
+        show(FoldPosture.Cover, state)
+        compose.waitForIdle()
+        assertTrue(state.pages.portfolioFinishedAll.value)
     }
 }

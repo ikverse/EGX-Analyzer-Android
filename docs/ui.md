@@ -255,9 +255,9 @@ along with the rounded well the page used to sit in.
   than one — a press landing there while somebody is typing must not be able to undo their typing.
 - **The three shelves lost their box**, which left each of them a Filters chip alone — a loose
   one-control row above every list, floating on a shadow, to open a panel. That is what took the
-  shelf itself away a day later; see **A page's filters live in a sheet** under Gotchas. The in-report toolbar on
-  Results keeps its own box, because that one is a different control inside a report card,
-  narrowing that report's own table.
+  shelf itself away a day later; see **A page's filters live in a sheet** under Gotchas. Since 5.1 a report
+  is a page of its own rather than a card that unfolds, and what narrows it is a row of chips above its
+  calls - one per group, shown open - rather than a toolbar with a box.
 - **`PageState.stockBox(destination)` is what decides whether a page has one**, the same shape
   `filtersActive` has and for the same reason: the question is asked from outside the screen that
   owns the answer. Analyze and Settings answer null and get **no search icon at all** — an icon
@@ -520,16 +520,35 @@ app's.
 
 ### How Settings is grouped
 
-Since 5.0 Settings is a hub of tiles, each opening its part as a page of its own - `SettingsSection`
-in `SettingsScreen.kt`: **Telegram**, **Analysis**, **Ask AI**, **Notifications**, **General**,
-**Data & backup** and **About**. Pressing a tile opens its part with a back button over its title;
-phone back returns to the hub. Unfolded and in book posture the parts are a column of tiles on the
-left with the open one in ink, and in tabletop they stand above the crease with the open part below.
-The open part is `PageState.settingsSection`, so a fold keeps it.
+Settings is a hub of tiles, each opening its part as a page of its own - `SettingsSection` in
+`SettingsScreen.kt`: **Telegram**, **Reader**, **Ask AI**, **Notifications**, **Prices and trades**,
+**Backup and sync** and **About**. The names were made plain in 5.1 (they were Analysis, General and
+Data & backup). Pressing a tile opens its part with a back button over its title; phone back returns
+to the hub. The open part is `PageState.settingsSection`, so a fold keeps it.
 
-- **The grouping is the 2026-09-14 one, with one move.** Prices left Data & backup for General in 5.0:
-  refreshing prices and keeping their history are things the phone does on its own, which is what
-  General is about, rather than data to be backed up.
+- **A status tile leads the hub** (since 5.1): "Everything is working", or "N things need a look",
+  over three lines - Telegram, the reader, prices - each with a tick or a warning. Pressing it opens
+  the first part that is wrong. `settingsStatus` in `ui/SettingsStatus.kt` works it out without
+  composing, so `SettingsStatusTest` checks every line as plain text. The prices line reads
+  `AppState.lastPriceRefreshAt`, which is written only when prices actually arrived, so a failed
+  refresh can never be reported as fresh. A key saved but not yet checked, and prices never fetched,
+  are said but are not faults.
+- **The six other parts are tiles in two columns**, each in its own tone with a one-line summary.
+  The ink Telegram tile with its lime circle went in 5.1: in dark mode it was a light tile carrying
+  a lime meant for dark ones, 1.03:1.
+- **Postures.** Unfolded and in book posture the parts are a column of tiles on the left, under a
+  one-line form of the status, with the open part beside them. In tabletop the status - or, on
+  Notifications, the chosen notification and its example - stands above the crease; below it are the
+  parts as chips and, on Notifications, a grid where a tap picks what is explained and only the
+  switch toggles anything.
+- **Reader opens on its own status tile** ("Ready to read", "The key was rejected" and so on), then
+  **Which AI**. The settings few people need - the endpoint and region, Reset provider, the timeout,
+  correction retries, and Token usage - are behind a closed **Advanced** row at the foot.
+  `PageState.settingsAdvancedOpen` holds it open through a rebuild.
+- **Notifications are seven, one `NotificationKind` each** (`ui/NotificationSamples.kt`): a plain
+  label, a second line saying when it comes, and a sample. Every `?` ends with **What it looks
+  like** and a drawn notification built from that sample, so the reader can see what a switch means
+  before turning it on. The seventh, **A report is ready**, is new in 5.1, on its own channel.
 - **Each part's groups are tiles**, titled, with the group's `about` on its heading and a summary
   under it. The wording rules are two tiles of their own - lime for what keeps a message, coral for
   what drops one - under a heading, because a tile drawn round two tiles reads as a mistake.
@@ -540,7 +559,9 @@ The open part is `PageState.settingsSection`, so a fold keeps it.
   proving it is you (a code, a password, an email, registering), and choosing the chats. The one in
   hand is a cobalt tile; the ones behind are ticked rows and the ones ahead faded. The QR code stays
   black on white whatever the theme.
-- **`Delete all analyses` is its own coral tile at the foot of Data & backup**, and still asks first.
+- **Backup and sync** holds the backup buttons, sync, and **Something not right?** (formerly
+  Diagnostics) with its **Save a report** button. `Delete all analyses` is its own coral tile at the
+  foot, and still asks first.
 
 ## A hue per page — retired in 4.5.0 (history)
 

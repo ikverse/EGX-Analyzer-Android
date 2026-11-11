@@ -452,7 +452,7 @@ through the filter dropdowns on row 1.
 
 ## Reading a problem off a device
 
-**Settings → Data and backup → Diagnostics → Save diagnostics** copies `egx_analyzer.db` into Downloads, from where
+**Settings → Backup and sync → Something not right? → Save a report** copies `egx_analyzer.db` into Downloads, from where
 `adb pull //sdcard/Download/egx-diagnostics-<date>.db` reaches it. It exists because there is no
 other way off a release-signed build: `run-as` refuses a package that is not debuggable,
 `adb backup` is closed by `android:allowBackup="false"`, and installing a debug build to get at the
@@ -506,7 +506,7 @@ before anybody tries to read one off it.
 
 ## Backing up, and getting it back
 
-**Settings → Data and backup → Backup** holds three buttons: *Back up now*, *Choose a folder*, and
+**Settings → Backup and sync → Backup** holds three buttons: *Back up now*, *Choose a folder*, and
 *Restore from a backup*. The gap they close is not which cloud the record sits in — the sync channel
 was already that, and it is the right answer for a multi-user app, because signing into Telegram is
 what makes this app work at all, so it is the one cloud account every user is certain to have. The
@@ -661,7 +661,7 @@ are rows now — shipped, visible, switchable, not deletable — and users add t
 
 Everything travels through a private Telegram channel titled `EGX Analyzer sync`.
 
-- **One switch stops all of it, per phone.** `Data and backup → Sync → Sync with Telegram`
+- **One switch stops all of it, per phone.** `Backup and sync → Sync → Sync with Telegram`
   (`AppState.telegramSyncEnabled`, stored in `SettingsRepository` and deliberately not part of the
   settings snapshot: synced, a phone switched off could never be switched back on from another,
   because it would no longer be listening). Off holds back every path to the channel — the launch
@@ -827,7 +827,7 @@ moving parts were most of what this whole area cost to build and maintain. `Anal
 and the schedule editor in Settings are gone. What is left below is exactly the three free things
 that shared its alarm, none of which needed any of that machinery in the first place.
 
-- **Keeping prices fresh** — `model/MarketRefresh.kt`, switched on in Settings under Data and backup →
+- **Keeping prices fresh** — `model/MarketRefresh.kt`, switched on in Settings under Prices and trades →
   Prices.
   Every 15 minutes, Sunday to Thursday, 10:00 to 14:45 Cairo. Free: it reads the same public feed
   the Fetch prices button does. Fifteen minutes because Android holds

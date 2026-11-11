@@ -576,7 +576,7 @@ one place that does.
   `PriceHealthTest` still covers it. What went is the page — the per-stock fault list, `FeedFaultRow`
   and `FeedFault.plainly`, the sentences that named each affected stock and said whether fetching
   again could help. `FeedFault.detail` is unaffected; it is the short form the record keeps.
-- **What is left of it is one line**, in `Data and backup → Prices` and only when something is actually
+- **What is left of it is one line**, in `Prices and trades → Prices` and only when something is actually
   wrong: how many stocks are not coming through and how many calls they are holding, in the error
   colour where any call is waiting. That is the half of the card anybody acted on — the count of
   broken symbols is trivia, and how much of the record they are holding is the reason to read it at
@@ -598,7 +598,7 @@ one place that does.
   checked", which is exactly what the card's always-present list existed to say.
 - **Pruned to the newest 200 checks**, inside the same transaction as the write that makes room, so
   a log that never changes is never opened for writing at all. Nothing reads it back for the
-  screen — the line in `Data and backup → Prices` is derived from `priceHealth` on every recompute exactly
+  screen — the line in `Prices and trades → Prices` is derived from `priceHealth` on every recompute exactly
   as it always was, so the table cannot disagree with what is on screen. Device-local and never
   synced, like `price_events` and `session_events`.
 - A **Fetch prices** button sits under that line, offered whatever the state, because it is also how

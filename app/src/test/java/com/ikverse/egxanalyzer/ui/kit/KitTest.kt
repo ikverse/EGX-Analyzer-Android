@@ -22,6 +22,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.ThemeMode
 import com.ikverse.egxanalyzer.ui.theme.EgxAnalyzerTheme
@@ -230,5 +232,25 @@ class KitTest {
             Tile(tone = TileTone.HIGHLIGHT, modifier = Modifier.popIn(3)) { Text("Hit rate") }
         }
         compose.onNodeWithText("Hit rate").assertExists()
+    }
+
+    @Test
+    fun `a hold opens the actions`() {
+        content {
+            HoldMenu(items = listOf(MenuItem("Copy the call") {}), onTap = {}) { Text("A held row") }
+        }
+        compose.onNodeWithText("A held row").performTouchInput { longClick() }
+        compose.onNodeWithText("Copy the call").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a tap opens the thing and no menu`() {
+        var tapped = false
+        content {
+            HoldMenu(items = listOf(MenuItem("Copy the call") {}), onTap = { tapped = true }) { Text("A tapped row") }
+        }
+        compose.onNodeWithText("A tapped row").performClick()
+        assertTrue(tapped)
+        compose.onNodeWithText("Copy the call").assertDoesNotExist()
     }
 }

@@ -33,6 +33,11 @@ data class AnalysisProgress(
      * that quietly took three of them would otherwise look like one slow one.
      */
     val correction: Int = 0,
+    /**
+     * Sources answered from an earlier run's reading rather than sent again, so the page can say
+     * why a run has fewer pictures to read than posts it loaded.
+     */
+    val skipped: Int = 0,
 ) {
     enum class Stage {
         /** Sending batches of images and collecting what the model read out of each. */
@@ -57,6 +62,14 @@ data class AnalysisProgress(
             else -> (imagesDone.toFloat() / images.toFloat()).coerceIn(0f, 1f)
         }
 
+    /**
+     * The work done and the work there is, in whatever the run can count: pictures where it sends
+     * any, batches on a text-only run - which has no pictures to count at all. The time estimate's
+     * input. See [ReadingEstimate].
+     */
+    val unitsDone: Int get() = if (images > 0) imagesDone else batchesDone
+    val units: Int get() = if (images > 0) images else batches
+
     /** Which batch is in flight, counting from one, and never past the last. */
     private val batch: Int get() = (batchesDone + 1).coerceAtMost(batches.coerceAtLeast(1))
 
@@ -67,10 +80,12 @@ data class AnalysisProgress(
      * what the reader recognises is that their messages go off a handful at a time.
      */
     fun line(): String = when (stage) {
-        Stage.READING -> {
-            val read = "Reading batch $batch of $batches"
-            if (images > 0) "$read · $imagesDone of $images images read" else read
-        }
+        Stage.READING ->
+            if (images > 0) {
+                "Reading the posts · $imagesDone of $images pictures"
+            } else {
+                "Reading the posts · batch $batch of $batches"
+            }
 
         Stage.WRITING -> when (correction) {
             0 -> "Writing the report"

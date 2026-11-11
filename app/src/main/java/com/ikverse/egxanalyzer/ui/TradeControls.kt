@@ -12,6 +12,8 @@ import androidx.compose.material3.LocalContentColor
 import com.ikverse.egxanalyzer.ui.theme.palette
 import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
 import com.ikverse.egxanalyzer.ui.kit.TileTone
+import com.ikverse.egxanalyzer.ui.kit.tileSignals
+import com.ikverse.egxanalyzer.model.plainWord
 import com.ikverse.egxanalyzer.ui.kit.Tile
 import com.ikverse.egxanalyzer.ui.kit.SegmentedControl
 import com.ikverse.egxanalyzer.ui.kit.KitStepper
@@ -220,6 +222,31 @@ internal fun TradeAction(
     }
 
     if (buying) {
+        PurchaseDialog(
+            suggestedEntry = suggestedEntry,
+            defaultWindow = defaultWindow,
+            tPlusOne = tPlusOne,
+            onDismiss = { buying = false },
+            onBuy = { price, date, window ->
+                buying = false
+                onBuy(price, date, window)
+            },
+        )
+    }
+}
+
+/**
+ * Recording a purchase: the price paid, the day, and the trade's own window. [TradeAction]'s button
+ * and the Results hold menu's I bought this both open it, so the two say the same thing.
+ */
+@Composable
+internal fun PurchaseDialog(
+    suggestedEntry: Double?,
+    defaultWindow: Int,
+    tPlusOne: Boolean,
+    onDismiss: () -> Unit,
+    onBuy: (price: Double, date: LocalDate, windowSessions: Int) -> Unit,
+) {
         TradeDialog(
             title = "Record the purchase",
             explanation = "The price you actually paid, which is what every figure for this " +
@@ -238,13 +265,9 @@ internal fun TradeAction(
                 "Your default, from Settings. Change it to give this trade its own deadline - " +
                     "it decides when this trade expires and nothing else."
             },
-            onDismiss = { buying = false },
-            onConfirm = { price, date, window ->
-                buying = false
-                onBuy(price, date, window ?: defaultWindow)
-            },
+            onDismiss = onDismiss,
+            onConfirm = { price, date, window -> onBuy(price, date, window ?: defaultWindow) },
         )
-    }
 }
 
 /**
@@ -322,7 +345,7 @@ internal fun KeepOpenButton(
 ) {
     var asking by remember { mutableStateOf(false) }
     KitButton(
-        "Keep open",
+        "Keep it open",
         onClick = { asking = true },
         modifier = modifier,
         kind = ButtonKind.SECONDARY,
@@ -348,7 +371,7 @@ internal fun KeepOpenButton(
  * later, when the reason is the one thing they cannot reconstruct.
  */
 @Composable
-private fun KeepOpenDialog(onDismiss: () -> Unit, onConfirm: (String?) -> Unit) {
+internal fun KeepOpenDialog(onDismiss: () -> Unit, onConfirm: (String?) -> Unit) {
     var note by remember { mutableStateOf("") }
     KitDialog(
         title = "Keep this trade open?",
@@ -386,27 +409,11 @@ internal fun SellButton(
     suggestedExit: Double?,
     onSell: (Sale) -> Unit,
     modifier: Modifier = Modifier,
-    /**
-     * Opens the dialog without the button being pressed, for the Record sale action in the shade.
-     *
-     * A sale needs a price and a date, so it can never be a one-tap action from a notification -
-     * what the action can do is put the reader in front of the two fields rather than in front of
-     * the tab and a hunt for the card. See `TradeStatusNotifier`.
-     */
-    openNow: Boolean = false,
-    /** Clears the request, so dismissing the dialog does not immediately reopen it. */
-    onOpened: () -> Unit = {},
 ) {
+    // The Record sale action in the shade no longer opens this one: since 5.1 the Portfolio hosts
+    // its sale dialog once, on PageState, so a fold cannot close it. See TradeDialogHost.
     var selling by remember { mutableStateOf(false) }
-    // Keyed on the request rather than run once: a second notification acted on while the app is
-    // already open has to open the dialog again.
-    LaunchedEffect(openNow) {
-        if (openNow) {
-            selling = true
-            onOpened()
-        }
-    }
-    KitButton("Sold", onClick = { selling = true }, modifier = modifier, size = ButtonSize.SMALL)
+    KitButton("I sold it", onClick = { selling = true }, modifier = modifier, size = ButtonSize.SMALL)
     if (selling) {
         SellDialog(
             held = held,
@@ -600,7 +607,7 @@ internal fun SellDialog(
                         }
                     }
                     val ret = (pending.blended - position.entryPrice) / position.entryPrice * 100
-                    Text(formatPercent(ret), style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures), color = if (ret < 0) p.loss else p.highlight)
+                    Text(formatPercent(ret), style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures), color = if (ret < 0) tileSignals(TileTone.INK).loss else tileSignals(TileTone.INK).gain)
                 }
             }
         }
@@ -833,7 +840,7 @@ private fun String.toWindowOrNull(): Int? = trim().toIntOrNull()
 internal fun PositionStatusChip(view: PositionView) {
     var showing by remember(view.position.id) { mutableStateOf(false) }
     OutlinePill(
-        view.status.label,
+        view.status.plainWord(),
         outline = view.status.pillOutline(),
         textColor = view.status.onContainer(),
         onClick = { showing = true },
@@ -842,7 +849,7 @@ internal fun PositionStatusChip(view: PositionView) {
         // `InfoNote`'s own constructor rather than the checked `infoNote` factory: that helper's
         // callers are checked by InfoNoteTest for static prose, and both the label and its
         // explanation here are read off `view.status` rather than typed at the call site.
-        InfoSheet(InfoNote(view.status.label, listOf(view.status.explanation()))) { showing = false }
+        InfoSheet(InfoNote(view.status.plainWord(), listOf(view.status.explanation()))) { showing = false }
     }
 }
 

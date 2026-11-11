@@ -62,6 +62,9 @@ class FakeAppState(
     override val analysisStartedAt: Instant? = null,
     override val analysisMessage: String? = null,
     override val analysisProgress: AnalysisProgress? = null,
+    override val analysisReadingEndsAt: Instant? = null,
+    override val lastPriceRefreshAt: Long = 0L,
+    override val sourcesReadEarlier: Set<String> = emptySet(),
     override val pendingResultId: Long? = null,
     override val pendingPositionId: String? = null,
     override val pendingCallId: String? = null,
@@ -319,7 +322,14 @@ class FakeAppState(
 
     override fun navigate(destination: AppDestination) = Unit
 
-    override fun goBack(): Boolean = false
+    // Mirrors the one step of LiveAppState's back that a preview can show: closing an open report.
+    override fun goBack(): Boolean {
+        if (destination == AppDestination.RESULTS && pages.openResultId.value != null) {
+            pages.openReport(null)
+            return true
+        }
+        return false
+    }
 
     override fun scrollToTop(destination: AppDestination) = Unit
 
@@ -378,6 +388,7 @@ class FakeAppState(
     override fun updateSessionDigest(enabled: Boolean) = Unit
 
     override fun updateFeedAlerts(enabled: Boolean) = Unit
+    override fun updateReportReady(enabled: Boolean) = Unit
 
     override fun updateMarketRefreshEnabled(enabled: Boolean) = Unit
 

@@ -1,5 +1,16 @@
 package com.ikverse.egxanalyzer.ui
 
+import com.ikverse.egxanalyzer.ui.kit.MoreRow
+import com.ikverse.egxanalyzer.ui.kit.KitChip
+import com.ikverse.egxanalyzer.ui.kit.tileSignals
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.FlowRow
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -88,11 +99,11 @@ import java.time.ZoneId
  */
 internal enum class SettingsSection(val title: String) {
     TELEGRAM("Telegram"),
-    ANALYSIS("Analysis"),
+    ANALYSIS("Reader"),
     ASK_AI("Ask AI"),
     NOTIFICATIONS("Notifications"),
-    GENERAL("General"),
-    DATA("Data & backup"),
+    GENERAL("Prices and trades"),
+    DATA("Backup and sync"),
     ABOUT("About"),
 }
 
@@ -116,6 +127,7 @@ internal fun SettingsScreen(appState: AppState) {
             is FoldPosture.Unfolded, is FoldPosture.Book -> {
                 val shown = open ?: SettingsSection.TELEGRAM
                 SplitColumns(posture, unfoldedStart = 0.34f, start = {
+                        SettingsStatusTile(appState, onOpen = { open = it }, compact = true)
                         SettingsSection.entries.forEach { section ->
                             SectionNavTile(section, summaries.getValue(section), selected = section == shown) {
                                 open = section
@@ -133,29 +145,30 @@ internal fun SettingsScreen(appState: AppState) {
             }
 
             is FoldPosture.Tabletop -> {
-                // The parts stand on the upright half and the open one starts on the flat half, so
-                // the controls being pressed are on the half lying on the table.
+                // What is read on the upright half, to the crease: the status, or on Notifications
+                // the one chosen and what it looks like. What is pressed lies on the flat half.
+                val shown = open ?: SettingsSection.TELEGRAM
+                var kind by appState.pages.settingsNotification
                 Column(
                     Modifier.fillMaxWidth().heightIn(min = tabletopHeroHeight(posture)),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(Kit.TileGap),
                 ) {
-                    SettingsSection.entries.chunked(2).forEach { pair ->
-                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            pair.forEach { section ->
-                                SectionNavTile(
-                                    section,
-                                    summaries.getValue(section),
-                                    selected = section == open,
-                                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                                ) { open = if (open == section) null else section }
-                            }
-                            if (pair.size == 1) Spacer(Modifier.weight(1f))
-                        }
+                    if (shown == SettingsSection.NOTIFICATIONS) {
+                        NotificationExplainer(kind)
+                    } else {
+                        SettingsStatusTile(appState, onOpen = { open = it })
                     }
                 }
-                open?.let { section ->
-                    SectionHeader(section) { open = null }
-                    SectionPage(section, appState)
+                // Wrapped rather than scrolled sideways: a sideways scroller would fight the page.
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    SettingsSection.entries.forEach { section ->
+                        KitChip(section.title, selected = section == shown, onClick = { open = section })
+                    }
+                }
+                if (shown == SettingsSection.NOTIFICATIONS) {
+                    NotificationKeys(appState, selected = kind, onSelect = { kind = it })
+                } else {
+                    SectionPage(shown, appState)
                 }
             }
 
@@ -175,18 +188,26 @@ internal fun SettingsScreen(appState: AppState) {
 /** The one line each part carries on the hub and in the column beside an open part. */
 @Composable
 private fun settingsSummaries(appState: AppState): Map<SettingsSection, String> {
-    val askModel = remember(appState.opinionSettingsRevision, appState.cloudConfiguration) { appState.opinionModel() }
     val askSearching = remember(appState.opinionSettingsRevision) { appState.opinionSearchEnabled() }
     val askWindow = remember(appState.opinionSettingsRevision) { appState.opinionNewsWindowDays() }
     val signedIn = appState.telegramAuthState.step == TelegramAuthStep.READY
+    val config = appState.cloudConfiguration
+    val prefs = appState.appPreferences
     return mapOf(
-        SettingsSection.TELEGRAM to if (signedIn) "Signed in · ${appState.channels.size} chats" else "Not connected",
-        SettingsSection.ANALYSIS to "${appState.cloudConfiguration.provider.displayName} · " +
-            appState.cloudConfiguration.model.ifBlank { "no model" },
-        SettingsSection.ASK_AI to if (askSearching) "$askModel · news from $askWindow days" else "$askModel · no search",
+        SettingsSection.TELEGRAM to if (signedIn) "Signed in · ${appState.channels.size} chats" else "Not signed in",
+        SettingsSection.ANALYSIS to config.model.ifBlank { "No AI chosen" } + " · " + when (appState.credentialVerified) {
+            true -> "key working"
+            false -> "key rejected"
+            null -> if (config.hasCredential) "key not checked" else "no key"
+        },
+        SettingsSection.ASK_AI to if (askSearching) "Searches the web · $askWindow days back" else "No web search",
         SettingsSection.NOTIFICATIONS to "${notificationSwitches(appState).count { it }} of $NOTIFICATION_COUNT on",
-        SettingsSection.GENERAL to "${appState.appPreferences.themeMode.displayName} · prices and trade defaults",
-        SettingsSection.DATA to "${appState.savedResults.size} saved analyses",
+        SettingsSection.GENERAL to "${prefs.themeMode.displayName} · " +
+            (if (appState.marketRefreshEnabled) "Fresh all session" else "Fetched once a day") +
+            " · ${prefs.defaultTradeWindowSessions}-session trades",
+        SettingsSection.DATA to "${appState.savedResults.size} reports · " +
+            (if (appState.telegramSyncEnabled) "sync on" else "sync off") + " · " +
+            (if (appState.backupFolder == null) "no backup folder" else "backing up to a folder"),
         SettingsSection.ABOUT to when (val state = appState.updateState) {
             is UpdateState.Available -> "Version ${state.update.versionName} available"
             is UpdateState.Ready -> "Version ${state.update.versionName} ready"
@@ -196,19 +217,13 @@ private fun settingsSummaries(appState: AppState): Map<SettingsSection, String> 
 }
 
 /**
- * The six switches, in one list, so the hub's count and the page's switches cannot disagree.
- * [NOTIFICATION_COUNT] is the same six, checked against this.
+ * The seven switches, in one list, so the hub's count and the page's switches cannot disagree.
+ * [NOTIFICATION_COUNT] is the same seven, checked against this.
  */
-private fun notificationSwitches(appState: AppState): List<Boolean> = listOf(
-    appState.appPreferences.overdueRemindersEnabled,
-    appState.appPreferences.tradeAlertsEnabled,
-    appState.appPreferences.callAlertsEnabled,
-    appState.appPreferences.approachAlertsEnabled,
-    appState.appPreferences.sessionDigestEnabled,
-    appState.appPreferences.feedAlertsEnabled,
-).also {
-    check(it.size == NOTIFICATION_COUNT) { "NOTIFICATION_COUNT is $NOTIFICATION_COUNT but ${it.size} switches are drawn" }
-}
+private fun notificationSwitches(appState: AppState): List<Boolean> =
+    NotificationKind.entries.map { it.isOn(appState.appPreferences) }.also {
+        check(it.size == NOTIFICATION_COUNT) { "NOTIFICATION_COUNT is $NOTIFICATION_COUNT but ${it.size} switches are drawn" }
+    }
 
 // ── The hub ────────────────────────────────────────────────────────────────────────────────────
 
@@ -218,109 +233,30 @@ private fun SettingsHub(
     summaries: Map<SettingsSection, String>,
     onOpen: (SettingsSection) -> Unit,
 ) {
-    val signedIn = appState.telegramAuthState.step == TelegramAuthStep.READY
     Column(verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
-        // Telegram leads, in ink: nothing else on this page works until it is connected.
-        Tile(
-            Modifier.fillMaxWidth().popIn(0),
-            tone = TileTone.INK,
-            onClick = { onOpen(SettingsSection.TELEGRAM) },
-            onClickLabel = "Open Telegram settings",
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Box(
-                    Modifier.size(52.dp).clip(CircleShape).background(palette.highlight),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Outlined.Forum, contentDescription = null, tint = palette.ink)
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (signedIn) "Telegram connected" else "Telegram not connected",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.ExtraBold,
-                    )
-                    Text(
-                        if (signedIn) {
-                            "${appState.channels.size} chats · sync " + if (appState.telegramSyncEnabled) "on" else "off"
-                        } else {
-                            "Sign in to read your chats and keep reports in step"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = LocalContentColor.current.copy(alpha = 0.72f),
-                    )
-                }
-                if (signedIn && appState.telegramSyncEnabled) {
-                    KitButton(
-                        "Sync now",
-                        onClick = { appState.startAction { appState.syncReports() } },
-                        kind = ButtonKind.ON_TONE,
-                        size = ButtonSize.SMALL,
-                        enabled = appState.busyLabel == null,
+        // What is working leads: nothing else on this page matters while one of the three is not.
+        SettingsStatusTile(appState, onOpen, modifier = Modifier.popIn(0))
+        // Every part the same shape now, in two columns, its value and detail read off the same
+        // summary the column beside an open part shows - so the two cannot disagree.
+        HubTones.chunked(2).forEachIndexed { row, pair ->
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+                pair.forEachIndexed { column, (section, tone) ->
+                    val summary = summaries.getValue(section)
+                    HubTile(
+                        section,
+                        tone,
+                        value = summary.substringBefore(" · "),
+                        detail = summary.substringAfter(" · ", ""),
+                        index = 1 + row * 2 + column,
+                        onOpen = onOpen,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
-            HubTile(
-                SettingsSection.ANALYSIS,
-                TileTone.TILE2,
-                value = appState.cloudConfiguration.model.ifBlank { "No model" },
-                detail = when (appState.credentialVerified) {
-                    true -> "Key verified · ${appState.cloudConfiguration.provider.displayName}"
-                    false -> "Key rejected"
-                    null -> if (appState.cloudConfiguration.hasCredential) "Key saved, not verified" else "No API key"
-                },
-                index = 1,
-                onOpen = onOpen,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
-            HubTile(
-                SettingsSection.ASK_AI,
-                TileTone.TILE1,
-                value = summaries.getValue(SettingsSection.ASK_AI).substringBefore(" · "),
-                detail = summaries.getValue(SettingsSection.ASK_AI).substringAfter(" · ", ""),
-                index = 2,
-                onOpen = onOpen,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
-        }
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
-            HubTile(
-                SettingsSection.NOTIFICATIONS,
-                TileTone.TILE3,
-                value = "${notificationSwitches(appState).count { it }} on",
-                detail = "of $NOTIFICATION_COUNT kinds",
-                index = 3,
-                onOpen = onOpen,
-                bigValue = true,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
-            HubTile(
-                SettingsSection.GENERAL,
-                TileTone.CARD,
-                value = appState.appPreferences.themeMode.displayName,
-                detail = "Prices · trade defaults",
-                index = 4,
-                onOpen = onOpen,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
-        }
-        HubTile(
-            SettingsSection.DATA,
-            TileTone.CARD,
-            value = "${appState.savedResults.size} saved analyses",
-            detail = listOf(
-                if (appState.backupFolder == null) "no backup folder" else "backing up to a folder",
-                tokenUsageSummary(appState.modelUsage),
-            ).joinToString(" · "),
-            index = 5,
-            onOpen = onOpen,
-            modifier = Modifier.fillMaxWidth(),
-        )
         val update = appState.updateState is UpdateState.Available || appState.updateState is UpdateState.Ready
         Tile(
-            Modifier.fillMaxWidth().popIn(6),
+            Modifier.fillMaxWidth().popIn(7),
             tone = if (update) TileTone.HIGHLIGHT else TileTone.CARD,
             onClick = { onOpen(SettingsSection.ABOUT) },
             onClickLabel = "Open About",
@@ -337,6 +273,86 @@ private fun SettingsHub(
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                 )
+            }
+        }
+    }
+}
+
+/** The hub's six parts, in order, and the fill each one stands on. About is its own row. */
+private val HubTones = listOf(
+    SettingsSection.TELEGRAM to TileTone.TILE3,
+    SettingsSection.ANALYSIS to TileTone.TILE2,
+    SettingsSection.NOTIFICATIONS to TileTone.TILE1,
+    SettingsSection.ASK_AI to TileTone.CARD,
+    SettingsSection.GENERAL to TileTone.HIGHLIGHT,
+    SettingsSection.DATA to TileTone.CARD,
+)
+
+/**
+ * Whether the three things this app cannot work without are working, on one ink tile. A press
+ * opens the first part with something wrong; with nothing wrong there is nothing to press.
+ *
+ * The icons are tinted with the ink tile's own signals rather than sat on a lime disc: lime on the
+ * ink tile is 1.03:1 in the dark theme, the fault the old Telegram tile had.
+ *
+ * @param compact the column beside an open part, unfolded: one line rather than three.
+ */
+@Composable
+private fun SettingsStatusTile(
+    appState: AppState,
+    onOpen: (SettingsSection) -> Unit,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    val status = settingsStatus(
+        telegramReady = appState.telegramAuthState.step == TelegramAuthStep.READY,
+        credentialVerified = appState.credentialVerified,
+        hasCredential = appState.cloudConfiguration.hasCredential,
+        model = appState.cloudConfiguration.model,
+        lastPriceRefreshAt = appState.lastPriceRefreshAt,
+        pricesRefreshing = appState.pricesRefreshing,
+        feedClean = appState.priceHealth.clean,
+        feedFaults = appState.priceHealth.faults.size,
+        stocksNamed = appState.priceHealth.stocksNamed,
+        now = java.time.Instant.now(),
+    )
+    val fault = status.firstFault
+    val signals = tileSignals(TileTone.INK)
+    Tile(
+        modifier.fillMaxWidth(),
+        tone = TileTone.INK,
+        onClick = fault?.let { { onOpen(it) } },
+        onClickLabel = fault?.let { "Open ${it.title}" },
+    ) {
+        Text(status.headline, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+        if (compact) {
+            Text(
+                status.lines.joinToString(" · ") { it.text },
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalContentColor.current.copy(alpha = 0.72f),
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        } else {
+            Column(Modifier.padding(top = Space.s), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                status.lines.forEach { line ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        Icon(
+                            when (line.ok) {
+                                true -> Icons.Outlined.CheckCircle
+                                false -> Icons.Outlined.Warning
+                                null -> Icons.Outlined.Schedule
+                            },
+                            contentDescription = null,
+                            tint = when (line.ok) {
+                                true -> signals.gain
+                                false -> signals.loss
+                                null -> LocalContentColor.current.copy(alpha = 0.72f)
+                            },
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Text(line.text, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
             }
         }
     }
@@ -497,7 +513,7 @@ private fun ColumnScope.TelegramPage(appState: AppState) {
         "The account is how this app reads anything at all: the chats ticked on Analyze " +
             "are read as you, on this device, and no chat you have not ticked is opened.",
         "It is also where your saved reports are kept - in a private channel of your own - " +
-            "so signing out here stops both. Sending them there is under Data and backup.",
+            "so signing out here stops both. Sending them there is under Backup and sync.",
     )
     if (appState.telegramAuthState.step == TelegramAuthStep.READY) {
         SignInProgress(step = SignInSteps + 1)
@@ -585,9 +601,13 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
         )
     }
 
+    // Whether the reader can work, said first, in words. It replaces the pill that said the same
+    // thing about the key alone.
+    ReaderStatusTile(appState)
+
     // The model that reads the cards, on its own tile, in the order a run uses things: which
     // model, what is sent to it, the wording it is told about, the prompt that carries it, and
-    // what is checked afterwards.
+    // what is checked afterwards. Everything only a careful reader needs is under Advanced.
     AnalysisModelCard(appState)
 
     Group(
@@ -604,11 +624,6 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
                 "key typed wrongly is found now rather than on the first paid run.",
         ),
     ) {
-        when (appState.credentialVerified) {
-            true -> StatusPill("API key verified", StatusTone.GOOD)
-            false -> StatusPill("API key rejected", StatusTone.BAD)
-            null -> if (appState.cloudConfiguration.hasCredential) StatusPill("API key not verified yet", StatusTone.NEUTRAL)
-        }
         Box {
             KitButton(
                 "Provider: ${appState.cloudConfiguration.provider.displayName}",
@@ -628,30 +643,6 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
             )
         }
         KitTextField(
-            value = appState.cloudConfiguration.endpoint,
-            onValueChange = appState::updateEndpoint,
-            label = "HTTPS API endpoint",
-            modifier = Modifier.fillMaxWidth(),
-            keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
-        )
-        if (appState.cloudConfiguration.provider.endpointPresets.isNotEmpty()) {
-            Box {
-                KitButton(
-                    "Choose endpoint region",
-                    onClick = { endpointMenuOpen = true },
-                    kind = ButtonKind.SECONDARY,
-                    size = ButtonSize.SMALL,
-                )
-                KitMenu(
-                    expanded = endpointMenuOpen,
-                    onDismiss = { endpointMenuOpen = false },
-                    items = appState.cloudConfiguration.provider.endpointPresets.map { preset ->
-                        MenuItem(preset.displayName) { appState.updateEndpoint(preset.endpoint) }
-                    },
-                )
-            }
-        }
-        KitTextField(
             value = credential,
             onValueChange = { credential = it },
             label = if (appState.cloudConfiguration.hasCredential) "Replace saved API key (optional)" else "API key",
@@ -669,7 +660,6 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
                 size = ButtonSize.SMALL,
                 enabled = appState.busyLabel == null,
             )
-            KitButton("Reset provider", onClick = { confirmResetProvider = true }, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
             if (appState.cloudConfiguration.hasCredential) {
                 KitButton("Remove key", onClick = { confirmRemoveCredential = true }, kind = ButtonKind.DANGER, size = ButtonSize.SMALL)
             }
@@ -726,20 +716,6 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
                 onCheckedChange = { appState.toggleDefaultContentType(type) },
             )
         }
-        StepperRow(
-            label = "Cloud response timeout",
-            value = appState.appPreferences.responseTimeoutSeconds,
-            range = ResponseTimeout.MIN..ResponseTimeout.MAX,
-            onValueChange = appState::updateResponseTimeout,
-            unit = "seconds, in steps of 30",
-            step = 30,
-            about = infoNote(
-                "Cloud response timeout",
-                "How long the model may think about one batch of images. It sends nothing " +
-                    "until it has finished, so a batch that needs longer than this is hung " +
-                    "up on.",
-            ),
-        )
     }
 
     // A heading on the page rather than a tile round the two lists, because the lists are tiles of
@@ -773,13 +749,9 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
 
     Group(
         "Validation",
-        summary = "${appState.appPreferences.correctionRetries} correction " +
-            if (appState.appPreferences.correctionRetries == 1) "retry" else "retries",
+        summary = if (appState.appPreferences.catalogEnrichmentEnabled) "Company names added" else "Company names not added",
         about = infoNote(
             "Validation",
-            "What happens to an answer that comes back malformed. A correction retry " +
-                "hands the model its own reply and the error, and asks again - each one " +
-                "is another paid request, which is why the ceiling is two.",
             "The catalog is the list of Cairo listings held on this phone. Enriching " +
                 "against it fills in a company's names and codes from that list rather " +
                 "than from the model, so a ticker read off a screenshot is checked " +
@@ -787,13 +759,6 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
                 "sends nothing.",
         ),
     ) {
-        StepperRow(
-            label = "Correction retries",
-            value = appState.appPreferences.correctionRetries,
-            range = 0..2,
-            onValueChange = appState::updateCorrectionRetries,
-            unit = "each one is another paid request",
-        )
         SettingToggle(
             label = "Enrich results with the on-device EGX catalog",
             checked = appState.appPreferences.catalogEnrichmentEnabled,
@@ -807,6 +772,105 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
             icon = Icons.Outlined.CloudDownload,
         )
         Text(appState.catalogMessage, style = MaterialTheme.typography.bodySmall, color = palette.muted)
+    }
+
+    // What only a careful reader needs, closed until asked for, on PageState so a fold while
+    // editing the endpoint does not shut it.
+    MoreRow(
+        "Advanced",
+        appState.pages.settingsAdvancedOpen,
+        summary = "Connection, waiting time, retries and usage",
+    ) {
+        KitTextField(
+            value = appState.cloudConfiguration.endpoint,
+            onValueChange = appState::updateEndpoint,
+            label = "HTTPS API endpoint",
+            modifier = Modifier.fillMaxWidth(),
+            keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            if (appState.cloudConfiguration.provider.endpointPresets.isNotEmpty()) {
+                Box {
+                    KitButton(
+                        "Choose endpoint region",
+                        onClick = { endpointMenuOpen = true },
+                        kind = ButtonKind.SECONDARY,
+                        size = ButtonSize.SMALL,
+                    )
+                    KitMenu(
+                        expanded = endpointMenuOpen,
+                        onDismiss = { endpointMenuOpen = false },
+                        items = appState.cloudConfiguration.provider.endpointPresets.map { preset ->
+                            MenuItem(preset.displayName) { appState.updateEndpoint(preset.endpoint) }
+                        },
+                    )
+                }
+            }
+            KitButton("Reset provider", onClick = { confirmResetProvider = true }, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
+        }
+        StepperRow(
+            label = "Cloud response timeout",
+            value = appState.appPreferences.responseTimeoutSeconds,
+            range = ResponseTimeout.MIN..ResponseTimeout.MAX,
+            onValueChange = appState::updateResponseTimeout,
+            unit = "seconds, in steps of 30",
+            step = 30,
+            about = infoNote(
+                "Cloud response timeout",
+                "How long the model may think about one batch of images. It sends nothing " +
+                    "until it has finished, so a batch that needs longer than this is hung " +
+                    "up on.",
+            ),
+        )
+        StepperRow(
+            label = "Correction retries",
+            value = appState.appPreferences.correctionRetries,
+            range = 0..2,
+            onValueChange = appState::updateCorrectionRetries,
+            unit = "each one is another paid request",
+            about = infoNote(
+                "Correction retries",
+                "What happens to an answer that comes back malformed. A correction retry " +
+                    "hands the model its own reply and the error, and asks again - each one " +
+                    "is another paid request, which is why the ceiling is two.",
+            ),
+        )
+        Group(
+            "Token usage",
+            summary = tokenUsageSummary(appState.modelUsage),
+            about = infoNote(
+                "Token usage",
+                "Every request comes back with the token count the provider billed it at. " +
+                    "This is those counts added up per model, on this phone alone - it is " +
+                    "not synced, because a token count describes one phone's spending.",
+                "A record, not a limit: nothing here stops or slows a run. Clearing it " +
+                    "forgets the record and not the spending, and the provider's own billing " +
+                    "page remains the account that matters.",
+            ),
+        ) {
+            ModelUsageSection(appState)
+        }
+    }
+}
+
+/** Whether the reader can work, in words, on a tile coloured by the answer. */
+@Composable
+private fun ReaderStatusTile(appState: AppState) {
+    val config = appState.cloudConfiguration
+    val (text, tone) = when {
+        appState.credentialVerified == false -> "The key was rejected" to TileTone.ALERT
+        !config.hasCredential -> "No key yet" to TileTone.TILE1
+        config.model.isBlank() -> "No AI chosen" to TileTone.TILE1
+        appState.credentialVerified == null -> "Key saved, not checked yet" to TileTone.TILE1
+        else -> "Ready to read" to TileTone.HIGHLIGHT
+    }
+    Tile(Modifier.fillMaxWidth(), tone = tone) {
+        Text(text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+        Text(
+            config.model.ifBlank { config.provider.displayName },
+            style = MaterialTheme.typography.bodySmall,
+            color = LocalContentColor.current.copy(alpha = 0.72f),
+        )
     }
 }
 
@@ -946,6 +1010,16 @@ private fun ColumnScope.AskAiPage(appState: AppState) {
 @Composable
 private fun ColumnScope.NotificationsPage(appState: AppState) {
     val prefs = appState.appPreferences
+
+    @Composable
+    fun toggle(kind: NotificationKind) = SettingToggle(
+        label = kind.label,
+        detail = kind.detail,
+        checked = kind.isOn(prefs),
+        onCheckedChange = { kind.set(appState, it) },
+        about = notificationNote(kind).withSample(kind),
+    )
+
     Group(
         "Your trades",
         summary = switchesOn(prefs.overdueRemindersEnabled, prefs.tradeAlertsEnabled, prefs.approachAlertsEnabled),
@@ -962,52 +1036,10 @@ private fun ColumnScope.NotificationsPage(appState: AppState) {
                 "only one that reaches you while you can still decide something.",
         ),
     ) {
-        SettingToggle(
-            label = "Remind me about trades kept open past their deadline",
-            checked = prefs.overdueRemindersEnabled,
-            onCheckedChange = appState::updateOverdueReminders,
-            about = infoNote(
-                "Remind me about trades kept open past their deadline",
-                "Once a day, and only while a trade you chose to keep open is past its " +
-                    "deadline with no sale recorded. A trade whose window simply ran out " +
-                    "closes as expired on its own and is never chased.",
-                "Nothing is analyzed, so this never spends anything on the cloud. With either " +
-                    "of these two switches on, the phone does fetch prices once after the " +
-                    "exchange closes, so it knows what the session did before it says anything.",
-            ),
-        )
-        SettingToggle(
-            label = "Tell me when the market changes a trade",
-            checked = prefs.tradeAlertsEnabled,
-            onCheckedChange = appState::updateTradeAlerts,
-            about = infoNote(
-                "Tell me when the market changes a trade",
-                "A target reached, the stop taken, the deadline passed - whenever the market " +
-                    "moves one of your trades.",
-                "The phone looks once at 14:45, after the exchange has closed and its figures " +
-                    "have settled, so a deadline that ran out this afternoon is said this " +
-                    "afternoon. It looks again on every price refresh, and once more each day " +
-                    "in case the alarm was dropped.",
-                "Not for anything you do yourself: recording a sale or closing a trade says " +
-                    "nothing back to you.",
-            ),
-        )
-        SettingToggle(
-            label = "Warn me before a trade reaches a level",
-            checked = prefs.approachAlertsEnabled,
-            onCheckedChange = appState::updateApproachAlerts,
-            about = infoNote(
-                "Warn me before a trade reaches a level",
-                "Everything else here tells you after the fact - a stop announced is a stop " +
-                    "already taken. This is the one that arrives while you can still decide " +
-                    "something: a trade of yours has come within reach of its stop, or of " +
-                    "target 2.",
-                "It says the distance and never what to do about it. Off unless you switch it " +
-                    "on, because a price near a level goes on being near it, and this is the " +
-                    "noisiest thing the app can say.",
-                "It books no extra work: the check rides a recompute that was happening anyway.",
-            ),
-        )
+        Text("Tap ? on any line to see an example.", style = MaterialTheme.typography.bodySmall, color = palette.muted)
+        toggle(NotificationKind.OVERDUE)
+        toggle(NotificationKind.TRADE)
+        toggle(NotificationKind.APPROACH)
         if (prefs.approachAlertsEnabled) {
             StepperRow(
                 label = "Close enough to warn about",
@@ -1037,67 +1069,158 @@ private fun ColumnScope.NotificationsPage(appState: AppState) {
                 "anything.",
         ),
     ) {
-        SettingToggle(
-            label = "Tell me when a stock reaches a buy zone",
-            checked = prefs.callAlertsEnabled,
-            onCheckedChange = appState::updateCallAlerts,
-            about = infoNote(
-                "Tell me when a stock reaches a buy zone",
-                "For calls you have not taken: the price has traded into the entry band a " +
-                    "channel printed. Off unless you switch it on - it is the one notification " +
-                    "here about something you have not committed to.",
-                "It says what the market did and never what to do about it, and it books no " +
-                    "extra work: the check rides a price refresh that was happening anyway.",
-            ),
-        )
-        SettingToggle(
-            label = "Tell me what the session did",
-            checked = prefs.sessionDigestEnabled,
-            onCheckedChange = appState::updateSessionDigest,
-            about = infoNote(
-                "Tell me what the session did",
-                "One line after the close: how many calls reached targets, how many were " +
-                    "stopped out, how many ran out of time, and how many of them were yours.",
-                "The gap it fills is the session where nothing of yours moved. Everything " +
-                    "else here is about one trade or one call, so an afternoon when three " +
-                    "calls from the channels you read hit targets and you held none of them " +
-                    "passed in silence.",
-                "Off unless you switch it on: it arrives on a rhythm rather than because " +
-                    "something happened, which is the kind of notification that wears out " +
-                    "fastest. Said once per session, whatever else happens that evening.",
-            ),
-        )
+        toggle(NotificationKind.CALL)
+        toggle(NotificationKind.DIGEST)
     }
 
     Group(
         "The app itself",
-        summary = switchesOn(prefs.feedAlertsEnabled),
+        summary = switchesOn(prefs.feedAlertsEnabled, prefs.reportReadyEnabled),
         about = infoNote(
             "The app itself",
             "Reports this app being unable to do its job, rather than anything the market " +
-                "did.",
+                "did, and the end of a run you left the app to wait for.",
             "On by default, and that is deliberate: the way this breaks is silence, so an " +
                 "app that stopped working quietly would look exactly like a quiet week.",
         ),
     ) {
-        SettingToggle(
-            label = "Tell me when the price feed goes quiet",
-            checked = prefs.feedAlertsEnabled,
-            onCheckedChange = appState::updateFeedAlerts,
-            about = infoNote(
-                "Tell me when the price feed goes quiet",
-                "A stock whose prices have stopped arriving looks exactly like a stock that " +
-                    "has not moved - the feed answers every request and its newest session " +
-                    "stays put. Meanwhile every rate on the record quietly rests on fewer " +
-                    "calls than it looks like.",
-                "This has happened here once already and nothing noticed at the time.",
-                "On by default, because it reports the app being unable to do its job rather " +
-                    "than something the market did. Said once when it starts, and not again " +
-                    "until the feed comes back and goes quiet a second time. Prices under " +
-                    "General says how many stocks are affected and how much of the record " +
-                    "they are holding.",
-            ),
-        )
+        toggle(NotificationKind.FEED)
+        toggle(NotificationKind.REPORT_READY)
+    }
+}
+
+/** What each notification is for, in the reader's words, titled with its label. */
+private fun notificationNote(kind: NotificationKind): InfoNote = when (kind) {
+    NotificationKind.OVERDUE -> infoNote(
+        kind.label,
+        "Once a day, and only while a trade you chose to keep open is past its " +
+            "deadline with no sale recorded. A trade whose window simply ran out " +
+            "closes as expired on its own and is never chased.",
+        "Nothing is analyzed, so this never spends anything on the cloud. With either " +
+            "of these two switches on, the phone does fetch prices once after the " +
+            "exchange closes, so it knows what the session did before it says anything.",
+    )
+    NotificationKind.TRADE -> infoNote(
+        kind.label,
+        "A target reached, the stop taken, the deadline passed - whenever the market " +
+            "moves one of your trades.",
+        "The phone looks once at 14:45, after the exchange has closed and its figures " +
+            "have settled, so a deadline that ran out this afternoon is said this " +
+            "afternoon. It looks again on every price refresh, and once more each day " +
+            "in case the alarm was dropped.",
+        "Not for anything you do yourself: recording a sale or closing a trade says " +
+            "nothing back to you.",
+    )
+    NotificationKind.APPROACH -> infoNote(
+        kind.label,
+        "Everything else here tells you after the fact - a stop announced is a stop " +
+            "already taken. This is the one that arrives while you can still decide " +
+            "something: a trade of yours has come within reach of its stop, or of " +
+            "target 2.",
+        "It says the distance and never what to do about it. Off unless you switch it " +
+            "on, because a price near a level goes on being near it, and this is the " +
+            "noisiest thing the app can say.",
+        "It books no extra work: the check rides a recompute that was happening anyway.",
+    )
+    NotificationKind.CALL -> infoNote(
+        kind.label,
+        "For calls you have not taken: the price has traded into the entry band a " +
+            "channel printed. Off unless you switch it on - it is the one notification " +
+            "here about something you have not committed to.",
+        "It says what the market did and never what to do about it, and it books no " +
+            "extra work: the check rides a price refresh that was happening anyway.",
+    )
+    NotificationKind.DIGEST -> infoNote(
+        kind.label,
+        "One line after the close: how many calls reached targets, how many were " +
+            "stopped out, how many ran out of time, and how many of them were yours.",
+        "The gap it fills is the session where nothing of yours moved. Everything " +
+            "else here is about one trade or one call, so an afternoon when three " +
+            "calls from the channels you read hit targets and you held none of them " +
+            "passed in silence.",
+        "Off unless you switch it on: it arrives on a rhythm rather than because " +
+            "something happened, which is the kind of notification that wears out " +
+            "fastest. Said once per session, whatever else happens that evening.",
+    )
+    NotificationKind.FEED -> infoNote(
+        kind.label,
+        "A stock whose prices have stopped arriving looks exactly like a stock that " +
+            "has not moved - the feed answers every request and its newest session " +
+            "stays put. Meanwhile every rate on the record quietly rests on fewer " +
+            "calls than it looks like.",
+        "This has happened here once already and nothing noticed at the time.",
+        "On by default, because it reports the app being unable to do its job rather " +
+            "than something the market did. Said once when it starts, and not again " +
+            "until the feed comes back and goes quiet a second time. Prices under " +
+            "Prices and trades says how many stocks are affected and how much of the " +
+            "record they are holding.",
+    )
+    NotificationKind.REPORT_READY -> infoNote(
+        kind.label,
+        "A run takes long enough to leave the app during. When it ends, one notification " +
+            "says the report is ready and how many calls it found - or that the run did not " +
+            "finish, and why. Tapping it opens the report, or the Analyze page to try again.",
+        "On by default, and it makes a sound: it is the moment you left the app to wait " +
+            "for. Stopping a run yourself is said by nothing.",
+    )
+}
+
+/** Tabletop's upper half on Notifications: the one chosen, what it is for, and what it looks like. */
+@Composable
+private fun NotificationExplainer(kind: NotificationKind) {
+    Tile(Modifier.fillMaxWidth()) {
+        Text("Notifications · selected", style = MaterialTheme.typography.labelMedium, color = palette.muted)
+        Text(kind.label, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+        Column(Modifier.padding(vertical = Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            notificationNote(kind).paragraphs.forEach {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted)
+            }
+        }
+        NotificationPreview(kind.sample)
+    }
+}
+
+/**
+ * Tabletop's flat half on Notifications: a key per kind, two to a row. Pressing a key chooses it for
+ * the explanation above the crease; only its switch switches it, so choosing one to read about
+ * never changes it. No question marks, because the explanation is already above.
+ */
+@Composable
+private fun NotificationKeys(appState: AppState, selected: NotificationKind, onSelect: (NotificationKind) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+        NotificationKind.entries.chunked(2).forEach { pair ->
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+                pair.forEach { kind ->
+                    val on = kind.isOn(appState.appPreferences)
+                    Tile(
+                        Modifier.weight(1f).fillMaxHeight(),
+                        tone = if (kind == selected) TileTone.INK else TileTone.CARD,
+                        onClick = { onSelect(kind) },
+                        onClickLabel = "Explain ${kind.label}",
+                    ) {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Text(kind.label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                            Box(
+                                Modifier
+                                    .toggleable(value = on, role = Role.Switch) {
+                                        kind.set(appState, it)
+                                        onSelect(kind)
+                                    }
+                                    .semantics { contentDescription = kind.label },
+                            ) {
+                                com.ikverse.egxanalyzer.ui.kit.KitSwitchFace(checked = on)
+                            }
+                        }
+                        Text(
+                            kind.detail,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = LocalContentColor.current.copy(alpha = 0.72f),
+                        )
+                    }
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
     }
 }
 
@@ -1258,24 +1381,8 @@ private fun ColumnScope.DataPage(appState: AppState) {
     }
 
     Group(
-        "Token usage",
-        summary = tokenUsageSummary(appState.modelUsage),
-        about = infoNote(
-            "Token usage",
-            "Every request comes back with the token count the provider billed it at. " +
-                "This is those counts added up per model, on this phone alone - it is " +
-                "not synced, because a token count describes one phone's spending.",
-            "A record, not a limit: nothing here stops or slows a run. Clearing it " +
-                "forgets the record and not the spending, and the provider's own billing " +
-                "page remains the account that matters.",
-        ),
-    ) {
-        ModelUsageSection(appState)
-    }
-
-    Group(
-        "Diagnostics",
-        summary = "A device copy for chasing a bug",
+        "Something not right?",
+        summary = "Save a report of what the app was doing",
         about = infoNote(
             "Diagnostics",
             "Copies this device's saved record into Downloads, and the crash log with it " +
@@ -1377,7 +1484,7 @@ private fun DiagnosticsControl(appState: AppState) {
             about = infoNote(
                 "The app closed unexpectedly",
                 "The app hit an error it could not carry on from and was shut down by Android.",
-                "What it was doing is written down on this phone. Save diagnostics puts it in " +
+                "What it was doing is written down on this phone. Save a report puts it in " +
                     "Downloads as egx-crashes-….txt, beside the record, where it can be sent on.",
                 "Forget removes it. Nothing is sent anywhere on its own.",
             ),
@@ -1400,7 +1507,7 @@ private fun DiagnosticsControl(appState: AppState) {
         }
     }
     KitButton(
-        if (saving) "Saving…" else "Save diagnostics",
+        if (saving) "Saving…" else "Save a report",
         onClick = {
             appState.startAction {
                 saving = true
@@ -1410,7 +1517,7 @@ private fun DiagnosticsControl(appState: AppState) {
                     }
                     .onFailure {
                         appState.statusMessage = StatusMessage(
-                            it.message?.takeIf(String::isNotBlank) ?: "Could not save diagnostics",
+                            it.message?.takeIf(String::isNotBlank) ?: "Could not save the report",
                             succeeded = false,
                         )
                     }
@@ -1575,7 +1682,7 @@ private val SEARCH_RESULTS = listOf(5, 8, 12, 20)
  * Named rather than written into the summary, because "3 of 7 on" over a page showing eight
  * switches is the kind of wrong nobody notices for months.
  */
-private const val NOTIFICATION_COUNT = 6
+private const val NOTIFICATION_COUNT = 7
 
 /**
  * "2 of 3 on", for a group of switches.

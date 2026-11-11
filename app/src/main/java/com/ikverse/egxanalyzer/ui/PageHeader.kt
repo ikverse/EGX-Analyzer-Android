@@ -464,7 +464,7 @@ private fun HeaderAction(
  * first version of this header was - the page is still filtered rather than replaced by a sheet -
  * and the sheet is a trailing target on a row, not what a press does.
  *
- * Not a `TextField`, for [StockFilterField]'s reason, which this deliberately resembles: Material's
+ * Not a `TextField`, for the reason the old in-report stock box was not one either: Material's
  * own is built for a form and brings a label, a container and 56dp of height with it, where this is
  * one line inside a bar that is 56dp in total.
  *

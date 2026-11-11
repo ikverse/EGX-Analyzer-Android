@@ -135,48 +135,25 @@ trade is then managed, in whatever state it has reached.
   arrival effect in `PositionSection` does the rest: clear the date filter only if it is what hides
   the trade, unfold the session card, scroll, flash the edge. A second path would be a second way for
   the app to disagree with itself about where a trade is.
-- **One card per session, holding that session's trades in every state**, with **Open**, **Expired**
-  and **Closed** as sections inside it. A day's trades were one decision, and splitting them across
-  an open list and a closed one meant scrolling to find the other half. **Every card starts
-  folded**, one holding a running trade included — enough traded sessions and the cards that opened
-  themselves were most of the screen, where the list of dates is what makes the record readable.
-  Its summary is what a folded card informs with: it names all three counts, each in
-  its state's colour — open is `primary`, expired is the **amber in `ExtraColors`**, closed is
-  `onSurfaceVariant`, and the chips in `TradeControls` use the same three so a section and the trades
-  under it agree. Expired is deliberately neither red nor purple: a trade that ran out of time can be
-  up 5%, so error red would report a loss it never made and would collide with Stopped out, and
-  `secondary` is a hue that means nothing in this app. Amber is **added** to the palette rather than
-  borrowed from it, because every scheme role is already spoken for — see `ExtraColors` and
-  `LocalExtraColors` in `theme/Theme.kt`, provided by `EgxAnalyzerTheme` so it follows the app's own
-  light/dark setting rather than the system's. Note `primary` is no longer the app's voice on every
-  page — see **A hue per page** below. The overdue pill keeps `errorContainer`: amber says
-  out of time, red says and you are late.
-- **Positions is one card, holding every session card inside it.** It was a loose `titleLarge`
-  heading, then a filter shelf, then a run of cards, all sitting directly on the page — a section
-  with no edge of its own to say where it began or ended, which is how the shelf's fill came to
-  read as continuous with the card beneath it. A `SectionCard` gives it one. The filters left for
-  the header's sheet on 2026-09-09 and took the last of that argument with them; what survives of
-  it is the sheet's title, **Filter positions**, which is how a control reached from the page
-  header still says it narrows this card and not the record above it. The heading drops from `titleLarge` to the `titleMedium` every other card on
-  the tab uses, which is the point: Overdue, What happened and Your record are cards, and Positions
-  was the one section pretending to be a page. **The session cards inside take
-  `surfaceContainerHigh`** — a card within a card goes one step up or it is the same fill as its
-  parent with nothing but a hairline between them, the rule `OverdueTile` and `EventTile` already
-  follow. `ExpandableSection.containerColor` is named by the caller rather than assumed, because
-  only the caller knows what its card is sitting on.
-- **A card whose children are cards holds them in by `Space.s`, not `Space.l`.** Three frames stand
-  between the page and a trade — the Positions card, the session card, the trade card — and every
-  one of them was paying a full 16dp inset on top of a hairline it had already drawn, which left the
-  trade card **285dp of a 411dp cover screen**: 126dp, nearly a third of the panel, spent on chrome.
-  `SectionCard.contentInset` and `ExpandableSection.contentInset` are that dial, `Space.l` by default
-  so every other card on the tab is untouched, and both give it back 32dp — 317dp on the cover, 335
-  on each of the unfolded panel's two columns. **The heading and its rule keep the full inset**
-  whatever the content takes, which is the whole reason the two are separate paddings now: a title
-  sitting 8dp from its card's edge while every other title on the page sits at 16 is exactly the
-  almost-aligned the spacing scale exists to stop. The trade card's own `Space.m` is deliberately
-  untouched — it is the innermost, and the only one of the four holding content rather than another
-  card. The reduced inset is **named by the caller** for `containerColor`'s reason: only the caller
-  knows whether what it is about to draw has an edge of its own.
+- **Since 5.1 the trades are two flat lists, not one card per session.** **Open now** comes first,
+as short cards - stock, paid → now, a compact ladder, what it has made, and its status in plain
+words - and **Finished** follows as rows, the first three and the rest behind See all
+(`PageState.portfolioFinishedAll`). The session cards with Open, Expired and Closed sections inside
+them were most of the screen once enough sessions had been traded, and a trade's session is still
+on its card. The date filter and the three orders apply to both lists, flattened in the session
+cards' old order.
+- **A trade opens as a sheet**, `TradeSheet` in `PositionCard.kt`: its ladder, figures, timeline and
+  buttons. A hold on a card or a row opens its menu (`HoldMenu`), and every action goes through one
+  `TradeActions` mapped onto `AppState` by `rememberTradeActions`. The dialogs - sell, edit, edit the
+  sale, keep open - are drawn in one place, `TradeDialogHost`, and the open one is
+  `PageState.portfolioDialog`, so a fold keeps a half-filled dialog.
+- **Unfolded, the trades are a table** under chips that pick Open, Finished or All
+  (`PageState.portfolioScope`, a view rather than a filter), and a row opens the trade beside the
+  page. In book posture the narrow column draws the lists as rows (`TradeListLayout.COMPACT`).
+- **The hero tile leads**, with the book against EGX30 and a compact form for the cover screen, then
+  **Needs you**, which names the late trades and the ones near a level, most overdue first, read off
+  the whole record rather than the filtered list. The record's extra figures are behind a More row
+  (`PageState.portfolioMoreNumbers`).
 - **`PortfolioOrder` holds the sort rules, for the screen and the calculator both.** `URGENT` is the
   default and what `PortfolioCalculator` groups by, so anything reading the portfolio without a
   screen gets the order the screen opens on. It sorts overdue-first then newest — date order alone

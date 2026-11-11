@@ -41,6 +41,7 @@ class SettingsSyncTest {
             // reader that never looked at it would still come back with the right answer.
             tradeAlertsEnabled = false,
             updateChecksEnabled = false,
+            reportReadyEnabled = false,
             portfolioOrder = PortfolioOrder.OLDEST,
         ),
         provider = CloudProvider.OPENROUTER,

@@ -146,8 +146,11 @@ fun TargetProgress(
  * colours, because this one bar is about money moving.
  */
 @Composable
-fun BreadthBar(up: Int, flat: Int, down: Int, modifier: Modifier = Modifier) {
-    val p = palette
+fun BreadthBar(up: Int, flat: Int, down: Int, modifier: Modifier = Modifier, tone: TileTone = TileTone.CARD) {
+    // The tile's own money colours, so the bar reads on the ink tile in both themes; flat is the
+    // tile's content colour, faded.
+    val signals = tileSignals(tone)
+    val flatColour = tileColors(tone).second.copy(alpha = 0.4f)
     val total = (up + flat + down).coerceAtLeast(1)
     Row(
         modifier
@@ -157,9 +160,9 @@ fun BreadthBar(up: Int, flat: Int, down: Int, modifier: Modifier = Modifier) {
             .semantics { contentDescription = "$up up, $flat flat, $down down" },
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        if (up > 0) Box(Modifier.weight(up / total.toFloat()).height(8.dp).background(p.gain))
-        if (flat > 0) Box(Modifier.weight(flat / total.toFloat()).height(8.dp).background(p.faint))
-        if (down > 0) Box(Modifier.weight(down / total.toFloat()).height(8.dp).background(p.loss))
+        if (up > 0) Box(Modifier.weight(up / total.toFloat()).height(8.dp).background(signals.gain))
+        if (flat > 0) Box(Modifier.weight(flat / total.toFloat()).height(8.dp).background(flatColour))
+        if (down > 0) Box(Modifier.weight(down / total.toFloat()).height(8.dp).background(signals.loss))
     }
 }
 
@@ -185,7 +188,7 @@ fun OutcomeStrip(outcomes: Outcomes, modifier: Modifier = Modifier) {
         val gap = 2.dp.toPx()
         val width = size.width * grow.value
         var x = 0f
-        listOf(outcomes.hit to p.gain, outcomes.stopped to p.loss, outcomes.expired to p.faint, outcomes.open to p.hero)
+        listOf(outcomes.hit to p.gain, outcomes.stopped to p.loss, outcomes.expired to p.faint, outcomes.open to p.heroInk)
             .filter { it.first > 0 }
             .forEach { (count, colour) ->
                 val w = (width - gap * 3) * count / total

@@ -154,4 +154,57 @@ class PriceLadderTest {
 
         assertEquals(0f, slots.single().left, 0.01f)
     }
+
+    // 5.1: the compact form, the travelled stripe and the zones between the levels.
+
+    @Test
+    fun `a compact ladder prints no prices`() {
+        assertTrue(ladderLabelTexts(listOf(9.5, 10.0, 11.0, 12.0), compact = true).isEmpty())
+        assertEquals(4, ladderLabelTexts(listOf(9.5, 10.0, 11.0, 12.0), compact = false).size)
+    }
+
+    @Test
+    fun `the travelled stripe is held inside the axis`() {
+        val clamped = clampToAxis(8.0..14.0, low = 9.5, high = 12.0)
+        assertEquals(9.5, clamped.start, 0.0)
+        assertEquals(12.0, clamped.endInclusive, 0.0)
+        val inside = clampToAxis(10.2..11.4, low = 9.5, high = 12.0)
+        assertEquals(10.2, inside.start, 0.0)
+        assertEquals(11.4, inside.endInclusive, 0.0)
+    }
+
+    @Test
+    fun `a full call has three zones meeting the entry band at its own ends`() {
+        val zones = ladderZones(stopLoss = 9.0, entryLow = 10.0, entryHigh = 10.4, target1 = 11.5, target2 = 13.0)
+        assertEquals(
+            listOf(
+                LadderZone(9.0, 10.0, ZoneKind.LOSS),
+                LadderZone(10.4, 11.5, ZoneKind.NEAR),
+                LadderZone(11.5, 13.0, ZoneKind.FAR),
+            ),
+            zones,
+        )
+    }
+
+    @Test
+    fun `a single entry price and one target still lay out`() {
+        val zones = ladderZones(stopLoss = 9.0, entryLow = 10.0, entryHigh = 10.0, target1 = null, target2 = 12.0)
+        assertEquals(listOf(LadderZone(9.0, 10.0, ZoneKind.LOSS), LadderZone(10.0, 12.0, ZoneKind.NEAR)), zones)
+    }
+
+    @Test
+    fun `a call with no stop has no loss zone, and one with no entry has none at all`() {
+        val noStop = ladderZones(stopLoss = null, entryLow = 10.0, entryHigh = 10.0, target1 = 11.0, target2 = 12.0)
+        assertTrue(noStop.none { it.kind == ZoneKind.LOSS })
+        assertEquals(2, noStop.size)
+        assertTrue(ladderZones(9.0, null, null, 11.0, 12.0).isEmpty())
+    }
+
+    @Test
+    fun `an entry label goes before the entry price and nowhere else`() {
+        val texts = ladderLabelTexts(listOf(9.0, 10.0, 10.4, 12.0), compact = false, entryIndex = 1, entryLabel = "You paid")
+        assertTrue(texts[1].startsWith("You paid "))
+        assertTrue(texts.filterIndexed { i, _ -> i != 1 }.none { it.contains("You paid") })
+        assertTrue(ladderLabelTexts(listOf(9.0, 10.0), compact = true, entryIndex = 1, entryLabel = "You paid").isEmpty())
+    }
 }

@@ -91,6 +91,7 @@ import com.ikverse.egxanalyzer.model.AnalysisInput
 import com.ikverse.egxanalyzer.model.AnalysisLanguage
 import com.ikverse.egxanalyzer.model.AnalysisMode
 import com.ikverse.egxanalyzer.model.AnalysisProgress
+import com.ikverse.egxanalyzer.model.ReadingEstimate
 import com.ikverse.egxanalyzer.model.AnalysisPlan
 import com.ikverse.egxanalyzer.model.AnalysisReport
 import com.ikverse.egxanalyzer.model.AnalysisRequest
@@ -1046,6 +1047,55 @@ class LiveAppState(
      */
     override var analysisProgress by mutableStateOf<AnalysisProgress?>(null)
         private set
+
+    override var analysisReadingEndsAt by mutableStateOf<Instant?>(null)
+        private set
+
+    override var lastPriceRefreshAt by mutableStateOf(settingsRepository.lastPriceRefreshAt())
+        private set
+
+    /** When the running analysis sent its first batch, for the reading estimate. */
+    @Volatile
+    private var readingStartedAt: Instant? = null
+
+    /** A run's progress, and the estimate worked out from it at each batch boundary. */
+    private fun noteProgress(progress: AnalysisProgress) {
+        analysisProgress = progress
+        val now = Instant.now()
+        analysisReadingEndsAt = if (progress.stage == AnalysisProgress.Stage.READING) {
+            val started = readingStartedAt ?: now.also { readingStartedAt = it }
+            ReadingEstimate.endsAt(started, now, progress.unitsDone, progress.units)
+        } else {
+            null
+        }
+    }
+
+    /** What [sourcesReadEarlier] was last worked out from, and what it came to. */
+    private var readEarlierCache: Pair<List<Any?>, Set<String>>? = null
+
+    /**
+     * The loaded posts an earlier run has read under this model, prompt and language.
+     *
+     * Worked out in the getter and kept against everything it depends on - the model, the reading
+     * key, the window, the loaded posts and how many reports there are - so a change to any of
+     * them recomputes it and nothing else does. One small query, not a recomposition's worth.
+     */
+    override val sourcesReadEarlier: Set<String>
+        get() {
+            val loaded = telegramTraces.keys
+            if (loaded.isEmpty()) return emptySet()
+            val model = cloudConfiguration.model
+            val readingKey = analysisReadingKey()
+            val start = runCatching { resolveAnalysisWindow(analysisMode, recommendationTargetDate).start }
+                .getOrNull() ?: return emptySet()
+            val key = listOf(model, readingKey, start, loaded, savedResults.size)
+            readEarlierCache?.takeIf { it.first == key }?.let { return it.second }
+            val read = runCatching { localDataStore.sourceReads(model, readingKey, start).keys }
+                .getOrDefault(emptySet())
+                .intersect(loaded)
+            readEarlierCache = key to read
+            return read
+        }
     private var activeRequestId: String? = null
     private var analysisJob: Job? = null
 
@@ -2532,7 +2582,11 @@ class LiveAppState(
      * unwind gets the system's own behaviour rather than a handler that swallows it.
      */
     override val canGoBack: Boolean
-        get() = nav.canReturn || pages.filtersActive(destination)
+        get() = nav.canReturn || reportOpen || pages.filtersActive(destination)
+
+    /** A report open on Results, which a back press closes before it touches the filters. */
+    private val reportOpen: Boolean
+        get() = destination == AppDestination.RESULTS && pages.openResultId.value != null
 
     /**
      * Undoes the last thing that narrowed or moved the view, and says whether it found one.
@@ -2556,6 +2610,12 @@ class LiveAppState(
             // has to undo.
             pendingPositionId = stop.positionId
             pendingCallId = stop.callId
+            return true
+        }
+        // The open report before the filters: it is the more recent thing the reader did, and the
+        // report's own back button does the same.
+        if (reportOpen) {
+            pages.openReport(null)
             return true
         }
         if (pages.filtersActive(destination)) {
@@ -2927,6 +2987,12 @@ class LiveAppState(
     override fun updateFeedAlerts(enabled: Boolean) {
         if (enabled == appPreferences.feedAlertsEnabled) return
         persistPreferences(appPreferences.copy(feedAlertsEnabled = enabled))
+    }
+
+    /** Whether the end of a run is announced. See `ReportReadyNotifier`. */
+    override fun updateReportReady(enabled: Boolean) {
+        if (enabled == appPreferences.reportReadyEnabled) return
+        persistPreferences(appPreferences.copy(reportReadyEnabled = enabled))
     }
 
     /**
@@ -3402,6 +3468,7 @@ class LiveAppState(
             settingsRepository.recordPriceRefreshDay(
                 LocalDate.now(ScheduleClock.ZONE).toString(),
             )
+            lastPriceRefreshAt = settingsRepository.lastPriceRefreshAt()
             recomputePerformance()
             recomputePortfolio(announceChanges = true)
             // Only now, because which sessions need bars is something only a scored record knows.
@@ -4316,7 +4383,7 @@ class LiveAppState(
         analysisMessage = "Sending ${selectedInputs.size} sources to ${cloudConfiguration.provider.displayName}…"
         analysisRunning(selectedInputs.size, cloudConfiguration.model)
         try {
-            val result = analysisRepository.analyze(request) { analysisProgress = it }
+            val result = analysisRepository.analyze(request) { noteProgress(it) }
             // The run has just spent; the tally on disk has moved and the screen's copy has not.
             refreshModelUsage()
             localDataStore.saveResult(
@@ -4342,7 +4409,12 @@ class LiveAppState(
             // them: the daily guard had already fired, so an Insights card sat unpriced until the
             // button was pressed or the app was restarted the next day.
             priceStocksWithNoHistory()
-            analysisFinished(savedResults.firstOrNull()?.id, result.recommendations.size)
+            // This run's own row, not the newest: a report that fails to read back would otherwise
+            // send the notification to an older one.
+            analysisFinished(
+                savedResults.firstOrNull { it.result.requestId == result.requestId }?.id,
+                result.recommendations.size,
+            )
             // Published as soon as it exists, so another device only ever has to pull. In the
             // background: a slow Telegram used to hold the tail of a run, leaving the screen on
             // "saved" while nothing moved. A failure here is not the run failing either - the
@@ -4368,6 +4440,8 @@ class LiveAppState(
             activeRequestId = null
             analysisStartedAt = null
             analysisProgress = null
+            readingStartedAt = null
+            analysisReadingEndsAt = null
         }
     }
 

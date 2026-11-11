@@ -40,6 +40,8 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.MutableState
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -425,4 +427,118 @@ fun KitSplitBar(first: Long, total: Long, modifier: Modifier = Modifier, firstCo
         if (share > 0f) Box(Modifier.weight(share).height(height).background(firstColor))
         if (share < 1f) Box(Modifier.weight(1f - share).height(height).background(secondColor))
     }
+}
+
+/** How a [TimelineStep] went: done, the one under way, still to come, or how it ended. */
+enum class StepTone { DONE, ACTIVE, WAITING, GOOD, BAD }
+
+/** One step of a [Timeline]: what happened, a line under it, and when, if anything kept the date. */
+data class TimelineStep(
+    val text: String,
+    val detail: String? = null,
+    val date: String? = null,
+    val tone: StepTone = StepTone.DONE,
+)
+
+/**
+ * What happened to a call or a trade, in order, as dots on a line.
+ *
+ * A step still to come is a hollow dot on a faint line, so how far along it is reads before a word
+ * does. The date is optional because some steps have none the app keeps - see the 5.1 plan.
+ */
+@Composable
+fun Timeline(steps: List<TimelineStep>, modifier: Modifier = Modifier) {
+    val p = palette
+    Column(modifier.fillMaxWidth()) {
+        steps.forEachIndexed { index, step ->
+            val colour = when (step.tone) {
+                StepTone.DONE -> p.ink
+                StepTone.ACTIVE -> p.heroInk
+                StepTone.WAITING -> p.faint
+                StepTone.GOOD -> p.gain
+                StepTone.BAD -> p.loss
+            }
+            val next = steps.getOrNull(index + 1)
+            val lineColour = if (next == null || next.tone == StepTone.WAITING) p.line else p.muted
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .drawBehind {
+                        // The connector runs from this dot to the next one, through the gap.
+                        if (next != null) {
+                            val x = TimelineDot.toPx() / 2f
+                            drawLine(
+                                lineColour,
+                                Offset(x, TimelineDotTop.toPx() + TimelineDot.toPx()),
+                                Offset(x, size.height + TimelineDotTop.toPx()),
+                                strokeWidth = 2.dp.toPx(),
+                            )
+                        }
+                    }
+                    .padding(bottom = if (next != null) 14.dp else 0.dp),
+            ) {
+                Box(
+                    Modifier
+                        .padding(top = TimelineDotTop)
+                        .size(TimelineDot)
+                        .clip(CircleShape)
+                        .then(
+                            if (step.tone == StepTone.WAITING) {
+                                Modifier.border(2.dp, colour, CircleShape)
+                            } else {
+                                Modifier.background(colour)
+                            },
+                        ),
+                )
+                Spacer(Modifier.size(12.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        step.text,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (step.tone == StepTone.WAITING) p.muted else p.ink,
+                    )
+                    step.detail?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = p.muted)
+                    }
+                }
+                step.date?.let {
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
+                        color = p.muted,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private val TimelineDot = 12.dp
+private val TimelineDotTop = 4.dp
+
+/**
+ * The closed row the technical detail sits behind: a title, a line saying what is inside, and the
+ * detail once opened. [expanded] is handed in because every caller keeps it in `PageState`, so a
+ * fold does not shut it.
+ */
+@Composable
+fun MoreRow(
+    title: String,
+    expanded: MutableState<Boolean>,
+    modifier: Modifier = Modifier,
+    summary: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val p = palette
+    KitExpandable(
+        title = title,
+        expanded = expanded.value,
+        onExpandedChange = { expanded.value = it },
+        modifier = modifier,
+        summary = summary?.let { text ->
+            { Text(text, style = MaterialTheme.typography.bodySmall, color = p.muted) }
+        },
+        content = content,
+    )
 }

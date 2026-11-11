@@ -163,6 +163,7 @@ class CloudAnalysisRepository(
                         imagesDone = harvest.imagesSent,
                         images = harvest.imagesSent,
                         correction = attempt,
+                        skipped = harvest.reusedSources,
                     ),
                 )
                 val document = consolidate(
@@ -324,6 +325,7 @@ class CloudAnalysisRepository(
                     batches = sendings.size,
                     imagesDone = imagesDone,
                     images = images,
+                    skipped = harvest.reusedSources,
                 ),
             )
             chunkNumber += 1

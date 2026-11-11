@@ -57,7 +57,12 @@ import androidx.compose.ui.unit.dp
  * @param paragraphs kept as a list rather than joined with newlines so the sheet spaces them the way
  *   the design system spaces everything else, instead of by whatever a "\n\n" happens to measure.
  */
-internal data class InfoNote(val title: String, val paragraphs: List<String>)
+internal data class InfoNote(
+    val title: String,
+    val paragraphs: List<String>,
+    /** A notification's example, drawn under the words as "What it looks like". See [withSample]. */
+    val sample: NotificationSample? = null,
+)
 
 /** [InfoNote] without the list ceremony at the call site, which is every call site. */
 internal fun infoNote(title: String, vararg paragraphs: String) =
@@ -156,6 +161,15 @@ internal fun InfoSheet(
                     Text(it, style = MaterialTheme.typography.bodyMedium, color = p.ink)
                 }
             }
+        }
+        note.sample?.let { sample ->
+            Text(
+                "What it looks like",
+                style = MaterialTheme.typography.titleSmall,
+                color = p.ink,
+                modifier = Modifier.padding(horizontal = Space.xs),
+            )
+            NotificationPreview(sample)
         }
         content?.let { extra ->
             Column(verticalArrangement = Arrangement.spacedBy(Space.s), content = extra)
@@ -262,6 +276,8 @@ internal fun SettingToggle(
     modifier: Modifier = Modifier,
     about: InfoNote? = null,
     enabled: Boolean = true,
+    /** A second, quieter line under the label: when the thing it switches happens. */
+    detail: String? = null,
 ) {
     SettingRow(
         // The row is the switch: one accessible node that carries the name, the state and the
@@ -276,13 +292,14 @@ internal fun SettingToggle(
         about,
         trailing = { com.ikverse.egxanalyzer.ui.kit.KitSwitchFace(checked = checked, enabled = enabled) },
     ) {
-        Text(
-            label,
-            modifier = Modifier
+        Column(
+            Modifier
                 .weight(1f)
                 .padding(end = Space.s),
-            style = MaterialTheme.typography.bodyLarge,
-        )
+        ) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted) }
+        }
     }
 }
 

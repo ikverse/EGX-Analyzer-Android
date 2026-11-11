@@ -185,6 +185,19 @@ interface AppState : AppUpdates {
      * been doing it, and on a run that has stalled the second is the only one that moves.
      */
     val analysisProgress: AnalysisProgress?
+
+    /**
+     * When the running analysis should finish reading, worked out at each batch from the pace so
+     * far, or null where there is no estimate - before the first batch, and while it writes.
+     */
+    val analysisReadingEndsAt: Instant?
+
+    /**
+     * The loaded posts an earlier run has already read under this model, prompt and language, by
+     * source id. An upper bound on what a run will skip: a reading that does not line up is read
+     * again, and the wording filter drops some posts anyway.
+     */
+    val sourcesReadEarlier: Set<String>
     val pendingResultId: Long?
     val pendingPositionId: String?
     val pendingCallId: String?
@@ -194,6 +207,13 @@ interface AppState : AppUpdates {
     val performance: PerformanceReport
     val priceHealth: PriceHealthReport
     val pricesRefreshing: Boolean
+
+    /**
+     * When prices last actually arrived, in epoch milliseconds, or 0 for never. Written only when
+     * the feed answered - unlike the market-refresh note, which is stamped on skipped and failed
+     * fires too - so the Settings status tile can say prices arrived without that being false.
+     */
+    val lastPriceRefreshAt: Long
 
     /**
      * The header's price strip: each stock with an open trade, its last stored close and the change
@@ -587,6 +607,9 @@ interface AppState : AppUpdates {
     fun updateSessionDigest(enabled: Boolean)
 
     fun updateFeedAlerts(enabled: Boolean)
+
+    /** Whether the end of a run is announced in the shade. */
+    fun updateReportReady(enabled: Boolean)
 
     fun updateMarketRefreshEnabled(enabled: Boolean)
 

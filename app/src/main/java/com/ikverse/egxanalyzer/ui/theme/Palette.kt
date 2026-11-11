@@ -57,6 +57,13 @@ data class AppPalette(
     val gain: Color,
     /** Losses and stops. */
     val loss: Color,
+
+    /** The price ladder's stretch from the entry down to the stop. A fill under a line, never text. */
+    val zoneLoss: Color,
+    /** The ladder's stretch from the entry to target 1. */
+    val zoneNear: Color,
+    /** The ladder's stretch from target 1 to target 2, a step deeper than [zoneNear]. */
+    val zoneFar: Color,
 )
 
 /** Navy ink, the one text colour on every tile fill in both themes. */
@@ -86,6 +93,9 @@ internal val LightPalette = AppPalette(
     // paper and gain figures are often small text, which needs 4.5. This one is 4.6:1 on paper.
     gain = Color(0xFF087A40),
     loss = Color(0xFFC62020),
+    zoneLoss = Color(0xFFF6C9C2),
+    zoneNear = Color(0xFFCFEBDB),
+    zoneFar = Color(0xFF9ED9B8),
 )
 
 internal val DarkPalette = AppPalette(
@@ -96,7 +106,8 @@ internal val DarkPalette = AppPalette(
     ink = Color(0xFFE6EAF2),
     onInk = NavyInk,
     muted = Color(0xFFA3A8B3),
-    faint = Color(0xFF6B6F78),
+    // 4.9:1 on a card. The #6B6F78 it replaced was 3.2:1, under even the large-text bar.
+    faint = Color(0xFF8A8F99),
     // A shade brighter than the light theme's cobalt, so the hero tile still carries white text
     // while sitting visibly apart from Graphite.
     hero = Color(0xFF2E3BFF),
@@ -111,6 +122,9 @@ internal val DarkPalette = AppPalette(
     onTile = NavyInk,
     gain = Color(0xFF4ADE80),
     loss = Color(0xFFFF4D4D),
+    zoneLoss = Color(0xFF6B2A26),
+    zoneNear = Color(0xFF245C3E),
+    zoneFar = Color(0xFF3A8F63),
 )
 
 /** [DarkPalette] on true black. Only the grounds move; every signal and tile is copied verbatim. */

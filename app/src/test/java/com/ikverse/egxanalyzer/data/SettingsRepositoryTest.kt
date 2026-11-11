@@ -37,6 +37,15 @@ class SettingsRepositoryTest {
     }
 
     @Test
+    fun `the report-ready notification is on until switched off, and stays off`() {
+        assertEquals(true, repository().loadPreferences().reportReadyEnabled)
+
+        repository().let { it.savePreferences(it.loadPreferences().copy(reportReadyEnabled = false)) }
+
+        assertEquals(false, repository().loadPreferences().reportReadyEnabled)
+    }
+
+    @Test
     fun `an order this build does not recognise falls back rather than failing`() {
         // What an install left holding a renamed or dropped option would read back. Stored by name
         // precisely so this case is recognisable at all - by ordinal it would silently become

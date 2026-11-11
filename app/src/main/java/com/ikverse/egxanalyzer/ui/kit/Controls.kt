@@ -142,7 +142,7 @@ fun KitSwitch(
 ) {
     val p = palette
     val still = LocalReduceMotion.current
-    val track by animateColorAsState(if (checked) p.hero else p.line, label = "switchTrack")
+    val track by animateColorAsState(if (checked) p.hero else MaterialTheme.colorScheme.outline, label = "switchTrack")
     val knob by animateDpAsState(
         if (checked) 24.dp else 4.dp,
         animationSpec = if (still) androidx.compose.animation.core.snap() else uiSpring(),
@@ -175,7 +175,7 @@ fun KitSwitch(
 fun KitSwitchFace(checked: Boolean, modifier: Modifier = Modifier, enabled: Boolean = true) {
     val p = palette
     val still = LocalReduceMotion.current
-    val track by animateColorAsState(if (checked) p.hero else p.line, label = "switchFaceTrack")
+    val track by animateColorAsState(if (checked) p.hero else MaterialTheme.colorScheme.outline, label = "switchFaceTrack")
     val knob by animateDpAsState(
         if (checked) 24.dp else 4.dp,
         animationSpec = if (still) androidx.compose.animation.core.snap() else uiSpring(),
@@ -255,7 +255,9 @@ fun KitTextField(
     val edge = when {
         error != null -> p.loss
         focused -> p.hero
-        else -> p.line
+        // The outline rather than the hairline: a resting field is a control, and the hairline
+        // is 1.5:1 on a dark card.
+        else -> MaterialTheme.colorScheme.outline
     }
     Column(modifier) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = p.muted)
