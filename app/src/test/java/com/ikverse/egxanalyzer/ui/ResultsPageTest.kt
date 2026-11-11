@@ -180,13 +180,18 @@ class ResultsPageTest {
 
     @Test
     @Config(qualifiers = "w750dp-h891dp")
-    fun `unfolded, a pressed run opens beside the list`() {
+    fun `unfolded, a pressed run fills the page as one table`() {
         show(FakeAppState(savedResults = listOf(run), performance = report), FoldPosture.Unfolded)
-        compose.onNodeWithText("open on the right", substring = true).assertDoesNotExist()
         compose.onNodeWithText("Mon 9 Nov").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("open on the right", substring = true).assertExists()
-        assertEquals(2, compose.onAllNodesWithText("Target 2").fetchSemanticsNodes().size)
+        // The list of sessions is gone: only the report's own bar names the day.
+        assertEquals(1, compose.onAllNodesWithText("Mon 9 Nov").fetchSemanticsNodes().size)
+        compose.onNodeWithText("2 stocks · read once at 09:12").assertDoesNotExist()
+        // One table, its column names said once for both stocks, and no ladder labels.
+        assertEquals(1, compose.onAllNodesWithText("TARGET 2").fetchSemanticsNodes().size)
+        compose.onNodeWithText("Target 2").assertDoesNotExist()
+        compose.onNodeWithText("COMI").assertExists()
+        compose.onNodeWithText("ABUK").assertExists()
     }
 
     /** The same session read again two hours later, when a third stock had been posted. */
@@ -264,10 +269,14 @@ class ResultsPageTest {
 
     @Test
     @Config(qualifiers = "w750dp-h891dp")
-    fun `in book posture the runs stay beside the open report`() {
+    fun `in book posture the report splits on the crease, with no list beside it`() {
         openRun(FoldPosture.Book(0.5f, 0.5f))
-        compose.onNodeWithText("open on the right", substring = true).assertExists()
+        assertEquals(1, compose.onAllNodesWithText("Mon 9 Nov").fetchSemanticsNodes().size)
         compose.onNodeWithText("About this run").assertExists()
+        compose.onNodeWithText("Stopped 1").assertExists()
+        // The calls are cards on the far side of the crease, not a table across it.
+        compose.onNodeWithText("TARGET 2").assertDoesNotExist()
+        assertEquals(2, compose.onAllNodesWithText("Target 2").fetchSemanticsNodes().size)
     }
 
     @Test
