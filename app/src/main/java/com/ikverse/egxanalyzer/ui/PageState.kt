@@ -284,6 +284,14 @@ class PageState {
 
     // ── Analyze ──────────────────────────────────────────────────────────────────────────────
 
+    /**
+     * The header's stock box on Analyze, which **narrows nothing**: Analyze has no list of stocks,
+     * so a pick here opens that stock's sheet and the box closes behind it. Asked for on
+     * 2026-11-11 - a page without the header's search read as a page missing it. Its `picked` is
+     * never written, so it never holds the box open or counts as a filter.
+     */
+    val analyzeStockBox: StockBox = StockBox()
+
     /** What it will read, open on the cover screen. Here so a fold keeps it. */
     internal val analyzePostsOpen: MutableState<Boolean> = mutableStateOf(false)
 
@@ -337,9 +345,9 @@ class PageState {
      * The header's stock box for this page, or null for a page that has no list to narrow.
      *
      * Read by [Screen], which draws that box in the page header rather than on the filter shelf -
-     * one control per page, in one place, wherever the page keeps its state. Analyze and Settings
-     * answer null and so get no search icon at all: an icon that opened a box narrowing nothing
-     * would be a control the page cannot honour.
+     * one control per page, in one place, wherever the page keeps its state. Settings answers null
+     * and gets no search icon. Analyze has one that narrows nothing and opens the sheet of the
+     * stock picked instead - see [analyzeStockBox] and [pickOpensStock].
      *
      * The same shape [filtersActive] has and for the same reason - the question is asked from
      * outside the screen that owns the answer, so the answer lives here. What the box itself keeps,
@@ -349,8 +357,15 @@ class PageState {
         AppDestination.RESULTS -> resultsStockBox
         AppDestination.INSIGHTS -> insightsStockBox
         AppDestination.PORTFOLIO -> portfolioStockBox
-        AppDestination.ANALYZE, AppDestination.SETTINGS -> null
+        AppDestination.ANALYZE -> analyzeStockBox
+        AppDestination.SETTINGS -> null
     }
+
+    /**
+     * Whether a pick in [destination]'s stock box opens the stock's sheet instead of narrowing the
+     * page to it - true only on Analyze, which has nothing to narrow. See [analyzeStockBox].
+     */
+    fun pickOpensStock(destination: AppDestination): Boolean = destination == AppDestination.ANALYZE
 
     /**
      * Whether [destination]'s filter sheet is open, or null for a page that has no filters.

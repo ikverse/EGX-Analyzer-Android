@@ -34,8 +34,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.graphics.lerp as lerpColor
-import androidx.compose.ui.text.lerp as lerpStyle
 import com.ikverse.egxanalyzer.ui.kit.popSpring
 import kotlin.math.roundToInt
 import androidx.compose.ui.Alignment
@@ -43,15 +41,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.lerp
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.model.AnalysisProgress
 import com.ikverse.egxanalyzer.model.ScheduleClock
@@ -201,6 +203,10 @@ internal class TabTravel(start: AppDestination) {
             progress.snapTo(1f)
         } else {
             progress.snapTo(begin)
+            // **One frame held before the motion starts** (2026-11-11). The arriving page is built
+            // on the press, header and all, and that frame and the next are the slowest the app
+            // draws; a spring started on them spent its first steps on frames that never showed.
+            withFrameNanos { }
             progress.animateTo(1f, popSpring())
         }
     }
@@ -229,14 +235,26 @@ internal fun HeaderTabs(
     onReselect: (AppDestination) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val p = palette
     val travel = LocalTabTravel.current
     val scroll = travel?.scroll ?: rememberScrollState()
-    val starts = remember { mutableStateMapOf<AppDestination, Int>() }
+    // **Each name's width at rest and small**, written by [TabName] only when it differs - which is
+    // once per collapse step, and never during a change of tab. Every name before the one the row
+    // is scrolled to is small at rest, so these alone place it, and nothing about the row has to be
+    // read back off the screen on every frame of a travel, which is what it did until 2026-11-11.
+    val smallWidths = remember { mutableStateMapOf<AppDestination, Int>() }
+    val gap = with(LocalDensity.current) { TabGap.roundToPx() }
     LaunchedEffect(current, travel) {
+        fun startOf(destination: AppDestination): Int? {
+            var x = 0
+            for (earlier in AppDestination.entries.take(AppDestination.entries.indexOf(destination))) {
+                x += (smallWidths[earlier] ?: return null) + gap
+            }
+            return x
+        }
         snapshotFlow {
             // Not told about this page yet: hold the row where the last page left it.
             if (travel != null && !travel.knows(current)) return@snapshotFlow null
+            val starts = AppDestination.entries.associateWith { startOf(it) }
             val landing = starts[tabBefore(current)] ?: return@snapshotFlow null
             // A finger heading for a neighbour carries the row with it.
             travel?.peek?.let { peek ->
@@ -248,35 +266,26 @@ internal fun HeaderTabs(
             (leaving + (landing - leaving) * along).roundToInt()
         }.collect { target -> if (target != null) scroll.scrollTo(target) }
     }
-    val large = MaterialTheme.typography.headlineLarge.copy(
-        fontSize = lerp(ExpandedTab, CollapsedTab, collapse),
-        letterSpacing = lerp(ExpandedTracking, CollapsedTracking, collapse),
-    )
-    val small = MaterialTheme.typography.titleLarge.copy(
-        fontSize = lerp(OtherTab, OtherTabCollapsed, collapse),
-        fontWeight = FontWeight.SemiBold,
-    )
+    // Both at their uncollapsed sizes, and fixed: the collapse and the travel are scales on them.
+    val large = MaterialTheme.typography.headlineLarge.copy(fontSize = ExpandedTab, letterSpacing = ExpandedTracking)
+    val small = MaterialTheme.typography.titleLarge.copy(fontSize = OtherTab, fontWeight = FontWeight.SemiBold)
     Row(
         modifier
             .horizontalScroll(scroll)
             .selectableGroup(),
-        horizontalArrangement = Arrangement.spacedBy(18.dp),
+        horizontalArrangement = Arrangement.spacedBy(TabGap),
         verticalAlignment = Alignment.Bottom,
     ) {
         AppDestination.entries.forEach { destination ->
             val selected = destination == current
-            val emphasis = travel?.emphasis(destination, current) ?: if (selected) 1f else 0f
-            Text(
-                destination.label,
-                style = when (emphasis) {
-                    0f -> small
-                    1f -> large
-                    else -> lerpStyle(small, large, emphasis)
-                },
-                color = lerpColor(p.faint, p.ink, emphasis.coerceIn(0f, 1f)),
-                maxLines = 1,
+            TabName(
+                label = destination.label,
+                small = small,
+                large = large,
+                collapse = collapse,
+                emphasis = { travel?.emphasis(destination, current) ?: if (selected) 1f else 0f },
+                onSmallWidth = { if (smallWidths[destination] != it) smallWidths[destination] = it },
                 modifier = Modifier
-                    .onGloballyPositioned { starts[destination] = it.positionInParent().x.toInt() }
                     .then(if (selected) Modifier.semantics { heading() } else Modifier)
                     .selectable(
                         selected = selected,
@@ -296,10 +305,80 @@ private fun tabBefore(destination: AppDestination): AppDestination {
     return all[(all.indexOf(destination) - 1).coerceAtLeast(0)]
 }
 
+/**
+ * One tab's name: laid out once, small and large, and moved between the two by a scale and a
+ * cross-fade rather than by laying the text out again.
+ *
+ * **Why it is drawn twice** (2026-11-11). It used to be one `Text` whose style was interpolated
+ * from the small to the large on every frame of a tab change and of a swipe, so every frame
+ * re-measured and re-shaped five names at a new font size, and recomposed the row to do it - the
+ * change of tab read as laggy on the Fold. Here both copies keep one style for good: [emphasis] is
+ * read in the measure block and the layer, never in composition, so a travel is a relayout of
+ * already-measured text and a change of scale. The small copy is faint and the large one ink, so
+ * the cross-fade is also the change of colour. The collapse is the same scale, applied to both.
+ *
+ * [onSmallWidth] reports the width this name takes at rest and small, which is what the row's
+ * scroll is placed by. See [HeaderTabs].
+ */
+@Composable
+private fun TabName(
+    label: String,
+    small: TextStyle,
+    large: TextStyle,
+    collapse: Float,
+    emphasis: () -> Float,
+    onSmallWidth: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val p = palette
+    Layout(
+        content = {
+            // The words are said once, by the large copy; the small one is drawing only.
+            Text(label, style = small, color = p.faint, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { })
+            Text(label, style = large, color = p.ink, maxLines = 1, softWrap = false)
+        },
+        modifier = modifier,
+    ) { measurables, _ ->
+        val loose = Constraints()
+        val smallText = measurables[0].measure(loose)
+        val largeText = measurables[1].measure(loose)
+        val e = emphasis()
+        val smallSize = mix(OtherTab.value, OtherTabCollapsed.value, collapse)
+        val largeSize = mix(ExpandedTab.value, CollapsedTab.value, collapse)
+        val size = mix(smallSize, largeSize, e)
+        val smallScale = size / OtherTab.value
+        val largeScale = size / ExpandedTab.value
+        onSmallWidth((smallText.width * smallSize / OtherTab.value).roundToInt())
+        val width = mix(smallText.width * smallScale, largeText.width * largeScale, e).roundToInt().coerceAtLeast(0)
+        val height = mix(smallText.height * smallScale, largeText.height * largeScale, e).roundToInt().coerceAtLeast(0)
+        // Mostly one or the other: the two copies overlap only through the middle of the travel.
+        val shown = ((e - 0.2f) / 0.6f).coerceIn(0f, 1f)
+        layout(width, height) {
+            // Each scaled from its bottom-left corner, so both stand on the row's line.
+            smallText.placeWithLayer(0, height - smallText.height) {
+                scaleX = smallScale
+                scaleY = smallScale
+                transformOrigin = BottomStart
+                alpha = 1f - shown
+            }
+            largeText.placeWithLayer(0, height - largeText.height) {
+                scaleX = largeScale
+                scaleY = largeScale
+                transformOrigin = BottomStart
+                alpha = shown
+            }
+        }
+    }
+}
+
+private val BottomStart = TransformOrigin(0f, 1f)
+
+private fun mix(start: Float, stop: Float, fraction: Float): Float = start + (stop - start) * fraction
+
+private val TabGap = 18.dp
 private val ExpandedTab = 42.sp
 private val CollapsedTab = 28.sp
 private val ExpandedTracking = (-1.7).sp
-private val CollapsedTracking = (-0.9).sp
 private val OtherTab = 20.sp
 private val OtherTabCollapsed = 17.sp
 
