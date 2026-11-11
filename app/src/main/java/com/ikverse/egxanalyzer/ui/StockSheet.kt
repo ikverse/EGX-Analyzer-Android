@@ -18,10 +18,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.OpenInFull
@@ -33,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -367,8 +370,12 @@ private fun StockSheetChips(trades: List<PositionView>, score: StockScore?, faul
 }
 
 /**
- * Where the stock has been, on the cobalt tile: the line with the levels across it, the expand
- * button, the reading under the finger, and the range row.
+ * Where the stock has been, on the sheet's dark chart tile: what the line adds up to, the Levels
+ * and Expand buttons, the line with its levels tagged down the right, and the range track.
+ *
+ * The tile was cobalt until 2026-11-11 - see [chartTileColors] for what it is now and why it is
+ * not one of the kit's tile tones. The reading under a finger takes the headline's two places
+ * rather than a caption of its own, so nothing below the chart moves when it arrives.
  */
 @Composable
 private fun StockSheetPrice(
@@ -386,7 +393,7 @@ private fun StockSheetPrice(
     modifier: Modifier = Modifier,
 ) {
     if (latest == null && history.isEmpty()) return
-    val p = palette
+    val colors = chartTileColors(palette)
     var range by pages.stockChartRange
     var showLevels by pages.stockChartLevels
     // A stored Call range on a stock nobody has called is a month, never an empty box.
@@ -396,204 +403,123 @@ private fun StockSheetPrice(
     val shown = if (showLevels) levels else null
     var touched by remember(visible) { mutableStateOf<DailySession?>(null) }
     var expanded by remember { mutableStateOf(false) }
-    Tile(modifier.fillMaxWidth(), tone = TileTone.HERO, contentPadding = PaddingValues(vertical = 14.dp)) {
-        val soft = p.onHero.copy(alpha = 0.85f)
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                if (effective == ChartRange.CALL) {
+    CompositionLocalProvider(LocalContentColor provides colors.text) {
+        Column(modifier.fillMaxWidth().clip(Kit.TileShape).background(colors.surface).padding(16.dp)) {
+            // Who made the call on the touched session, where there was one, in the move's place.
+            val reading = chartReading(visible, touched, note = touched?.let { calls[it.date] })
+            ChartHeadline(
+                title = reading?.first ?: if (effective == ChartRange.CALL) {
                     "Since the call · ${visible.size} sessions"
                 } else {
-                    "Where it stands · ${effective.label}"
+                    effective.title
                 },
-                style = MaterialTheme.typography.bodySmall,
-                color = soft,
-                modifier = Modifier.weight(1f),
-            )
-            if (move != null) {
-                Text(
-                    formatPercent(move),
-                    style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
-                    color = p.onHero,
-                    modifier = Modifier.padding(end = Space.s),
+                figure = reading?.second ?: move?.let { formatPercent(it) }.orEmpty(),
+                colors = colors,
+            ) {
+                // Absent rather than disabled where there are no levels to draw.
+                if (levels != null) LevelsButton(showLevels, colors) { showLevels = !showLevels }
+                // The same chart on the whole screen. Offered only where there is a line to expand.
+                if (history.count { it.close != null } > 1) {
+                    val press = remember { MutableInteractionSource() }
+                    Box(
+                        Modifier
+                            .pressScale(press)
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(colors.track)
+                            .clickable(
+                                interactionSource = press,
+                                indication = null,
+                                role = Role.Button,
+                                onClickLabel = "Expand the chart",
+                            ) { expanded = true }
+                            .semantics { contentDescription = "Expand chart" },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Outlined.OpenInFull, contentDescription = null, tint = colors.text, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+            if (expanded) {
+                ExpandedChart(
+                    ticker = ticker,
+                    history = history,
+                    levels = levels,
+                    calls = calls.keys,
+                    range = range,
+                    onRange = { range = it },
+                    showLevels = showLevels,
+                    onLevels = { showLevels = it },
+                    indicators = appState.chartIndicators,
+                    onIndicators = appState::saveChartIndicators,
+                    drawings = appState.chartDrawings(ticker),
+                    onDrawings = { appState.saveChartDrawings(ticker, it) },
+                    onClose = { expanded = false },
+                    newestCall = newestCall,
                 )
             }
-            // The same chart on the whole screen. Offered only where there is a line to expand.
-            if (history.count { it.close != null } > 1) {
-                Box(
-                    Modifier
-                        .minimumInteractiveComponentSize()
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(p.onHero.copy(alpha = 0.16f))
-                        .clickable(role = Role.Button, onClickLabel = "Expand the chart") { expanded = true }
-                        .semantics { contentDescription = "Expand chart" },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Outlined.OpenInFull, contentDescription = null, tint = p.onHero, modifier = Modifier.size(16.dp))
+            if (visible.count { it.close != null } > 1) {
+                PriceChart(
+                    visible,
+                    shown,
+                    calls.keys,
+                    colors = colors,
+                    selected = touched,
+                    onSelect = { touched = it },
+                    modifier = Modifier.padding(top = Space.m),
+                )
+                val called = visible.any { it.date in calls }
+                val legend = listOfNotNull(
+                    "A call was made".takeIf { called },
+                    shown?.let { "levels from " + it.source },
+                ).joinToString(" · ")
+                if (legend.isNotEmpty()) {
+                    ChartLegend(legend, colors, Modifier.padding(top = Space.s), dot = called)
                 }
+            } else {
+                ChartLegend("No sessions stored in this range.", colors, Modifier.padding(top = Space.m), dot = false)
             }
-        }
-        if (expanded) {
-            ExpandedChart(
-                ticker = ticker,
-                history = history,
-                levels = levels,
-                calls = calls.keys,
-                range = range,
-                onRange = { range = it },
-                showLevels = showLevels,
-                onLevels = { showLevels = it },
-                indicators = appState.chartIndicators,
-                onIndicators = appState::saveChartIndicators,
-                drawings = appState.chartDrawings(ticker),
-                onDrawings = { appState.saveChartDrawings(ticker, it) },
-                onClose = { expanded = false },
-                newestCall = newestCall,
+            ChartRanges(
+                options = ChartRange.entries.filter { newestCall != null || it != ChartRange.CALL },
+                selected = effective,
+                onSelect = { range = it },
+                label = { it.label },
+                colors = colors,
+                modifier = Modifier.padding(top = Space.m),
             )
         }
-        if (visible.count { it.close != null } > 1) {
-            PriceChart(
-                visible,
-                shown,
-                calls.keys,
-                on = p.hero,
-                selected = touched,
-                onSelect = { touched = it },
-                modifier = Modifier.padding(top = Space.s, start = 4.dp, end = 12.dp),
-                onHero = true,
-            )
-            val reading = touched
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                if (reading?.close != null) {
-                    HeroCaption(AppDates.DayMonth.format(reading.date) + " · " + formatPrice(reading.close))
-                    HeroCaption(
-                        calls[reading.date]
-                            ?: visible.moveTo(reading)?.let { formatPercent(it) + " since " + AppDates.DayMonth.format(visible.first().date) }
-                            ?: "",
-                    )
-                } else {
-                    HeroCaption(AppDates.DayMonth.format(visible.first().date))
-                    if (visible.any { it.date in calls }) HeroCaption("○ a call was made")
-                    HeroCaption(AppDates.DayMonth.format(visible.last().date))
-                }
-            }
-            if (shown != null) {
-                HeroCaption("levels from " + shown.source, Modifier.padding(horizontal = 16.dp))
-            }
-        } else {
-            HeroCaption("No sessions stored in this range.", Modifier.padding(16.dp))
-        }
-        ChartControls(
-            range = effective,
-            onRange = { range = it },
-            levels = if (levels == null) null else showLevels,
-            onLevels = { showLevels = it },
-            hasCall = newestCall != null,
-            onHero = true,
-            modifier = Modifier.padding(horizontal = 12.dp).padding(top = Space.s),
-        )
     }
 }
 
+/** Whether the chart carries the levels: filled while it does, a quiet wash while it does not. */
 @Composable
-private fun HeroCaption(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-        color = palette.onHero.copy(alpha = 0.8f),
-        modifier = modifier,
-    )
-}
-
-/**
- * How far back a chart reaches, and whether it carries the levels.
- *
- * [hasCall] offers the Call range, which only means something where there is a call to start from.
- * [onHero] draws the row for the cobalt tile: lime for the chosen range, white washes for the rest,
- * and cobalt ink on the Levels toggle when it is on. The levels chip is absent rather than disabled
- * where there are none to draw.
- */
-@Composable
-internal fun ChartControls(
-    range: ChartRange,
-    onRange: (ChartRange) -> Unit,
-    levels: Boolean?,
-    onLevels: (Boolean) -> Unit,
-    hasCall: Boolean = false,
-    onHero: Boolean = false,
-    modifier: Modifier = Modifier,
-) {
-    val options = ChartRange.entries.filter { hasCall || it != ChartRange.CALL }
+private fun LevelsButton(on: Boolean, colors: ChartColors, onToggle: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
     Row(
-        modifier.fillMaxWidth().scrollableRow(),
+        Modifier
+            .pressScale(press)
+            .height(44.dp)
+            .clip(Kit.Capsule)
+            .background(if (on) colors.text else colors.track)
+            .toggleable(
+                value = on,
+                interactionSource = press,
+                indication = null,
+                role = Role.Switch,
+                onValueChange = { onToggle() },
+            )
+            .padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        options.forEach { option ->
-            if (onHero) {
-                HeroChip(option.label, selected = option == range) { onRange(option) }
-            } else {
-                CompactFilterChip(label = option.label, selected = option == range, onClick = { onRange(option) })
-            }
-        }
-        if (levels != null) {
-            Spacer(Modifier.width(Space.s))
-            if (onHero) {
-                HeroChip(if (levels) "Levels ✓" else "Levels", selected = false, on = levels) { onLevels(!levels) }
-            } else {
-                CompactFilterChip(label = "Levels", selected = levels, onClick = { onLevels(!levels) }, toggle = true)
-            }
-        }
-    }
-}
-
-/** One choice on the cobalt tile: lime when chosen, white when a toggle is on, a white wash otherwise. */
-@Composable
-private fun HeroChip(label: String, selected: Boolean, on: Boolean = false, onClick: () -> Unit) {
-    val p = palette
-    val press = remember { MutableInteractionSource() }
-    Box(
-        Modifier
-            .minimumInteractiveComponentSize()
-            .pressScale(press)
-            .height(34.dp)
-            .widthIn(min = 48.dp)
-            .clip(Kit.Capsule)
-            .background(
-                when {
-                    selected -> p.highlight
-                    on -> p.onHero
-                    else -> p.onHero.copy(alpha = 0.14f)
-                },
-            )
-            .clickable(interactionSource = press, indication = null, role = Role.Button, onClick = onClick)
-            .semantics { this.selected = selected || on }
-            .padding(horizontal = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
+        if (on) Icon(Icons.Outlined.Check, contentDescription = null, tint = colors.surface, modifier = Modifier.size(16.dp))
         Text(
-            label,
-            style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
-            fontWeight = if (selected || on) FontWeight.Bold else FontWeight.Medium,
-            color = when {
-                selected -> p.onTile
-                on -> p.hero
-                else -> p.onHero
-            },
+            "Levels",
+            style = MaterialTheme.typography.labelLarge,
+            color = if (on) colors.surface else colors.text,
             maxLines = 1,
         )
     }
-}
-
-@Composable
-internal fun ChartCaption(text: String) {
-    Text(text, style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures), color = palette.muted)
 }
 
 /**

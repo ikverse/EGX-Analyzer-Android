@@ -62,6 +62,30 @@ class PaletteContrastTest {
     }
 
     /** The fill each tone draws, as `tileColors` gives it. */
+    /**
+     * The stock sheet's chart tile is not one of the kit's tones: navy in the light theme and the
+     * raised card at night, with a lime and a coral that have to read on both.
+     */
+    @Test
+    fun `the chart tile's text holds on the chart tile`() {
+        val f = Failures()
+        palettes.forEach { (name, p) ->
+            val c = com.ikverse.egxanalyzer.ui.chartTileColors(p)
+            fun need(role: String, fg: Color, surface: String, bg: Color) =
+                f.check("$name chart $role on $surface (${hex(fg)} on ${hex(bg)})", fg, bg, 4.5, contrast(fg, bg))
+            need("text", c.text, "tile", c.surface)
+            need("captions", c.soft, "tile", c.surface)
+            need("target", c.target, "tile", c.surface)
+            need("stop", c.stopText, "tile", c.surface)
+            need("text", c.text, "range track", c.track)
+            need("now", c.nowText, "its tag", c.nowFill)
+            need("chosen range", c.onChosen, "its segment", c.chosen)
+            // The Levels button, filled: the tile's own colour as text on the tile's text colour.
+            need("levels", c.surface, "its button", c.text)
+        }
+        f.assertNone()
+    }
+
     private fun fill(p: AppPalette, tone: TileTone) = when (tone) {
         TileTone.CARD -> p.card
         TileTone.INK -> p.ink
