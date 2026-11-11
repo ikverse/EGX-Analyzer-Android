@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.1.6] — 2026-11-11
+
+- **Pills side by side are one height.** A pill holding Arabic, such as a channel name, stood taller than an English one beside it, because the Arabic font reaches further above and below the line. Every pill of a size is now one fixed height, still growing with the phone's font size setting.
+
+---
+
 ## [5.1.5] — 2026-11-11
 
 The rest of the pills, and one 5.1.4 brought.
