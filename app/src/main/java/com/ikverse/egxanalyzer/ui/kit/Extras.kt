@@ -58,6 +58,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -84,6 +86,12 @@ import java.util.Locale
  * The word takes the ink of whatever the tag sits on - the page's ink on a card, navy on a lilac
  * tile - since 5.1.5; 5.1.4 always used the page's ink, which is light at night and vanished on the
  * bright tiles that stay bright in the dark. [large] is for the one headline answer on a sheet.
+ *
+ * **Every tag of a size is one height** since 5.1.6, whatever is written in it: the line height of
+ * its style plus its padding, with the word centred in it. It used to be as tall as its text, and
+ * an Arabic channel name - drawn in the Arabic fallback, which reaches further above and below the
+ * line than Bricolage - stood a few pixels taller than the English status beside it. The height is
+ * read off the style in sp, so it still grows with the phone's font size. `KitTagTest` holds it.
  */
 @Composable
 fun KitTag(
@@ -95,6 +103,8 @@ fun KitTag(
     onClick: (() -> Unit)? = null,
 ) {
     val press = remember { MutableInteractionSource() }
+    val style = if (large) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelMedium
+    val height = with(LocalDensity.current) { style.lineHeight.toDp() } + (if (large) 7.dp else 3.dp) * 2
     Box(
         modifier
             .then(if (onClick != null) Modifier.pressScale(press) else Modifier)
@@ -107,11 +117,13 @@ fun KitTag(
                     Modifier
                 },
             )
-            .padding(horizontal = if (large) 14.dp else 10.dp, vertical = if (large) 7.dp else 3.dp),
+            .height(height)
+            .padding(horizontal = if (large) 14.dp else 10.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
             text,
-            style = if (large) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelMedium,
+            style = style.copy(lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)),
             color = ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
