@@ -65,30 +65,30 @@ import com.ikverse.egxanalyzer.ui.kit.HoldMenu
 import com.ikverse.egxanalyzer.ui.kit.KitTag
 
 /**
- * Every occurrence of one stock, one card each, swiped through sideways.
+ * One stock of an open report: its name and price once, then every call made on it, one under the
+ * other, each with its own figures.
  *
  * A stock is often called twice in a report - by two channels, or once as a watch and once for a
- * named date - and those calls have different entries and different targets. Folding them into a
- * single card showed the first and silently dropped the rest, which is the one thing a table row
- * never did. So two channels are still two cards here, each with its own channel tag, rather than
- * one card wearing "2 channels".
+ * named date - and those calls have different entries and different targets. They used to be cards
+ * swiped through sideways, which hid all but the first behind a row of dots; listed, a stock two
+ * channels named shows both calls at once and neither has to be found.
  *
- * Since 5.1 a card answers the one question a page of them is scanned for - where does this call
- * stand - and everything else is a press away: a tap opens the call in full, a hold opens what can
+ * Each call says its channel, where it stands, how far the price has moved from its entry, and the
+ * four levels as numbers under a small ladder. A tap opens the call in full, a hold opens what can
  * be done about it ([holdItems]).
  */
 @Composable
-internal fun RecommendationCards(
+internal fun StockCallsCard(
     stock: ConsolidatedRecommendation,
     /** The channel behind an occurrence, looked up by the message the model cited. */
     channelFor: (String?) -> String?,
-    /** Records what the user did about a call. Absent, the cards are read-only. */
+    /** Records what the user did about a call. Absent, the calls are read-only. */
     trades: TradeBook? = null,
     /** Corrects what the model read off the card. Absent, the figures cannot be changed. */
     editor: CallEditor? = null,
     /** The status word on a call's tag, and the group that colours it. */
     statusFor: (RecommendationDataPoint) -> Pair<String, CallGroup> = { "Running" to CallGroup.RUNNING },
-    /** Where the stock is now, for the price beside the name and the ladder's arrow. */
+    /** Where the stock is now, for the price beside the name and each ladder's arrow. */
     latest: LatestPrice? = null,
     /** A tap: the call in full. */
     onOpen: (RecommendationDataPoint) -> Unit = {},
@@ -96,35 +96,19 @@ internal fun RecommendationCards(
     holdItems: (RecommendationDataPoint) -> List<MenuItem> = { emptyList() },
     modifier: Modifier = Modifier,
 ) {
-    val points = stock.dataPoints
-    if (points.isEmpty()) {
-        Box(modifier.fillMaxWidth().callBlock(null)) {
-            Column(Modifier.padding(Space.l)) { StockHeader(stock, latest, point = null) }
-        }
-        return
-    }
-
-    val pager = rememberPagerState(pageCount = { points.size })
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        HorizontalPager(
-            state = pager,
-            // No peek, deliberately: insetting only the stocks with several occurrences made their
-            // cards narrower than the rest, and a row of cards that do not match reads as a fault
-            // before it reads as a hint. The dots under the card carry the hint instead.
-            pageSpacing = Space.s,
-            verticalAlignment = Alignment.Top,
-        ) { page ->
-            val point = points[page]
-            RecommendationCard(
+    Column(modifier.fillMaxWidth().callBlock(null).padding(Space.m)) {
+        StockHeader(stock, latest, stock.dataPoints.size)
+        stock.dataPoints.forEach { point ->
+            Spacer(Modifier.height(Space.s))
+            Hairline()
+            CallLine(
                 stock = stock,
                 point = point,
                 channel = channelFor(point.sourceMessageId),
                 status = statusFor(point),
-                latest = latest,
+                close = latest?.session?.close,
                 trades = trades,
                 editor = editor,
-                page = page,
-                pageCount = points.size,
                 onOpen = { onOpen(point) },
                 holdItems = holdItems(point),
             )
@@ -133,66 +117,96 @@ internal fun RecommendationCards(
 }
 
 /**
- * One occurrence: the stock, where it is now, what the call is, and where it stands on its ladder.
- *
- * The levels grid, risk to reward, the source and the trade controls all moved to the sheet a tap
- * opens. The held ring stays, so a page of calls can still be read for what is held before any card
- * is opened.
+ * One call under its stock: who made it and where it stands, then its levels as a ladder and as
+ * the four numbers the ladder is drawn from. A held call keeps its ring, so a report can still be
+ * read for what is held before any call is opened.
  */
 @Composable
-private fun RecommendationCard(
+private fun CallLine(
     stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     channel: String?,
     status: Pair<String, CallGroup>,
-    latest: LatestPrice?,
+    close: Double?,
     trades: TradeBook?,
     editor: CallEditor?,
-    page: Int,
-    pageCount: Int,
     onOpen: () -> Unit,
     holdItems: List<MenuItem>,
-    modifier: Modifier = Modifier,
 ) {
     var editing by remember(point) { mutableStateOf(false) }
-    val held = trades?.heldFor(stock, point)
-    val close = latest?.session?.close
-
-    HoldMenu(items = holdItems, modifier = modifier.fillMaxWidth(), onTap = onOpen) {
-        Box(Modifier.fillMaxWidth().callBlock(heldBorder(held))) {
-            Column(Modifier.padding(Space.m)) {
-                StockHeader(stock, latest, point)
-                Spacer(Modifier.height(Space.s))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                    verticalArrangement = Arrangement.spacedBy(Space.xs),
-                ) {
-                    KitTag(status.first, tone = status.second.tone())
-                    channel?.takeIf(String::isNotBlank)?.let { KitTag(it, tone = palette.muted) }
-                    if (point.isTPlusOne) KitTag("T+1", tone = palette.muted)
-                    if (editor?.editFor(stock, point) != null) EditedChip { editing = true }
-                }
-                Spacer(Modifier.height(Space.m))
-                if (point.isWatching) {
-                    Text(
-                        watchingSentence(point),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = palette.muted,
-                    )
-                } else {
-                    PriceLadder(point, reached = close)
-                }
-                if (pageCount > 1) {
-                    Spacer(Modifier.height(Space.s))
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        PageDots(page, pageCount)
+    val ring = heldBorder(trades?.heldFor(stock, point))
+    val shape = RoundedCornerShape(14.dp)
+    HoldMenu(items = holdItems, modifier = Modifier.fillMaxWidth(), onTap = onOpen) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = Space.s)
+                .then(if (ring != null) Modifier.border(ring, shape).padding(Space.s) else Modifier),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
+                Text(
+                    channel?.takeIf(String::isNotBlank) ?: "Channel not stated",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                KitTag(status.first, tone = status.second.tone())
+                if (point.isTPlusOne) KitTag("T+1", tone = palette.muted)
+                if (editor?.editFor(stock, point) != null) EditedChip { editing = true }
+                // Against the entry: the app keeps no day's move behind AppState.
+                if (!point.isWatching) {
+                    moveVsEntry(point, close)?.let { move ->
+                        Text(
+                            formatPercent(move),
+                            style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                            color = if (move >= 0) palette.gain else palette.loss,
+                            maxLines = 1,
+                        )
                     }
+                }
+            }
+            if (point.isWatching) {
+                Text(
+                    watchingSentence(point),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.muted,
+                    modifier = Modifier.padding(top = Space.s),
+                )
+            } else {
+                PriceLadder(point, Modifier.padding(top = Space.s), reached = close, compact = true)
+                Row(Modifier.fillMaxWidth().padding(top = Space.xs)) {
+                    LevelFigure("Stop", formatPrice(point.stopLoss), palette.loss, Modifier.weight(1f))
+                    LevelFigure("Entry", entryText(point), palette.ink, Modifier.weight(EntryShare))
+                    LevelFigure("Target 1", formatPrice(point.target1), palette.gain, Modifier.weight(1f))
+                    LevelFigure("Target 2", formatPrice(point.target2), palette.gain, Modifier.weight(1f))
                 }
             }
         }
     }
     if (editing && editor != null) {
         EditCallSheet(stock, point, editor, onDismiss = { editing = false })
+    }
+}
+
+/** The entry is a band, two prices and a dash, so its column is wider than the single prices'. */
+private const val EntryShare = 1.8f
+
+/** One level of a call as a number under its name. */
+@Composable
+private fun LevelFigure(label: String, value: String, tone: androidx.compose.ui.graphics.Color, modifier: Modifier) {
+    Column(modifier) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = palette.muted, maxLines = 1)
+        Text(
+            value,
+            style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+            color = tone,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
@@ -234,12 +248,12 @@ internal fun moveVsEntry(point: RecommendationDataPoint, close: Double?): Double
 private fun StockHeader(
     stock: ConsolidatedRecommendation,
     latest: LatestPrice?,
-    point: RecommendationDataPoint?,
+    calls: Int,
 ) {
     // Ticker style and name style match the identity block Insights draws on its own call card, so
-    // one stock looks the same on two screens. The price takes the corner the pills used to: the
-    // tags row under the header says what they said.
-    Row(verticalAlignment = Alignment.Top) {
+    // one stock looks the same on two screens. The price is the stock's, said once for every call
+    // under it; each call's own move is on its own line.
+    Row(verticalAlignment = Alignment.CenterVertically) {
         val openStock = LocalOpenStock.current
         Row(
             Modifier.weight(1f).clickable { openStock(stock.stockCode) },
@@ -251,9 +265,10 @@ private fun StockHeader(
                     Text(stock.stockCode, style = MaterialTheme.typography.titleLarge)
                     Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
                 }
-                stock.stockNameArabic?.let {
+                val under = listOfNotNull(stock.stockNameArabic, "$calls calls".takeIf { calls > 1 })
+                if (under.isNotEmpty()) {
                     Text(
-                        it,
+                        under.joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
                         color = palette.muted,
                         maxLines = 2,
@@ -269,14 +284,7 @@ private fun StockHeader(
                     formatPrice(close),
                     style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
                 )
-                // Against the entry, and said so: the app keeps no day's move behind AppState.
-                point?.let { moveVsEntry(it, close) }?.let { move ->
-                    Text(
-                        "${formatPercent(move)} vs entry",
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-                        color = if (move >= 0) palette.gain else palette.loss,
-                    )
-                }
+                Text("now", style = MaterialTheme.typography.labelSmall, color = palette.muted)
             }
         }
     }

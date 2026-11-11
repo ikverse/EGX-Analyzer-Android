@@ -1,7 +1,12 @@
 package com.ikverse.egxanalyzer.model
 
+import java.time.DayOfWeek
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
+import java.time.temporal.TemporalAdjusters
 import java.time.format.TextStyle
 import java.util.Locale
 
@@ -104,4 +109,111 @@ fun scoredCallFor(
     val on = point.callDate(saved.result.recommendationTargetDate) ?: return null
     val candidates = calls.filter { Scoring.normalizeTicker(it.ticker) == ticker && it.openedOn == on }.toList()
     return candidates.firstOrNull { channel != null && it.channel == channel } ?: candidates.firstOrNull()
+}
+
+/**
+ * One reading of a session: a run, how much it found, and what it found that the reading before it
+ * had not. [newStocks] is null on the first reading of the day, which has nothing to be new against.
+ */
+data class Reading(val saved: SavedAnalysis, val calls: Int, val stocks: Int, val newStocks: List<String>?)
+
+/** The reading a session's card is drawn from: the one made last. */
+fun newestReading(runs: List<SavedAnalysis>): SavedAnalysis = runs.maxBy { it.result.completedAt }
+
+/**
+ * Every reading of one session, newest first, each saying which stocks it named that the reading
+ * before it did not. A session read three times is one card in the list; this is what the sheet
+ * behind that card's "read 3 times" lists.
+ */
+fun readingsOf(runs: List<SavedAnalysis>): List<Reading> {
+    val oldestFirst = runs.sortedBy { it.result.completedAt }
+    return oldestFirst.mapIndexed { index, saved ->
+        val tickers = saved.result.consolidated.map { it.stockCode }
+        val before = oldestFirst.getOrNull(index - 1)
+            ?.result?.consolidated?.map { Scoring.normalizeTicker(it.stockCode) }?.toSet()
+        Reading(
+            saved = saved,
+            calls = saved.result.consolidated.sumOf { it.dataPoints.size },
+            stocks = tickers.size,
+            newStocks = before?.let { seen -> tickers.filter { Scoring.normalizeTicker(it) !in seen } },
+        )
+    }.reversed()
+}
+
+/** "read once at 21:40", "read twice, last at 13:20", "read 5 times, last at 14:30". Cairo time. */
+fun readLine(count: Int, lastAt: Instant, zone: ZoneId = ScheduleClock.ZONE): String {
+    val time = lastAt.atZone(zone).format(READ_TIME)
+    return when (count) {
+        1 -> "read once at $time"
+        2 -> "read twice, last at $time"
+        else -> "read $count times, last at $time"
+    }
+}
+
+/** A reading's own time, `13:20`. */
+fun readingTime(at: Instant, zone: ZoneId = ScheduleClock.ZONE): String = at.atZone(zone).format(READ_TIME)
+
+private val READ_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+private val WEEK_OF: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM")
+
+/**
+ * The heading a session is listed under. The exchange's week runs Sunday to Thursday, so a week
+ * starts on Sunday here.
+ */
+fun weekHeading(date: LocalDate, today: LocalDate): String {
+    fun start(day: LocalDate) = day.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
+    val from = start(date)
+    return when (ChronoUnit.WEEKS.between(start(today), from)) {
+        0L -> "This week"
+        -1L -> "Last week"
+        1L -> "Next week"
+        else -> "Week of ${from.format(WEEK_OF)}"
+    }
+}
+
+/** Where one stock of a report stands, for the tag on its session's card. */
+data class StockStanding(val ticker: String, val group: CallGroup)
+
+/**
+ * Each stock of [saved] with the best thing any of its calls has done: reached a target, else been
+ * stopped, else still running. Reached first, then stopped, then the rest, each in report order.
+ */
+fun stockStandings(saved: SavedAnalysis, report: PerformanceReport): List<StockStanding> =
+    saved.result.consolidated.map { stock ->
+        val groups = stock.dataPoints.map { callGroup(it, scoredCallFor(saved, stock, it, report)) }
+        StockStanding(
+            stock.stockCode,
+            when {
+                CallGroup.REACHED in groups -> CallGroup.REACHED
+                CallGroup.STOPPED in groups -> CallGroup.STOPPED
+                else -> CallGroup.RUNNING
+            },
+        )
+    }.sortedBy {
+        when (it.group) {
+            CallGroup.REACHED -> 0
+            CallGroup.STOPPED -> 1
+            else -> 2
+        }
+    }
+
+/** The orders an open report's stocks can be read in. */
+enum class CallSort(val label: String, val sentence: String) {
+    CLOSEST("Closest to target", "closest to target first"),
+    MOVE("Biggest move", "biggest move first"),
+    REPORT("Report order", "in the report's order"),
+}
+
+/**
+ * How near a call is to its first target, smaller being nearer: the fraction of the price still to
+ * travel, which is nought or less once the target is reached. A running call with no price sorts
+ * after every one that has one; a call the market has finished with after those; a watch last.
+ */
+fun closenessKey(group: CallGroup, target1: Double?, close: Double?): Double = when (group) {
+    CallGroup.WATCHING -> 1e9
+    CallGroup.STOPPED, CallGroup.ENDED -> 1e8
+    CallGroup.REACHED, CallGroup.RUNNING ->
+        if (target1 != null && close != null && close != 0.0) (target1 - close) / close
+        else if (group == CallGroup.REACHED) 0.0
+        else 1e7
 }

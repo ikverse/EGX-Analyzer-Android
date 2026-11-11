@@ -146,6 +146,23 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import com.ikverse.egxanalyzer.model.CallSort
+import com.ikverse.egxanalyzer.model.PerformanceReport
+import com.ikverse.egxanalyzer.model.Reading
+import com.ikverse.egxanalyzer.model.closenessKey
+import com.ikverse.egxanalyzer.model.newestReading
+import com.ikverse.egxanalyzer.model.readLine
+import com.ikverse.egxanalyzer.model.readingTime
+import com.ikverse.egxanalyzer.model.readingsOf
+import com.ikverse.egxanalyzer.model.stockStandings
+import com.ikverse.egxanalyzer.model.weekHeading
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -315,49 +332,45 @@ internal fun ResultsScreen(appState: AppState) {
             }
             BoxWithConstraints {
                 val columns = responsiveColumns(minColumnWidth = SavedRunMinWidth, maxColumns = 2)
-                // One entry per session rather than per run: a session re-read three times is one
-                // row of the list, swiped through, newest reading in front.
+                // One entry per session rather than per run: a session read three times is one
+                // card, drawn from its newest reading, and says how often it was read. The other
+                // readings are reached from inside the report.
                 val allDays = remember(shown) { groupRunsByDay(shown) }
                 val days = remember(allDays, visibleCount) { allDays.take(visibleCount) }
+                val today = LocalDate.now(ScheduleClock.ZONE)
+                // Sessions under the week they belong to; one still to come sits above them all.
+                val weeks = remember(days, today) { groupDaysByWeek(days, today) }
 
-                @Composable
-                fun tile(
-                    saved: SavedAnalysis,
-                    stack: StackPosition?,
-                    onBringForward: (() -> Unit)?,
-                    cardModifier: Modifier,
-                    leadAllowed: Boolean,
-                ) {
-                    val dayIndex = days.indexOfFirst { day -> day.any { it.id == saved.id } }
-                    RunTile(
-                        saved = saved,
-                        // Cobalt, lime, white, down the list, so neighbouring runs never share a fill.
-                        tone = RunTones[dayIndex.coerceAtLeast(0) % RunTones.size],
-                        outcomes = remember(saved, appState.performance) {
-                            runOutcomes(saved, appState.performance)
-                        },
-                        lead = leadAllowed && dayIndex == 0,
-                        isOpen = saved.id == openRun,
-                        stack = stack,
-                        onBringForward = onBringForward,
-                        onOpen = {
-                            appState.pages.openReport(saved.id)
-                            // Opening also selects, so the companion pane follows what is open.
-                            appState.selectResult(saved)
-                        },
-                        highlighted = saved.id == appState.pendingResultId,
-                        onHighlightShown = { appState.consumePendingResult() },
-                        modifier = cardModifier.staggerIn(dayIndex, enabled = !introDone),
-                    )
+                val posture = LocalFoldPosture.current
+                val openSaved = shown.firstOrNull { it.id == openRun }
+                val openDay = allDays.firstOrNull { day -> day.any { it.id == openRun } }
+                // A report deleted while open, or hidden by a filter, is closed rather than left
+                // open off screen, where the first back press would close it and seem to do nothing.
+                LaunchedEffect(openRun, openSaved == null) {
+                    if (openRun != null && openSaved == null) appState.pages.openReport(null)
+                }
+                val closeReport = { appState.pages.openReport(null) }
+                val open: (SavedAnalysis) -> Unit = { saved ->
+                    appState.pages.openReport(saved.id)
+                    // Opening also selects, so the companion pane follows what is open.
+                    appState.selectResult(saved)
                 }
 
                 @Composable
-                fun stack(day: List<SavedAnalysis>, stackModifier: Modifier, leadAllowed: Boolean = true) {
-                    // A tile only opens now, so no stack is ever holding an open run in step.
-                    SavedRunStack(runs = day, openRunId = null, modifier = stackModifier) {
-                            saved, _, stackAt, onBringForward, cardModifier ->
-                        tile(saved, stackAt, onBringForward, cardModifier, leadAllowed)
-                    }
+                fun card(day: List<SavedAnalysis>, cardModifier: Modifier, compact: Boolean) {
+                    val newest = remember(day) { newestReading(day) }
+                    DayCard(
+                        saved = newest,
+                        readings = day.size,
+                        report = appState.performance,
+                        today = today,
+                        compact = compact,
+                        isOpen = day.any { it.id == openRun },
+                        onOpen = { open(newest) },
+                        highlighted = day.any { it.id == appState.pendingResultId },
+                        onHighlightShown = { appState.consumePendingResult() },
+                        modifier = cardModifier.staggerIn(days.indexOf(day).coerceAtLeast(0), enabled = !introDone),
+                    )
                 }
 
                 @Composable
@@ -374,6 +387,31 @@ internal fun ResultsScreen(appState: AppState) {
                     }
                 }
 
+                // The sessions, week by week. [firstFloor] is tabletop's: the first card stands to
+                // the crease, so what is read is on the upright half and the rest on the flat one.
+                @Composable
+                fun list(grid: Int, compact: Boolean, firstFloor: Dp = 0.dp) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+                        weeks.forEachIndexed { index, (heading, weekDays) ->
+                            heading?.let {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = palette.muted,
+                                    modifier = Modifier.padding(start = Space.s, top = Space.xs),
+                                )
+                            }
+                            ResponsiveRows(weekDays, grid) { day, cardModifier ->
+                                key(day.first().id) {
+                                    val first = index == 0 && day === weekDays.first()
+                                    card(day, if (first) cardModifier.heightIn(min = firstFloor) else cardModifier, compact)
+                                }
+                            }
+                        }
+                        showOlder()
+                    }
+                }
+
                 // Opening a report puts its top at the top of the view.
                 val reveal = remember { BringIntoViewRequester() }
                 LaunchedEffect(openRun) {
@@ -381,63 +419,37 @@ internal fun ResultsScreen(appState: AppState) {
                         reveal.revealIfOnScreen(appState, AppDestination.RESULTS)
                     }
                 }
-
-                val posture = LocalFoldPosture.current
-                val openSaved = shown.firstOrNull { it.id == openRun }
-                // A report deleted while open, or hidden by a filter, is closed rather than left
-                // open off screen, where the first back press would close it and seem to do nothing.
-                LaunchedEffect(openRun, openSaved == null) {
-                    if (openRun != null && openSaved == null) appState.pages.openReport(null)
-                }
-                val closeReport = { appState.pages.openReport(null) }
                 val reportModifier = Modifier.fillMaxWidth().bringIntoViewRequester(reveal)
 
                 @Composable
                 fun report(layout: ReportLayout) {
                     // Keyed by the run, so one report's remembered pieces never serve another's.
-                    key(openSaved!!.id) { OpenReport(openSaved, appState, layout, closeReport, reportModifier) }
+                    key(openSaved!!.id) {
+                        OpenReport(
+                            saved = openSaved,
+                            appState = appState,
+                            layout = layout,
+                            onClose = closeReport,
+                            readings = remember(openDay) { readingsOf(openDay.orEmpty()) },
+                            onPickReading = open,
+                            modifier = reportModifier,
+                        )
+                    }
                 }
 
+                val tabletopFloor = (posture as? FoldPosture.Tabletop)?.let { tabletopHeroHeight(it) } ?: 0.dp
                 when {
-                    openSaved == null && (posture is FoldPosture.Unfolded || posture is FoldPosture.Book) -> {
-                        // Side by side while nothing is open: the runs down one half, and a word on
-                        // the other about what opens there. In book posture the gap is the crease.
-                        SplitColumns(posture, unfoldedStart = 0.42f, start = {
-                            days.forEach { day ->
-                                key(day.first().id) { stack(day, Modifier.fillMaxWidth()) }
-                            }
-                            showOlder()
-                        }, end = {
-                            Tile(Modifier.fillMaxWidth(), tone = TileTone.TILE3) {
-                                Text("Pick a run", style = MaterialTheme.typography.headlineSmall)
-                                Text(
-                                    "Its report opens across the page: every call and the figures " +
-                                        "it was read off.",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.padding(top = Space.s),
-                                )
-                            }
-                        })
-                    }
-                    openSaved == null -> {
-                        Column(verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
-                            ResponsiveRows(days, columns) { day, cardModifier ->
-                                key(day.first().id) { stack(day, cardModifier) }
-                            }
-                            showOlder()
-                        }
-                    }
-                    // Book: the runs stay on the left half and the open report reads on the right,
-                    // the crease between them. The tiles are the short form there.
-                    posture is FoldPosture.Book -> SplitColumns(posture, unfoldedStart = 0.42f, start = {
-                        days.forEach { day ->
-                            key(day.first().id) { stack(day, Modifier.fillMaxWidth(), leadAllowed = false) }
-                        }
-                        showOlder()
-                    }, end = { report(ReportLayout.CARDS) })
-                    // Unfolded the 614dp container clears the table's 600dp, so the report gets
-                    // the whole row and the table.
-                    posture is FoldPosture.Unfolded -> report(ReportLayout.TABLE)
+                    openSaved == null -> list(columns, compact = false, firstFloor = tabletopFloor)
+                    // Unfolded and book: the sessions stay down the left and the report reads on the
+                    // right, the crease between them in book posture. The cards are the short form
+                    // there. The right half is narrower than the table needs on every device this
+                    // runs on, so it reads as stocks and their calls; a pane wide enough gets the table.
+                    posture is FoldPosture.Unfolded || posture is FoldPosture.Book -> SplitColumns(
+                        posture,
+                        unfoldedStart = 0.42f,
+                        start = { list(1, compact = true) },
+                        end = { report(if (posture is FoldPosture.Unfolded) ReportLayout.TABLE else ReportLayout.CARDS) },
+                    )
                     posture is FoldPosture.Tabletop -> report(ReportLayout.TABLETOP)
                     else -> report(ReportLayout.CARDS)
                 }
@@ -453,61 +465,6 @@ internal fun ResultsScreen(appState: AppState) {
  * old 380dp minimum asked for 760dp and never once got it on the screen it was meant for.
  */
 private val SavedRunMinWidth = 300.dp
-
-/**
- * How much of the card behind shows below the one in front, per step of the deck.
- *
- * Below rather than beside, which is most of why this reads at all. Offset to the side, the card
- * behind showed a vertical strip down the edge of the one in front - which is exactly where every
- * card in the app already draws a hairline, so it read as a border before it read as a card. It
- * also charged the width to the wrong card: the front one was inset to make room for it. Stepped
- * down out of the foot the strip sits where the list has a gap anyway, the front card gives up
- * nothing, and the shrink takes the width off the cards behind, where it belongs.
- */
-private val StackStep = 9.dp
-
-/**
- * How many cards are drawn behind the front one.
- *
- * Two, so that a session read twice and a session read three times do not look the same: the depth
- * of the deck is the count, up to here, and past it the dots and `Run 2/5` carry it. Each further
- * step costs [StackStep] of the row's height and another [StackShrink] off that card's width - at
- * two the deepest card is 9% narrower, which still reads as a card further away, and at three it is
- * 13% and reads as a fanned hand of playing cards.
- *
- * Everything deeper than the last step rests exactly under it, covered by it and drawn at nothing.
- * A long stack drawn there is a pile of full-height cards redrawn on every frame of a drag for
- * pixels nobody can see.
- */
-private const val StackDepth = 2
-
-/**
- * How much narrower each step back is drawn, as a fraction.
- *
- * A card further away is a smaller card, and that is what separates a deck from a rule drawn under
- * one card. Small on purpose: a shrink deep enough to notice on its own makes the type on the card
- * behind look as though it is set at a different size from the type on the one in front.
- */
-private const val StackShrink = 0.045f
-
-/**
- * How far past the last drawn step a card is dropped rather than drawn.
- *
- * Cut outright rather than dimmed: nothing in this deck fades, ever, because a fade is the exact
- * fault the opaque backing exists to rule out. Everything past this sits exactly under the last
- * drawn step, covered rather than faded away, so the cut only has to clear the fractional overshoot
- * a live drag can still put a deep card through.
- */
-private const val StackFadeTail = 0.2f
-
-/**
- * The gap the pager leaves between two readings of a session.
- *
- * Named rather than written twice: a card behind cancels the pager's own travel to hold its place
- * in the stack, and travel is a page plus this gap. The two drifting apart would leave the card
- * creeping sideways under the thumb.
- */
-private val StackPageSpacing = Space.s
 
 /**
  * The orders a saved run can be listed in.
@@ -630,458 +587,321 @@ private fun UnreadableNotice(count: Int) {
 }
 
 /**
- * Every reading of one session, as a stack of cards the reader swipes through.
+ * The sessions of the list under the week each belongs to, in the order they came in.
  *
- * A session re-run three times used to fill three cards of the grid with the same date, and the
- * only thing separating them was a line of small print naming the time each was run at. One row per
- * session, with the readings behind it, is what the list was always describing.
- *
- * A day with a single run draws exactly as it always did: no deck, no dots, and still glass. Most
- * days are that day, and a deck drawn around a stack of one is chrome reporting nothing.
- *
- * **The cards behind step down out of the foot**, each one narrower than the one over it, so the
- * depth of the deck is the number of readings and the front card keeps its full width. See
- * [StackStep] for why they are not offset to the side, which is what this replaced.
- *
- * **A deck is opaque, the card in front included.** Glass shows what is behind a card, and behind
- * a card in a deck is another card - so the material would be showing one reading's figures through
- * another's, which is the one thing a page of figures cannot do. The fill is the page's own colour
- * laid under each card, so its glass resolves to exactly the value it resolves to anywhere else on
- * the page and a deck sits in the list at the same weight as the cards beside it.
- *
- * The peek is the real card behind, not a blank standing in for one, so there is nothing for the
- * card to land on and no step where a ghost is swapped for the thing it stood in for. Under the
- * thumb it rises into the front slot; the card being turned lifts fractionally and fades on a
- * squared curve, so it has gone before it has crossed the one behind rather than dragging across it.
- *
- * **A card behind is brought forward, never opened.** A press on the strip below the front card
- * used to open whichever reading was under the thumb, which is never the one the reader meant - the
- * card they can read is the one in front.
+ * A session still to come has no heading: it is what the page leads with, above every week. A run
+ * with no target date is filed by the day it was made.
  */
-@Composable
-internal fun SavedRunStack(
-    runs: List<SavedAnalysis>,
-    /** The run whose report is open, when it is one of these. Null while the whole stack is shut. */
-    openRunId: Long?,
-    modifier: Modifier = Modifier,
-    card: @Composable (SavedAnalysis, Boolean, StackPosition?, (() -> Unit)?, Modifier) -> Unit,
-) {
-    if (runs.size == 1) {
-        // Untouched: no deck to make room for, so the card keeps the page's full width and the
-        // glass every other card on the page is drawn in.
-        card(runs.single(), openRunId != null, null, null, modifier)
-        return
+internal fun groupDaysByWeek(
+    days: List<List<SavedAnalysis>>,
+    today: LocalDate,
+    zone: ZoneId = ScheduleClock.ZONE,
+): List<Pair<String?, List<List<SavedAnalysis>>>> {
+    val weeks = mutableListOf<Pair<String?, MutableList<List<SavedAnalysis>>>>()
+    days.forEach { day ->
+        val newest = newestReading(day)
+        val date = newest.result.recommendationTargetDate ?: newest.result.completedAt.atZone(zone).toLocalDate()
+        val heading = if (date > today) null else weekHeading(date, today)
+        val last = weeks.lastOrNull()
+        if (last != null && last.first == heading) last.second += day else weeks += heading to mutableListOf(day)
     }
-    val open = openRunId != null
-    val openIndex = runs.indexOfFirst { it.id == openRunId }
-    val pager = rememberPagerState(
-        // Opening the day at whichever run is open, rather than at the front: a report opened from
-        // a notification can be any reading of the session, including one behind the front card.
-        initialPage = openIndex.coerceAtLeast(0),
-        pageCount = { runs.size },
-    )
-    LaunchedEffect(openIndex) {
-        if (openIndex >= 0 && openIndex != pager.currentPage) pager.scrollToPage(openIndex)
-    }
-    // How tall the tallest shut card of this session stands, which every other one is then held to.
-    // A run naming six chats is two lines taller than one naming two, and a stack that changed
-    // height under the thumb read as the page moving rather than as a card being turned.
-    //
-    // Measured rather than asked for. `IntrinsicSize` is the obvious way to write this and it
-    // throws: these cards contain a `SubcomposeLayout`, and intrinsic measurement of one is
-    // unsupported - the trap `ResponsiveRows` and `AdaptivePanes` both carry a warning about. Read
-    // back this way the floor can only grow, so it settles in one pass.
-    var tallest by remember(runs) { mutableIntStateOf(0) }
-    val floor = with(LocalDensity.current) { tallest.toDp() }
-    // How the card settles once the thumb is off it. The stock snap runs a card to its stop and
-    // halts it dead, which on a short flick - the way a stack of two or three is actually read - is
-    // most of what read as stiff. A spring damped just under one lands it without a bounce a reader
-    // would have to watch twice to be sure of.
-    // The one number the whole stack is drawn from: the cards' transforms, the dots' marker and the
-    // line of type beside it all read this, so nothing on screen can report a different swipe from
-    // anything else. Built once per stack rather than per card - three cards each holding their own
-    // reader of one pager is three things to keep in step.
-    val stackPosition = remember(pager, runs.size, floor) {
-        StackPosition(
-            runs.size,
-            { pager.currentPage + pager.currentPageOffsetFraction },
-            floor,
-        ) { height -> if (height > tallest) tallest = height }
-    }
-    val fling = PagerDefaults.flingBehavior(
-        state = pager,
-        snapAnimationSpec = spring(
-            dampingRatio = 0.92f,
-            stiffness = Spring.StiffnessMedium,
-        ),
-    )
-    val scope = rememberCoroutineScope()
-    // How many steps of the deck are actually drawn, which is what the row is made taller by. A
-    // session read twice holds one step of room below itself and a session read six times holds two.
-    val steps = (runs.size - 1).coerceAtMost(StackDepth)
-    // The page's own colour, laid under every card in the deck so that its glass resolves over the
-    // page rather than over the reading behind it. See this function's note on why a deck is opaque.
-    val backing = MaterialTheme.colorScheme.background
-    val cardShape = Kit.TileShape
-    // **Since 2026-11-11 there is no destination pager above this deck** - tabs change in place, see
-    // `DestinationSwitch` - so what this connection lets through now reaches nothing and a drag past
-    // the deck's last card simply stops. The note below is how it stood while there was one.
-    //
-    // This page's own width, so a drag that runs past the deck's last card can be handed to the
-    // destination pager but never by more than the one page this deck fills - the same overshoot
-    // `sidewaysGesturesStayOnThePage` exists to prevent, measured locally because this connection
-    // sits closer to the gesture than that one does. -1 until laid out once; nothing is passed on
-    // before then.
-    var pageWidthPx by remember { mutableIntStateOf(-1) }
-    // **Only past the deck's own edge, and only the drag, never the fling.** Every other sideways
-    // gesture inside a page is eaten whole by `sidewaysGesturesStayOnThePage` because there is
-    // always page margin to start a tab-turn from instead - this deck is the page, on a multi-run
-    // day, so the same blanket swallow left nothing to swipe from at all. `canScrollForward` /
-    // `canScrollBackward` say whether the deck itself has anywhere left to go in the drag's
-    // direction; only once it does not is anything let through, and only up to one page width, so
-    // a fast swipe that clears the deck in one motion can turn the tab it was headed for and no
-    // further. Fling is swallowed outright rather than passed on capped: its velocity alone can
-    // clear more than a page, and it is `DestinationPager`'s own fling that should decide how far
-    // a hand-off travels. That leaves one gap - a flick thrown right at the deck's last card, with
-    // too little drag distance for the clamp above to carry, does not turn the page - accepted
-    // because it fails by doing nothing rather than by overshooting.
-    val edgeAware = remember(pager) {
-        object : NestedScrollConnection {
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource,
-            ): Offset {
-                val exhausted = (available.x < 0f && !pager.canScrollForward) ||
-                    (available.x > 0f && !pager.canScrollBackward)
-                if (!exhausted || pageWidthPx < 0) return Offset(available.x, 0f)
-                val freed = available.x.coerceIn(-pageWidthPx.toFloat(), pageWidthPx.toFloat())
-                return Offset(available.x - freed, 0f)
-            }
-
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity) =
-                Velocity(available.x, 0f)
-        }
-    }
-    Box(
-        modifier
-            .fillMaxWidth()
-            .onSizeChanged { pageWidthPx = it.width }
-            .then(if (open) Modifier else Modifier.nestedScroll(edgeAware)),
-    ) {
-        HorizontalPager(
-            state = pager,
-            flingBehavior = fling,
-            // No horizontal peek: the deck steps down rather than across, so every card in the list
-            // is the same width whether its session was read once or four times. A grid row of
-            // cards that do not match reads as a fault before it reads as a hint.
-            pageSpacing = StackPageSpacing,
-            // Without this there is no deck, and that is the fault this whole change began as.
-            // Every card behind is laid out a full page away and carried back under the front one
-            // by its own layer, so as far as the pager is concerned not one of them is in the
-            // viewport - it composed exactly one page, the layers of the rest never ran, and the
-            // strip a reader was meant to see was never drawn at any colour. Nothing about that
-            // reads as broken on a device: the row draws, the dots draw, and a session read twice
-            // simply never says so. `SavedRunStackTest` is the net under it.
-            beyondViewportPageCount = StackDepth,
-            verticalAlignment = Alignment.Top,
-            // Nothing is swiped past an open report. It holds its own sideways pager over a stock's
-            // occurrences and tables that scroll sideways, and a drag landing on either would be
-            // caught by two things at once. Closing it is what puts the stack back under the thumb.
-            userScrollEnabled = !open,
-        ) { page ->
-            val saved = runs[page]
-            val expanded = saved.id == openRunId
-            // Nothing behind an open report is drawn at all - not dimmed, not invisible-but-still-
-            // there, simply absent. A shut sibling still sits close behind the front slot the open
-            // report now occupies, since its own position is measured off its own collapsed height,
-            // not the report's; left drawn there, its opaque backing shows through the top of the
-            // report's ordinary glass fill, which is the report's own material working exactly as
-            // every other open report's does and disagreeing with what is supposed to be behind it.
-            // Skipped rather than hidden with alpha, or the sibling's `Card` would still answer a
-            // touch meant for whatever the report draws in the same place.
-            if (open && !expanded) return@HorizontalPager
-            card(
-                saved,
-                expanded,
-                // The stack's own position and not this card's page, so every card in it reads the
-                // same gesture: what the dots report is where the stack stands, which is the one
-                // thing a card behind and a card in front cannot disagree about.
-                stackPosition,
-                // A reading behind the front of the deck answers a press by coming forward. Read
-                // against the settled page rather than the live position, so a press landing
-                // mid-swipe cannot be answered by a card that is already on its way to the front.
-                // Null while a report is open: nothing in the deck is pressable behind one.
-                if (!open && page != pager.settledPage) {
-                    { scope.launch { pager.animateScrollToPage(page) } }
-                } else {
-                    null
-                },
-                if (expanded) {
-                    // An open report is as tall as its report. Holding it to the shut cards' floor
-                    // would be measuring it against something it is not.
-                    Modifier.fillMaxWidth()
-                } else {
-                    Modifier.fillMaxWidth()
-                        // The room the deck steps down into, held by the page itself rather than
-                        // taken off the pager. A pager clips its pages, and the slack it leaves on
-                        // the cross axis is an implementation detail of the platform (30dp, for
-                        // shadows) - a deck that fitted inside it would be a deck drawn at the
-                        // mercy of a constant nobody here chose. Held by the page, the steps are
-                        // inside the bounds they are drawn in whatever the depth.
-                        .padding(bottom = StackStep * steps)
-                        // A lower run number is always the card on top. Left to the pager, page 2
-                        // draws over page 1, and the card that is meant to be underneath swipes
-                        // across the front of the one it is behind.
-                        .zIndex(-page.toFloat())
-                        // Applied unconditionally, every page, every frame - never branched on in
-                        // the composable body. Until 2026-09-22 a page was drawn one of three ways
-                        // - a step waiting behind, the page under the thumb, or a page already
-                        // passed - and which of the three applied was itself read from
-                        // `pager.currentPage`/`currentPageOffsetFraction` up here, outside the
-                        // layer. Two faults came of that, one in what it drew and one in what it
-                        // cost. What it drew: a page's drawing moved between three separate blocks
-                        // of maths as `currentPage` rolled over mid-drag, and two of those three
-                        // disagreed with each other at the seam - a step's shrink disagreed with
-                        // its own screen position and with the front card's own sink, so a page's
-                        // size and position both snapped at the exact instant it became the front
-                        // card, which is what read as the animation changing shape mid-swipe and a
-                        // further card popping into the deck rather than sliding into it. What it
-                        // cost: choosing *which* modifier applies is a composition-time decision,
-                        // and the discarded first attempt at fixing the drawing fault above picked
-                        // the branch from a `distance` computed from `currentPageOffsetFraction` -
-                        // a value that changes every frame of a drag - straight in the composable
-                        // body, which is exactly the trap this file's own comments warn about
-                        // elsewhere on this same pager: it recomposed every card of every stack on
-                        // every frame of any drag anywhere on the page, which is what made a drag
-                        // feel dead rather than merely wrong. One continuous `distance`, computed
-                        // fresh inside the layer below on every frame without recomposing anything,
-                        // and applied the same way whichever side of the front it lands on, has
-                        // neither fault: nothing about a page's own drawing changes shape at any
-                        // instant, and nothing above this layer ever reads a value that changes
-                        // faster than a page turning.
-                        .graphicsLayer {
-                            // How far this page sits from the front, in pages: 0 once it is the
-                            // page under the thumb, positive while it is still a step waiting
-                            // behind, negative once it has been swiped past.
-                            val distance =
-                                (page - pager.currentPage) - pager.currentPageOffsetFraction
-                            // Every card grows and shrinks about the middle of its own top edge.
-                            // About its centre the shrink would pull the foot up by half of what
-                            // it takes and eat the very step the deck is drawn to show; held at
-                            // the top, a card's head stays where its neighbour's is and the whole
-                            // of the shrink is spent below, which is where it can be seen.
-                            transformOrigin = TransformOrigin(0.5f, 0f)
-                            // Held at its own step regardless of how far a drag has gone - the
-                            // pager's own placement for this page is cancelled outright by this
-                            // same distance and replaced with a much smaller, constant-width step,
-                            // because a page still waiting is carried further along by a drag
-                            // *toward* it, not pulled back by one.
-                            //
-                            // **Only while still waiting.** A page already passed keeps the
-                            // pager's own placement instead - this cancellation is what pins a
-                            // step near the centre, and a passed page pinned there the same way
-                            // sits back at the centre it just left, on top of the very page that
-                            // replaced it (a lower run number always draws over a higher one,
-                            // steps included, and a passed page is a lower number than whichever
-                            // step or front card is now in front of it). That shipped for a few
-                            // hours on 2026-09-22 as "the next card doesn't show in front" - the
-                            // old front card, held to zero by this same cancellation, never left.
-                            translationX = if (distance >= 0f) {
-                                -distance * (size.width + StackPageSpacing.toPx())
-                            } else {
-                                0f
-                            }
-                            // Symmetric about the front: a step still waiting (positive distance)
-                            // and a card that has just sunk into the deck (negative) shrink by the
-                            // same amount at the same remove, which is what makes leaving read as
-                            // joining the stack it came from rather than sliding off the edge.
-                            val t = distance.absoluteValue.coerceAtMost(StackDepth.toFloat())
-                            val shrunk = 1f - StackShrink * t
-                            scaleX = shrunk
-                            scaleY = shrunk
-                            // The shrink lifts this card's foot by its own height times what was
-                            // taken off it; adding that back is what makes the step below the card
-                            // in front exactly StackStep whatever height the deck settled on,
-                            // rather than a figure that shrinks as the cards do.
-                            translationY = size.height * (1f - shrunk) + StackStep.toPx() * t
-                            // The step a reader can actually see is never dimmed. Fully opaque
-                            // throughout - nothing in this deck fades, ever, because a fade is the
-                            // exact fault the opaque backing below exists to rule out: one card
-                            // and the reading behind it both readable at once. Everything past the
-                            // last drawn step sits under it at nothing, exactly covered rather
-                            // than faded away.
-                            // Against the uncapped distance: `t` stops at StackDepth, so it could
-                            // never pass this line and nothing past the last step was ever hidden.
-                            alpha = if (distance.absoluteValue > StackDepth + StackFadeTail) 0f else 1f
-                        }
-                        // The card's own glass resolves over the page's colour rather than over
-                        // the reading behind it, which is what makes the deck opaque.
-                        .background(backing, cardShape)
-                },
-            )
-        }
-    }
+    return weeks
 }
 
 /**
- * Where the stack stands, for the dots and the line of type beside them.
+ * One session in the list, drawn from its newest reading: which day, how its calls have gone, who
+ * leads and who trails, which stocks, and how often it was read. A card only opens.
  *
- * A live position rather than this card's own page number, because the readout is the gesture: the
- * marker travels with the cards on the same fraction they move on, and the words turn over as it
- * crosses the halfway mark. A lambda for the reason the cards' transforms are read in their layer -
- * read as a value, every card of every stack would recompose for each frame of a drag.
- *
- * [floor] and [reportHeight] ride along for a second reason entirely: they are what a shut card
- * needs to pin its own footer under its own header rather than under whatever a taller sibling
- * reading needed, while staying in step with those siblings. [reportHeight] must be fed this
- * card's own *natural* height - the sum of its header-group and footer-group, measured, never the
- * gap [SavedAnalysisCard] inserts between them - because that gap is derived from [floor] itself,
- * and a card already sitting at the floor would otherwise report the floor straight back as if it
- * were new content, growing without bound one recomposition at a time. A card genuinely taller
- * than every other reading still pushes the floor up to meet it; a card already covered by it
- * reports a number [floor] already accounts for and changes nothing.
- */
-internal class StackPosition(
-    val count: Int,
-    val position: () -> Float,
-    val floor: Dp,
-    val reportHeight: (Int) -> Unit,
-)
-
-/**
- * One run in the list: which session it was for, and how its calls went. A tile only opens; what
- * the run's menu used to offer is on About this run, inside the report.
- *
- * [lead] is the first day's run, which says the most - how many calls, from where, and the three
- * outcomes as figures. Every other tile says one figure, so the list reads as one story with
- * footnotes rather than a column of equal boxes. [isOpen] is book posture's, where the list stays
- * beside the report it opened.
+ * Its colour is its state, not its place in the list: a session still to come is the one cobalt
+ * tile, and says what is waiting rather than three noughts; every other session is a white card
+ * whose strip carries the colour. [compact] is the short form beside an open report.
  */
 @Composable
-private fun RunTile(
+private fun DayCard(
     saved: SavedAnalysis,
-    tone: TileTone,
-    outcomes: RunOutcomes,
-    lead: Boolean,
+    /** How many times the session was read; [saved] is the last of them. */
+    readings: Int,
+    report: PerformanceReport,
+    today: LocalDate,
+    compact: Boolean,
     isOpen: Boolean,
-    /** Which reading of its session this is, where the session was read more than once. */
-    stack: StackPosition?,
-    /**
-     * Set on a reading sitting behind the front of its day's deck: a press brings it forward
-     * instead of opening it. The reader can only read the card in front, so that is the only one a
-     * press can honestly mean.
-     */
-    onBringForward: (() -> Unit)?,
     onOpen: () -> Unit,
     /** Opened from a notification: its edge flashes briefly. */
     highlighted: Boolean,
     onHighlightShown: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val callCount = saved.callCount()
+    val target = saved.result.recommendationTargetDate
+    val upcoming = target != null && target > today
     val flash = arrivalFlash(highlighted, onHighlightShown)
     Tile(
         modifier = modifier
             .fillMaxWidth()
             .then(if (flash != null) Modifier.border(flash, Kit.TileShape) else Modifier),
-        tone = tone,
-        onClick = onBringForward ?: onOpen,
+        tone = if (upcoming) TileTone.HERO else TileTone.CARD,
+        onClick = onOpen,
         onClickLabel = "Open report",
         contentPadding = PaddingValues(Space.l),
     ) {
-        val soft = LocalContentColor.current.copy(alpha = 0.66f)
-        val target = saved.result.recommendationTargetDate
-        val label = runLabel(target, LocalDate.now(ScheduleClock.ZONE), ScheduleClock.lastFinalSession())
-        val shownLabel = if (isOpen) listOfNotNull(label, "open on the right").joinToString(" · ") else label
-        shownLabel?.let {
-            Text(it, style = MaterialTheme.typography.labelMedium, color = soft, maxLines = 1)
-        }
-        Text(
-            target?.format(RUN_DATE_FORMAT) ?: runTitle(saved.result.completedAt),
-            style = MaterialTheme.typography.headlineSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        if (lead) {
-            Text(
-                runSentence(callCount, saved.stockCount(), saved.channelNames().size),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = Space.s),
-            )
-            Row(Modifier.fillMaxWidth().padding(top = Space.m)) {
-                RunFigure(outcomes.hit, "reached target", Modifier.weight(1f))
-                RunFigure(outcomes.open, "still running", Modifier.weight(1f))
-                RunFigure(outcomes.stopped, "stopped", Modifier.weight(1f))
-            }
+        val soft = LocalContentColor.current.copy(alpha = 0.7f)
+        val lastFinal = ScheduleClock.lastFinalSession()
+        val label = listOfNotNull(
+            runLabel(target, today, lastFinal),
+            "waiting for the open".takeIf { upcoming },
+            "open on the right".takeIf { isOpen },
+        ).joinToString(" · ").replaceFirstChar(Char::uppercase).takeIf(String::isNotEmpty)
+        val date = target?.format(RUN_DATE_FORMAT) ?: runTitle(saved.result.completedAt)
+        val read = readLine(readings, saved.result.completedAt)
+        if (upcoming) {
+            UpcomingBody(saved, label, date, read, soft, compact)
         } else {
-            Row(Modifier.padding(top = Space.m), verticalAlignment = Alignment.Bottom) {
-                Text(
-                    "${outcomes.hit}/$callCount",
-                    style = MaterialTheme.typography.headlineMedium.copy(fontFamily = TabularFigures),
-                    maxLines = 1,
-                )
-                Text(
-                    "reached target",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = soft,
-                    modifier = Modifier.padding(start = Space.s, bottom = 4.dp),
-                )
-            }
-        }
-        if (outcomes.total > 0) {
-            val strip = Outcomes(outcomes.hit, outcomes.stopped, outcomes.expired, outcomes.open)
-            // On the cobalt tile the bar's own open colour is close to the tile's, so it sits on a
-            // white track there rather than vanishing into its ground.
-            if (tone == TileTone.HERO) {
-                Box(
-                    Modifier
-                        .padding(top = Space.s)
-                        .fillMaxWidth()
-                        .clip(Kit.Capsule)
-                        .background(palette.card)
-                        .padding(3.dp),
-                ) { OutcomeStrip(strip) }
-            } else {
-                OutcomeStrip(strip, Modifier.padding(top = Space.s))
-            }
-        }
-        // Which reading of the session this tile is, under the figures.
-        stack?.let {
-            val showing by remember(it) { derivedStateOf { it.position().roundToInt() + 1 } }
-            Column(
-                Modifier.fillMaxWidth().padding(top = Space.m),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(Space.xs),
-            ) {
-                PageDots(it.count, it.position)
-                Text(
-                    "Run $showing/${it.count}",
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-                    color = soft,
-                    maxLines = 1,
-                )
-            }
+            SettledBody(
+                saved, report, label, date, read, soft, compact,
+                stillOpen = target != null && target == today && lastFinal < target,
+            )
         }
     }
 }
 
-/** A figure over its word, on the lead run tile. */
+/** A session that has not opened yet: what is waiting, on which stocks, from whom. */
 @Composable
-private fun RunFigure(value: Int, label: String, modifier: Modifier = Modifier) {
-    Column(modifier) {
+private fun ColumnScope.UpcomingBody(
+    saved: SavedAnalysis,
+    label: String?,
+    date: String,
+    read: String,
+    soft: Color,
+    compact: Boolean,
+) {
+    label?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = soft, maxLines = 1) }
+    Text(date, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    val points = saved.result.consolidated.flatMap { it.dataPoints }
+    val watching = points.count { it.isWatching }
+    Text(
+        upcomingSentence(
+            take = if (points.isEmpty()) saved.callCount() else points.size - watching,
+            watch = watching,
+            stocks = saved.stockCount(),
+        ),
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.padding(top = Space.s),
+    )
+    val tickers = saved.result.consolidated.map { it.stockCode }
+    if (tickers.isNotEmpty()) {
+        if (!compact) {
+            Row(Modifier.padding(top = Space.m), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+                tickers.take(MaxLogos).forEach { StockLogo(it, 28.dp) }
+            }
+        }
         Text(
-            value.toString(),
-            style = MaterialTheme.typography.headlineMedium.copy(fontFamily = TabularFigures),
-            maxLines = 1,
-        )
-        Text(
-            label,
+            shortList(tickers, MaxNamed, " · "),
             style = MaterialTheme.typography.labelMedium,
-            color = LocalContentColor.current.copy(alpha = 0.66f),
-            maxLines = 1,
+            color = soft,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = Space.s),
         )
     }
+    val channels = channelCallCounts(saved).joinToString(" · ") { (name, calls) -> "$name $calls" }
+    Text(
+        listOf(channels, read).filter(String::isNotEmpty).joinToString(" · "),
+        style = MaterialTheme.typography.labelMedium,
+        color = soft,
+        modifier = Modifier.padding(top = Space.xs),
+    )
+}
+
+/** A session that is trading or has traded: the figure, the strip and what it counts, who leads. */
+@Composable
+private fun ColumnScope.SettledBody(
+    saved: SavedAnalysis,
+    report: PerformanceReport,
+    label: String?,
+    date: String,
+    read: String,
+    soft: Color,
+    compact: Boolean,
+    stillOpen: Boolean,
+) {
+    val outcomes = remember(saved, report) { runOutcomes(saved, report) }
+    Row(verticalAlignment = Alignment.Top) {
+        Column(Modifier.weight(1f)) {
+            label?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = soft, maxLines = 1) }
+            Text(date, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Column(Modifier.padding(start = Space.s), horizontalAlignment = Alignment.End) {
+            Text(
+                "${outcomes.hit} of ${saved.callsToTake()}",
+                style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
+                maxLines = 1,
+            )
+            Text(
+                if (stillOpen) "reached target so far" else "reached target",
+                style = MaterialTheme.typography.labelMedium,
+                color = soft,
+                maxLines = 1,
+            )
+        }
+    }
+    if (outcomes.total > 0) {
+        OutcomeStrip(
+            Outcomes(outcomes.hit, outcomes.stopped, outcomes.expired, outcomes.open),
+            Modifier.padding(top = Space.m),
+        )
+        // The strip's own counts, written: a bar alone says "mostly blue" and no more.
+        FlowRow(
+            Modifier.padding(top = Space.s),
+            horizontalArrangement = Arrangement.spacedBy(Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.xs),
+        ) {
+            if (outcomes.hit > 0) LegendItem(outcomes.hit, "reached", palette.gain)
+            if (outcomes.open > 0) LegendItem(outcomes.open, "running", palette.heroInk)
+            if (outcomes.stopped > 0) LegendItem(outcomes.stopped, "stopped", palette.loss)
+            if (outcomes.expired > 0) LegendItem(outcomes.expired, "ran out of time", palette.muted)
+        }
+    }
+    val (best, worst) = remember(saved, report) {
+        runExtremes(saved) { code -> report.latestPrices[Scoring.normalizeTicker(code)]?.session?.close }
+    }
+    if (best != null) {
+        if (compact) {
+            Text(
+                listOfNotNull(
+                    "Best ${best.ticker} ${formatPercent(best.pct)}",
+                    worst?.let { "worst ${it.ticker} ${formatPercent(it.pct)}" },
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = Space.s),
+            )
+        } else {
+            Row(Modifier.padding(top = Space.m), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                ExtremeBox("Best so far", best, Modifier.weight(1f))
+                if (worst != null) ExtremeBox("Worst so far", worst, Modifier.weight(1f))
+            }
+        }
+    }
+    if (!compact) {
+        val standings = remember(saved, report) { stockStandings(saved, report) }
+        if (standings.isNotEmpty()) {
+            FlowRow(
+                Modifier.padding(top = Space.s),
+                horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
+                standings.take(MaxNamed).forEach { standing ->
+                    KitTag(
+                        standing.ticker,
+                        tone = when (standing.group) {
+                            CallGroup.REACHED -> palette.gain
+                            CallGroup.STOPPED -> palette.loss
+                            else -> palette.muted
+                        },
+                    )
+                }
+                if (standings.size > MaxNamed) KitTag("+${standings.size - MaxNamed} more", tone = palette.muted)
+            }
+        }
+    }
+    val channels = saved.channelNames().size
+    Text(
+        listOfNotNull(
+            plural(saved.stockCount(), "stock"),
+            plural(channels, "channel").takeIf { channels > 0 },
+            read,
+        ).joinToString(" · "),
+        style = MaterialTheme.typography.labelMedium,
+        color = soft,
+        modifier = Modifier.padding(top = Space.s),
+    )
+}
+
+/** One count of the strip, written: the figure in the strip's colour, the word in the card's. */
+@Composable
+private fun LegendItem(count: Int, word: String, tone: Color) {
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = tone, fontFamily = TabularFigures, fontWeight = FontWeight.SemiBold)) {
+                append(count.toString())
+            }
+            append(" $word")
+        },
+        style = MaterialTheme.typography.labelMedium,
+        maxLines = 1,
+    )
+}
+
+/** The stock furthest ahead of its entry, or furthest behind, on a session's card. */
+@Composable
+private fun ExtremeBox(label: String, move: StockMove, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(palette.ground)
+            .padding(horizontal = Space.m, vertical = Space.s),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = palette.muted, maxLines = 1)
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+            Text(
+                move.ticker,
+                style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                maxLines = 1,
+            )
+            Text(
+                formatPercent(move.pct),
+                style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                color = if (move.pct >= 0) palette.gain else palette.loss,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/** How many logos a card for a session still to come draws, and how many stocks any card names. */
+private const val MaxLogos = 6
+private const val MaxNamed = 6
+
+/** A stock and how far its price stands from the entry of a call on it, as a percentage. */
+internal data class StockMove(val ticker: String, val pct: Double)
+
+/**
+ * The call of [saved] furthest above its entry and the one furthest below, by the latest close.
+ * The second is null where both would be the same stock, so a run with one priced call says one
+ * thing rather than the same thing twice. Watched stocks are left out: they have no entry taken.
+ */
+internal fun runExtremes(saved: SavedAnalysis, closeFor: (String) -> Double?): Pair<StockMove?, StockMove?> {
+    val moves = saved.result.consolidated.flatMap { stock ->
+        val close = closeFor(stock.stockCode)
+        stock.dataPoints.filterNot { it.isWatching }
+            .mapNotNull { point -> moveVsEntry(point, close)?.let { StockMove(stock.stockCode, it) } }
+    }
+    val best = moves.maxByOrNull { it.pct }
+    val worst = moves.minByOrNull { it.pct }?.takeIf { it.ticker != best?.ticker }
+    return best to worst
+}
+
+/** How many calls each channel made in [saved], most first, by the message each call cites. */
+internal fun channelCallCounts(saved: SavedAnalysis): List<Pair<String, Int>> {
+    val names = saved.result.sources
+        .filter { it.messageId != null }
+        .associate { it.messageId.toString() to it.channelName }
+    return saved.result.consolidated.flatMap { it.dataPoints }
+        .mapNotNull { names[it.sourceMessageId]?.takeIf(String::isNotBlank) }
+        .groupingBy { it }
+        .eachCount()
+        .toList()
+        .sortedByDescending { it.second }
+}
+
+/** The first [max] of [items], then how many more there are. */
+internal fun shortList(items: List<String>, max: Int, separator: String): String =
+    items.take(max).joinToString(separator) + if (items.size > max) " and ${items.size - max} more" else ""
+
+/** The calls of a run that are calls to take: every occurrence that is not a watch. */
+private fun SavedAnalysis.callsToTake(): Int {
+    val points = result.consolidated.flatMap { it.dataPoints }
+    return if (points.isEmpty()) callCount() else points.count { !it.isWatching }
 }
 
 /** Every occurrence in the report: one stock named by three channels is three calls to check. */
@@ -1094,10 +914,10 @@ private fun SavedAnalysis.stockCount(): Int =
 
 private fun plural(count: Int, one: String, many: String = one + "s") = "$count ${if (count == 1) one else many}"
 
-/** "14 calls on 9 stocks, from 3 channels", dropping the channels where the run names none. */
-internal fun runSentence(calls: Int, stocks: Int, channels: Int): String =
-    plural(calls, "call") + " on " + plural(stocks, "stock") +
-        (if (channels > 0) ", from " + plural(channels, "channel") else "")
+/** "4 calls to take and 1 to watch, on 4 stocks", or "5 calls on 4 stocks" where nothing is watched. */
+internal fun upcomingSentence(take: Int, watch: Int, stocks: Int): String =
+    (if (watch > 0) plural(take, "call") + " to take and $watch to watch, on " else plural(take, "call") + " on ") +
+        plural(stocks, "stock")
 
 /**
  * The small label above a run's date: "Yesterday", "Last week" - or, for a session still trading,
@@ -1161,6 +981,9 @@ private fun OpenReport(
     appState: AppState,
     layout: ReportLayout,
     onClose: () -> Unit,
+    /** Every reading of this report's session, newest first. One entry where it was read once. */
+    readings: List<Reading> = emptyList(),
+    onPickReading: (SavedAnalysis) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val pages = appState.pages
@@ -1268,6 +1091,7 @@ private fun OpenReport(
 
     @Composable
     fun bar() = ReportBar(
+        saved = saved,
         onBack = onClose,
         onShare = { appState.shareReport(saved) },
         onAbout = { pages.resultsAboutOpen.value = true },
@@ -1300,18 +1124,17 @@ private fun OpenReport(
             return@Column
         }
         bar()
-        val header: @Composable (Modifier) -> Unit = { m ->
-            ReportHeader(saved, calls, counts, tradedCount, outcomes, m)
-        }
-        val best = if (layout == ReportLayout.TABLE) bestSoFar(calls, latestFor) else null
-        if (best != null) {
-            Row(horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
-                header(Modifier.weight(1f))
-                BestSoFarTile(best.first, best.second, Modifier.width(BestTileWidth))
-            }
-        } else {
-            header(Modifier.fillMaxWidth())
-        }
+        ReportHeader(
+            saved = saved,
+            taken = calls.count { it.group != CallGroup.WATCHING },
+            watching = counts[CallGroup.WATCHING] ?: 0,
+            tradedCount = tradedCount,
+            outcomes = outcomes,
+            best = if (layout == ReportLayout.TABLE) bestSoFar(calls, latestFor) else null,
+            readings = readings,
+            onReadings = { pages.resultsReadingsOpen.value = true },
+            modifier = Modifier.fillMaxWidth(),
+        )
         if (legacy) {
             // Analyses saved before the consolidated contract have no nested occurrences, so they
             // fall back to a flat list, with no chips: there is nothing to sort into groups.
@@ -1325,14 +1148,29 @@ private fun OpenReport(
                     color = palette.muted,
                 )
             }
-            // The report's stocks in their own order, each carrying only its calls still shown.
-            val stocks = saved.result.consolidated.mapNotNull { stock ->
+            // The report's stocks, each carrying only its calls still shown.
+            val unsorted = saved.result.consolidated.mapNotNull { stock ->
                 shownCalls.filter { it.stock === stock }.map(ReportCall::point)
                     .takeIf(List<RecommendationDataPoint>::isNotEmpty)
                     ?.let { stock.copy(dataPoints = it) }
             }
             fun callOf(stock: ConsolidatedRecommendation, point: RecommendationDataPoint) =
                 byAnchor[stock.anchorOf(point) to point.parseIndex]
+            var sort by pages.resultsCallSort
+            fun closeOf(stock: ConsolidatedRecommendation) = latestFor(stock.stockCode)?.session?.close
+            // Stable, so stocks the chosen order cannot tell apart stay in the report's own order.
+            val stocks = when (sort) {
+                CallSort.REPORT -> unsorted
+                CallSort.CLOSEST -> unsorted.sortedBy { stock ->
+                    stock.dataPoints.minOf { point ->
+                        closenessKey(callOf(stock, point)?.group ?: CallGroup.RUNNING, point.target1, closeOf(stock))
+                    }
+                }
+                CallSort.MOVE -> unsorted.sortedByDescending { stock ->
+                    stock.dataPoints.mapNotNull { moveVsEntry(it, closeOf(stock)) }.maxOrNull() ?: Double.NEGATIVE_INFINITY
+                }
+            }
+            if (stocks.size > 1) SortRow(stocks.size, sort) { sort = it }
             BoxWithConstraints {
                 if (layout == ReportLayout.TABLE && maxWidth >= TableMinWidth) {
                     RecommendationTable(
@@ -1346,7 +1184,7 @@ private fun OpenReport(
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                         stocks.forEach { stock ->
-                            RecommendationCards(
+                            StockCallsCard(
                                 stock = stock,
                                 channelFor = { messageId -> channelNames[messageId] },
                                 trades = trades,
@@ -1447,6 +1285,18 @@ private fun OpenReport(
             EditCallSheet(stock, point, editor, onDismiss = { editing = null })
         }
     }
+    if (pages.resultsReadingsOpen.value && readings.size > 1) {
+        ReadingsSheet(
+            readings = readings,
+            showing = saved.id,
+            day = saved.result.recommendationTargetDate?.format(RUN_DATE_FORMAT) ?: "This session",
+            onPick = { picked ->
+                pages.resultsReadingsOpen.value = false
+                if (picked.id != saved.id) onPickReading(picked)
+            },
+            onDismiss = { pages.resultsReadingsOpen.value = false },
+        )
+    }
     if (pages.resultsAboutOpen.value) {
         KitSheet(
             onDismiss = { pages.resultsAboutOpen.value = false },
@@ -1458,19 +1308,28 @@ private fun OpenReport(
     }
 }
 
-/** Back to the list on the left, and the report's two actions on the right. */
+/** Back to the list, which session this is, and the report's two actions. */
 @Composable
-private fun ReportBar(onBack: () -> Unit, onShare: () -> Unit, onAbout: () -> Unit) {
+private fun ReportBar(saved: SavedAnalysis, onBack: () -> Unit, onShare: () -> Unit, onAbout: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        KitButton(
-            "Results",
+        KitIconButton(
+            Icons.AutoMirrored.Outlined.ArrowBack,
+            label = "Back to all runs",
             onClick = onBack,
-            kind = ButtonKind.SECONDARY,
-            size = ButtonSize.SMALL,
-            icon = Icons.AutoMirrored.Outlined.ArrowBack,
-            modifier = Modifier.semantics { contentDescription = "Back to all runs" },
+            filled = true,
         )
-        Spacer(Modifier.weight(1f))
+        Column(Modifier.weight(1f).padding(horizontal = Space.m)) {
+            val target = saved.result.recommendationTargetDate
+            runLabel(target, LocalDate.now(ScheduleClock.ZONE), ScheduleClock.lastFinalSession())?.let {
+                Text(it, style = MaterialTheme.typography.labelMedium, color = palette.muted, maxLines = 1)
+            }
+            Text(
+                target?.format(RUN_DATE_FORMAT) ?: runTitle(saved.result.completedAt),
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         KitIconButton(Icons.Outlined.Share, label = "Share this report", onClick = onShare, filled = true, size = 40.dp)
         Spacer(Modifier.width(Space.s))
         KitIconButton(Icons.Outlined.Info, label = "About this run", onClick = onAbout, filled = true, size = 40.dp)
@@ -1478,89 +1337,186 @@ private fun ReportBar(onBack: () -> Unit, onShare: () -> Unit, onAbout: () -> Un
 }
 
 /**
- * What the open report amounts to, on one ink tile: when, how much, how it has gone. Its money
- * colours come from [tileSignals], because the ink tile swaps lightness with the theme.
+ * What the open report amounts to, on one ink tile: how many of its calls reached a target, out of
+ * how much, and the strip. The counts by status are on the chips under it, once. Where the session
+ * was read more than once the tile says which reading this is, and pressing that lists the others.
+ * Its money colours come from [tileSignals], because the ink tile swaps lightness with the theme.
  */
 @Composable
 private fun ReportHeader(
     saved: SavedAnalysis,
-    calls: List<ReportCall>,
-    counts: Map<CallGroup, Int>,
+    taken: Int,
+    watching: Int,
     tradedCount: Int,
     outcomes: RunOutcomes,
+    best: Pair<String, Double>?,
+    readings: List<Reading>,
+    onReadings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val signals = tileSignals(TileTone.INK)
     Tile(modifier, tone = TileTone.INK, contentPadding = PaddingValues(Space.l)) {
         val soft = LocalContentColor.current.copy(alpha = 0.7f)
         val target = saved.result.recommendationTargetDate
-        runLabel(target, LocalDate.now(ScheduleClock.ZONE), ScheduleClock.lastFinalSession())?.let {
-            Text(it, style = MaterialTheme.typography.labelMedium, color = soft, maxLines = 1)
+        val stillOpen = target != null && target == LocalDate.now(ScheduleClock.ZONE) &&
+            ScheduleClock.lastFinalSession() < target
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "${outcomes.hit} of $taken",
+                    style = MaterialTheme.typography.headlineMedium.copy(fontFamily = TabularFigures),
+                    maxLines = 1,
+                )
+                Text(
+                    reportDetail(stillOpen, saved.stockCount(), saved.channelNames().size, watching, tradedCount),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = soft,
+                )
+            }
+            Column(
+                Modifier.padding(start = Space.s),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
+                best?.let { (ticker, move) ->
+                    Text("Best so far", style = MaterialTheme.typography.labelSmall, color = soft, maxLines = 1)
+                    Text(
+                        "$ticker ${formatPercent(move)}",
+                        style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures),
+                        color = if (move >= 0) signals.gain else signals.loss,
+                        maxLines = 1,
+                    )
+                }
+                if (readings.size > 1) {
+                    // Counted from the first reading of the day, so the newest is "3 of 3".
+                    val index = readings.size - readings.indexOfFirst { it.saved.id == saved.id }
+                    KitTag(
+                        "Read at ${readingTime(saved.result.completedAt)} · $index of ${readings.size}",
+                        tone = LocalContentColor.current,
+                        onClick = onReadings,
+                    )
+                }
+            }
         }
-        Text(
-            target?.format(RUN_DATE_FORMAT) ?: runTitle(saved.result.completedAt),
-            style = MaterialTheme.typography.headlineSmall,
-            maxLines = 1,
-        )
-        Text(
-            reportSentence(
-                calls = calls.count { it.group != CallGroup.WATCHING },
-                watching = counts[CallGroup.WATCHING] ?: 0,
-                stocks = saved.stockCount(),
-                channels = saved.channelNames().size,
-                bought = tradedCount,
-            ),
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(top = Space.s),
-        )
         if (outcomes.total > 0) {
             OutcomeStrip(
                 Outcomes(outcomes.hit, outcomes.stopped, outcomes.expired, outcomes.open),
                 Modifier.padding(top = Space.m),
             )
         }
-        Row(
-            Modifier.fillMaxWidth().padding(top = Space.m),
-            horizontalArrangement = Arrangement.spacedBy(Space.m),
-        ) {
-            Text("${counts[CallGroup.REACHED] ?: 0} reached target", style = MaterialTheme.typography.labelLarge, color = signals.gain)
-            Text("${counts[CallGroup.RUNNING] ?: 0} running", style = MaterialTheme.typography.labelLarge, color = signals.accent)
-            Text("${counts[CallGroup.STOPPED] ?: 0} stopped", style = MaterialTheme.typography.labelLarge, color = signals.loss)
+    }
+}
+
+/** "reached target · 9 stocks · 3 channels · 2 to watch · 1 bought", each part only where it is not nought. */
+internal fun reportDetail(stillOpen: Boolean, stocks: Int, channels: Int, watching: Int, bought: Int): String =
+    buildList {
+        add(if (stillOpen) "reached target so far" else "reached target")
+        add(plural(stocks, "stock"))
+        if (channels > 0) add(plural(channels, "channel"))
+        if (watching > 0) add("$watching to watch")
+        if (bought > 0) add("$bought bought")
+    }.joinToString(" · ")
+
+/** How many stocks are listed and in what order, with the control that changes the order. */
+@Composable
+private fun SortRow(stocks: Int, sort: CallSort, onSort: (CallSort) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "${plural(stocks, "stock")}, ${sort.sentence}",
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.muted,
+            modifier = Modifier.weight(1f).padding(start = Space.s),
+        )
+        Box {
+            KitButton("Sort", onClick = { open = true }, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
+            KitMenu(
+                expanded = open,
+                onDismiss = { open = false },
+                items = CallSort.entries.map { choice ->
+                    MenuItem(choice.label) {
+                        open = false
+                        onSort(choice)
+                    }
+                },
+            )
         }
     }
 }
 
-/** "14 calls and 2 to watch · 9 stocks · 3 channels · 2 bought", each part only where it is not nought. */
-internal fun reportSentence(calls: Int, watching: Int, stocks: Int, channels: Int, bought: Int): String =
-    buildList {
-        add(plural(calls, "call") + if (watching > 0) " and $watching to watch" else "")
-        add(plural(stocks, "stock"))
-        if (channels > 0) add(plural(channels, "channel"))
-        if (bought > 0) add("$bought bought")
-    }.joinToString(" · ")
+/**
+ * Every reading of one session: when each was made, how much it found, and what it found that the
+ * one before had not. Pressing one opens that reading in place of the one showing.
+ */
+@Composable
+private fun ReadingsSheet(
+    readings: List<Reading>,
+    showing: Long,
+    day: String,
+    onPick: (SavedAnalysis) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    KitSheet(
+        onDismiss = onDismiss,
+        posture = LocalFoldPosture.current,
+        title = "Readings of $day",
+    ) {
+        // The sheet's own title is only announced, so the heading is drawn here.
+        Text(
+            "$day was read ${readings.size} times",
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.padding(bottom = Space.s),
+        )
+        Text(
+            "Each reading holds every call found up to that time. The list and its figures use the newest one.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.muted,
+        )
+        val shape = RoundedCornerShape(20.dp)
+        readings.forEachIndexed { index, reading ->
+            val current = reading.saved.id == showing
+            val time = readingTime(reading.saved.result.completedAt)
+            Row(
+                Modifier
+                    .padding(top = Space.s)
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(palette.raised)
+                    .then(if (current) Modifier.border(2.dp, palette.ink, shape) else Modifier)
+                    .clickable(onClickLabel = "Open the $time reading") { onPick(reading.saved) }
+                    .padding(Space.m),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(time, style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures))
+                    Text(
+                        "${plural(reading.calls, "call")} on ${plural(reading.stocks, "stock")}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.muted,
+                    )
+                    val before = readings.getOrNull(index + 1)?.saved?.result?.completedAt?.let(::readingTime)
+                    Text(
+                        when {
+                            reading.newStocks == null || before == null -> "First reading of the day"
+                            reading.newStocks.isEmpty() -> "No new stocks since $before"
+                            else -> "New since $before: " + shortList(reading.newStocks, MaxNamed, ", ")
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = Space.xs),
+                    )
+                }
+                if (current) KitTag("Showing", tone = palette.gain)
+            }
+        }
+    }
+}
 
-/** The call that has gone furthest from its entry, and how far, for unfolded's lime tile. */
+/** The call that has gone furthest from its entry, and how far, for the header of a wide report. */
 private fun bestSoFar(calls: List<ReportCall>, latestFor: (String) -> LatestPrice?): Pair<String, Double>? =
     calls.asSequence()
         .filter { it.group != CallGroup.WATCHING }
         .mapNotNull { call -> moveVsEntry(call.point, latestFor(call.stock.stockCode)?.session?.close)?.let { call.stock.stockCode to it } }
         .maxByOrNull { it.second }
-
-@Composable
-private fun BestSoFarTile(ticker: String, move: Double, modifier: Modifier = Modifier) {
-    Tile(modifier, tone = TileTone.HIGHLIGHT, contentPadding = PaddingValues(Space.l)) {
-        Text("Best so far", style = MaterialTheme.typography.labelMedium)
-        Text(ticker, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = Space.s))
-        Text(
-            formatPercent(move),
-            style = MaterialTheme.typography.headlineMedium.copy(fontFamily = TabularFigures),
-            color = if (move >= 0) tileSignals(TileTone.HIGHLIGHT).gain else tileSignals(TileTone.HIGHLIGHT).loss,
-        )
-        Text("since the call", style = MaterialTheme.typography.labelSmall)
-    }
-}
-
-private val BestTileWidth = 200.dp
 
 /**
  * The chips that narrow a report to one kind of call. `All` leads and is selected while nothing is
@@ -2000,9 +1956,6 @@ private val RUN_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("EE
 
 /** When a run was made, in About this run: `Wed 11 Nov at 09:12`. */
 private val MADE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM 'at' HH:mm")
-
-/** The fills the run tiles cycle through, in list order. */
-private val RunTones = listOf(TileTone.HERO, TileTone.HIGHLIGHT, TileTone.CARD)
 
 /** IMAGE_REF is one-based over the images sent with the request. */
 internal fun AnalysisResult.imagePathFor(reference: Int?): String? =

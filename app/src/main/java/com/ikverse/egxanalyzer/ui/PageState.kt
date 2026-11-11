@@ -188,6 +188,13 @@ class PageState {
     /** For the curious, inside About this run. */
     internal val resultsCuriousOpen: MutableState<Boolean> = mutableStateOf(false)
 
+    /** The sheet listing every reading of the open report's session. */
+    internal val resultsReadingsOpen: MutableState<Boolean> = mutableStateOf(false)
+
+    /** The order an open report's stocks are read in. A preference, so it outlives the report. */
+    internal val resultsCallSort: MutableState<com.ikverse.egxanalyzer.model.CallSort> =
+        mutableStateOf(com.ikverse.egxanalyzer.model.CallSort.CLOSEST)
+
     /** Opens [id]'s report, or closes the one open, and resets everything that belonged to it. */
     fun openReport(id: Long?) {
         if (openResultId.value != id) {
@@ -198,6 +205,7 @@ class PageState {
             resultsAboutOpen.value = false
             resultsAboutRowOpen.value = false
             resultsCuriousOpen.value = false
+            resultsReadingsOpen.value = false
         }
         openResultId.value = id
     }
