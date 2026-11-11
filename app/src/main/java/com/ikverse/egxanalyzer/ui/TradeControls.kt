@@ -24,6 +24,7 @@ import com.ikverse.egxanalyzer.ui.kit.ButtonSize
 import com.ikverse.egxanalyzer.ui.kit.ButtonKind
 import com.ikverse.egxanalyzer.ui.kit.KitButton
 import com.ikverse.egxanalyzer.ui.kit.Kit
+import com.ikverse.egxanalyzer.ui.kit.KitTag
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -839,12 +840,8 @@ private fun String.toWindowOrNull(): Int? = trim().toIntOrNull()
 @Composable
 internal fun PositionStatusChip(view: PositionView) {
     var showing by remember(view.position.id) { mutableStateOf(false) }
-    OutlinePill(
-        view.status.plainWord(),
-        outline = view.status.pillOutline(),
-        textColor = view.status.onContainer(),
-        onClick = { showing = true },
-    )
+    // The filled tag every other status in the app wears, so one status reads one way everywhere.
+    KitTag(view.status.plainWord(), tone = view.status.tone(), filled = true, ink = palette.ink, onClick = { showing = true })
     if (showing) {
         // `InfoNote`'s own constructor rather than the checked `infoNote` factory: that helper's
         // callers are checked by InfoNoteTest for static prose, and both the label and its
@@ -907,24 +904,3 @@ internal fun PositionStatus.tone(): Color = when (this) {
     PositionStatus.CLOSED_MANUALLY -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
-/**
- * The ring a status pill wears, which is [tone] wherever the status means something.
- *
- * The exception is a position the user closed by hand. Its tone is `onSurfaceVariant`, a colour
- * meant for text, and a ring drawn in it reads louder than the red on the card beside it - which is
- * backwards for the one state that is finished business. `outline` is the role Material keeps for a
- * border with nothing to say.
- */
-@Composable
-internal fun PositionStatus.pillOutline(): Color =
-    if (this == PositionStatus.CLOSED_MANUALLY) MaterialTheme.colorScheme.outline else tone()
-
-@Composable
-internal fun PositionStatus.onContainer(): Color = when (this) {
-    PositionStatus.OPEN -> MaterialTheme.colorScheme.onPrimaryContainer
-    PositionStatus.PARTIAL_TARGET_HIT, PositionStatus.FULL_TARGET_HIT ->
-        MaterialTheme.colorScheme.onTertiaryContainer
-    PositionStatus.STOPPED_OUT -> extraColors.onLossContainer
-    PositionStatus.EXPIRED -> extraColors.onExpiredContainer
-    PositionStatus.CLOSED_MANUALLY -> MaterialTheme.colorScheme.onSurfaceVariant
-}

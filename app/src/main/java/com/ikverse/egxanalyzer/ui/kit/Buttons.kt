@@ -83,10 +83,12 @@ fun KitButton(
             .minimumInteractiveComponentSize()
             .pressScale(press)
             .height(size.height)
+            // Before the fill, so a disabled button fades whole rather than keeping a full fill
+            // under faded words.
+            .alpha(if (enabled) 1f else 0.4f)
             .clip(Kit.Capsule)
             .background(fill)
             .then(if (edge != null) Modifier.border(BorderStroke(1.5.dp, edge), Kit.Capsule) else Modifier)
-            .alpha(if (enabled) 1f else 0.4f)
             .clickable(
                 interactionSource = press,
                 indication = null,

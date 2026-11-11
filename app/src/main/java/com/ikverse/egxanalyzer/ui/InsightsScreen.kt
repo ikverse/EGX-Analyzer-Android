@@ -1212,13 +1212,21 @@ private fun WhatHappenedPanel(call: ScoredCall, latest: LatestPrice?, modifier: 
     }
 }
 
-/** A session's calls as the result bar divides them; what has not settled is still open. */
-private fun ScoredSession.outcomeSplit(tally: CallTally): Outcomes = Outcomes(
+/**
+ * A session's calls as the result bar divides them. Open is the calls still running and nothing
+ * else: one the record does not count is not running, and calling it so made the head say 11 over
+ * a Running chip of 6.
+ */
+internal fun ScoredSession.outcomeSplit(tally: CallTally): Outcomes = Outcomes(
     hit = tally.partialHits + tally.fullHits,
     stopped = tally.stopped,
     expired = tally.expired,
-    open = calls.count { it.repeatOf == null && !it.outcome.judged },
+    open = calls.count { it.repeatOf == null && it.outcome == Outcome.OPEN },
 )
+
+/** The session's calls that are neither judged nor running: what the record leaves out. */
+internal fun ScoredSession.notCountedCalls(): Int =
+    calls.count { it.repeatOf == null && !it.outcome.judged && it.outcome != Outcome.OPEN }
 
 /** "Mon 9 Nov", the way a day of the record is named everywhere on the page. */
 private fun ScoredSession.dayName(): String = targetDate?.format(DayFormat) ?: "Target not recorded"
@@ -1257,7 +1265,8 @@ private fun DayOpened(run: ScoredSession, tally: CallTally, onClose: (() -> Unit
         if (split.total > 0) OutcomeStrip(split, Modifier.padding(top = Space.s))
         Text(
             "${tally.partialHits + tally.fullHits} reached target · ${tally.expired} ran out of time · " +
-                "${tally.stopped} stopped · ${split.open} running",
+                "${tally.stopped} stopped · ${split.open} running" +
+                run.notCountedCalls().let { if (it > 0) " · $it not counted" else "" },
             style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
             modifier = Modifier.padding(top = Space.s),
         )
@@ -1354,7 +1363,7 @@ private fun DayCard(
             }
             DayChips(run.calls, dayFilter) { dayFilter = it }
             Text(
-                "The dark line on each bar is how far the price travelled.",
+                "The blue line on each bar is how far the price travelled.",
                 style = MaterialTheme.typography.labelSmall,
                 color = palette.muted,
             )

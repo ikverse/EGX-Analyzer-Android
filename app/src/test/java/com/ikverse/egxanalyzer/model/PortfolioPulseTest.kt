@@ -140,6 +140,20 @@ class PortfolioPulseTest {
     }
 
     @Test
+    fun `a trade already past its stop or its target 2 is not called close to it`() {
+        val items = needsYou(
+            listOf(
+                // NIPH on 11 Nov: bought 381, stop 325, now 324 - stopped out, not close to it.
+                view("PASTSTOP", 381.0, current = 324.0, stop = 325.0, target2 = 420.0),
+                view("PASTT2", 76.0, current = 85.0, stop = 72.0, target2 = 84.0),
+                view("ATSTOP", 68.0, current = 64.7, stop = 64.7, target2 = 78.0),
+            ),
+            thresholdPercent = 3,
+        )
+        assertTrue(items.isEmpty())
+    }
+
+    @Test
     fun `the target path runs from entry to target 2 with target 1 marked on it`() {
         val path = targetPath(view("COMI", 76.0, current = 82.0, target1 = 80.0, target2 = 86.0))!!
         assertEquals(0.6f, path.progress, 1e-6f)

@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -252,5 +253,21 @@ class KitTest {
         compose.onNodeWithText("A tapped row").performClick()
         assertTrue(tapped)
         compose.onNodeWithText("Copy the call").assertDoesNotExist()
+    }
+
+    /** 5.1.1's dark mode drew every bare name black on graphite: nothing set a default text colour. */
+    @Test
+    fun `text outside a tile takes the palette's ink in the dark theme`() {
+        var seen = androidx.compose.ui.graphics.Color.Unspecified
+        var ink = androidx.compose.ui.graphics.Color.Unspecified
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.DARK) {
+                seen = androidx.compose.material3.LocalContentColor.current
+                ink = com.ikverse.egxanalyzer.ui.theme.palette.ink
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(ink, seen)
+        assertTrue("ink should be light at night", ink.luminance() > 0.5f)
     }
 }

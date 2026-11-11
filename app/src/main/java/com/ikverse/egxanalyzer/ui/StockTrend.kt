@@ -477,16 +477,16 @@ internal fun PriceChart(
         )
         allLabels.forEachIndexed { index, label ->
             val at = Offset(boxes[index].x, boxes[index].y)
-            // The surface's own colour drawn as a stroke first, so the dashed line under a label
-            // is cleared behind the letters and nowhere else - a plate would hide the chart.
-            drawText(
-                label.layout,
+            // A small patch of the surface's own colour behind the words, so no line - its own
+            // guide, the price, another level - runs through them. An outline round the letters
+            // was tried first and let the dashes through the gap between "t1" and its price.
+            val pad = LabelPatchPad.toPx()
+            drawRoundRect(
                 color = on,
-                topLeft = at,
-                drawStyle = Stroke(width = LabelOutline.toPx(), join = StrokeJoin.Round),
+                topLeft = Offset(at.x - pad, at.y),
+                size = Size(label.layout.size.width + pad * 2, label.layout.size.height.toFloat()),
+                cornerRadius = CornerRadius(pad),
             )
-            // `Fill` said outright: the paragraph keeps the style of its last draw, so without it
-            // this second pass is drawn as an outline too and every label comes out as a blob.
             drawText(label.layout, color = label.color, topLeft = at, drawStyle = Fill)
         }
     }
@@ -517,8 +517,8 @@ private fun layoutChartLabels(wanted: List<Float>, rowHeight: Float, height: Flo
     val placed = FloatArray(wanted.size)
     var previous = Float.NEGATIVE_INFINITY
     order.forEach { index ->
-        // Centred on its own line, then pushed clear of whatever is already above it.
-        val at = maxOf(wanted[index] - rowHeight / 2, previous + rowHeight, 0f)
+        // Sitting on its own line, just above it, then pushed clear of whatever is above it.
+        val at = maxOf(wanted[index] - rowHeight, previous + rowHeight, 0f)
         placed[index] = at
         previous = at
     }
@@ -557,7 +557,7 @@ private data class LabelBox(val x: Float, val y: Float, val width: Float, val he
  * than one has never come up, and a full two-dimensional solver was not written for a collision
  * that has one offender on every chart seen so far.
  *
- * Deliberately blind to the price line itself: the text keeps its own [LabelHaloWidth] stroke for
+ * Deliberately blind to the price line itself: the text keeps its own patch for
  * exactly the case of a line, a guide or a ring passing behind it, and that is a cheaper and more
  * honest fix than trying to steer every label clear of a line that moves with every stock.
  */
@@ -580,7 +580,7 @@ private fun placeLabels(
     values.indices.forEach { index ->
         val box = boxes[index]
         if (rings.none { box.overlaps(it, ringRadius) }) return@forEach
-        val trueY = y(values[index]) - rowHeight / 2
+        val trueY = y(values[index]) - rowHeight
         var x = box.x
         var slid = LabelBox(x, trueY, widths[index], rowHeight)
         var guard = 0
@@ -740,8 +740,8 @@ private val LatestDot = 3.5.dp
 /** Bigger than the latest dot: it is under a fingertip and has to be found by eye beside it. */
 private val TouchDot = 4.5.dp
 
-/** The outline round a chart label, in the surface's colour. Thin: it clears a line, not a box. */
-private val LabelOutline = 3.dp
+/** How far the surface-coloured patch behind a chart label reaches past its words, either side. */
+private val LabelPatchPad = 3.dp
 
 private val LabelInset = 2.dp
 
