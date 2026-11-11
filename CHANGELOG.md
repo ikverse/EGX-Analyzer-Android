@@ -4,6 +4,17 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.1.5] — 2026-11-11
+
+The rest of the pills, and one 5.1.4 brought.
+
+- **Pills on coloured tiles are readable again in dark mode.** 5.1.4 drew every pill's word in the page ink, which vanished on the stock sheet's lilac calls tile. A pill's word now takes the ink of whatever it sits on.
+- **The last pills in the old styles are gone:** the timing pill and "Edited" in the Results call sheet and cards, the Ask AI answer's verdict, stance, direction and rating, the image count beside a channel on Analyze, and "reached" on the stock sheet's levels. All are the one filled pill; Ask AI's verdict stays larger.
+- **One colour per status everywhere:** running blue, target reached green, stopped red, and grey for ran out of time, closed by you, not counted and watching. "Running" was a different blue on Portfolio, and a trade that ran out of time was amber.
+- The stock sheet's status pills use the same plain words as every other page, and the Results "Today" tile shows its status in the status colour.
+
+---
+
 ## [5.1.4] — 2026-11-11
 
 - **One pill style everywhere.** Every label pill is now the filled one "Running" uses: a soft wash of colour with the word in ink. The outlined pills (channel names, T+1, Not counted, Kept open, days left, Overdue, Close to its stop, the misread-level warning and others) were the old design. Neutral notes are grey, warnings red, good news green. Filter chips you press to choose are unchanged.

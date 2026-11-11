@@ -904,8 +904,9 @@ internal fun EditedChip(onClick: () -> Unit) {
     // stacked they were the tallest thing on the card. Tertiary rather than primary: the pill under
     // it may already be the app's own T+1, and two primary rings in one column read as one control
     // split in half.
-    // Filled, so a corrected call is told apart from the hairline timing chip beside it.
-    com.ikverse.egxanalyzer.ui.kit.KitChip(label = "Edited", selected = true, onClick = onClick)
+    // A label, so the kit's tag rather than a chip: as a selected chip it read as a control left
+    // switched on. The app's own blue, so a corrected call stands apart from its grey notes.
+    com.ikverse.egxanalyzer.ui.kit.KitTag("Edited", tone = palette.heroInk, onClick = onClick)
 }
 
 private fun signedPercent(value: Double): String =

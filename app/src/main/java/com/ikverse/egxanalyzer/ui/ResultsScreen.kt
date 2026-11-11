@@ -1663,8 +1663,9 @@ private fun SelectedCallPane(call: ReportCall, latest: LatestPrice?, peak: Doubl
             Modifier.padding(top = Space.s),
             horizontalArrangement = Arrangement.spacedBy(Space.xs),
         ) {
-            KitTag(call.status.first, tone = LocalContentColor.current, ink = LocalContentColor.current)
-            call.channel?.let { KitTag(it, tone = LocalContentColor.current, ink = LocalContentColor.current) }
+            // The status in its own colour, as on every other card; the word in the tile's ink.
+            KitTag(call.status.first, tone = call.status.second.tone())
+            call.channel?.let { KitTag(it, tone = LocalContentColor.current) }
         }
     }
     Tile(Modifier.fillMaxWidth(), contentPadding = PaddingValues(Space.l)) {

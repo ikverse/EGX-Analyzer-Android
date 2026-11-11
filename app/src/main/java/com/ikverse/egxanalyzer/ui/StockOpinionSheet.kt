@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
+import com.ikverse.egxanalyzer.ui.kit.KitTag
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.unit.dp
@@ -398,18 +399,18 @@ private fun OpinionSection(
 }
 
 /**
- * The answer in one word, on a filled capsule. Lime is where the call says to take it, coral
- * where it says to keep away, sunflower is waiting - neither good nor bad.
+ * The answer in one word, on the kit's tag at its large size: green where the call says to take
+ * it, red where it says to keep away, grey for waiting - neither good nor bad.
  */
 @Composable
 private fun VerdictChip(verdict: StockOpinion.Verdict) {
     val p = palette
-    FillTag(
+    ArabicTag(
         verdict.arabic,
         when (verdict) {
-            StockOpinion.Verdict.BUY_NOW -> p.highlight
-            StockOpinion.Verdict.WAIT -> p.tile1
-            StockOpinion.Verdict.AVOID -> p.alert
+            StockOpinion.Verdict.BUY_NOW -> p.gain
+            StockOpinion.Verdict.WAIT -> p.muted
+            StockOpinion.Verdict.AVOID -> p.loss
         },
         large = true,
     )
@@ -418,40 +419,40 @@ private fun VerdictChip(verdict: StockOpinion.Verdict) {
 @Composable
 private fun StanceChip(stance: StockOpinion.Stance) {
     val p = palette
-    FillTag(
+    ArabicTag(
         stance.arabic,
         when (stance) {
-            StockOpinion.Stance.SOUND -> p.tile3
-            StockOpinion.Stance.RISKY, StockOpinion.Stance.OVERTAKEN -> p.tile1
-            StockOpinion.Stance.UNSOUND -> p.alert
+            StockOpinion.Stance.SOUND -> p.gain
+            StockOpinion.Stance.RISKY, StockOpinion.Stance.OVERTAKEN -> p.muted
+            StockOpinion.Stance.UNSOUND -> p.loss
         },
     )
 }
 
-/** Which way one span points: lime up, coral down, the ground for flat - a definite answer too. */
+/** Which way one span points: green up, red down, grey for flat - a definite answer too. */
 @Composable
 private fun DirectionChip(direction: StockOpinion.Direction) {
     val p = palette
-    FillTag(
+    ArabicTag(
         direction.arabic,
         when (direction) {
-            StockOpinion.Direction.UP -> p.highlight
-            StockOpinion.Direction.DOWN -> p.alert
-            StockOpinion.Direction.SIDEWAYS -> p.ground
+            StockOpinion.Direction.UP -> p.gain
+            StockOpinion.Direction.DOWN -> p.loss
+            StockOpinion.Direction.SIDEWAYS -> p.muted
         },
     )
 }
 
-/** What one printed number is worth: lime, sunflower for workable with a fault, coral for poor. */
+/** What one printed number is worth: green, grey for workable with a fault, red for poor. */
 @Composable
 private fun RatingChip(rating: StockOpinion.Rating) {
     val p = palette
-    FillTag(
+    ArabicTag(
         rating.arabic,
         when (rating) {
-            StockOpinion.Rating.GOOD -> p.highlight
-            StockOpinion.Rating.FAIR -> p.tile1
-            StockOpinion.Rating.POOR -> p.alert
+            StockOpinion.Rating.GOOD -> p.gain
+            StockOpinion.Rating.FAIR -> p.muted
+            StockOpinion.Rating.POOR -> p.loss
         },
     )
 }
@@ -476,23 +477,11 @@ private fun ToneChip(tone: StockOpinion.Tone) {
     )
 }
 
-/** A word on a filled capsule, in the tile ink every bright fill takes. */
+/** The kit's tag, read right to left: these words are Arabic. */
 @Composable
-private fun FillTag(text: String, fill: Color, large: Boolean = false) {
-    Box(
-        Modifier
-            .clip(Kit.Capsule)
-            .background(fill)
-            .padding(horizontal = if (large) 14.dp else 10.dp, vertical = if (large) 7.dp else 3.dp),
-    ) {
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-            Text(
-                text,
-                style = if (large) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelMedium,
-                color = palette.onTile,
-                maxLines = 1,
-            )
-        }
+private fun ArabicTag(text: String, tone: Color, large: Boolean = false) {
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        KitTag(text, tone = tone, large = large)
     }
 }
 

@@ -699,15 +699,6 @@ private fun ScoredCall.dayGroup(): String? = when (outcome) {
 
 private val DayGroups = listOf("Reached", "Stopped", "Out of time", "Running")
 
-/** A call's status tag colour. */
-@Composable
-private fun Outcome.cardTone(): Color = when (this) {
-    Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> palette.gain
-    Outcome.STOPPED -> palette.loss
-    Outcome.OPEN -> palette.heroInk
-    else -> palette.muted
-}
-
 /**
  * Everything one call can do, held in one place: its hold menu, the Ask AI confirmation and answer,
  * the screenshot, recording a purchase, and its sheet. [content] draws the call however the posture
@@ -985,7 +976,7 @@ private fun FinishedCallCard(
                 horizontalArrangement = Arrangement.spacedBy(Space.xs),
                 verticalArrangement = Arrangement.spacedBy(Space.xs),
             ) {
-                KitTag(call.outcome.plainWord(), tone = call.outcome.cardTone())
+                KitTag(call.outcome.plainWord(), tone = call.outcome.tone())
                 KitTag(call.channel, tone = palette.muted)
                 TimingLabel(call)
             }
@@ -1049,7 +1040,7 @@ private fun CallSheet(
             CallReturn(call)
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-            KitTag(call.outcome.plainWord(), tone = call.outcome.cardTone())
+            KitTag(call.outcome.plainWord(), tone = call.outcome.tone())
             KitTag(call.channel, tone = palette.muted)
             TimingLabel(call)
         }
@@ -1455,7 +1446,7 @@ private fun DayCallTable(run: ScoredSession, env: CallEnv, order: CallOrder) {
                         )
                         Row(Modifier.width(DayTableStatusWidth).padding(start = Space.s), verticalAlignment = Alignment.CenterVertically) {
                             val word = if (call.notCounted()) "Not counted" else call.outcome.plainWord()
-                            Box(Modifier.size(8.dp).clip(CircleShape).background(call.outcome.cardTone()))
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(call.outcome.tone()))
                             AutoSizeText(word, style = MaterialTheme.typography.labelMedium, color = palette.ink, modifier = Modifier.padding(start = Space.xs).fillMaxWidth())
                         }
                     }
@@ -1758,9 +1749,8 @@ private fun TimingLabel(call: ScoredCall) {
  *
  * A caption and not a subtraction. The outcome above it, the return beside it and every rate on the
  * page are untouched - see `CallSanity` for why a heuristic may caption a card and not move a
- * published figure. So it is drawn in **amber rather than error red**: red on this card already
- * means the stop took the call out, and a second red saying something quite different is one the
- * reader has to stop and disambiguate.
+ * published figure. It was amber until 5.1.4, when every warning pill took the loss red; the
+ * wording, not the hue, is what tells it apart from a stop-out.
  *
  * Tappable, and it says so by looking the same as the status tag - a chip that is only sometimes
  * tappable teaches nobody that it can be tapped.

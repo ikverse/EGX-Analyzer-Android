@@ -270,4 +270,31 @@ class KitTest {
         assertEquals(ink, seen)
         assertTrue("ink should be light at night", ink.luminance() > 0.5f)
     }
+
+    /**
+     * 5.1.4 drew every tag's word in the page ink, which is light at night, so tags on the lilac
+     * tile - which stays bright in the dark - lost their words. A tag takes the ink of what it sits on.
+     */
+    @Test
+    fun `a tag on a bright tile in the dark takes the tile's ink`() {
+        var onTile = androidx.compose.ui.graphics.Color.Unspecified
+        var tileInk = androidx.compose.ui.graphics.Color.Unspecified
+        var pageInk = androidx.compose.ui.graphics.Color.Unspecified
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.DARK) {
+                pageInk = com.ikverse.egxanalyzer.ui.theme.palette.ink
+                tileInk = tileColors(TileTone.TILE2).second
+                Tile(tone = TileTone.TILE2) {
+                    // What KitTag's `ink` defaults to, read where the tag would be drawn.
+                    onTile = androidx.compose.material3.LocalContentColor.current
+                    KitTag("Target 1 reached", tone = com.ikverse.egxanalyzer.ui.theme.palette.gain)
+                }
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(tileInk, onTile)
+        assertTrue("the tile's ink should differ from the page's at night", tileInk != pageInk)
+        assertTrue("navy on lilac", tileInk.luminance() < 0.5f)
+        compose.onNodeWithText("Target 1 reached").assertIsDisplayed()
+    }
 }

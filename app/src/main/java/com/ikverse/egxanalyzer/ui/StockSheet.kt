@@ -62,6 +62,7 @@ import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.ScoredCall
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.StockScore
+import com.ikverse.egxanalyzer.model.plainWord
 import com.ikverse.egxanalyzer.model.WatchAlert
 import com.ikverse.egxanalyzer.model.inPlay
 import com.ikverse.egxanalyzer.model.isEgx33
@@ -821,7 +822,7 @@ private fun StockSheetLevels(levels: ChartLevels, now: Double, call: ScoredCall?
                     fontWeight = if (line.isNow) FontWeight.ExtraBold else FontWeight.Bold,
                     color = line.tone,
                 )
-                line.tag?.let { KitTag(it, p.highlight, ink = p.onTile, modifier = Modifier.padding(start = Space.s)) }
+                line.tag?.let { KitTag(it, p.gain, modifier = Modifier.padding(start = Space.s)) }
                 Spacer(Modifier.weight(1f))
                 Text(line.shown, style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures), fontWeight = FontWeight.Bold, color = line.tone)
                 if (!line.isNow && now > 0) {
@@ -914,7 +915,7 @@ private fun StockSheetTrades(trades: List<PositionView>, modifier: Modifier, onO
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    KitTag(view.status.label, view.status.tone())
+                    KitTag(view.status.plainWord(), view.status.tone())
                     Text(
                         listOfNotNull(
                             "bought ${AppDates.DayMonth.format(view.position.entryDate)} at " + formatPrice(view.position.entryPrice),
@@ -977,7 +978,7 @@ private fun StockSheetCalls(calls: List<ScoredCall>, modifier: Modifier, onOpen:
                     )
                 }
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    KitTag(call.outcome.label, call.outcome.tagTone())
+                    KitTag(call.outcome.plainWord(), call.outcome.tone())
                     Text(
                         formatPercent(call.returnPct),
                         style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
@@ -996,14 +997,6 @@ private fun StockSheetCalls(calls: List<ScoredCall>, modifier: Modifier, onOpen:
             )
         }
     }
-}
-
-/** The colour an outcome's tag wears on the lilac tile: ink for the verdicts, muted for the rest. */
-@Composable
-private fun Outcome.tagTone(): Color = when (this) {
-    Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> palette.gain
-    Outcome.STOPPED -> palette.loss
-    else -> palette.onTile.copy(alpha = 0.7f)
 }
 
 /** What a stock did between its last two stored sessions, and which one it moved from. */
