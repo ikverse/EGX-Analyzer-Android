@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.1.3] — 2026-11-11
+
+- **Swipe left or right on a page to change tab.** The header's highlight follows your finger toward the next tab's name and the page leans a little; let go past a quarter of the screen, or flick, and the new tab's tiles pop in as if you had pressed its name. A short swipe settles back, and the first and last tabs stretch slightly to show there is nothing further. Chip rows, the wide report table, charts and the ticker tape keep their own sideways scrolling.
+
+---
+
 ## [5.1.2] — 2026-11-11
 
 Dark mode, and colours that disagreed.

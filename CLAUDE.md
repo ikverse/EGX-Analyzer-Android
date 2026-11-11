@@ -534,7 +534,7 @@ floating bar, this section is what is true now.
   That has happened here — the ISIN migration — and nothing noticed at the time. Seven days, which
   clears the Friday–Saturday weekend plus a public holiday. Both are now standing state on Insights
   rather than a count in a toast — see **When the feed goes quiet**.
-- **A tab changes in place; nothing slides sideways and nothing is swiped.** Until 2026-11-11 the
+- **A tab changes in place; nothing slides sideways.** Until 2026-11-11 the
   five pages sat in a `HorizontalPager` - the pre-5.0 navigation, carried into 5.0 untouched and
   reported as "the old swiping animation". The mockups draw one header, identical on every page,
   with only the large name moving, and pages whose tiles pop in. So `DestinationSwitch` in
@@ -554,9 +554,22 @@ floating bar, this section is what is true now.
   reader sat still on its neighbour; `PageState` is what makes the rebuild lossless, and `Screen`
   seeds the header's collapse from the saved scroll so a page left part-way down comes back that way.
 - **The design is silent on two things here, and both were decided on 2026-11-11 rather than read
-  off a mockup**: swiping between tabs (removed - a page that follows a finger cannot also pop in),
-  and where the header's buttons go once the session line has folded away (pinned at the right,
-  coming to rest beside the collapsed tab names).
+  off a mockup**: swiping between tabs, and where the header's buttons go once the session line has
+  folded away (pinned at the right, coming to rest beside the collapsed tab names).
+- **Swiping between tabs came back the same day, designed for this shell, not the pager.** The
+  owner asked for it ("that is so obvious to have") and for nothing from the old build. `TabSwipe.kt`
+  reads the drag on the page (`Modifier.tabSwipe` on `DestinationSwitch`'s box) and **nothing
+  slides**: no neighbour is drawn. While the finger is down the header's emphasis follows it toward
+  the neighbour's name (`TabTravel.preview` / `peek`, the row's scroll carried with it), and the page
+  under the header leans at most 24dp and fades a quarter (`LocalTabSwipe`, read in `Screen`'s
+  layer so a drag recomposes nothing). A quarter of the width or a flick commits through the same
+  `navigate()` a press uses, and `TabTravel.goTo` finishes the emphasis from where the finger left
+  it; short of that both spring back. Past either end the page stretches a little and returns.
+  **It reads the final pass and gives up on anything already consumed**, which is how the chip
+  rows, the wide table, the charts, the tape and the tab row keep their own sideways drags without
+  a guard list; a gesture that starts mostly vertical is let go too. Reduce motion drops the lean
+  and the follow but keeps the change of tab. Sheets, dialogs and the full-screen chart are their
+  own windows, so the gesture never reaches them. `TabSwipeTest` holds all of this.
 - **Pressing the destination already showing takes that page back to the top.** The press every
   bottom bar on this platform answers, and this app answered it with nothing — the way back from a
   session card deep inside Insights was to scroll all of it by hand. `AppState.scrollToTopRequest`

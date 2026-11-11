@@ -88,6 +88,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
@@ -496,10 +498,29 @@ private fun DestinationSwitch(appState: AppState) {
     val still = LocalReduceMotion.current
     val travel = remember { TabTravel(destination) }
     LaunchedEffect(destination) { travel.goTo(destination, still) }
-    CompositionLocalProvider(LocalTabTravel provides travel) {
-        key(destination) {
-            Box(Modifier.fillMaxSize()) {
-                DestinationScreen(destination, appState)
+    // Swiping sideways changes tab, without anything sliding: see TabSwipe. Outside the `key`, so a
+    // swipe's state outlives the page it started on and the arrival can finish what it began.
+    val swipe = remember { TabSwipe() }
+    val scope = rememberCoroutineScope()
+    val currentDestination by rememberUpdatedState(destination)
+    val currentStill by rememberUpdatedState(still)
+    CompositionLocalProvider(LocalTabTravel provides travel, LocalTabSwipe provides swipe) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .tabSwipe(
+                    swipe = swipe,
+                    current = { currentDestination },
+                    travel = travel,
+                    still = { currentStill },
+                    scope = scope,
+                    navigate = appState::navigate,
+                ),
+        ) {
+            key(destination) {
+                Box(Modifier.fillMaxSize()) {
+                    DestinationScreen(destination, appState)
+                }
             }
         }
     }

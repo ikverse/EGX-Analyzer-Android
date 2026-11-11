@@ -267,10 +267,19 @@ internal fun Screen(
         }
     }
     val fadeBand = with(LocalDensity.current) { PageEdgeFade.toPx() }
+    // How far a swipe between tabs has pushed the page, read in the layer so a drag recomposes
+    // nothing. The header stays put; only what is under it leans. See TabSwipe.
+    val swipe = LocalTabSwipe.current
+    val leanMax = with(LocalDensity.current) { TabSwipe.LeanMax.toPx() }
     val page = @Composable {
         Column(
             Modifier
                 .fillMaxSize()
+                .graphicsLayer {
+                    val lean = swipe?.lean() ?: 0f
+                    translationX = lean * leanMax
+                    alpha = 1f - kotlin.math.abs(lean) * TabSwipe.LeanFade
+                }
                 .onGloballyPositioned { viewportTop = it.positionInWindow().y }
                 // Soft where the page meets the header above and the gesture strip below, rather
                 // than sliced mid-line. Nothing is drawn faded at rest: the top fades only once

@@ -30,6 +30,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ScrollState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -146,13 +147,41 @@ internal class TabTravel(start: AppDestination) {
     val fraction: Float get() = progress.value
 
     /**
+     * The neighbour a swipe is heading for while the finger is still down, and how far toward it
+     * the emphasis has moved (0 none, 1 all the way). Null when no swipe is under way. See
+     * `TabSwipe`.
+     */
+    var peek by mutableStateOf<AppDestination?>(null)
+        private set
+    var peekFraction by mutableFloatStateOf(0f)
+        private set
+
+    /** Moves the emphasis part of the way toward [destination], following a finger. */
+    fun preview(destination: AppDestination?, fraction: Float) {
+        peek = destination
+        peekFraction = if (destination == null) 0f else fraction
+    }
+
+    /**
      * How large [destination]'s name is drawn on the page showing [current]: 0 small, 1 large.
      *
      * A page is composed a frame before [goTo] is told about it. For that frame the row is drawn
      * exactly as the page being left drew it, so the travel starts from what was on screen.
      */
     fun emphasis(destination: AppDestination, current: AppDestination): Float = when {
+        // The first frame of a swipe's arrival: the row is drawn where the finger left it.
+        to != current && peek == current -> when (destination) {
+            current -> peekFraction
+            to -> 1f - peekFraction
+            else -> 0f
+        }
         to != current -> if (destination == to) 1f else 0f
+        // A finger is moving the emphasis toward a neighbour.
+        peek != null -> when (destination) {
+            to -> 1f - peekFraction
+            peek -> peekFraction
+            else -> 0f
+        }
         destination == to -> progress.value
         destination == from -> 1f - progress.value
         else -> 0f
@@ -163,12 +192,15 @@ internal class TabTravel(start: AppDestination) {
 
     suspend fun goTo(destination: AppDestination, still: Boolean) {
         if (destination == to) return
+        // A swipe that committed has already moved the emphasis part of the way: finish from there.
+        val begin = if (peek == destination) peekFraction else 0f
         from = to
         to = destination
+        preview(null, 0f)
         if (still) {
             progress.snapTo(1f)
         } else {
-            progress.snapTo(0f)
+            progress.snapTo(begin)
             progress.animateTo(1f, popSpring())
         }
     }
@@ -206,6 +238,11 @@ internal fun HeaderTabs(
             // Not told about this page yet: hold the row where the last page left it.
             if (travel != null && !travel.knows(current)) return@snapshotFlow null
             val landing = starts[tabBefore(current)] ?: return@snapshotFlow null
+            // A finger heading for a neighbour carries the row with it.
+            travel?.peek?.let { peek ->
+                val toward = starts[tabBefore(peek)] ?: landing
+                return@snapshotFlow (landing + (toward - landing) * travel.peekFraction).roundToInt()
+            }
             val leaving = travel?.from?.let { starts[tabBefore(it)] } ?: landing
             val along = travel?.fraction?.coerceIn(0f, 1f) ?: 1f
             (leaving + (landing - leaving) * along).roundToInt()

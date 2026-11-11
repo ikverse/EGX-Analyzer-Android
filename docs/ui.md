@@ -206,6 +206,17 @@ along with the rounded well the page used to sit in.
   parameter), but no longer needs a separate "arrive early" case to be honest about it — every page
   arrives early now.
 
+### Swiping between tabs (since 5.1.3)
+
+A sideways swipe on a page changes tab, and nothing slides: only one page is ever composed. While
+the finger is down the header's emphasis moves toward the neighbouring tab's name and the page
+under the header leans up to 24dp and fades slightly; a quarter of the width or a flick commits,
+and the new page's tiles pop in exactly as after a press. Short of that it springs back; past the
+first or last tab it stretches a little and returns. Anything below that scrolls sideways - chip
+rows, the wide table, the charts, the tape, the tab row - keeps the gesture, because `TabSwipe`
+reads the final pass and gives up on a consumed one. The full account is in CLAUDE.md under
+**Gotchas**.
+
 ### The stock filter, moved into the header
 
 - **It is the page's own filter, and since 2026-09-11 it is picked rather than typed.** Results,
