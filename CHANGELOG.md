@@ -4,6 +4,13 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [Unreleased]
+
+- **The price ladder is redrawn.** One plain line with four upright ticks: red for the stop, dark for the entry, green for the two targets. A round blue dot sits on the line where the price is, with the price above it, and every level's price is on one row beneath. The coloured zones between the levels and the arrow under the line are gone. It is the same ladder everywhere: Portfolio, Results, Insights and the call and trade sheets.
+- **A trade's ladder on Portfolio shows where the stock has been.** A pale stripe runs from the lowest to the highest price since you bought, and the entry is labelled "You paid".
+
+---
+
 ## [5.1.7] — 2026-11-11
 
 - **The Results table is grouped by stock.** Each stock has a heading with its name, how many calls from how many channels, and the latest price, shown once. Each call is a row led by its channel, so calls on the same stock compare one above the other. Watching rows show the levels their post gave. T+1 calls carry a tag.
