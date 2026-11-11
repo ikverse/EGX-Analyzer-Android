@@ -11,12 +11,13 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import com.ikverse.egxanalyzer.ui.kit.MenuItem
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
+import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.LatestPrice
 import java.time.LocalDate
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
 import com.ikverse.egxanalyzer.model.ThemeMode
@@ -36,7 +37,7 @@ import org.robolectric.RobolectricTestRunner
  * showed 64%, the bigger screen truncating harder than the small one. The same mistake is on record
  * against the `TodayCard` tile grid before it.
  *
- * Only `ChannelWidth` and `StatusWidth` are fixed now and every figure column is weighted, which
+ * Only `WhoWidth` is fixed now and every figure column is weighted, which
  * makes "no width shows fewer columns than a narrower one" a property rather than a number - and a
  * property is a thing a test can hold. The three widths below are the real containers on the three
  * devices this app runs on, taken from the table at the top of `CLAUDE.md`: what is left of the
@@ -51,17 +52,26 @@ class RecommendationTableTest {
     /** The Fold unfolded, the Huawei tablet, and the emulator, as the table actually meets them. */
     private val containers = listOf(614, 682, 715)
 
+    /** Said above the figures of a tile's first call, since 2026-11-11, and not in a shared header. */
     private val columns =
-        listOf("Channel", "Entry", "Stop", "Target 1", "Target 2", "Stop to target")
+        listOf("Entry", "Stop", "Target 1", "Target 2", "Since entry", "To target 1")
 
     @Composable
-    private fun Table(width: Int, vararg points: RecommendationDataPoint = arrayOf(point())) {
+    private fun Table(
+        width: Int,
+        vararg points: RecommendationDataPoint = arrayOf(point()),
+        close: Double? = null,
+    ) {
         EgxAnalyzerTheme(themeMode = ThemeMode.DARK) {
             Box(Modifier.size(width.dp, 2000.dp)) {
                 RecommendationTable(
                     stocks = listOf(stock(points.toList())),
                     channelFor = { it },
-                    latestFor = { null },
+                    latestFor = { code ->
+                        close?.let {
+                            LatestPrice(DailySession(code, LocalDate.of(2026, 9, 2), it, it, it, null), provisional = false)
+                        }
+                    },
                     onSelectPoint = { _, _ -> },
                     holdItems = { _, _ ->
                         listOf(MenuItem("I bought this") {}, MenuItem("Fix a wrong number") {})
@@ -98,11 +108,11 @@ class RecommendationTableTest {
     }
 
     @Test
-    fun `a watched stock says what it waits for instead of drawing a ladder`() {
-        compose.setContent { Table(containers.min(), point(basis = "watching")) }
+    fun `a watched stock says what it waits for instead of a move`() {
+        compose.setContent { Table(containers.min(), point(basis = "watching"), close = 10.6) }
 
         compose.onNodeWithText("buy only above 10.5").assertIsDisplayed()
-        compose.onNodeWithTag(LadderCellTag, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("+2.4%").assertDoesNotExist()
     }
 
     @Test
@@ -130,14 +140,58 @@ class RecommendationTableTest {
         compose.onNodeWithText("2 calls · 2 channels", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Nile Signals").assertIsDisplayed()
         compose.onNodeWithText("Cairo Desk").assertIsDisplayed()
-        assertEquals(1, compose.onAllNodesWithText("T+1").fetchSemanticsNodes().size)
+        assertEquals(1, compose.onAllNodesWithText("T+1", substring = true).fetchSemanticsNodes().size)
     }
 
     @Test
-    fun `an ordinary call draws its ladder`() {
+    fun `a second call on a stock lines up under the names without repeating them`() {
+        compose.setContent { Table(containers.min(), point(), point(channel = "Cairo Desk")) }
+
+        columns.forEach { assertEquals(it, 1, compose.onAllNodesWithText(it).fetchSemanticsNodes().size) }
+    }
+
+    @Test
+    fun `each level says how far it is from the entry`() {
         compose.setContent { Table(containers.min()) }
 
-        compose.onNodeWithTag(LadderCellTag, useUnmergedTree = true).assertExists()
+        // Against the middle of the 10.2 - 10.5 band: stop 9.8, targets 11 and 12.
+        listOf("-5.3%", "+6.3%", "+15.9%").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+    }
+
+    @Test
+    fun `a live call says its move since entry and what is left to target 1`() {
+        compose.setContent { Table(containers.min(), close = 10.6) }
+
+        compose.onNodeWithText("+2.4%").assertIsDisplayed()
+        compose.onNodeWithText("3.8%").assertIsDisplayed()
+        compose.onNodeWithText("now").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a stock the feed has no price for says so`() {
+        compose.setContent { Table(containers.min()) }
+
+        compose.onNodeWithText("no price").assertIsDisplayed()
+        compose.onNodeWithText("now").assertDoesNotExist()
+    }
+
+    @Test
+    fun `live calls come before watched ones, each in the report's order`() {
+        val watched = point(basis = "watching", channel = "A")
+        val first = point(channel = "B")
+        val second = point(channel = "C")
+
+        assertEquals(
+            listOf("B", "C", "A"),
+            liveFirst(listOf(watched, first, second)).map { it.sourceMessageId },
+        )
+    }
+
+    @Test
+    fun `a price at or past target 1 has nothing left to go`() {
+        compose.setContent { Table(containers.min(), close = 11.2) }
+
+        compose.onNodeWithText("reached").assertIsDisplayed()
     }
 
     private fun stock(points: List<RecommendationDataPoint>) = ConsolidatedRecommendation(
