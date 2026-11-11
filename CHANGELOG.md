@@ -4,6 +4,13 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.4.1] — 2026-11-12
+
+- **Dark mode is easier on the eyes.** The coloured tiles (lime, sunflower, lilac, sky, coral, cobalt) are mid-tone at night instead of full strength, and the light-grey lead tiles ("0 of 4", the session tile, Needs you) are a soft slate. Light mode is unchanged.
+- **A report's table is easier to read.** The To T1 and To T2 columns are gone so the rest are wider; rows are taller and the figures, channel, status and move are a size bigger.
+
+---
+
 ## [5.4.0] — 2026-11-12
 
 - **An open report fills the screen on the unfolded Fold.** The list of sessions no longer sits beside it; the back arrow or system back returns to the list. Before, the report had a narrow column, and scrolling either side moved both.
