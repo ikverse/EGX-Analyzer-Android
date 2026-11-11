@@ -9,7 +9,9 @@ import org.junit.Test
  *
  * Every label is centred under its own mark, which is the whole point of putting them there, so
  * the interesting cases are the ones where that is impossible: the ends of the track, and levels
- * close enough that two labels would sit on top of each other.
+ * close enough that two labels would sit on top of each other. Since 2026-11-11 every level's
+ * price is under the line - only where the price is prints over it - so a label with no room
+ * drops a row rather than crossing to the other side.
  */
 class PriceLadderTest {
 
@@ -26,60 +28,40 @@ class PriceLadderTest {
         val slots = place(centers = listOf(50f, 150f, 250f), widths = listOf(30f, 30f, 30f))
 
         assertEquals(listOf(35f, 135f, 235f), slots.map { it.left })
+        // The ordinary ladder is one line under the track.
         assertTrue(slots.all { it.row == 0 })
-        // The ordinary ladder is one line under the track, exactly as it always was.
-        assertTrue(slots.none { it.above })
     }
 
-    /**
-     * The second choice is the other side of the line, not a second line under it.
-     *
-     * A label pushed down a row sits further from the mark it belongs to than from its neighbour's,
-     * which is the wrong thing to read at a glance.
-     */
     @Test
-    fun `a label that would overlap moves above the line`() {
+    fun `a label that would overlap drops to the next row`() {
         // Two marks ten pixels apart cannot both print a thirty pixel wide price.
         val slots = place(centers = listOf(100f, 110f), widths = listOf(30f, 30f))
 
-        assertEquals(0, slots[0].row)
-        assertTrue(!slots[0].above)
-        assertEquals(0, slots[1].row)
-        assertTrue(slots[1].above)
+        assertEquals(listOf(0, 1), slots.map { it.row })
     }
 
     @Test
-    fun `a third label returns below once there is room`() {
+    fun `a third label returns to the first row once there is room`() {
         val slots = place(centers = listOf(100f, 110f, 260f), widths = listOf(30f, 30f, 30f))
 
-        assertEquals(listOf(0, 0, 0), slots.map { it.row })
-        assertEquals(listOf(false, true, false), slots.map { it.above })
+        assertEquals(listOf(0, 1, 0), slots.map { it.row })
     }
 
-    /**
-     * There is exactly one row under the line, and everything else stacks over it.
-     *
-     * A label pushed to a second row below sits further from the mark it belongs to than from its
-     * neighbour's, which is the wrong price to read it against.
-     */
     @Test
-    fun `crowded labels stack above rather than under`() {
+    fun `crowded labels take a row each`() {
         val slots = place(
             centers = listOf(100f, 105f, 110f, 115f),
             widths = listOf(30f, 30f, 30f, 30f),
         )
 
-        assertEquals(listOf(false, true, true, true), slots.map { it.above })
-        assertEquals(listOf(0, 0, 1, 2), slots.map { it.row })
-        assertTrue(slots.none { it.row > 0 && !it.above })
+        assertEquals(listOf(0, 1, 2, 3), slots.map { it.row })
     }
 
     /**
-     * A range is one fact, so both its ends print on one side and on one line.
+     * A range is one fact, so both its ends print on one line.
      *
-     * An entry band with its floor under the line and its ceiling over it is two prices that happen
-     * to be near each other, which is not what it means - and the same is true of one end sitting a
-     * row above the other.
+     * An entry range with its floor on one row and its ceiling on another is two prices that
+     * happen to be near each other, which is not what it means.
      */
     @Test
     fun `both ends of a range share a row`() {
@@ -89,21 +71,19 @@ class PriceLadderTest {
             groups = listOf(0, 1, 1),
         )
 
-        assertEquals(slots[1].above, slots[2].above)
         assertEquals(slots[1].row, slots[2].row)
         // Side by side, in axis order, clear of each other by the gap.
         assertTrue(slots[2].left >= slots[1].left + 30f + 6f)
     }
 
     /**
-     * The real case: an entry band a fifth of a piastre wide.
+     * The real case: an entry range a fifth of a piastre wide.
      *
-     * Centred on their own marks its two ends would overlap, and the one that lost used to be
-     * bumped to a second row above - so the ladder carried a third line for a single price with the
-     * space beside it empty. Packed side by side the pair fits the row below, beside the stop.
+     * Centred on their own marks its two ends would overlap. Packed side by side the pair is one
+     * block, and that block takes the second row because the stop already has the room under it.
      */
     @Test
-    fun `a band too narrow to centre is packed side by side, not stacked`() {
+    fun `a range too narrow to centre is packed side by side, on one row`() {
         val slots = place(
             // stop, entry low, entry high, target 1, target 2
             centers = listOf(10f, 60f, 63f, 160f, 290f),
@@ -111,13 +91,10 @@ class PriceLadderTest {
             groups = listOf(0, 1, 1, 2, 3),
         )
 
-        // The pair still goes over the line - the stop has the room below - but on one row, which
-        // is the whole point. Nothing sits on a second row any more.
-        assertEquals(listOf(false, true, true, false, false), slots.map { it.above })
-        assertEquals(List(5) { 0 }, slots.map { it.row })
+        assertEquals(listOf(0, 1, 1, 0, 0), slots.map { it.row })
         // Side by side: one label width plus the gap between their left edges.
         assertEquals(34f + 6f, slots[2].left - slots[1].left, 0.01f)
-        // And the pair straddles the band rather than each end sitting on its own mark.
+        // And the pair straddles the range rather than each end sitting on its own mark.
         assertTrue(slots[1].left < 61.5f && slots[2].left > 61.5f)
     }
 
@@ -144,8 +121,8 @@ class PriceLadderTest {
         val ascending = place(centers = listOf(100f, 110f), widths = listOf(30f, 30f))
         val descending = place(centers = listOf(110f, 100f), widths = listOf(30f, 30f))
 
-        assertEquals(ascending[0].above, descending[1].above)
-        assertEquals(ascending[1].above, descending[0].above)
+        assertEquals(ascending[0].row, descending[1].row)
+        assertEquals(ascending[1].row, descending[0].row)
     }
 
     @Test
@@ -155,7 +132,12 @@ class PriceLadderTest {
         assertEquals(0f, slots.single().left, 0.01f)
     }
 
-    // 5.1: the compact form, the travelled stripe and the zones between the levels.
+    @Test
+    fun `a blank label takes no room and never costs a row`() {
+        val slots = place(centers = listOf(50f, 52f), widths = listOf(0f, 30f))
+
+        assertTrue(slots.all { it.row == 0 })
+    }
 
     @Test
     fun `a compact ladder prints no prices`() {
@@ -174,33 +156,6 @@ class PriceLadderTest {
     }
 
     @Test
-    fun `a full call has three zones meeting the entry band at its own ends`() {
-        val zones = ladderZones(stopLoss = 9.0, entryLow = 10.0, entryHigh = 10.4, target1 = 11.5, target2 = 13.0)
-        assertEquals(
-            listOf(
-                LadderZone(9.0, 10.0, ZoneKind.LOSS),
-                LadderZone(10.4, 11.5, ZoneKind.NEAR),
-                LadderZone(11.5, 13.0, ZoneKind.FAR),
-            ),
-            zones,
-        )
-    }
-
-    @Test
-    fun `a single entry price and one target still lay out`() {
-        val zones = ladderZones(stopLoss = 9.0, entryLow = 10.0, entryHigh = 10.0, target1 = null, target2 = 12.0)
-        assertEquals(listOf(LadderZone(9.0, 10.0, ZoneKind.LOSS), LadderZone(10.0, 12.0, ZoneKind.NEAR)), zones)
-    }
-
-    @Test
-    fun `a call with no stop has no loss zone, and one with no entry has none at all`() {
-        val noStop = ladderZones(stopLoss = null, entryLow = 10.0, entryHigh = 10.0, target1 = 11.0, target2 = 12.0)
-        assertTrue(noStop.none { it.kind == ZoneKind.LOSS })
-        assertEquals(2, noStop.size)
-        assertTrue(ladderZones(9.0, null, null, 11.0, 12.0).isEmpty())
-    }
-
-    @Test
     fun `an entry label goes before the entry price and nowhere else`() {
         val texts = ladderLabelTexts(listOf(9.0, 10.0, 10.4, 12.0), compact = false, entryIndex = 1, entryLabel = "You paid")
         assertTrue(texts[1].startsWith("You paid "))
@@ -208,31 +163,16 @@ class PriceLadderTest {
         assertTrue(ladderLabelTexts(listOf(9.0, 10.0), compact = true, entryIndex = 1, entryLabel = "You paid").isEmpty())
     }
 
+    /**
+     * Every level prints its own price, whatever the price is doing.
+     *
+     * Until 2026-11-11 a level printing the same figure as where the price stood was left blank,
+     * because both were under the line. The price is over the line now, so the row beneath always
+     * reads stop, entry, target 1, target 2 in full.
+     */
     @Test
-    fun `where the price stands has the row under the line first and others make room`() {
-        // The stop at 40 would take the row under the line first in axis order; pinned, the price
-        // at 50 keeps it and the stop, which would overlap it, goes above.
-        val slots = layoutPriceLabels(
-            centers = listOf(40f, 50f, 250f),
-            widths = listOf(30f, 30f, 30f),
-            trackWidth = 300f,
-            gap = 6f,
-            pinnedBelow = 1,
-        )
-        assertEquals(LabelSlot(35f, row = 0, above = false), slots[1])
-        assertTrue(slots[0].above)
-        assertTrue(!slots[2].above)
-    }
-
-    @Test
-    fun `a level printing the same figure as the price stands blank so it is read once`() {
-        val texts = ladderLabelTexts(listOf(300.0, 320.0, 360.0, 320.0), compact = false, entryIndex = 1, reachedIndex = 3)
-        assertEquals(listOf("300", "", "360", "320"), texts.map { it.replace(".00", "") })
-    }
-
-    @Test
-    fun `a blank label takes no room and never costs a row`() {
-        val slots = layoutPriceLabels(listOf(50f, 52f), listOf(0f, 30f), 300f, 6f, pinnedBelow = 1)
-        assertTrue(slots.none { it.above })
+    fun `every level prints its price`() {
+        val texts = ladderLabelTexts(listOf(300.0, 320.0, 360.0), compact = false, entryIndex = 1)
+        assertTrue(texts.none { it.isBlank() })
     }
 }

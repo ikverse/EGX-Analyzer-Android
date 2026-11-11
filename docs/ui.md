@@ -611,3 +611,13 @@ things had to move with them:
   reopens an answer, same height and press as `ActionPill`. The violet, the breathing halo and the
   gold mark were the glass design's and are gone; while a request is out a band of light sweeps
   across it, built only while working and still under reduce motion.
+
+## The price ladder (redrawn 2026-11-11)
+
+`PriceLadder` was redrawn to the owner's mockup, and it is one component, so every place that draws it changed together.
+
+- **One plain line, four ticks of one size.** Red for the stop, ink for the entry, green for the targets, all upright and centred. The loss, near and far zones on the line are gone (`ladderZones` was deleted; the palette's `zoneLoss` / `zoneNear` / `zoneFar` are no longer read by anything). The ticks used to point down for the stop and up for the targets so the two could be told apart without colour; that was given up for the mockup, and position on the axis plus the row of prices is what says which is which now.
+- **Where the price is, is a dot on the line with its figure above it.** The ring round the dot is cut out of the canvas's own layer (`CompositingStrategy.Offscreen` and `BlendMode.Clear`), so it shows whatever the ladder sits on without the ladder being told. Past either end the dot becomes an arrowhead pointing out.
+- **Every level's price is under the line.** A label with no room drops to the next row down (`layoutPriceLabels`); nothing but the price itself prints over the line. An entry range still packs its two ends side by side.
+- **The travelled stripe is the line's full thickness, pale cobalt.** The Portfolio trade card passes the lowest and highest since the purchase and names the entry "You paid".
+- **Not checked on a device.** Built and unit-tested only.
