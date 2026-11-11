@@ -4,6 +4,16 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.1.7] — 2026-11-11
+
+- **The Results table is grouped by stock.** Each stock has a heading with its name, how many calls from how many channels, and the latest price, shown once. Each call is a row led by its channel, so calls on the same stock compare one above the other. Watching rows show the levels their post gave. T+1 calls carry a tag.
+- **The session card on Insights matches the rest of the page.** The counts are one strip with one-line labels. Each event is a row with the stock, who called it and when, and a status in plain words. The new-calls line is a footnote.
+- **A trade's sheet and a call's sheet read in the same order:** who it is, where it stands, the levels, what happened. The levels are a ladder with each level in its own column. A trade kept open past its stop or deadline says what that has cost.
+- **Ranking cards on the cover screen keep the source's full name.** The two figures sit on their own row under it, and no longer run past the tile's edge.
+- Sentences on Portfolio and Insights that were set in the figure font are in the text font.
+
+---
+
 ## [5.1.6] — 2026-11-11
 
 - **Pills side by side are one height.** A pill holding Arabic, such as a channel name, stood taller than an English one beside it, because the Arabic font reaches further above and below the line. Every pill of a size is now one fixed height, still growing with the phone's font size setting.
