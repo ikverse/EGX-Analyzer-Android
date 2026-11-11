@@ -176,6 +176,26 @@ object PortfolioCalculator {
             else -> position.estimatedExit(scored.outcome, scored.stoppedAfterPartial, window)
         }
 
+        // A trade kept open past the point the call itself ended. The scorer stops reading at that
+        // point, so its high and low stop there too - which printed a worst dip of -4.7% under a
+        // return of -16.3% on a trade held two months past its stop. Such a trade is measured over
+        // every session the user has held it, and carries what ending with the call would have
+        // returned, so the card can say what staying in has cost.
+        val heldPastCall = open && settledByMarket && !priceScaleChanged
+        val extremes = if (heldPastCall) {
+            extremesOf(sessions.filter { it.date >= position.entryDate })
+        } else {
+            Extremes(scored.peakHigh, scored.peakOn, scored.troughLow, scored.troughOn)
+        }
+        val callEndedReturnPct = if (heldPastCall) {
+            returnPct(
+                position.entryPrice,
+                position.estimatedExit(scored.outcome, scored.stoppedAfterPartial, window),
+            )
+        } else {
+            null
+        }
+
         return PositionView(
             position = position,
             status = when {
@@ -195,7 +215,9 @@ object PortfolioCalculator {
             realized = soldByHand,
             returnPct = returnPct(position.entryPrice, exit),
             sessionsElapsed = elapsed,
-            sessionsHeld = held.size,
+            // To the latest session on a trade kept open past its call, for the reason the
+            // extremes are: the window stopped counting where the call ended, and the user did not.
+            sessionsHeld = if (heldPastCall) sessions.count { it.date >= position.entryDate } else held.size,
             sessionsRemaining = remaining,
             deadlineDate = deadlineDate,
             settledOn = scored.settledOn,
@@ -206,10 +228,11 @@ object PortfolioCalculator {
             // them. Dropped entirely across a change of scale, for the reason [exit] is - a high
             // quoted in the old money against an entry paid in it is a percentage of two different
             // things, and the card says so rather than printing one.
-            peakSinceEntry = scored.peakHigh.takeUnless { priceScaleChanged },
-            peakOn = scored.peakOn.takeUnless { priceScaleChanged },
-            troughSinceEntry = scored.troughLow.takeUnless { priceScaleChanged },
-            troughOn = scored.troughOn.takeUnless { priceScaleChanged },
+            peakSinceEntry = extremes.peak.takeUnless { priceScaleChanged },
+            peakOn = extremes.peakOn.takeUnless { priceScaleChanged },
+            troughSinceEntry = extremes.trough.takeUnless { priceScaleChanged },
+            troughOn = extremes.troughOn.takeUnless { priceScaleChanged },
+            callEndedReturnPct = callEndedReturnPct,
             ranOutOfTime = ranOutOfTime,
             overdueDays = overdueDays(ranOutOfTime && keptOpen, deadlineDate, today),
             priceScaleChanged = priceScaleChanged,
@@ -258,6 +281,25 @@ object PortfolioCalculator {
             outcome == Outcome.PARTIAL_HIT && stoppedAfterPartial -> stopLoss ?: lastClose
             else -> lastClose
         }
+    }
+
+    /** The highest high and the lowest low of some sessions, each with the session that set it. */
+    private class Extremes(
+        val peak: Double?,
+        val peakOn: LocalDate?,
+        val trough: Double?,
+        val troughOn: LocalDate?,
+    )
+
+    /**
+     * The extremes of [sessions], read the way the scorer reads them: the session's high and low,
+     * with any price that is not positive taken as unknown.
+     */
+    private fun extremesOf(sessions: List<DailySession>): Extremes {
+        val traded = sessions.map { it.traded }
+        val top = traded.filter { it.high != null }.maxByOrNull { it.high!! }
+        val bottom = traded.filter { it.low != null }.minByOrNull { it.low!! }
+        return Extremes(top?.high, top?.date, bottom?.low, bottom?.date)
     }
 
     /** Profit or loss from what was paid to what it is worth, which is the only basis used here. */

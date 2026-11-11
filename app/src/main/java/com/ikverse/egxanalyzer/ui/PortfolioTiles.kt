@@ -374,7 +374,7 @@ internal fun NeedsYouTile(
                         )
                         if (view.keptOpen) {
                             KitButton(
-                                "Stop keeping it open",
+                                LetItClose,
                                 onClick = { appState.setKeepOpen(view.position, keepOpen = false) },
                                 kind = ButtonKind.ON_TONE,
                                 size = ButtonSize.SMALL,

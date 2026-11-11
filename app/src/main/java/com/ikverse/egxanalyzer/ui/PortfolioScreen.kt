@@ -173,7 +173,8 @@ internal fun PortfolioScreen(appState: AppState) {
                     TradeLists(portfolio, appState, TradeListLayout.COMPACT)
                 }, end = {
                     shownView?.let { view ->
-                        Tile(Modifier.fillMaxWidth()) {
+                        // Each block of the trade is a tile of its own, on the page's ground.
+                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
                             TradeDetail(view, appState, rememberTradeActions(view, appState))
                         }
                     }
@@ -187,7 +188,7 @@ internal fun PortfolioScreen(appState: AppState) {
                 ) {
                     PortfolioRecord(appState, portfolio, heroHeight = null, compact = true)
                     shownView?.let { view ->
-                        Tile(Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
                             TradeDetail(view, appState, rememberTradeActions(view, appState), showButtons = false, brief = true)
                         }
                     }

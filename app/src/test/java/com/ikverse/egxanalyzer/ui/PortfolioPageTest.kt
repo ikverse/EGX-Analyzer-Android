@@ -115,7 +115,7 @@ class PortfolioPageTest {
         compose.onNodeWithText("COMI").performScrollTo().performClick()
         compose.waitForIdle()
         assertEquals(comi.position.id, state.pages.portfolioSelectedTrade.value)
-        compose.onNodeWithText("since you bought").assertExists()
+        compose.onNodeWithText("since you bought", substring = true).assertExists()
     }
 
     @Test

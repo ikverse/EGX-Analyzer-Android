@@ -1,20 +1,14 @@
 package com.ikverse.egxanalyzer.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import com.ikverse.egxanalyzer.ui.kit.KitSheet
-import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
-import com.ikverse.egxanalyzer.ui.kit.Panel
-import com.ikverse.egxanalyzer.ui.theme.palette
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,51 +18,67 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.model.CallGroup
+import com.ikverse.egxanalyzer.model.CallStep
+import com.ikverse.egxanalyzer.model.CallStepKind
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
+import com.ikverse.egxanalyzer.model.LatestPrice
+import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
+import com.ikverse.egxanalyzer.model.ScoredCall
+import com.ikverse.egxanalyzer.model.timeline
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.KitTag
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.MoreRow
+import com.ikverse.egxanalyzer.ui.kit.StepTone
+import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.ui.kit.TileTone
+import com.ikverse.egxanalyzer.ui.kit.Timeline
+import com.ikverse.egxanalyzer.ui.kit.TimelineStep
+import com.ikverse.egxanalyzer.ui.kit.tileColors
+import com.ikverse.egxanalyzer.ui.kit.tileSignals
+import com.ikverse.egxanalyzer.ui.theme.palette
 import java.time.LocalDate
+import kotlin.math.abs
 
 /**
- * Everything about one extracted occurrence.
+ * Everything about one extracted occurrence, opened by pressing a call in a report.
  *
- * The table shows six columns and the card below 600dp shows the figures; this is where the rest of
- * one call lives - the levels the row could not hold, and the evidence every number on it is
- * supposed to be traceable to.
+ * **Rebuilt on 2026-11-11 to read in the order the trade's own sheet reads in** - who it is, where
+ * it stands, the levels, what happened, what it was read off - out of the same pieces
+ * (`SheetPieces.kt`). What the old sheet got wrong, each of which was reported off a phone:
  *
- * **A header, a scroller and an action bar**, since 2026-09-11. It was one column of dividers, which
- * is the shape [StockSheet] left behind when it was built and the shape every other surface in this
- * app has moved off. Three things came of that rebuild and the first is a bug rather than a look:
+ * - **Both names were cut off.** A PEAK block and its percentage shared the header with them, so
+ *   "El- Nile Co. for ..." was all there was room for. The names have the full width now, and how
+ *   far the stock has been is the sheet's leading figure instead.
+ * - **It never said the call's verdict or how long it had left.** The row that opened it carried
+ *   "Running" or "Target 1 reached"; the sheet showed only where the date came from. [status] and
+ *   [scored] bring both, and the timeline Insights already draws for the same call.
+ * - **It showed the peak and called it nothing.** [latest] is the price now, which is the first
+ *   thing a reader deciding whether to buy asks, and the peak is said beside it in words.
+ * - **The same four prices were printed twice**, on the ladder and again in a six-cell grid with a
+ *   coloured bar down each cell and a row of dashes where the call gave no support or resistance.
+ *   The ladder's columns carry the percentages the grid was for.
+ * - **A watching call's condition was a quote in the footer.** "Buy only on a break of the price"
+ *   is the whole of such a call, and it leads the sheet now, with what the app can and cannot say
+ *   about it underneath.
  *
- * - **It had no scroller at all.** No `verticalScroll` anywhere, alone among the sheets here - so a
- *   call carrying all six levels, a long Arabic note, or an ordinary one at a large font scale ran
- *   off the bottom of the screen with no way to reach it. Since 5.0 it is a `KitSheet`, which
- *   scrolls its whole column.
- * - **The identity band no longer scrolls.** The logo, the ticker, the EGX 33 mark and both names
- *   are what the sheet was opened to look at, and the ticker opens [StockSheet] through
- *   [LocalOpenStock] the way every other full-width card naming a stock already does. The channel
- *   is drawn at all for the first time - it has been a parameter of this function since it was
- *   written and reached the screen nowhere, so two calls on one stock were told apart by nothing.
- * - **The figures are [LevelGrid] rather than a `FlowRow`.** Six tiles flowed at whatever width
- *   their numbers happened to print, which is why Resistance sat alone on a line under five
- *   figures; the grid pairs the entry with its stop and the two targets with each other, and lands
- *   the market levels last on every call.
- *
- * `Edit` was a text button in the top-right corner, the loudest thing on the sheet, and is now the
- * `⋮` the recommendation card already carries - which brings **Copy call** to a surface that had no
- * way of getting a call's numbers out of the app. The `Edited` pill still opens the editor directly.
+ * It scrolls as one column, which is what lets a call with every level, a long Arabic note and a
+ * large font scale still reach its trade button.
  */
 @Composable
 internal fun OccurrenceSheet(
     stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     imagePath: String? = null,
-    /** Highest the stock has traded since the call, drawn as the ladder's arrow. */
+    /** Highest the stock has traded since the call. */
     peak: Double? = null,
     /** The channel behind this occurrence, recorded with a trade taken on it. */
     channel: String? = null,
@@ -76,6 +86,12 @@ internal fun OccurrenceSheet(
     trades: TradeBook? = null,
     /** Corrects what the model read off the card. Absent, the figures cannot be changed. */
     editor: CallEditor? = null,
+    /** The newest price the app holds for the stock, which is where the call stands now. */
+    latest: LatestPrice? = null,
+    /** The word on the call's tag in the report, and the group that colours it. */
+    status: Pair<String, CallGroup>? = null,
+    /** How the scorer has judged the call so far. Absent on a call it has not been handed. */
+    scored: ScoredCall? = null,
     onDismiss: () -> Unit,
 ) {
     var viewingImage by remember { mutableStateOf(false) }
@@ -83,22 +99,21 @@ internal fun OccurrenceSheet(
     val held = trades?.heldFor(stock, point)
     val session = trades?.dateOf(point) ?: editor?.sessionOf(point)
     // The kit's sheet: a bottom sheet folded, a panel beside the page unfolded or in book posture.
-    // It scrolls as one column, which is what lets a call with every level, a long Arabic note and
-    // a large font scale still reach its trade button.
     KitSheet(onDismiss = onDismiss, posture = LocalFoldPosture.current, title = stock.stockCode) {
-        OccurrenceHeading(stock, point, channel, peak, editor, session) { editing = true }
-        // On its own, the one drawing on this sheet: where the entry, the stop and both targets
-        // sit against each other, with how far the stock has been since.
-        Panel(Modifier.fillMaxWidth(), color = palette.card) {
-            PriceLadder(point, reached = peak)
-        }
-        Panel(Modifier.fillMaxWidth(), color = palette.card) {
-            SheetSectionLabel("The call")
-            Spacer(Modifier.height(Space.s))
-            LevelGrid(point)
-            point.riskRewardRatio()?.let { RiskRewardRow(it) }
-        }
-        OccurrenceSource(stock, point, imagePath) { viewingImage = true }
+        OccurrenceContent(
+            stock = stock,
+            point = point,
+            imagePath = imagePath,
+            peak = peak,
+            channel = channel,
+            session = session,
+            latest = latest,
+            status = status,
+            scored = scored,
+            editor = editor,
+            onEdit = { editing = true },
+            onOpenImage = { viewingImage = true },
+        )
         // Only where the call has a session to belong to, since an occurrence the model left
         // undated cannot be scored, so a trade filed against it would have no deadline to run to.
         if (trades != null && session != null) {
@@ -113,275 +128,200 @@ internal fun OccurrenceSheet(
     }
 }
 
-/**
- * Who the call is about, who made it, and how far the stock has been since - on one fixed band.
- *
- * The same shape [StockSheet] opens with and the recommendation card's header repeats: identity on
- * the left, the `⋮` on its right, every pill on one row beneath at the sheet's own inset. The
- * Arabic and English names each get their own line now, since 2026-09-20, and the logo centers
- * against the three lines it stands beside - the ticker, then each name - rather than sitting
- * top-aligned against the ticker alone. The channel and the date it was called for get one more
- * line of their own, between the identity block and the pill row.
- */
+/** The sheet's blocks, apart from the sheet itself so they can be drawn and tested without one. */
 @Composable
-private fun OccurrenceHeading(
-    stock: ConsolidatedRecommendation,
-    point: RecommendationDataPoint,
-    channel: String?,
-    peak: Double?,
-    editor: CallEditor?,
-    session: LocalDate?,
-    onEdit: () -> Unit,
-) {
-    val openStock = LocalOpenStock.current
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Space.s),
-        verticalAlignment = Alignment.Top,
-    ) {
-        // The logo centers against the whole three-line block - ticker, Arabic name, English
-        // name - rather than sitting top-aligned against the ticker alone. Asked for on 2026-09-20.
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-            StockLogo(stock.stockCode, LogoSize.Header, Modifier.padding(end = Space.s))
-            Column {
-                // The logo and the ticker press together as one target, as they do on the card: a
-                // 12sp glyph beside a headline is two touch targets where the reader sees one thing.
-                Row(
-                    Modifier.clickable { openStock(stock.stockCode) },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        stock.stockCode,
-                        style = MaterialTheme.typography.headlineMedium,
-                    )
-                    Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
-                }
-                // Arabic and English each on their own line rather than joined by a middot - the
-                // combined line was the widest thing under the ticker and the first to clip.
-                stock.stockNameArabic?.let {
-                    Text(
-                        "⁨$it⁩",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = palette.muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                stock.stockNameEnglish?.takeIf { it != stock.stockCode }?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = palette.muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-        if (peak != null) PeakSinceTheCall(point, peak)
-        CallMenu(stock, point, channel, session, editor, onEdit)
-    }
-    // The channel and the session it was called for, on one line under the identity block - what
-    // used to be said only in the caption under the buy button, which repeated it a screen away
-    // from the ticker it was about. Two occurrences of one stock in one report are identical apart
-    // from who said it and when, and until 2026-09-11 this sheet named neither of them at all.
-    if (channel?.isNotBlank() == true || session != null) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Space.l)
-                .padding(bottom = Space.s),
-            horizontalArrangement = Arrangement.spacedBy(Space.xs),
-        ) {
-            channel?.takeIf(String::isNotBlank)?.let {
-                Text(
-                    "Source:",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.muted,
-                )
-                Text(
-                    "⁨$it⁩",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            session?.let {
-                if (channel?.isNotBlank() == true) {
-                    Text(
-                        "·",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.muted,
-                    )
-                }
-                Text(
-                    AppDates.DayMonth.format(it),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.muted,
-                )
-            }
-        }
-    }
-    // Every pill on one line under the header and starting at the sheet's own inset - level with
-    // the ticker above it and with ENTRY below it. The same row the two call cards carry.
-    FlowRow(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Space.s),
-        verticalArrangement = Arrangement.spacedBy(Space.xs),
-    ) {
-        // Edited beside Timing rather than over it: what dated a call and whether anybody has
-        // corrected it are two different facts about it, and stacked, the pill that is on every
-        // call sat under the one that is on almost none.
-        if (editor?.editFor(stock, point) != null) EditedChip(onEdit)
-        TimingChip(point)
-    }
-}
-
-/**
- * How far the stock has been since the call was made, which is the one figure this sheet is handed
- * and never printed as a number.
- *
- * It is already the ladder's arrow, and that is a position on a scale rather than a price - the
- * same relationship [StockSheet] draws between its header's close and the line under it. Measured
- * against the entry midpoint, which is the basis the scorer measures every return from.
- */
-@Composable
-private fun PeakSinceTheCall(point: RecommendationDataPoint, peak: Double) {
-    val entry = point.entryMidpoint()
-    val over = entry?.takeIf { it > 0.0 }?.let { (peak - it) / it * 100 }
-    Column(horizontalAlignment = Alignment.End) {
-        Text(
-            "PEAK",
-            style = MaterialTheme.typography.labelSmall,
-            color = palette.muted,
-        )
-        Text(
-            formatPrice(peak),
-            style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
-            color = PriceRole.market,
-        )
-        Text(
-            if (over == null) "since the call" else "${formatPercent(over)} since the call",
-            style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-            color = if (over == null) PriceRole.muted else PriceRole.forReturn(over),
-            textAlign = TextAlign.End,
-        )
-    }
-}
-
-/**
- * What the call risks against what it seeks, as a sentence and as a length.
- *
- * It was one muted line of text here, and the ratio is the context a target cannot be read
- * without - 2.55 against a stop at 2.15 means one thing at 1 : 3 and another at 1 : 0.4, and the
- * arithmetic is exactly what a reader does not do in their head while deciding. [RiskRewardBar]
- * draws the proportion; this is the one surface where a single call is the whole subject, so there
- * is room for both.
- */
-@Composable
-private fun RiskRewardRow(ratio: Double) {
-    Row(
-        Modifier.fillMaxWidth().padding(top = Space.xs),
-        horizontalArrangement = Arrangement.spacedBy(Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            "RISK / REWARD",
-            style = MaterialTheme.typography.labelSmall,
-            color = palette.muted,
-        )
-        Text(
-            "1 : ${"%.1f".format(ratio)}",
-            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
-            color = PriceRole.entry,
-        )
-        RiskRewardBar(ratio, Modifier.weight(1f))
-    }
-}
-
-/**
- * The card the numbers were read off, and what the model says it read there.
- *
- * A section of its own rather than a footer under a rule. The screenshot is the evidence every
- * figure above it rests on, and it was drawn at 88dp under a run-on line whose loudest content was
- * a nineteen-digit Telegram message id. The picture comes up beside the quote, and the ids drop to
- * a monospace last line - they are for checking the app against a report, not for reading a call.
- */
-@Composable
-private fun OccurrenceSource(
+internal fun ColumnScope.OccurrenceContent(
     stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     imagePath: String?,
+    peak: Double?,
+    channel: String?,
+    session: LocalDate?,
+    latest: LatestPrice?,
+    status: Pair<String, CallGroup>?,
+    scored: ScoredCall?,
+    editor: CallEditor?,
+    onEdit: () -> Unit,
     onOpenImage: () -> Unit,
 ) {
-    Panel(Modifier.fillMaxWidth(), color = palette.card) {
-        SheetSectionLabel("What it was read off")
-        Spacer(Modifier.height(Space.s))
-        // The quote first and right-aligned, the thumbnail last - the quote is Arabic, and reads
-        // toward the photo beside it the same way the notes paragraph below reads toward its own
-        // trailing edge. Asked for on 2026-09-20.
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-            point.recommendationEvidence?.let {
-                Text(
-                    "“$it”",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            // The thumbnail draws `#13` where the photo has gone from Telegram's cache; absent
-            // altogether, the trace line below still names the image the model cited.
-            if (imagePath != null) {
-                SourceImageThumbnail(
-                    path = imagePath,
-                    reference = point.sourceImageRef,
-                    size = SourceShotSize,
-                    onOpen = onOpenImage,
-                )
-            }
-        }
-        // Timing, when the card was printed and the session it targets - one middot-joined line,
-        // the pattern the recommendation card's own source facts already read in, rather than
-        // three stacked rows that ran together with nothing to tell one fact from the next.
-        val facts = listOfNotNull(
-            point.timingEvidence?.let { it to palette.hero },
-            point.visibleSourceDate?.takeIf(String::isNotBlank)
-                ?.let { ("Printed $it") to palette.muted },
-            point.date?.let {
-                ("Target " + AppDates.DayMonth.format(it)) to palette.muted
+    val openStock = LocalOpenStock.current
+    val entryLow = point.buyPriceLow ?: point.buyPrice
+    val entryHigh = point.buyPriceHigh ?: point.buyPrice
+    val entry = point.entryMidpoint()
+    val close = latest?.session?.close
+    // One precision for every price on the sheet: 320, 335 and 325.01 are one stock's money.
+    val decimals = priceDecimals(point.stopLoss, entryLow, entryHigh, point.target1, point.target2, close, peak)
+
+    SheetIdentity(
+        ticker = stock.stockCode,
+        arabic = stock.stockNameArabic,
+        english = stock.stockNameEnglish,
+        onOpenStock = { openStock(stock.stockCode) },
+    ) {
+        CallMenu(stock, point, channel, session, editor, onEdit)
+    }
+    // Every pill on one row under the header: the verdict, whether it was corrected, where its
+    // date came from, who made it and for which session.
+    FlowRow(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        // A watching call's verdict is the word its timing pill already says.
+        status?.takeIf { it.second != CallGroup.WATCHING }?.let { (word, group) -> KitTag(word, tone = group.tone()) }
+        if (editor?.editFor(stock, point) != null) EditedChip(onEdit)
+        TimingChip(point)
+        // "from", so the channel reads as where the call came from rather than as a second status.
+        channel?.takeIf(String::isNotBlank)?.let { KitTag("from ⁨$it⁩", tone = palette.muted) }
+        session?.let { KitTag(AppDates.DayMonth.format(it), tone = palette.muted) }
+    }
+
+    // Where it stands: the price now where the app holds one, the peak where it holds only that.
+    val standing = close ?: peak
+    if (standing != null) {
+        val signals = tileSignals(TileTone.HERO)
+        val move = fromEntry(standing, entry)
+        StandsTile(
+            tone = TileTone.HERO,
+            figure = formatPrice(standing, decimals),
+            figureColor = tileColors(TileTone.HERO).second,
+            beside = when {
+                close == null -> "highest since the call"
+                latest.provisional -> "so far today"
+                else -> "now · " + shortDate(latest.session.date)
             },
-        )
-        if (facts.isNotEmpty()) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                verticalArrangement = Arrangement.spacedBy(Space.xs),
-            ) {
-                facts.forEachIndexed { index, (text, color) ->
-                    Text(text, style = MaterialTheme.typography.labelSmall, color = color)
-                    if (index != facts.lastIndex) {
-                        Text(
-                            "·",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = palette.muted,
-                        )
-                    }
-                }
+        ) {
+            if (move != null) {
+                Text(
+                    buildAnnotatedString {
+                        val size = formatPercent(abs(move), signed = false)
+                        when {
+                            move > 0 -> { figure("+$size", signals.gain); append(" above the entry") }
+                            move < 0 -> { figure("-$size", signals.loss); append(" below the entry") }
+                            else -> append("At the entry")
+                        }
+                        // A range has no one price to name; its ends are on the ladder below.
+                        if (entryLow == entryHigh && entry != null) {
+                            append(" of ")
+                            figure(formatPrice(entry, decimals))
+                        }
+                    },
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+            if (close != null && peak != null) {
+                Text(
+                    buildAnnotatedString {
+                        if (formatPrice(peak, decimals) == formatPrice(close, decimals) || peak < close) {
+                            append("The highest it has been since the call.")
+                        } else {
+                            append("Highest since the call ")
+                            figure(formatPrice(peak, decimals))
+                            fromEntry(peak, entry)?.let { append(", ${formatPercent(it)} from the entry") }
+                            append(".")
+                        }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = QuietOnTile),
+                )
             }
         }
-        (point.notesArabic ?: stock.notesSummary)?.let {
+    }
+
+    // A watching call is its condition: what has to happen before it is a call to buy at all.
+    val condition = point.recommendationEvidence?.takeIf { point.isWatching && it.isNotBlank() }
+    if (condition != null) {
+        Tile(Modifier.fillMaxWidth(), tone = TileTone.TILE1) {
             Text(
-                it,
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.End,
-                modifier = Modifier.fillMaxWidth(),
+                "THE CALL'S OWN CONDITION",
+                style = MaterialTheme.typography.labelSmall,
+                color = LocalContentColor.current.copy(alpha = QuietOnTile),
+            )
+            Spacer(Modifier.height(Space.s))
+            SourceText(condition, MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(Space.s))
+            Text(conditionWords(close, entryLow, entryHigh), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+
+    Tile(Modifier.fillMaxWidth()) {
+        SheetSectionLabel("The levels")
+        Spacer(Modifier.height(Space.s))
+        LevelsBlock(
+            stopLoss = point.stopLoss,
+            entryLow = entryLow,
+            entryHigh = entryHigh,
+            target1 = point.target1,
+            target2 = point.target2,
+            now = standing,
+            standing = if (close != null) "now" else "at its highest since the call",
+        )
+        point.riskRewardRatio()?.let { ratio ->
+            Spacer(Modifier.height(Space.m))
+            Hairline()
+            Spacer(Modifier.height(Space.m))
+            // What the call risks against what it seeks, as a sentence and as a length: 335 against
+            // a stop at 310 means one thing at 1 to 3 and another at 1 to 0.4.
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    buildAnnotatedString {
+                        append("Risks ")
+                        figure("1")
+                        append(" to make ")
+                        figure("%.1f".format(ratio))
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                RiskRewardBar(ratio, Modifier.weight(1f))
+            }
+        }
+        // Only where the call gave one. A support is a price the stock has held at, not a
+        // distance from the entry, so neither carries a percentage.
+        if (point.support != null || point.resistance != null) {
+            Spacer(Modifier.height(Space.s))
+            Text(
+                buildAnnotatedString {
+                    point.support?.let { append("Support "); figure(formatPrice(it, decimals)) }
+                    if (point.support != null && point.resistance != null) append(" · ")
+                    point.resistance?.let { append("Resistance "); figure(formatPrice(it, decimals)) }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.muted,
             )
         }
-        // The ids are for checking the app against a report, not for reading a call - below a rule
-        // now so they read as a footnote rather than running straight on from the notes above them.
-        Spacer(Modifier.height(Space.s))
-        Hairline()
-        Spacer(Modifier.height(Space.s))
+    }
+
+    // How long it has left, on a call still running.
+    scored?.takeIf { it.outcome == Outcome.OPEN }?.let { call ->
+        val left = (call.windowSessions - call.sessionsElapsed).coerceAtLeast(0)
+        Tile(Modifier.fillMaxWidth()) {
+            Text(
+                "$left of ${call.windowSessions} trading days left",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Spacer(Modifier.height(Space.s))
+            DaySteps(call.sessionsElapsed, call.windowSessions)
+        }
+    }
+
+    scored?.let { call ->
+        Tile(Modifier.fillMaxWidth()) {
+            SheetSectionLabel("What happened")
+            Spacer(Modifier.height(Space.s))
+            Timeline(call.timeline().map { it.asSheetStep() })
+        }
+    }
+
+    OccurrenceSource(stock, point, imagePath, quote = condition == null, onOpenImage = onOpenImage)
+
+    // The ids are for checking the app against a report, not for reading a call, so they wait
+    // behind a closed row. Transient, like any other disclosure a fold may shut.
+    val detailsOpen = remember(point) { mutableStateOf(false) }
+    MoreRow("Source details", detailsOpen) {
         Text(
             listOfNotNull(
                 point.sourceImageRef?.let { "image $it" },
@@ -394,13 +334,111 @@ private fun OccurrenceSource(
 }
 
 /**
+ * What the app can say about a watching call's condition, which is where the last close stands
+ * against the entry, and what it cannot: a card that asks for two hours above a price is asking
+ * for something no daily close can show.
+ */
+internal fun conditionWords(close: Double?, entryLow: Double?, entryHigh: Double?): String {
+    val low = entryLow ?: entryHigh
+    val high = entryHigh ?: entryLow
+    val where = when {
+        close == null || low == null || high == null -> null
+        close > high -> "The last close is above the entry"
+        close < low -> "The last close is below the entry"
+        low != high -> "The last close is inside the entry range"
+        else -> "The last close is at the entry"
+    }
+    return if (where == null) {
+        "Read off the card. The app cannot check it for you."
+    } else {
+        "Read off the card. $where; the app cannot check anything else it asks for."
+    }
+}
+
+/** A step of the model's timeline as the kit draws it. */
+private fun CallStep.asSheetStep(): TimelineStep = TimelineStep(
+    text = text,
+    detail = detail,
+    date = date?.format(AppDates.DayMonth),
+    tone = when (kind) {
+        CallStepKind.DONE -> StepTone.DONE
+        CallStepKind.ACTIVE -> StepTone.ACTIVE
+        CallStepKind.WAITING -> StepTone.WAITING
+        CallStepKind.GOOD -> StepTone.GOOD
+        CallStepKind.BAD -> StepTone.BAD
+    },
+)
+
+/**
+ * The card the numbers were read off, and what the model says it read there.
+ *
+ * The screenshot is the evidence every figure above it rests on, so it leads, with when the card
+ * was printed, the session it was for and how it was marked beside it - three labelled facts where
+ * there was one middot-joined line that wrapped and ended on its own separator. The quote is drawn
+ * here only where the sheet has not already led with it as the call's condition.
+ */
+@Composable
+private fun OccurrenceSource(
+    stock: ConsolidatedRecommendation,
+    point: RecommendationDataPoint,
+    imagePath: String?,
+    quote: Boolean,
+    onOpenImage: () -> Unit,
+) {
+    Tile(Modifier.fillMaxWidth()) {
+        SheetSectionLabel("What it was read off")
+        Spacer(Modifier.height(Space.s))
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.Top) {
+            // The thumbnail draws `#13` where the photo has gone from Telegram's cache; absent
+            // altogether, Source details still names the image the model cited.
+            if (imagePath != null) {
+                SourceImageThumbnail(
+                    path = imagePath,
+                    reference = point.sourceImageRef,
+                    size = SourceShotSize,
+                    onOpen = onOpenImage,
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                point.visibleSourceDate?.takeIf(String::isNotBlank)?.let { SourceFact("Printed", printedWords(it)) }
+                // "Target 11 Nov" until 2026-11-11, which on a sheet of price targets read as one.
+                point.date?.let { SourceFact("For the session of", AppDates.DayMonth.format(it)) }
+                point.timingEvidence?.takeIf(String::isNotBlank)?.let { SourceFact("Marked", "⁨$it⁩") }
+            }
+        }
+        if (quote) {
+            point.recommendationEvidence?.takeIf(String::isNotBlank)?.let {
+                Spacer(Modifier.height(Space.s))
+                SourceText("“$it”", MaterialTheme.typography.bodyMedium)
+            }
+        }
+        (point.notesArabic ?: stock.notesSummary)?.takeIf(String::isNotBlank)?.let {
+            Spacer(Modifier.height(Space.s))
+            SourceText(it, MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+/** One fact about the source card: what it is, muted, then what it says. */
+@Composable
+private fun SourceFact(label: String, value: String) {
+    val muted = palette.muted
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = muted)) { append("$label ") }
+            append(value)
+        },
+        style = MaterialTheme.typography.bodyMedium,
+    )
+}
+
+/**
  * The one thing a reader does about a call, on the edge their thumb is already on.
  *
  * [TradeAction] is the app's only way of recording a purchase and this is one more surface asking
- * it, not a second way of asking. One more item in the sheet's own scrollable column now, alongside
- * "The call" and "What it was read off" rather than a bar pinned below them - which means it scrolls
- * with the rest of a long call instead of staying reachable, the trade a reader who wanted it
- * pinned there made. Asked for on 2026-09-20.
+ * it, not a second way of asking. One more item in the sheet's own scrollable column, so it scrolls
+ * with the rest of a long call - the trade a reader who wanted it pinned there made. Asked for on
+ * 2026-09-20.
  *
  * Selling is offered here and not on the recommendation card, which is the split that already
  * exists: a card being scanned for what to buy next is not where a position is closed, and this
@@ -414,8 +452,6 @@ private fun OccurrenceActions(
     trades: TradeBook,
     held: PositionView?,
 ) {
-    // No divider and no caption naming the channel and the session - the header says both of
-    // those now, and a rule above a lone button drew a boundary nothing else on this list has.
     Row(Modifier.fillMaxWidth()) {
         TradeAction(
             held = held,
