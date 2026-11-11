@@ -182,7 +182,7 @@ internal fun PositionCard(
                 }
                 Text(
                     "You paid ${formatPrice(position.entryPrice)} · now ${formatPrice(view.currentPrice)}",
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = TabularFigures),
+                    style = MaterialTheme.typography.bodySmall,
                     color = palette.muted,
                 )
                 FlowRow(

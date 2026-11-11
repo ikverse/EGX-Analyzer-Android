@@ -558,8 +558,8 @@ private fun FeedFooter(appState: AppState) {
     val health = appState.priceHealth
     val text = if (health.clean) "Every stock priced" else "${health.faults.size} of ${health.stocksNamed} stocks have no usable price"
     Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+        text,
+        style = MaterialTheme.typography.labelSmall,
         color = if (health.clean) p.muted else p.loss,
         modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
     )
