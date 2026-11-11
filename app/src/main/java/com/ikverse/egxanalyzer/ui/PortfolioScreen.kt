@@ -58,6 +58,22 @@ import com.ikverse.egxanalyzer.ui.kit.TileTone
 import com.ikverse.egxanalyzer.ui.kit.popIn
 import com.ikverse.egxanalyzer.ui.theme.palette
 import kotlinx.coroutines.delay
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import com.ikverse.egxanalyzer.model.LevelBar
+import com.ikverse.egxanalyzer.model.TradeRowGroup
+import com.ikverse.egxanalyzer.model.inTableOrder
+import com.ikverse.egxanalyzer.model.levelBar
+import com.ikverse.egxanalyzer.model.tableGroup
+import com.ikverse.egxanalyzer.model.tableStatusWord
+import com.ikverse.egxanalyzer.model.tableTimeWord
+import com.ikverse.egxanalyzer.ui.kit.KitRule
 
 /** Which of the Portfolio's lists the chips show: a view, like the sort order, never a filter. */
 internal enum class TradeScope { OPEN, FINISHED, ALL }
@@ -515,13 +531,20 @@ private fun ColumnScope.TradeLists(portfolio: Portfolio, appState: AppState, lay
 /**
  * Unfolded: the trades as a table, under chips that pick Open, Finished or All. A row opens the
  * trade beside the page; a hold opens its menu.
+ *
+ * Rebuilt on 2026-11-12 to the owner's pick of three mockups. Four columns: the stock and what it
+ * is doing, what was paid and where the price is, a bar from the stop through the price paid to
+ * the far target, and what the trade has made with its time under it. The compact ladder this
+ * replaced printed no price at all, and its time line read "0 trading days left" on every trade
+ * kept open past its stop. Open trades are grouped - running, waiting to be sold, past deadline -
+ * under headings, so the order is something the reader can see.
  */
 @Composable
 private fun ColumnScope.TradesTable(portfolio: Portfolio, appState: AppState) {
     var scope by appState.pages.portfolioScope
     var selected by appState.pages.portfolioSelectedTrade
     val shown = rememberShownTrades(portfolio, appState)
-    val open = shown.filter { it.open }
+    val open = remember(shown) { shown.filter { it.open }.inTableOrder() }
     val finished = shown.filterNot { it.open }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
         KitChip("Open ${open.size}", selected = scope == TradeScope.OPEN, onClick = { scope = TradeScope.OPEN })
@@ -529,30 +552,38 @@ private fun ColumnScope.TradesTable(portfolio: Portfolio, appState: AppState) {
         KitChip("All", selected = scope == TradeScope.ALL, onClick = { scope = TradeScope.ALL })
     }
     Tile(Modifier.fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = TableInset, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(TableColumnGap),
+        ) {
             TableHeading("Stock", Modifier.width(TableStockWidth))
-            TableHeading("Stop to target", Modifier.weight(1f))
+            TableHeading("Price", Modifier.width(TablePriceWidth))
+            TableHeading("Stop → target", Modifier.weight(1f))
             TableHeading("Made", Modifier.width(TableMadeWidth), TextAlign.End)
-            TableHeading("Time", Modifier.width(TableTimeWidth).padding(start = Space.s))
         }
+        // [grouped] puts a heading over each run of one group; a rule parts the rows inside one.
         @Composable
-        fun rows(views: List<PositionView>) = views.forEach { view ->
-            val actions = rememberTradeActions(view, appState)
-            TradeRow(view, onOpen = { selected = view.position.id }, actions = actions.menu(view))
+        fun rows(views: List<PositionView>, grouped: Boolean) {
+            var last: TradeRowGroup? = null
+            views.forEachIndexed { index, view ->
+                val group = view.tableGroup()
+                when {
+                    grouped && group != last -> TableGroupHeading(group.heading)
+                    index > 0 -> KitRule(Modifier.padding(horizontal = TableInset))
+                }
+                last = group
+                val actions = rememberTradeActions(view, appState)
+                TradeRow(view, onOpen = { selected = view.position.id }, actions = actions.menu(view))
+            }
         }
         when (scope) {
-            TradeScope.OPEN -> rows(open)
-            TradeScope.FINISHED -> rows(finished)
+            TradeScope.OPEN -> rows(open, grouped = true)
+            TradeScope.FINISHED -> rows(finished, grouped = false)
             TradeScope.ALL -> {
-                rows(open)
+                rows(open, grouped = true)
                 if (finished.isNotEmpty()) {
-                    Text(
-                        "Finished lately",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.muted,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
-                    rows(finished)
+                    TableGroupHeading("Finished lately")
+                    rows(finished, grouped = false)
                 }
             }
         }
@@ -561,69 +592,171 @@ private fun ColumnScope.TradesTable(portfolio: Portfolio, appState: AppState) {
 
 @Composable
 private fun TableHeading(label: String, modifier: Modifier, align: TextAlign = TextAlign.Start) {
-    Text(label, style = MaterialTheme.typography.labelSmall, color = palette.muted, textAlign = align, modifier = modifier)
+    Text(label, style = MaterialTheme.typography.labelMedium, color = palette.muted, textAlign = align, maxLines = 1, modifier = modifier)
 }
 
-private val TableStockWidth = 132.dp
-private val TableMadeWidth = 64.dp
-private val TableTimeWidth = 120.dp
+/** The name of a run of rows: a rule, then the words, in the table's own inset. */
+@Composable
+private fun TableGroupHeading(label: String) {
+    KitRule(Modifier.padding(horizontal = TableInset))
+    Text(
+        label,
+        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+        color = palette.muted,
+        modifier = Modifier.padding(start = TableInset, end = TableInset, top = 12.dp, bottom = 2.dp),
+    )
+}
 
-/** One trade in the table: the stock and paid → now, its ladder, what it made, and its time. */
+// The three fixed columns and their gaps leave the bar about 100dp on the unfolded Fold, whose
+// table is 393dp inside its tile, and more on the tablet. The bar is the one column that grows.
+private val TableInset = 16.dp
+private val TableColumnGap = 10.dp
+private val TableStockWidth = 116.dp
+private val TablePriceWidth = 74.dp
+private val TableMadeWidth = 72.dp
+
+/** A small figure in the table: a price beside its word, or under an end of the bar. */
+@Composable
+private fun tableFigure() = MaterialTheme.typography.labelMedium.copy(
+    fontFamily = TabularFigures, fontWeight = FontWeight.Medium, letterSpacing = 0.sp,
+)
+
+/** One trade in the table: the stock and its state, paid and now, the bar, and what it made. */
 @Composable
 private fun TradeRow(view: PositionView, onOpen: () -> Unit, actions: List<com.ikverse.egxanalyzer.ui.kit.MenuItem>) {
     val position = view.position
+    val group = view.tableGroup()
+    val reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice
     HoldMenu(items = actions, onTap = onOpen) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp),
+            Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = TableInset, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(TableColumnGap),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.width(TableStockWidth)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     StockLogo(position.ticker, LogoSize.Row, Modifier.padding(end = Space.xs))
-                    Text(position.ticker, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        position.ticker,
+                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.ExtraBold),
+                        maxLines = 1,
+                    )
                 }
                 Text(
-                    "${formatPrice(position.entryPrice)} → ${formatPrice(view.currentPrice)}",
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-                    color = palette.muted,
-                    maxLines = 1,
-                )
-            }
-            Box(Modifier.weight(1f).padding(horizontal = Space.xs)) {
-                PriceLadder(
-                    stopLoss = position.stopLoss,
-                    entryLow = position.entryPrice,
-                    entryHigh = position.entryPrice,
-                    target1 = position.target1,
-                    target2 = position.target2,
-                    reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
-                    compact = true,
-                )
-            }
-            Text(
-                formatPercent(view.returnPct),
-                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
-                color = PriceRole.forReturn(view.returnPct),
-                textAlign = TextAlign.End,
-                modifier = Modifier.width(TableMadeWidth),
-            )
-            Column(Modifier.width(TableTimeWidth).padding(start = Space.s)) {
-                Text(
-                    when {
-                        view.open -> "${view.sessionsRemaining} trading ${if (view.sessionsRemaining == 1) "day" else "days"} left"
-                        view.ranOutOfTime && view.awaitingSale -> "time is up"
-                        else -> "in ${view.sessionsHeld} ${if (view.sessionsHeld == 1) "day" else "days"}"
+                    view.tableStatusWord(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = when (group) {
+                        TradeRowGroup.TO_SELL, TradeRowGroup.PAST_DEADLINE -> palette.loss
+                        else -> view.status.tone()
                     },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = palette.muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(view.status.tone()))
-                    Text(view.status.plainWord(), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = Space.xs), maxLines = 1)
-                }
             }
+            Column(Modifier.width(TablePriceWidth)) {
+                PriceLine("paid", formatPrice(position.entryPrice), strong = false)
+                PriceLine(
+                    when {
+                        view.open -> "now"
+                        view.realized -> "sold"
+                        else -> "end"
+                    },
+                    formatPrice(reached),
+                    strong = true,
+                )
+            }
+            Box(Modifier.weight(1f)) {
+                TradeLevelBar(
+                    bar = levelBar(position.entryPrice, reached, position.stopLoss, position.target1, position.target2),
+                    paid = position.entryPrice,
+                    now = reached,
+                )
+            }
+            Column(Modifier.width(TableMadeWidth), horizontalAlignment = Alignment.End) {
+                Text(
+                    formatPercent(view.returnPct),
+                    style = MaterialTheme.typography.bodyLarge.copy(fontFamily = TabularFigures, fontWeight = FontWeight.Bold),
+                    color = PriceRole.forReturn(view.returnPct),
+                    maxLines = 1,
+                )
+                Text(
+                    view.tableTimeWord(::shortDate),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                    color = palette.muted,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** A word and its price on one line, the word muted and the price in the figures' face. */
+@Composable
+private fun PriceLine(word: String, price: String, strong: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            word,
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+            color = palette.muted,
+            modifier = Modifier.width(30.dp),
+        )
+        Text(
+            price,
+            style = tableFigure().copy(fontWeight = if (strong) FontWeight.Bold else FontWeight.Medium),
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * The bar of the table's third column: a track with what was paid at its centre, loss growing left
+ * toward the stop and gain growing right toward the far target, a notch where target 1 sits, and
+ * the two end prices beneath. A price beyond either end fills that side and points out of it.
+ */
+@Composable
+private fun TradeLevelBar(bar: LevelBar, paid: Double, now: Double?) {
+    val p = palette
+    val words = buildString {
+        bar.stop?.let { append("Stop ${formatPrice(it)}, ") }
+        append("paid ${formatPrice(paid)}")
+        bar.far?.let { append(", target ${formatPrice(it)}") }
+        now?.let { append(", now ${formatPrice(it)}") }
+    }
+    Column(Modifier.fillMaxWidth().semantics { contentDescription = words }) {
+        Canvas(Modifier.fillMaxWidth().height(16.dp)) {
+            val track = 8.dp.toPx()
+            val top = (size.height - track) / 2
+            val round = CornerRadius(track / 2)
+            val half = size.width / 2
+            drawRoundRect(p.raised, Offset(0f, top), Size(size.width, track), round)
+            if (bar.fill > 0f) {
+                drawRoundRect(p.gain, Offset(half, top), Size(half * bar.fill, track), round)
+            } else if (bar.fill < 0f) {
+                val width = half * -bar.fill
+                drawRoundRect(p.loss, Offset(half - width, top), Size(width, track), round)
+            }
+            bar.target1At?.let {
+                val x = half + half * it
+                drawRect(p.gain.copy(alpha = 0.55f), Offset(x - 1.dp.toPx(), top - 2.dp.toPx()), Size(2.dp.toPx(), track + 4.dp.toPx()))
+            }
+            drawRect(p.ink, Offset(half - 1.dp.toPx(), 0f), Size(2.dp.toPx(), size.height))
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 3.dp)) {
+            val ends = tableFigure().copy(fontSize = 10.sp, lineHeight = 13.sp)
+            Text(
+                bar.stop?.let { (if (bar.pastStop) "◀ " else "") + formatPrice(it) }.orEmpty(),
+                style = ends,
+                color = if (bar.pastStop) p.loss else p.muted,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                bar.far?.let { formatPrice(it) + (if (bar.pastFar) " ▶" else "") }.orEmpty(),
+                style = ends,
+                color = if (bar.pastFar) p.gain else p.muted,
+                maxLines = 1,
+            )
         }
     }
 }
