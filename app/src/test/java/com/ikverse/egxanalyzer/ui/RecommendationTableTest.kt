@@ -177,21 +177,22 @@ class RecommendationTableTest {
     }
 
     @Test
-    fun `a live call says its move since entry and what is left to target 1`() {
+    fun `a live call says its move since entry`() {
         compose.setContent { Table(containers.min(), close = 10.6) }
 
         compose.onNodeWithText("+2.4%").assertIsDisplayed()
-        compose.onNodeWithText("3.8%").assertIsDisplayed()
         compose.onNodeWithText("now").assertIsDisplayed()
     }
 
     @Test
-    fun `a live call says how far it stands above its stop and short of target 2`() {
+    fun `a live call says how far it stands above its stop, and nothing of what is left to a target`() {
         compose.setContent { Table(containers.min(), close = 10.6) }
 
-        // Stop 9.8 against 10.6, and target 2 at 12.
+        // Stop 9.8 against 10.6. Target 1 at 11 would have been 3.8% to go, target 2 at 12 13.2%.
         compose.onNodeWithText("7.5%").assertIsDisplayed()
-        compose.onNodeWithText("13.2%").assertIsDisplayed()
+        compose.onNodeWithText("3.8%").assertDoesNotExist()
+        compose.onNodeWithText("13.2%").assertDoesNotExist()
+        compose.onNodeWithText("TO T1").assertDoesNotExist()
     }
 
     @Test
@@ -228,13 +229,6 @@ class RecommendationTableTest {
             listOf("B", "C", "A"),
             liveFirst(listOf(watched, first, second)).map { it.sourceMessageId },
         )
-    }
-
-    @Test
-    fun `a price at or past target 1 has nothing left to go`() {
-        compose.setContent { Table(containers.min(), close = 11.2) }
-
-        compose.onNodeWithText("reached").assertIsDisplayed()
     }
 
     private fun stock(points: List<RecommendationDataPoint>) = ConsolidatedRecommendation(
