@@ -52,8 +52,9 @@ import com.ikverse.egxanalyzer.ui.theme.palette
  *
  * **It is for comparing in numbers, and there is no ladder.** The ladder is in the sheet a line
  * opens. Under the stop and each target is how far it is from the entry, in that level's own colour;
- * then the move since entry, the peak since the call, and how far the price is from the stop and
- * from each target.
+ * then the move since entry, the peak since the call, and how far the price is above the stop.
+ * How far is left to each target was two more columns until 2026-11-12, dropped at the owner's
+ * request to give the rest room and a larger face.
  *
  * **It fits, and that is the rest of the design.** It was sixteen fixed-width columns behind a
  * horizontal scroll until 2026-09-09, and crossing a breakpoint *appended* columns, so the tablet's
@@ -133,12 +134,6 @@ internal fun fromEntry(point: RecommendationDataPoint, level: Double?): Double? 
     return (level - entry) / entry * 100
 }
 
-/** How far the price still has to rise from [close] to reach target 1. Null where either is missing. */
-internal fun toTarget1(point: RecommendationDataPoint, close: Double?): Double? = toLevel(point.target1, close)
-
-/** How far the price still has to rise from [close] to reach target 2. Null where either is missing. */
-internal fun toTarget2(point: RecommendationDataPoint, close: Double?): Double? = toLevel(point.target2, close)
-
 /** How far [close] still sits above the stop, as a share of the price. Null where either is missing. */
 internal fun aboveStop(point: RecommendationDataPoint, close: Double?): Double? {
     val stop = point.stopLoss ?: return null
@@ -146,23 +141,18 @@ internal fun aboveStop(point: RecommendationDataPoint, close: Double?): Double? 
     return (close - stop) / close * 100
 }
 
-private fun toLevel(level: Double?, close: Double?): Double? {
-    if (level == null || close == null || close == 0.0) return null
-    return (level - close) / close * 100
-}
-
 /** A tile's inset, left and right: the heading, every line and the rules between them share it. */
 private val TileInset = 20.dp
 
 /** The channel that made the call, with its status under it. The one column of words. */
-private val WhoWidth = 124.dp
+private val WhoWidth = 140.dp
 
 /** How many live figure columns close a line, each weighted 1. */
-private const val LiveColumns = 5
+private const val LiveColumns = 3
 
 /** The column names after the channel, in order. The last [LiveColumns] are the live figures. */
 internal val TableColumns = listOf(
-    "Entry", "Stop", "Target 1", "Target 2", "Since entry", "Peak", "To stop", "To T1", "To T2",
+    "Entry", "Stop", "Target 1", "Target 2", "Since entry", "Peak", "To stop",
 )
 
 /** The ink band's height: one line of names, or a stack of them at a large font scale. */
@@ -175,7 +165,7 @@ private val NamesHeight = 40.dp
 private const val EntryWeight = 1.4f
 
 /** A minimum rather than a fixed height, so a large font scale grows the cell instead of clipping it. */
-private val CellHeight = 36.dp
+private val CellHeight = 48.dp
 
 /** The system font scale past which a several-word column name is stacked. */
 private const val StackLabelsAbove = 1.15f
@@ -303,7 +293,7 @@ private fun CallLine(
 ) {
     HoldMenu(items = holdItems, onTap = onClick) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = TileInset, vertical = Space.xs),
+            Modifier.fillMaxWidth().padding(horizontal = TileInset, vertical = Space.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             WhoCell(channel, status, point.isTPlusOne, Modifier.width(WhoWidth))
@@ -321,7 +311,7 @@ private fun CallLine(
                 ) {
                     BasicText(
                         watchingNote(point),
-                        style = MaterialTheme.typography.labelSmall.merge(color = palette.muted, textAlign = TextAlign.End),
+                        style = MaterialTheme.typography.labelMedium.merge(color = palette.muted, textAlign = TextAlign.End),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -337,18 +327,9 @@ private fun CallLine(
                     if (stopped) "hit" else formatPercent(stopLeft, signed = false),
                     if (stopped) palette.loss else palette.ink,
                 )
-                LeftCell(Modifier.weight(1f), toTarget1(point, close))
-                LeftCell(Modifier.weight(1f), toTarget2(point, close))
             }
         }
     }
-}
-
-/** What is left to a target: the distance, or "reached" in the gain's colour once there is none. */
-@Composable
-private fun LeftCell(modifier: Modifier, left: Double?) {
-    val there = left != null && left <= 0.0
-    FigureCell(modifier, if (there) "reached" else formatPercent(left, signed = false), if (there) palette.gain else palette.ink)
 }
 
 /**
@@ -376,19 +357,19 @@ internal fun watchingNote(point: RecommendationDataPoint): String {
 private fun WhoCell(channel: String?, status: Pair<String, CallGroup>, tPlusOne: Boolean, modifier: Modifier) {
     Column(modifier.heightIn(min = CellHeight).padding(end = Space.s), verticalArrangement = Arrangement.Center) {
         // Channel names run long and this column is fixed, so the name shrinks before it is cut.
-        AutoSizeText(channel ?: Dash, style = MaterialTheme.typography.labelMedium, color = palette.ink)
+        AutoSizeText(channel ?: Dash, style = MaterialTheme.typography.bodyMedium, color = palette.ink)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(status.second.tone()))
             AutoSizeText(
                 status.first,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
                 color = palette.muted,
                 modifier = Modifier.padding(start = Space.xs).weight(1f, fill = false),
             )
             if (tPlusOne) {
                 AutoSizeText(
                     " · T+1",
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
                     color = palette.ink,
                 )
             }
@@ -416,7 +397,7 @@ private fun FigureCell(
     ) {
         AutoSizeText(
             value,
-            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
+            style = MaterialTheme.typography.bodyLarge.copy(fontFamily = TabularFigures),
             color = shown,
             textAlign = TextAlign.End,
             modifier = Modifier.fillMaxWidth(),
@@ -424,7 +405,7 @@ private fun FigureCell(
         if (fromEntry != null) {
             AutoSizeText(
                 formatPercent(fromEntry),
-                style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
                 color = if (value == Dash) shown else underTone,
                 textAlign = TextAlign.End,
                 modifier = Modifier.fillMaxWidth(),
@@ -451,7 +432,7 @@ private fun MoveCell(modifier: Modifier, move: Double?) {
         Box(Modifier.fillMaxWidth().heightIn(min = CellHeight), contentAlignment = Alignment.CenterEnd) {
             AutoSizeText(
                 text,
-                style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
                 color = tone,
                 modifier = if (move == null) Modifier else Modifier
                     .clip(CircleShape)

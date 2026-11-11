@@ -672,9 +672,9 @@ sessions.
   stock in `palette.raised` with its logo, ticker, name, call count and price now. A line per call
   on the card, led by the channel and its status dot.
 - **Columns**: Entry, Stop, Target 1, Target 2 (each level with its distance from the entry under
-  it), then Since entry, Peak (`AppState.peakSince`, with how far above the entry), To stop ("hit"
-  once stopped), To T1, To T2 ("reached" once there). A watched call's note takes the five live
-  columns. Only the channel column is fixed; every other is weighted, so a wider window widens the
+  it), then Since entry, Peak (`AppState.peakSince`, with how far above the entry) and To stop
+  ("hit" once stopped). A watched call's note takes the three live columns. To T1 and To T2 were
+  dropped the same day so the rest could be wider, the rows 48dp tall and the figures body-large. Only the channel column is fixed; every other is weighted, so a wider window widens the
   columns and never adds one. `RecommendationTableTest` holds every column at 614, 682 and 715dp.
 
 ## The price ladder (redrawn 2026-11-11)
