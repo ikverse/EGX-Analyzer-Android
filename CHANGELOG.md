@@ -4,14 +4,17 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
-## [Unreleased]
+## [5.1.8] — 2026-11-11
 
 - **A trade's card on Portfolio says what the trade needs.** One sentence leads it, the most urgent thing true of the trade: "Past its deadline by 3 days", "1.2% above its stop", "Target 1 reached, 3.6% to target 2", or how far it is to the next target. It replaces the "You paid · now" line, whose two prices are on the ladder.
 - **The call's trading days are a row of segments** on that card, filled as they are used, with how many are left beside them. Once the deadline has passed they are all filled in the alert colour.
 - **The card says whether the price is keeping pace with the clock.** It compares how far the price has come toward target 1 with how much of the call's time is used: "Ahead of pace", "On pace", or "Behind pace: 70% of the time used, 20% of the way".
 - The card's tags are down to the status, "Kept open" before the deadline, T+1 and a change of price scale. The return is larger.
-- **The price ladder is redrawn.** One plain line with four upright ticks: red for the stop, dark for the entry, green for the two targets. A round blue dot sits on the line where the price is, with the price above it, and every level's price is on one row beneath. The coloured zones between the levels and the arrow under the line are gone. It is the same ladder everywhere: Portfolio, Results, Insights and the call and trade sheets.
+- **The price ladder is redrawn.** One plain line with four upright ticks: red for the stop, dark for the entry, green for the two targets. A round blue dot sits on the line where the price is, with the price above it, and every level's price is on one row beneath. The coloured zones between the levels and the arrow under the line are gone. It is the same ladder everywhere it is drawn: Portfolio, the Results cards on the cover screen, Insights and the call and trade sheets. The wide Results table shows numbers, and its ladder is in the sheet a line opens.
 - **A trade's ladder on Portfolio shows where the stock has been.** A pale stripe runs from the lowest to the highest price since you bought, and the entry is labelled "You paid".
+- **The Results table on a wide screen is a tile per stock, in numbers.** The shared row of column names is gone: the names sit above the figures of a tile's first call, and a second call lines up under them. The stock's price is in the tile's head once, or "no price" where the feed has none. Under the stop and each target is how far it is from the entry, in that level's colour. Each live call then says its move since entry and how far the price still has to go to target 1. Live calls come before watched ones, and T+1 is written after the status of the call that named it.
+- **The Results list is one card per session,** under week headings, drawn from the session's newest reading: the figure, the counts written out, best and worst so far, and the stocks as tags. A session still to come says what is waiting. In an open report the stocks can be sorted by closest to target, biggest move or report order, and where a session was read more than once a pill opens a list of each reading and the stocks new since the last. Unfolded, the list stays on the left and the report opens on the right.
+- **The price chart is rebuilt** on the stock sheet, the Insights call sheet and the position card. Level names and prices are tags in a column beside the plot, spread so none overlaps; the latest close has a filled tag of its own. Three dates sit under the plot, and a touched session reads out in the headline so nothing below the chart moves. The ranges are one full-width track, so none is cut off on the cover screen. The stock sheet's chart tile is navy in the light theme.
 
 ---
 
