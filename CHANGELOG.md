@@ -4,6 +4,19 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.1.9] — 2026-11-12
+
+- **The trades table on the unfolded Portfolio is rebuilt in numbers.** Four columns: the stock with what it is doing under its ticker, what you paid and where the price is, a bar, and what the trade has made with its time under it. The compact ladder it replaces printed no prices.
+- **The bar is centred on what you paid.** Red grows left toward the stop and green grows right toward target 2, with a notch at target 1 and the stop and target prices under the ends. A price below the stop fills the red side and points out of it.
+- **Open trades are grouped:** Running, Waiting for you to sell, and Past deadline, each under its own heading.
+- **The time under a return says something about the trade.** "6 days left" while it runs, "hit 5 Nov" once its stop has broken, "52d late" past its deadline, and "in 4 days" when finished. A trade kept open past its stop used to read "0 trading days left".
+- **Pulling a page down to fetch prices moves the page.** The floating disc is gone: the page follows the finger and uncovers a band saying what the pull will do, how old the prices are, and how far there is to pull. A pull while a fetch is running says so and does nothing.
+- **Changing tab is smoother.** The tab names move by a scale and a cross-fade, and they no longer shift from page to page: the header keeps room for both buttons everywhere.
+- **The search button on Analyze picks a stock** and opens its sheet.
+- Best source showed its hit rate multiplied by 100 twice, so 54.9% read as 5490%, on Portfolio and on Analyze. Fixed.
+
+---
+
 ## [5.1.8] — 2026-11-11
 
 - **A trade's card on Portfolio says what the trade needs.** One sentence leads it, the most urgent thing true of the trade: "Past its deadline by 3 days", "1.2% above its stop", "Target 1 reached, 3.6% to target 2", or how far it is to the next target. It replaces the "You paid · now" line, whose two prices are on the ladder.
