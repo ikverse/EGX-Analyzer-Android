@@ -871,26 +871,3 @@ internal fun heldBorder(view: PositionView?): BorderStroke? =
  */
 private val HeldOutline = 0.5.dp
 
-/**
- * Status colour, borrowed from the roles prices already use.
- *
- * Targets are the tertiary hue everywhere in this app, a stop is the error hue, and a position still
- * running is the primary one the market's own figures use. Nothing new is invented here, so a
- * portfolio card reads in the same language as the recommendation it came from.
- */
-@Composable
-internal fun PositionStatus.tone(): Color = when (this) {
-    // The market's blue since the 2026-11 redesign: the accent is vermilion now, and an open trade
-    // drawn in it would read as one losing.
-    PositionStatus.OPEN -> extraColors.market
-    PositionStatus.PARTIAL_TARGET_HIT, PositionStatus.FULL_TARGET_HIT ->
-        MaterialTheme.colorScheme.tertiary
-    PositionStatus.STOPPED_OUT -> extraColors.loss
-    // Amber, and deliberately not the loss red. A trade that ran out of time can easily be up 5%,
-    // so red would report a loss the position never made and would read as the same thing as the
-    // stop-out beside it. The overdue pill keeps the loss colour: amber says out of time, red says
-    // and you are late, which is one story in two steps rather than two alarms.
-    PositionStatus.EXPIRED -> extraColors.expired
-    PositionStatus.CLOSED_MANUALLY -> MaterialTheme.colorScheme.onSurfaceVariant
-}
-

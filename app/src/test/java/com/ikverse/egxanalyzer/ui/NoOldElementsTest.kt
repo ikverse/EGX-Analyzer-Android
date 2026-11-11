@@ -33,7 +33,7 @@ class NoOldElementsTest {
         "DropdownMenu", "DropdownMenuItem", "AppMenu", "AppMenuItem", "MoreButton", "ActionPill",
         "DisclosureButton", "SettingsButton", "HorizontalDivider", "CircularProgressIndicator",
         "LinearProgressIndicator", "Slider", "OutlinedTextField", "TextField", "RadioButton",
-        "StatStrip", "ShareBar", "FloatingSurface", "StatTile", "PillLabel", "OutlinePill", "FilledPill", "StatusPill", "ToneTag", "pressCorner", "rememberSweep", "Scaffold", "NavigationRail", "NavigationBar",
+        "StatStrip", "ShareBar", "FloatingSurface", "StatTile", "PillLabel", "OutlinePill", "FilledPill", "StatusPill", "ToneTag", "FillTag", "cardTone", "recordTone", "tagTone", "pressCorner", "rememberSweep", "Scaffold", "NavigationRail", "NavigationBar",
     )
 
     private val call = Regex("(^|[^A-Za-z0-9_.])(${Old.joinToString("|")})\\(")
@@ -88,5 +88,15 @@ class NoOldElementsTest {
         val tag = File(ui, "kit/Extras.kt").readText().replace("\r\n", "\n")
             .substringAfter("fun KitTag(").substringBefore("\n}\n")
         assertTrue("KitTag has an outlined mode again", "border(" !in tag && "filled" !in tag)
+    }
+
+    /** A label is the kit's tag, never a chip: a chip is something pressed to choose. */
+    @Test
+    fun `the timing and edited labels are tags, not chips`() {
+        val timing = File(ui, "RecommendationCard.kt").readText().substringAfter("fun TimingChip(").substringBefore("if (showing)")
+        val edited = File(ui, "EditCallSheet.kt").readText().substringAfter("fun EditedChip(").substringBefore("private fun")
+        listOf(timing, edited).forEach {
+            assertTrue("a label drawn as a chip", "KitChip(" !in it && "KitTag(" in it)
+        }
     }
 }

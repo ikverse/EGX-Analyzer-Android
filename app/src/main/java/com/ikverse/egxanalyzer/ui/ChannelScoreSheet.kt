@@ -189,7 +189,7 @@ internal fun ColumnScope.ChannelRecord(
                 ) {
                     StockLogo(call.ticker, LogoSize.Row)
                     Text(call.ticker, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                    KitTag(call.outcome.plainWord(), tone = call.outcome.recordTone())
+                    KitTag(call.outcome.plainWord(), tone = call.outcome.tone())
                     Text(
                         formatPercent(call.believableReturn),
                         style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
@@ -402,15 +402,6 @@ internal fun ColumnScope.ChannelRecord(
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth().padding(horizontal = Space.s),
     )
-}
-
-/** A call's outcome in the colour its status tag takes on the record. */
-@Composable
-private fun Outcome.recordTone(): Color = when (this) {
-    Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> palette.gain
-    Outcome.STOPPED -> palette.loss
-    Outcome.OPEN -> palette.heroInk
-    else -> palette.muted
 }
 
 @Composable

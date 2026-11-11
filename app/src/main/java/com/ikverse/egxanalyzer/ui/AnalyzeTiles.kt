@@ -52,6 +52,7 @@ import com.ikverse.egxanalyzer.ui.kit.Kit
 import com.ikverse.egxanalyzer.ui.kit.KitButton
 import com.ikverse.egxanalyzer.ui.kit.KitCheckbox
 import com.ikverse.egxanalyzer.ui.kit.KitChip
+import com.ikverse.egxanalyzer.ui.kit.KitTag
 import com.ikverse.egxanalyzer.ui.kit.KitProgress
 import com.ikverse.egxanalyzer.ui.kit.StepTone
 import com.ikverse.egxanalyzer.ui.kit.Tile
@@ -377,12 +378,7 @@ internal fun SourcesTile(appState: AppState, locked: Boolean = false, modifier: 
                     )
                 }
                 if (inRun > 0) {
-                    Text(
-                        "$inRun",
-                        style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
-                        color = p.onTile,
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(p.highlight).padding(horizontal = 8.dp, vertical = 3.dp),
-                    )
+                    KitTag("$inRun", tone = p.heroInk)
                 }
                 KitCheckbox(
                     checked = channel.selected,

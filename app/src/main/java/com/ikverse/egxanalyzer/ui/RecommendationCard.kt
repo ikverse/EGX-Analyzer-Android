@@ -8,7 +8,6 @@ import com.ikverse.egxanalyzer.ui.kit.ButtonKind
 import com.ikverse.egxanalyzer.ui.kit.ButtonSize
 import com.ikverse.egxanalyzer.ui.kit.Kit
 import com.ikverse.egxanalyzer.ui.kit.KitButton
-import com.ikverse.egxanalyzer.ui.kit.KitChip
 import com.ikverse.egxanalyzer.ui.kit.KitIconButton
 import com.ikverse.egxanalyzer.ui.kit.KitMenu
 import com.ikverse.egxanalyzer.ui.kit.MenuItem
@@ -353,7 +352,7 @@ internal fun TimingChip(point: RecommendationDataPoint) {
     // nothing else: a reader who has never seen "Watching" or "T+1" on a card before had no way to
     // ask what either meant.
     var showing by remember(point) { mutableStateOf(false) }
-    KitChip(label = label, selected = false, onClick = { showing = true })
+    KitTag(label, tone = palette.muted, onClick = { showing = true })
     if (showing) {
         // `InfoNote`'s own constructor rather than the checked `infoNote` factory: that helper's
         // callers are checked by InfoNoteTest for static prose, and this label and explanation are

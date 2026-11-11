@@ -80,13 +80,18 @@ import java.util.Locale
  * always filled** since 5.1.4: the hairline version was the pre-5.0 look, and two styles side by
  * side read as two designs. A note with no meaning of its own takes the muted wash. Pressed, a tag
  * explains itself where [onClick] is given.
+ *
+ * The word takes the ink of whatever the tag sits on - the page's ink on a card, navy on a lilac
+ * tile - since 5.1.5; 5.1.4 always used the page's ink, which is light at night and vanished on the
+ * bright tiles that stay bright in the dark. [large] is for the one headline answer on a sheet.
  */
 @Composable
 fun KitTag(
     text: String,
     tone: Color,
     modifier: Modifier = Modifier,
-    ink: Color = palette.ink,
+    ink: Color = LocalContentColor.current,
+    large: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
     val press = remember { MutableInteractionSource() }
@@ -102,11 +107,11 @@ fun KitTag(
                     Modifier
                 },
             )
-            .padding(horizontal = 10.dp, vertical = 3.dp),
+            .padding(horizontal = if (large) 14.dp else 10.dp, vertical = if (large) 7.dp else 3.dp),
     ) {
         Text(
             text,
-            style = MaterialTheme.typography.labelMedium,
+            style = if (large) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelMedium,
             color = ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
