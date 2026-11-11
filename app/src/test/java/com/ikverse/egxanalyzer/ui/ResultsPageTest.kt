@@ -131,9 +131,11 @@ class ResultsPageTest {
     fun `a shut run is named for its day and says how its calls went`() {
         show(FakeAppState(savedResults = listOf(run), performance = report))
         compose.onNodeWithText("Mon 9 Nov").assertExists()
-        compose.onNodeWithText("2 calls on 2 stocks").assertExists()
+        compose.onNodeWithText("1 of 2").assertExists()
         compose.onNodeWithText("reached target").assertExists()
-        compose.onNodeWithText("stopped").assertExists()
+        compose.onNodeWithText("1 reached").assertExists()
+        compose.onNodeWithText("1 stopped").assertExists()
+        compose.onNodeWithText("2 stocks · read once at 09:12").assertExists()
         compose.onNodeWithContentDescription("1 hit, 1 stopped, 0 expired, 0 open").assertExists()
     }
 
@@ -142,7 +144,10 @@ class ResultsPageTest {
         show(FakeAppState(savedResults = listOf(run), performance = report))
         compose.onNodeWithText("Mon 9 Nov").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("2 calls · 2 stocks").assertExists()
+        compose.onNodeWithText("reached target · 2 stocks").assertExists()
+        // Every call says its levels as numbers, under their names.
+        assertEquals(2, compose.onAllNodesWithText("Stop").fetchSemanticsNodes().size)
+        assertEquals(2, compose.onAllNodesWithText("Target 2").fetchSemanticsNodes().size)
         compose.onNodeWithText("About this run").assertExists()
     }
 
@@ -175,13 +180,50 @@ class ResultsPageTest {
 
     @Test
     @Config(qualifiers = "w750dp-h891dp")
-    fun `unfolded, a pressed run opens as the table`() {
+    fun `unfolded, a pressed run opens beside the list`() {
         show(FakeAppState(savedResults = listOf(run), performance = report), FoldPosture.Unfolded)
-        compose.onNodeWithText("Pick a run").assertExists()
+        compose.onNodeWithText("open on the right", substring = true).assertDoesNotExist()
         compose.onNodeWithText("Mon 9 Nov").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("Pick a run").assertDoesNotExist()
-        compose.onNodeWithText("Stop to target").assertExists()
+        compose.onNodeWithText("open on the right", substring = true).assertExists()
+        assertEquals(2, compose.onAllNodesWithText("Target 2").fetchSemanticsNodes().size)
+    }
+
+    /** The same session read again two hours later, when a third stock had been posted. */
+    private val reread = run.copy(
+        id = 32,
+        result = run.result.copy(
+            requestId = "run-32",
+            completedAt = Instant.parse("2026-11-09T09:12:00Z"),
+            consolidated = listOf(stock("COMI", 0), stock("ABUK", 1), stock("ORAS", 2)),
+        ),
+    )
+
+    @Test
+    fun `a session read twice is one card that says so, and its readings are a press away`() {
+        val state = FakeAppState(savedResults = listOf(run, reread), performance = mixed)
+        show(state)
+        // One card, drawn from the newest reading.
+        assertEquals(1, compose.onAllNodesWithText("Mon 9 Nov").fetchSemanticsNodes().size)
+        compose.onNodeWithText("3 stocks · read twice, last at 11:12").assertExists()
+        compose.onNodeWithText("Mon 9 Nov").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Read at 11:12 · 2 of 2").performClick()
+        compose.runOnIdle { assertEquals(true, state.pages.resultsReadingsOpen.value) }
+        compose.onNodeWithText("Mon 9 Nov was read 2 times").assertExists()
+        compose.onNodeWithText("New since 09:12: ORAS").assertExists()
+        compose.onNodeWithText("09:12").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Read at 09:12 · 1 of 2").assertExists()
+    }
+
+    @Test
+    fun `the stocks of a report can be put back in the report's own order`() {
+        openRun()
+        compose.onNodeWithText("2 stocks, closest to target first").assertExists()
+        compose.onNodeWithText("Sort").performClick()
+        compose.onNodeWithText("Report order").performClick()
+        compose.onNodeWithText("2 stocks, in the report's order").assertExists()
     }
 
     /** COMI still running and ABUK stopped, so the chips have two groups to tell apart. */
@@ -257,7 +299,7 @@ class ResultsPageTest {
         compose.onNodeWithText("Stopped 1").assertExists()
         compose.runOnIdle { assertEquals(true, state.goBack()) }
         compose.onNodeWithText("Stopped 1").assertDoesNotExist()
-        compose.onNodeWithText("2 calls on 2 stocks").assertExists()
+        compose.onNodeWithText("0 of 2").assertExists()
     }
 
     @Test
