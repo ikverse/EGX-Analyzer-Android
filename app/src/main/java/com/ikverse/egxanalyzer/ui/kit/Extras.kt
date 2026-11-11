@@ -75,17 +75,18 @@ import java.time.format.TextStyle
 import java.util.Locale
 
 /**
- * A word on a card - a status, an outcome, a timing, a fault - as a capsule in the colour that word
- * already means. Hairline by default; [filled] lays a light wash of [tone] under it instead, for a
- * standing fact rather than an annotation. Pressed, a tag explains itself where [onClick] is given.
+ * A word on a card - a status, an outcome, a timing, a fault, a channel - as a capsule with a light
+ * wash of the colour that word already means and the word in [ink]. **The only pill in the app, and
+ * always filled** since 5.1.4: the hairline version was the pre-5.0 look, and two styles side by
+ * side read as two designs. A note with no meaning of its own takes the muted wash. Pressed, a tag
+ * explains itself where [onClick] is given.
  */
 @Composable
 fun KitTag(
     text: String,
     tone: Color,
     modifier: Modifier = Modifier,
-    filled: Boolean = false,
-    ink: Color = tone,
+    ink: Color = palette.ink,
     onClick: (() -> Unit)? = null,
 ) {
     val press = remember { MutableInteractionSource() }
@@ -93,9 +94,7 @@ fun KitTag(
         modifier
             .then(if (onClick != null) Modifier.pressScale(press) else Modifier)
             .clip(Kit.Capsule)
-            .then(
-                if (filled) Modifier.background(tone.copy(alpha = 0.16f)) else Modifier.border(1.dp, tone, Kit.Capsule),
-            )
+            .background(tone.copy(alpha = 0.16f))
             .then(
                 if (onClick != null) {
                     Modifier.clickable(interactionSource = press, indication = null, role = Role.Button, onClick = onClick)

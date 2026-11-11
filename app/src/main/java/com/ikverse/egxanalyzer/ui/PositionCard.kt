@@ -248,7 +248,7 @@ internal fun FinishedRow(view: PositionView, onOpen: () -> Unit, actions: List<M
         ) {
             StockLogo(view.ticker, LogoSize.Row)
             Text(view.ticker, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            KitTag(view.status.plainWord(), tone = view.status.tone(), filled = true, ink = palette.ink)
+            KitTag(view.status.plainWord(), tone = view.status.tone())
             Text(
                 formatPercent(view.returnPct),
                 style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures),
@@ -626,12 +626,7 @@ private fun TPlusOneChip(position: Position) {
     // the app a different colour from its neighbours for a reason none of them showed. The
     // wording is what says this call names its own deadline; the hue was saying it twice, in a
     // language the card spends on prices everywhere else. Asked for on 2026-09-11.
-    OutlinePill(
-        "T+1",
-        outline = MaterialTheme.colorScheme.outline,
-        textColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        onClick = { showing = true },
-    )
+    KitTag("T+1", tone = palette.muted, onClick = { showing = true })
     if (showing) {
         val who = position.channel?.takeIf(String::isNotBlank) ?: "The channel"
         val call = "$who printed this as a T+1 call: buy on the session it was made for, and be " +
@@ -665,12 +660,7 @@ private fun TPlusOneChip(position: Position) {
 @Composable
 private fun KeptOpenChip() {
     var showing by remember { mutableStateOf(false) }
-    OutlinePill(
-        "Keep open · sell to close",
-        outline = MaterialTheme.colorScheme.tertiary,
-        textColor = MaterialTheme.colorScheme.onTertiaryContainer,
-        onClick = { showing = true },
-    )
+    KitTag("Keep open · sell to close", tone = palette.muted, onClick = { showing = true })
     if (showing) {
         InfoSheet(
             infoNote(

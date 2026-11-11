@@ -353,15 +353,15 @@ private fun StockSheetChips(trades: List<PositionView>, score: StockScore?, faul
         verticalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
         if (open != null) {
-            KitTag("Held " + formatPercent(open.returnPct), if ((open.returnPct ?: 0.0) >= 0) p.gain else p.loss, filled = true)
+            KitTag("Held " + formatPercent(open.returnPct), if ((open.returnPct ?: 0.0) >= 0) p.gain else p.loss)
         }
         if (score != null) {
-            KitTag("${score.sources} " + (if (score.sources == 1) "source" else "sources"), p.muted, filled = true, ink = p.ink)
+            KitTag("${score.sources} " + (if (score.sources == 1) "source" else "sources"), p.muted)
             if (settled > 0) {
-                KitTag("$settled settled " + (if (settled == 1) "call" else "calls"), p.muted, filled = true, ink = p.ink)
+                KitTag("$settled settled " + (if (settled == 1) "call" else "calls"), p.muted)
             }
         }
-        faults.forEach { fault -> KitTag(fault.label, p.loss, filled = true) }
+        faults.forEach { fault -> KitTag(fault.label, p.loss) }
     }
 }
 
@@ -821,7 +821,7 @@ private fun StockSheetLevels(levels: ChartLevels, now: Double, call: ScoredCall?
                     fontWeight = if (line.isNow) FontWeight.ExtraBold else FontWeight.Bold,
                     color = line.tone,
                 )
-                line.tag?.let { KitTag(it, p.highlight, filled = true, ink = p.onTile, modifier = Modifier.padding(start = Space.s)) }
+                line.tag?.let { KitTag(it, p.highlight, ink = p.onTile, modifier = Modifier.padding(start = Space.s)) }
                 Spacer(Modifier.weight(1f))
                 Text(line.shown, style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures), fontWeight = FontWeight.Bold, color = line.tone)
                 if (!line.isNow && now > 0) {
