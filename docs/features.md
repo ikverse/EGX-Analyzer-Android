@@ -185,6 +185,16 @@ A table above `TableMinWidth` (600dp of container) and `RecommendationCards` bel
 were always right; the table was rebuilt on 2026-09-09 because it did not fit any screen the app
 runs on, and fitted the bigger ones worst.
 
+- **The table is grouped by stock since 2026-11-11, because it is for comparing calls on one
+  stock.** Each stock has a heading - logo, ticker, name, "3 calls · 2 channels", and the latest
+  price, said once - and each call a row led by its channel, with Entry, Stop, Target 1, Target 2,
+  the ladder and the status in columns shared by the whole table. From 5.1 it had been one flat
+  block with the ticker and a `Now` column on every row, which read as a transcript of the posts.
+  A **watching row shows the levels its post gave** (they were dashes), and where a call draws its
+  ladder it says `buy only above X`, else its support and resistance, else the post's own note
+  (`watchingNote`). A **T+1 call carries a `T+1` tag** beside its channel, as the cards already do.
+  Only `ChannelWidth` and `StatusWidth` are fixed. The bullets below are the 2026-09-09 history.
+
 - **The width a row came to was a function of nothing but how many columns had been added.** Sixteen
   fixed `Dp` widths behind a horizontal scroll: 889dp of them at the Fold's **614dp** of container,
   1277dp at the tablet's **682dp**, because crossing `ContextMinWidth` (620dp) *appended* 388dp of

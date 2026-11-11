@@ -181,7 +181,7 @@ class ResultsPageTest {
         compose.onNodeWithText("Mon 9 Nov").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Pick a run").assertDoesNotExist()
-        compose.onNodeWithText("Stock").assertExists()
+        compose.onNodeWithText("Stop to target").assertExists()
     }
 
     /** COMI still running and ABUK stopped, so the chips have two groups to tell apart. */
