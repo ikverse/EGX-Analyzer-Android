@@ -40,5 +40,5 @@ internal fun pageStocks(appState: AppState, destination: AppDestination): Set<St
         }
 
         // The two pages with no list to narrow, which get no search icon at all and so never ask.
-        AppDestination.ANALYZE, AppDestination.SETTINGS -> emptySet()
+        AppDestination.ANALYZE, AppDestination.SETTINGS, AppDestination.HOME -> emptySet()
     }

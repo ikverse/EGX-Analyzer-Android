@@ -53,6 +53,17 @@ data class AppPalette(
     /** Text on any of [highlight], [alert], [tile1], [tile2], [tile3]. Navy ink in both themes. */
     val onTile: Color,
 
+    /**
+     * The Home page's "Your book" tile while the open trades are ahead. Deep teal, with white on it.
+     * These three are fills that follow the sign of one figure, added on 2026-11-12 when the owner
+     * asked for something calmer than lime there; they are never text and never a gain or a loss.
+     */
+    val bookUp: Color,
+    /** The same tile while the open trades are flat. Soft sage, with navy ink on it. */
+    val bookFlat: Color,
+    /** The same tile while the open trades are behind. Maroon, with white on it. */
+    val bookDown: Color,
+
     /** Profit figures and bars. */
     val gain: Color,
     /** Losses and stops. */
@@ -89,6 +100,9 @@ internal val LightPalette = AppPalette(
     tile2 = Color(0xFFE2D4FF),
     tile3 = Color(0xFFBFE3FF),
     onTile = NavyInk,
+    bookUp = Color(0xFF1F5F5B),
+    bookFlat = Color(0xFFDCE6D2),
+    bookDown = Color(0xFF6E1B27),
     // Forest green, one step darker than the #0B8A4A on the colour board: that shade is 3.8:1 on
     // paper and gain figures are often small text, which needs 4.5. This one is 4.6:1 on paper.
     gain = Color(0xFF087A40),
@@ -120,6 +134,11 @@ internal val DarkPalette = AppPalette(
     tile2 = Color(0xFFE2D4FF),
     tile3 = Color(0xFFBFE3FF),
     onTile = NavyInk,
+    // The same three fills at night, as every other tile colour is: a tile keeps its colour and
+    // the ground changes under it.
+    bookUp = Color(0xFF1F5F5B),
+    bookFlat = Color(0xFFDCE6D2),
+    bookDown = Color(0xFF6E1B27),
     gain = Color(0xFF4ADE80),
     loss = Color(0xFFFF4D4D),
     zoneLoss = Color(0xFF6B2A26),

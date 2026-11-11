@@ -621,3 +621,34 @@ things had to move with them:
 - **Every level's price is under the line.** A label with no room drops to the next row down (`layoutPriceLabels`); nothing but the price itself prints over the line. An entry range still packs its two ends side by side.
 - **The travelled stripe is the line's full thickness, pale cobalt.** The Portfolio trade card passes the lowest and highest since the purchase and names the entry "You paid".
 - **Not checked on a device.** Built and unit-tested only.
+
+## The Home page (since 2026-11-12)
+
+The first tab. One header like every other page, no stock box and no filter icon.
+
+Blocks, in the cover screen's order:
+
+1. **EGX30** - the chart tile's navy (raised card at night): level, move on the day, a line, and a
+   1W / 1M / 3M track. `HomeRange` is in `PageState`.
+2. **EGX70 EWI, EGX100 EWI, Shariah 33** - sunflower, lilac, sky: level, move, a 22-session line.
+3. **Your book** - teal, sage or maroon by the sign of the average open return; tags for trades
+   near target 2, near a stop, or overdue. Pressed, it goes to Portfolio.
+4. **Needs a look** (coral, absent with none) beside **Calls** for the session. A trade pressed
+   opens that trade; Calls goes to Insights.
+5. **Market** - the breadth counts, the kit's `BreadthBar`, and one sentence.
+6. **Top gainers / Top losers** - five each; a row opens the stock sheet through `LocalOpenStock`.
+7. **USD / EGP, Gold, Brent**.
+8. **News** - five Arabic then three English before Show all; Arabic rows are laid out right to left.
+9. **AI market brief** (lilac, once there is one) and the Ask AI button that opens the confirmation.
+
+Postures:
+
+- **Cover**: one column, the order above.
+- **Unfolded / book**: `SplitColumns` at 0.5 - blocks 1 to 5 and 7 on the left, 6, 8 and 9 on the
+  right; book splits on the hinge.
+- **Tabletop**: above the crease, the EGX30 (compact, no range track) with the outside numbers
+  beside the three indices and the book tile; below it, news and the brief button beside Needs a
+  look, Calls, Market and the movers.
+
+A pull refreshes prices, the indices and the news together. Arriving refreshes the indices if they
+are over ten minutes old and the news if over thirty.

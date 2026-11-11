@@ -21,6 +21,7 @@ import com.ikverse.egxanalyzer.ui.AnalysisStatus
 import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppState
 import com.ikverse.egxanalyzer.ui.AppUpdates
+import com.ikverse.egxanalyzer.ui.HomeFeed
 import com.ikverse.egxanalyzer.ui.CallText
 import com.ikverse.egxanalyzer.ui.NavStack
 import com.ikverse.egxanalyzer.ui.NavStop
@@ -374,7 +375,13 @@ class LiveAppState(
      * for why it was the piece that could go and Ask AI was not.
      */
     private val updates: LiveUpdates = LiveUpdates(updateRepository, status, settingsRepository),
-) : AppState, AppUpdates by updates {
+    /**
+     * The Home page's own state, the second region to live outside this class - see [LiveHome].
+     * `HomeFeed by home` below gives this class its members; what it needs back from here arrives
+     * through `bind`, in the `init` beside [destination].
+     */
+    private val home: LiveHome = LiveHome(context, localDataStore, analysisRepository, status),
+) : AppState, AppUpdates by updates, HomeFeed by home {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /**
@@ -416,8 +423,19 @@ class LiveAppState(
 
     /** Started by whichever path first needs Telegram, and never by merely existing. */
     private val telegramRepository: TelegramRepository by lazy { telegramProvider() }
-    override var destination by mutableStateOf(AppDestination.PORTFOLIO)
+    override var destination by mutableStateOf(AppDestination.HOME)
         private set
+
+    init {
+        // Lambdas rather than values: all three are read at the press, not at construction.
+        home.bind(
+            model = { opinionModel() },
+            language = {
+                if (appPreferences.analysisLanguage == AnalysisLanguage.ENGLISH) "English" else "Arabic"
+            },
+            spent = { refreshModelUsage() },
+        )
+    }
 
     /**
      * What each tab had open and filtered to, kept out of the composition so a fold cannot take it.
@@ -1414,6 +1432,8 @@ class LiveAppState(
         returnByDay = result.first
         marketBreadth = result.second
         indexByDay = indexByDay(indexSessions, returnByDay.map { it.date })
+        // Home's gainers and losers, off the same stored closes the breadth above was counted from.
+        home.recomputeMovers()
     }
 
     override var indexByDay by mutableStateOf(emptyList<IndexPoint>())
@@ -3476,6 +3496,9 @@ class LiveAppState(
             // A second recompute is cheap and happens only when bars actually arrived.
             if (resolveUnorderedSessions()) recomputePerformance()
             refreshIndexLine()
+            // Home's indices ride the same refresh, so a pull on any page brings them up to date.
+            // Not forced: a pull on Home itself has already asked, and this would ask twice.
+            home.refreshHomeMarket()
             val missing = refresh.unpriced.size
             // A stock whose prices changed scale, and one whose feed has stopped moving, are
             // both worth saying out loud: neither shows up as a failure, and the app's own

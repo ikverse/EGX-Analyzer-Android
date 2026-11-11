@@ -62,6 +62,9 @@ enum class AppDestination(
     // Portfolio first since 5.0, chosen by the owner on 2026-11-09: the trades actually held are what
     // the app is opened to check, and the app opens on this tab. The order here is the order of the
     // header's tab row and of the pager, and nothing stores a tab by position.
+    // Home leads since 2026-11-12, by the owner's choice: the market first, then the trades. It
+    // shares Portfolio's hue, because it draws the same book figures and no market blue of its own.
+    HOME("Home", "HM", AccentKey.INDIGO),
     PORTFOLIO("Portfolio", "PF", AccentKey.INDIGO),
     ANALYZE("Analyze", "AI", AccentKey.CYAN),
     RESULTS("Results", "RS", AccentKey.VIOLET),
@@ -119,7 +122,7 @@ interface AppUpdates {
  * calling something below rather than by assigning to it. The two exceptions are marked where
  * they are declared.
  */
-interface AppState : AppUpdates {
+interface AppState : AppUpdates, HomeFeed {
 
     val destination: AppDestination
     val pages: PageState

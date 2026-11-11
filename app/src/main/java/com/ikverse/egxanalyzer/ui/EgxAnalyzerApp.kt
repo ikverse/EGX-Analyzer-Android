@@ -55,6 +55,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.AutoGraph
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Settings
@@ -63,6 +64,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.AutoGraph
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Settings
@@ -544,6 +546,7 @@ private fun DestinationScreen(
         // happens to be behind them.
         PageTheme(destination.accent) {
             when (destination) {
+                AppDestination.HOME -> HomeScreen(appState)
                 AppDestination.ANALYZE -> AnalyzeScreen(appState)
                 AppDestination.RESULTS -> ResultsScreen(appState)
                 AppDestination.INSIGHTS -> InsightsScreen(appState)
@@ -573,6 +576,7 @@ private const val StatusUndoMilliseconds = 10_000L
 /** Read by the navigation, on both layouts. */
 internal val AppDestination.icon: ImageVector
     get() = when (this) {
+        AppDestination.HOME -> Icons.Outlined.Home
         AppDestination.ANALYZE -> Icons.Outlined.AutoGraph
         AppDestination.RESULTS -> Icons.Outlined.Assessment
         AppDestination.INSIGHTS -> Icons.Outlined.Insights
@@ -586,6 +590,7 @@ internal val AppDestination.icon: ImageVector
  * name. One property, so the two cannot disagree about what a destination looks like. */
 internal val AppDestination.selectedIcon: ImageVector
     get() = when (this) {
+        AppDestination.HOME -> Icons.Filled.Home
         AppDestination.ANALYZE -> Icons.Filled.AutoGraph
         AppDestination.RESULTS -> Icons.Filled.Assessment
         AppDestination.INSIGHTS -> Icons.Filled.Insights
