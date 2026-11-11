@@ -3,6 +3,7 @@ package com.ikverse.egxanalyzer.ui.theme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import com.ikverse.egxanalyzer.ui.kit.TileTone
+import com.ikverse.egxanalyzer.ui.kit.tileFill
 import com.ikverse.egxanalyzer.ui.kit.tileSignalsFor
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -57,6 +58,14 @@ class PaletteContrastTest {
                 "highlight" to p.highlight, "alert" to p.alert,
                 "tile1" to p.tile1, "tile2" to p.tile2, "tile3" to p.tile3,
             ).forEach { (s, bg) -> need("onTile", p.onTile, s, bg) }
+            // What a kit Tile is actually filled with, which at night is not the accent above.
+            listOf(
+                "tileHighlight" to p.tileHighlight, "tileAlert" to p.tileAlert,
+                "tileOne" to p.tileOne, "tileTwo" to p.tileTwo, "tileThree" to p.tileThree,
+                "tileBookFlat" to p.tileBookFlat,
+            ).forEach { (s, bg) -> need("onTile", p.onTile, s, bg) }
+            need("onTileInk", p.onTileInk, "tileInk", p.tileInk)
+            need("onHero", p.onHero, "tileHero", p.tileHero)
         }
         f.assertNone()
     }
@@ -86,18 +95,22 @@ class PaletteContrastTest {
         f.assertNone()
     }
 
-    private fun fill(p: AppPalette, tone: TileTone) = when (tone) {
-        TileTone.CARD -> p.card
-        TileTone.INK -> p.ink
-        TileTone.HERO -> p.hero
-        TileTone.HIGHLIGHT -> p.highlight
-        TileTone.ALERT -> p.alert
-        TileTone.TILE1 -> p.tile1
-        TileTone.TILE2 -> p.tile2
-        TileTone.TILE3 -> p.tile3
-        TileTone.BOOK_UP -> p.bookUp
-        TileTone.BOOK_FLAT -> p.bookFlat
-        TileTone.BOOK_DOWN -> p.bookDown
+    private fun fill(p: AppPalette, tone: TileTone) = tileFill(p, tone)
+
+    /** The dark tiles are mid-tone, not the light theme's fills: the glare reported on 2026-11-12. */
+    @Test
+    fun `dark tiles are dimmer than the light theme's`() {
+        val f = Failures()
+        listOf("Dark" to DarkPalette, "Black" to BlackPalette).forEach { (name, p) ->
+            // The card and ink tiles swap with the theme, and cobalt is already a dark fill.
+            TileTone.entries.filter { it !in setOf(TileTone.CARD, TileTone.INK, TileTone.HERO) }.forEach { tone ->
+                val night = fill(p, tone).luminance()
+                val day = fill(LightPalette, tone).luminance()
+                if (night > day) f.lines += "$name $tone is brighter at night (${hex(fill(p, tone))})"
+            }
+            if (fill(p, TileTone.INK).luminance() >= p.ink.luminance()) f.lines += "$name ink tile is as bright as the page's text"
+        }
+        f.assertNone()
     }
 
     @Test

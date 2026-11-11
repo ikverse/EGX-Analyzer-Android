@@ -31,17 +31,32 @@ fun tileColors(tone: TileTone): Pair<Color, Color> {
     val p = palette
     return when (tone) {
         TileTone.CARD -> p.card to p.ink
-        TileTone.INK -> p.ink to p.ground
-        TileTone.HERO -> p.hero to p.onHero
-        TileTone.HIGHLIGHT -> p.highlight to p.onTile
-        TileTone.ALERT -> p.alert to p.onTile
-        TileTone.TILE1 -> p.tile1 to p.onTile
-        TileTone.TILE2 -> p.tile2 to p.onTile
-        TileTone.TILE3 -> p.tile3 to p.onTile
+        TileTone.INK -> p.tileInk to p.onTileInk
+        TileTone.HERO -> p.tileHero to p.onHero
+        TileTone.HIGHLIGHT -> p.tileHighlight to p.onTile
+        TileTone.ALERT -> p.tileAlert to p.onTile
+        TileTone.TILE1 -> p.tileOne to p.onTile
+        TileTone.TILE2 -> p.tileTwo to p.onTile
+        TileTone.TILE3 -> p.tileThree to p.onTile
         TileTone.BOOK_UP -> p.bookUp to Color.White
-        TileTone.BOOK_FLAT -> p.bookFlat to p.onTile
+        TileTone.BOOK_FLAT -> p.tileBookFlat to p.onTile
         TileTone.BOOK_DOWN -> p.bookDown to Color.White
     }
+}
+
+/** The fill [tone] draws in [p], outside composition, so the contrast tests read what a tile shows. */
+internal fun tileFill(p: AppPalette, tone: TileTone): Color = when (tone) {
+    TileTone.CARD -> p.card
+    TileTone.INK -> p.tileInk
+    TileTone.HERO -> p.tileHero
+    TileTone.HIGHLIGHT -> p.tileHighlight
+    TileTone.ALERT -> p.tileAlert
+    TileTone.TILE1 -> p.tileOne
+    TileTone.TILE2 -> p.tileTwo
+    TileTone.TILE3 -> p.tileThree
+    TileTone.BOOK_UP -> p.bookUp
+    TileTone.BOOK_FLAT -> p.tileBookFlat
+    TileTone.BOOK_DOWN -> p.bookDown
 }
 
 /**
@@ -61,20 +76,35 @@ fun tileSignals(tone: TileTone): TileSignals = tileSignalsFor(palette, tone)
 
 /** [tileSignals] for a given palette, outside composition, so the contrast test can sweep it. */
 internal fun tileSignalsFor(p: AppPalette, tone: TileTone): TileSignals {
-    // A light ink tile is the dark theme's: read the fill rather than a flag, so the pure-black
-    // palette and any later one follow without being named.
-    val inkIsLight = p.ink.luminance() > 0.5f
+    // Read the fill rather than a flag, so the pure-black palette and any later one follow without
+    // being named. A dark fill is the light theme's navy ink tile; a mid-tone one is the dark
+    // theme's dusk set, where the pale fills' green and red fall under 4.5:1.
+    val fill = tileFill(p, tone).luminance()
+    val dusk = fill < DuskBelow
     return when (tone) {
         TileTone.CARD -> TileSignals(p.gain, p.loss, p.heroInk)
-        TileTone.INK -> if (inkIsLight) OnPaleFill else OnDarkFill
-        TileTone.HIGHLIGHT -> OnPaleFill
-        TileTone.TILE1, TileTone.TILE2, TileTone.TILE3 -> OnPastelFill
+        TileTone.INK -> when {
+            fill < 0.2f -> OnDarkFill
+            dusk -> OnDuskFill
+            else -> OnPaleFill
+        }
+        TileTone.HIGHLIGHT -> if (dusk) OnDuskFill else OnPaleFill
+        TileTone.TILE1, TileTone.TILE2, TileTone.TILE3 -> if (dusk) OnDuskFill else OnPastelFill
         TileTone.ALERT -> TileSignals(p.onTile, p.onTile, p.onTile)
         TileTone.HERO -> TileSignals(p.highlight, p.tile1, Color.White)
         TileTone.BOOK_UP, TileTone.BOOK_DOWN -> OnDeepFill
-        TileTone.BOOK_FLAT -> OnPastelFill
+        TileTone.BOOK_FLAT -> if (dusk) OnDuskFill else OnPastelFill
     }
 }
+
+/** Under this luminance a pale-looking tile is the dark theme's mid-tone fill. Every pale fill is over 0.6. */
+private const val DuskBelow = 0.6f
+
+/**
+ * For the dark theme's mid-tone tiles: green, red and cobalt deep enough to hold 4.5:1 on lilac,
+ * the darkest of them.
+ */
+private val OnDuskFill = TileSignals(Color(0xFF013A1A), Color(0xFF5E0A0A), Color(0xFF1A2299))
 
 /** The light theme's deep green, red and cobalt: 4.5:1 or better on every pale fill. */
 private val OnPaleFill = TileSignals(Color(0xFF087A40), Color(0xFFC62020), Color(0xFF1E2BFF))

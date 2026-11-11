@@ -75,6 +75,33 @@ data class AppPalette(
     val zoneNear: Color,
     /** The ladder's stretch from target 1 to target 2, a step deeper than [zoneNear]. */
     val zoneFar: Color,
+
+    /*
+     * What a kit Tile is filled with. The light theme fills a tile with the palette colour itself,
+     * so each of these defaults to the field it shadows and the light palette names none of them.
+     * The dark theme does not: lime, sunflower and lilac at full strength glared on graphite, and
+     * the ink tile turned near-white. The owner chose the "Dusk, clearer" set on 2026-11-12 - the
+     * same hues at mid-tone, keeping navy ink on them. These are fills for tiles only; the accents
+     * of the same name (chart lines, chips, logos, selection) keep the fields above.
+     */
+    /** The ink tile's fill: navy in light, a soft slate at night. */
+    val tileInk: Color = ink,
+    /** Text on [tileInk]. */
+    val onTileInk: Color = ground,
+    /** The hero tile's fill. */
+    val tileHero: Color = hero,
+    /** The highlight tile's fill. */
+    val tileHighlight: Color = highlight,
+    /** The alert tile's fill. */
+    val tileAlert: Color = alert,
+    /** Tile 1's fill. */
+    val tileOne: Color = tile1,
+    /** Tile 2's fill. */
+    val tileTwo: Color = tile2,
+    /** Tile 3's fill. */
+    val tileThree: Color = tile3,
+    /** The flat book tile's fill. */
+    val tileBookFlat: Color = bookFlat,
 )
 
 /** Navy ink, the one text colour on every tile fill in both themes. */
@@ -144,9 +171,20 @@ internal val DarkPalette = AppPalette(
     zoneLoss = Color(0xFF6B2A26),
     zoneNear = Color(0xFF245C3E),
     zoneFar = Color(0xFF3A8F63),
+    // Dusk, clearer: each tile's hue at mid-tone, navy ink kept on it. The book's teal and maroon
+    // are already deep and stay as they are.
+    tileInk = Color(0xFFB4BBC8),
+    onTileInk = NavyInk,
+    tileHero = Color(0xFF3440D9),
+    tileHighlight = Color(0xFFA8D13A),
+    tileAlert = Color(0xFFE08A72),
+    tileOne = Color(0xFFDDB02A),
+    tileTwo = Color(0xFFA893DB),
+    tileThree = Color(0xFF7FB4DE),
+    tileBookFlat = Color(0xFFA9B89C),
 )
 
-/** [DarkPalette] on true black. Only the grounds move; every signal and tile is copied verbatim. */
+/** [DarkPalette] on true black. Only the grounds move; every signal and tile fill is copied verbatim. */
 internal val BlackPalette = DarkPalette.copy(
     ground = Color(0xFF000000),
     card = Color(0xFF14161A),
