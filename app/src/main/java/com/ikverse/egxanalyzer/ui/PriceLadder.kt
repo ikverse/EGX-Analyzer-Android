@@ -41,12 +41,22 @@ import kotlin.math.min
  * against the levels", asked of two things. The axis is still scaled by the levels themselves, so
  * the risk-to-reward shape does not change with the market; a price beyond them is pinned to the
  * end it passed and points out.
+ * @param compact no printed prices and a lower band, for a table row or a list row where the
+ * figures already sit in their own columns and the shape is all the row has room for.
+ * @param travelled the lowest and highest the price reached, drawn as a stripe along the line. It
+ * is clamped to the levels like [reached], so a stock that ran past target 2 shows a stripe to the
+ * end rather than stretching the axis.
+ * @param entryLabel words printed before the entry price, "You paid" on a trade. The ladder prints
+ * no word for any level otherwise, so this is the one place a level is named on it.
  */
 @Composable
 internal fun PriceLadder(
     point: RecommendationDataPoint,
     modifier: Modifier = Modifier,
     reached: Double? = null,
+    compact: Boolean = false,
+    travelled: ClosedFloatingPointRange<Double>? = null,
+    entryLabel: String? = null,
 ) = PriceLadder(
     stopLoss = point.stopLoss,
     entryLow = point.buyPriceLow ?: point.buyPrice,
@@ -55,6 +65,9 @@ internal fun PriceLadder(
     target2 = point.target2,
     modifier = modifier,
     reached = reached,
+    compact = compact,
+    travelled = travelled,
+    entryLabel = entryLabel,
 )
 
 /**
@@ -74,6 +87,9 @@ internal fun PriceLadder(
     target2: Double?,
     modifier: Modifier = Modifier,
     reached: Double? = null,
+    compact: Boolean = false,
+    travelled: ClosedFloatingPointRange<Double>? = null,
+    entryLabel: String? = null,
 ) {
     val levels = listOfNotNull(stopLoss, entryLow, entryHigh, target1, target2)
     if (levels.size < 2) return
@@ -91,7 +107,9 @@ internal fun PriceLadder(
     val targetColor = p.gain
     val trackColor = p.raised
     val reachedColor = p.hero
-    val grow = com.ikverse.egxanalyzer.ui.kit.rememberDrawIn(key = levels to reached, durationMs = 900)
+    val grow = com.ikverse.egxanalyzer.ui.kit.rememberDrawIn(key = listOf(levels, reached, travelled), durationMs = 900)
+    val zones = ladderZones(stopLoss, entryLow, entryHigh, target1, target2)
+    val travelledOnAxis = travelled?.let { clampToAxis(it, low, high) }
 
     // The group is what has to stay together when labels are pushed around: the two ends of the
     // entry band are one fact, and a range printed with its floor below the line and its ceiling
@@ -109,8 +127,13 @@ internal fun PriceLadder(
 
     val measurer = rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures)
-    val labels = marks.map { mark ->
-        measurer.measure(formatPrice(mark.value), labelStyle) to mark.color
+    val labels = ladderLabelTexts(
+        marks.map { it.value },
+        compact,
+        entryIndex = marks.indexOfFirst { it.group == ENTRY_GROUP }.takeIf { it >= 0 },
+        entryLabel = entryLabel,
+    ).mapIndexed { index, text ->
+        measurer.measure(text, labelStyle) to marks[index].color
     }
 
     BoxWithConstraints(modifier.fillMaxWidth()) {
@@ -122,11 +145,11 @@ internal fun PriceLadder(
 
         fun axis(value: Double) = insetPx + ((value.coerceIn(low, high) - low) / span).toFloat() * usable
 
-        val centers = marks.map { axis(it.value) }
-        val widths = labels.map { it.first.size.width.toFloat() }
-        val slots = layoutPriceLabels(
-            centers,
-            widths,
+        // A compact ladder prints nothing, so there is nothing to lay out and every row count
+        // below comes to zero.
+        val slots = if (labels.isEmpty()) emptyList() else layoutPriceLabels(
+            marks.map { axis(it.value) },
+            labels.map { it.first.size.width.toFloat() },
             widthPx,
             with(density) { LabelGap.toPx() },
             marks.map { it.group },
@@ -140,8 +163,9 @@ internal fun PriceLadder(
             slots.getOrNull(marks.indexOfFirst { it.value == value })?.above
         } ?: false
 
+        val band = if (compact) CompactTrackBand else TrackBand
         val rowHeight = with(density) { LabelRowHeight.toPx() }
-        val trackHeight = with(density) { TrackBand.toPx() }
+        val trackHeight = with(density) { band.toPx() }
         val reachedBand = with(density) { ReachedBand.toPx() }
 
         val above = LabelRowHeight * rowsAbove + if (reached != null && reachedAbove) ReachedBand else 0.dp
@@ -150,7 +174,7 @@ internal fun PriceLadder(
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(above + TrackBand + below)
+                .height(above + band + below)
                 // Drawn in from the low end, the way the kit's price lines arrive.
                 .drawWithContent {
                     clipRect(right = size.width * grow.value) { this@drawWithContent.drawContent() }
@@ -166,6 +190,36 @@ internal fun PriceLadder(
                 size = Size(usable, track),
                 cornerRadius = CornerRadius(track / 2),
             )
+
+            // What lies between the levels: the ground given up to the stop, the stretch to the
+            // first target, and the one beyond it. Drawn on the line's own thickness, under the
+            // entry band and the ticks, so the levels still read as the edges of the zones.
+            zones.forEach { zone ->
+                val start = axis(min(zone.from, zone.to))
+                val end = axis(max(zone.from, zone.to))
+                if (end - start <= 0f) return@forEach
+                drawRect(
+                    color = when (zone.kind) {
+                        ZoneKind.LOSS -> p.zoneLoss
+                        ZoneKind.NEAR -> p.zoneNear
+                        ZoneKind.FAR -> p.zoneFar
+                    },
+                    topLeft = Offset(start, y - track / 2),
+                    size = Size(end - start, track),
+                )
+            }
+
+            travelledOnAxis?.let { range ->
+                val start = axis(range.start)
+                val end = axis(range.endInclusive)
+                val stripe = 2.dp.toPx()
+                drawRoundRect(
+                    color = reachedColor,
+                    topLeft = Offset(start, y - stripe / 2),
+                    size = Size(max(end - start, stripe), stripe),
+                    cornerRadius = CornerRadius(stripe / 2),
+                )
+            }
 
             if (entryLow != null && entryHigh != null) {
                 val start = min(axis(entryLow), axis(entryHigh))
@@ -209,6 +263,64 @@ internal fun PriceLadder(
                 )
             }
         }
+    }
+}
+
+/**
+ * The prices printed under the marks, in mark order; none at all on a compact ladder.
+ *
+ * [entryLabel] goes before the price at [entryIndex] only - the low end of a band - so a range
+ * reads "You paid 10.00  10.40" rather than naming itself twice.
+ */
+internal fun ladderLabelTexts(
+    values: List<Double>,
+    compact: Boolean,
+    entryIndex: Int? = null,
+    entryLabel: String? = null,
+): List<String> =
+    if (compact) {
+        emptyList()
+    } else {
+        values.mapIndexed { index, value ->
+            val price = formatPrice(value)
+            if (index == entryIndex && entryLabel != null) "$entryLabel $price" else price
+        }
+    }
+
+/** [range] held inside the axis, the way [PriceLadder] pins a price past either end. */
+internal fun clampToAxis(
+    range: ClosedFloatingPointRange<Double>,
+    low: Double,
+    high: Double,
+): ClosedFloatingPointRange<Double> = range.start.coerceIn(low, high)..range.endInclusive.coerceIn(low, high)
+
+/** Which stretch of a call a zone is: given up to the stop, on the way to target 1, or beyond it. */
+internal enum class ZoneKind { LOSS, NEAR, FAR }
+
+internal data class LadderZone(val from: Double, val to: Double, val kind: ZoneKind)
+
+/**
+ * The stretches between a call's levels: stop to entry, entry to target 1, target 1 to target 2.
+ *
+ * Each zone starts from the end of the entry band facing it, so the band itself is never coloured
+ * as loss or gain - it is where the trade opens, not a place it went. A call with no first target
+ * runs the near zone to target 2; one with no stop simply has no loss zone.
+ */
+internal fun ladderZones(
+    stopLoss: Double?,
+    entryLow: Double?,
+    entryHigh: Double?,
+    target1: Double?,
+    target2: Double?,
+): List<LadderZone> {
+    val ends = listOfNotNull(entryLow, entryHigh)
+    if (ends.isEmpty()) return emptyList()
+    fun nearest(to: Double) = ends.minBy { abs(it - to) }
+    return buildList {
+        stopLoss?.let { add(LadderZone(it, nearest(it), ZoneKind.LOSS)) }
+        val first = target1 ?: target2
+        first?.let { add(LadderZone(nearest(it), it, ZoneKind.NEAR)) }
+        if (target1 != null && target2 != null) add(LadderZone(target1, target2, ZoneKind.FAR))
     }
 }
 
@@ -404,6 +516,9 @@ internal fun RecommendationDataPoint.riskRewardRatio(): Double? {
 
 private val LadderInset = 8.dp
 private val TrackBand = 26.dp
+
+/** The compact ladder's band: room for the ticks and nothing else, for a row. */
+private val CompactTrackBand = 14.dp
 
 /** Just enough room beside the line for the arrow, without pushing the prices away. */
 private val ReachedBand = 9.dp

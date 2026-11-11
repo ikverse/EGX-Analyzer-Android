@@ -4,12 +4,27 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
-## [Unreleased]
+## [5.1.0] — 2026-11-11
 
-- **Tabs change in place.** Pressing a tab no longer slides the whole screen sideways through the tabs in between. The header stays where it is, the name you pressed grows while the old one shrinks, and the page's tiles pop in.
-- **No swiping between tabs** on the cover screen; tabs change from the header at every width.
-- **Search and filter buttons redrawn** to the design: round, one fixed size, with the design's own glyphs. On the cover screen they sit beside the session line, so the tab names have the full row.
-- The tab row keeps the previous tab's name visible to the left of the current one.
+**Plainer, everywhere.** Every tab says what is happening in ordinary words, shows less at first, and keeps the rest one press away.
+
+- **Tabs change in place.** Pressing a tab no longer slides the whole screen sideways through the tabs in between. The header stays put, the name you pressed grows while the old one shrinks, and the page's tiles pop in. There is no swiping between tabs; tabs change from the header at every width, and the row keeps the previous tab's name visible.
+- **Search and filter buttons redrawn** to the design: round, one fixed size, with the design's own glyphs. On the cover screen they sit beside the session line.
+- **Plain status words.** "Target 1 reached", "Ran out of time", "Watching", instead of the scorer's terms.
+- **Price ladders** on calls and trades are compact, with the loss, near and far zones shaded, and show how far the price has travelled.
+- **Hold for the menu.** A long press on a call or trade card opens its actions.
+- **Results.** Each run is a tile; an open report is a page of its own, closed with back. Calls are grouped with chips above them, a call opens on a press, and "About this run" says how the run went in a sentence.
+- **Insights.** The podium is gone; the ranking is tiles, a source's record opens on a press, every call has a timeline of what happened when, and a day's calls can be filtered by chips.
+- **Portfolio.** Open trades are short cards and finished ones are rows, with a trade opening as a sheet. Unfolded, the trades are a table with Open, Finished and All. A "Needs you" tile names late trades and ones near a level.
+- **Analyze.** A clearer hero, a progress line that counts the batches read and says roughly when reading ends, a note on sources read by an earlier run and not sent again, and a preview of the posts it will read.
+- **New notification: "A report is ready"**, with its own switch, which opens Analyze.
+- **Settings.**
+  - A status tile at the top says whether everything is working; pressing it opens whatever needs a look.
+  - Parts renamed: Reader, Prices and trades, Backup and sync.
+  - Reader's rarely used settings are behind **Advanced**, and token usage moved there.
+  - Every notification's **?** shows an example of what it looks like.
+  - Diagnostics is now "Something not right?" with **Save a report**.
+- **Dark mode.** Text and figures on coloured tiles were re-coloured wherever they were hard to read, and a contrast test now checks every pair.
 
 ---
 

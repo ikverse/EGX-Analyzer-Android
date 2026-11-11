@@ -25,6 +25,12 @@ import com.ikverse.egxanalyzer.ui.theme.EgxAnalyzerTheme
 import java.time.Instant
 import java.time.LocalDate
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -91,12 +97,12 @@ class InsightsPageTest {
     }
 
     @Test
-    fun `the podium names the three that lead and none too thin to rank`() {
+    fun `the ranking leads with who delivered and names the leader once`() {
         show(FakeAppState(performance = report()))
         compose.onNodeWithText("Who delivered").assertExists()
         compose.onNodeWithText("5 sources · 30 calls").assertExists()
-        // The leader is on the podium and in the ranking.
-        assertTrue(compose.onAllNodesWithText("⁨Tadawul Calls⁩").fetchSemanticsNodes().size >= 2)
+        // On a tile of its own in the ranking, and no podium restating it.
+        assertEquals(1, compose.onAllNodesWithText("⁨Tadawul Calls⁩").fetchSemanticsNodes().size)
         compose.onNodeWithText("Thin Source").assertDoesNotExist()
     }
 
@@ -107,15 +113,17 @@ class InsightsPageTest {
         compose.onNodeWithText("⁨Thin Source⁩").assertDoesNotExist()
         compose.onNodeWithText("Show all 5 sources").performScrollTo().performClick()
         compose.onNodeWithText("⁨Thin Source⁩").assertExists()
-        compose.onNodeWithText("4 calls · too few judged to rank").assertExists()
+        compose.onNodeWithText("Too new to rank").assertExists()
     }
 
     @Test
-    fun `a ranking row opens how that source is scored`() {
+    fun `a ranking row opens that source's record, with how it is scored kept shut`() {
         show(FakeAppState(performance = report()))
-        compose.onAllNodesWithText("⁨Nile Signals⁩")[1].performScrollTo().performClick()
+        compose.onAllNodesWithText("⁨Nile Signals⁩")[0].performScrollTo().performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("HOW THIS SOURCE IS SCORED").assertExists()
+        assertTrue(compose.onAllNodesWithText("earned per call").fetchSemanticsNodes().isNotEmpty())
+        compose.onNodeWithText("How a call is judged").assertDoesNotExist()
+        compose.onNodeWithText("How this is scored").performScrollTo().performClick()
         compose.onNodeWithText("How a call is judged").assertExists()
     }
 
@@ -162,5 +170,95 @@ class InsightsPageTest {
     fun `in book posture the page splits at the hinge`() {
         show(FakeAppState(performance = report()), FoldPosture.Book(0.49f, 0.51f))
         compose.onNodeWithText("Who delivered").assertExists()
+    }
+
+    /** Opens the one day the fixture holds. */
+    private fun openDay() {
+        compose.onNodeWithText("Mon 9 Nov").performScrollTo().performClick()
+        compose.waitForIdle()
+    }
+
+    @Test
+    fun `a day opens and its chips narrow it`() {
+        show(FakeAppState(performance = report()))
+        openDay()
+        compose.onNodeWithText("Running").assertExists()
+        compose.onNodeWithText("Reached 1").performScrollTo().performClick()
+        compose.onNodeWithText("Target 1 reached").assertExists()
+        compose.onNodeWithText("Running").assertDoesNotExist()
+        compose.onNodeWithText("All").performClick()
+        compose.onNodeWithText("Running").assertExists()
+    }
+
+    @Test
+    fun `a call whose entry never traded is not counted and shows no return`() {
+        val unentered = report().copy(
+            sessions = listOf(
+                ScoredSession(day, Instant.EPOCH, "m", 1, calls = listOf(call("EFIH", Outcome.ENTRY_NOT_REACHED))),
+            ),
+        )
+        show(FakeAppState(performance = unentered))
+        openDay()
+        compose.onNodeWithText("Not counted").assertExists()
+        compose.onNodeWithText("The price never came into the buying range").assertExists()
+        compose.onNodeWithText("+1.0%").assertDoesNotExist()
+    }
+
+    @Test
+    fun `a tap opens the call sheet, with its numbers kept shut`() {
+        show(FakeAppState(performance = report()))
+        openDay()
+        compose.onNodeWithText("Target 1 reached").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("PEAK").assertDoesNotExist()
+        compose.onNodeWithText("More numbers").performScrollTo().performClick()
+        compose.onNodeWithText("PEAK").assertExists()
+    }
+
+    @Test
+    fun `a hold on a call opens its menu`() {
+        show(FakeAppState(performance = report()))
+        openDay()
+        compose.onNodeWithText("Target 1 reached").performScrollTo().performTouchInput { longClick() }
+        compose.onNodeWithText("Copy").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w750dp-h891dp")
+    fun `unfolded, a day's calls are a table`() {
+        show(FakeAppState(performance = report()), FoldPosture.Unfolded)
+        compose.onNodeWithText("Stop to target").assertExists()
+    }
+
+    @Test
+    @Config(qualifiers = "w750dp-h891dp")
+    fun `in book posture the leader's record is open beside the ranking`() {
+        show(FakeAppState(performance = report()), FoldPosture.Book(0.49f, 0.51f))
+        compose.onNodeWithText("IF YOU HAD FOLLOWED EVERY CALL").assertExists()
+    }
+
+    @Test
+    fun `on tabletop the calls are keys`() {
+        show(FakeAppState(performance = report()), FoldPosture.Tabletop(0.5f, 0.52f))
+        compose.onNodeWithText("● EFIH", substring = true).assertExists()
+    }
+
+    @Test
+    fun `a source's record composes in the dark theme`() {
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.DARK) {
+                Column {
+                    ChannelRecord(
+                        ranked.first(),
+                        photoPath = null,
+                        latestCalls = listOf(call("COMI", Outcome.PARTIAL_HIT)),
+                        onOpenCall = {},
+                        rowState = { mutableStateOf(false) },
+                    )
+                }
+            }
+        }
+        compose.onNodeWithText("earned per call").assertExists()
+        compose.onNodeWithText("IF YOU HAD FOLLOWED EVERY CALL").assertExists()
     }
 }

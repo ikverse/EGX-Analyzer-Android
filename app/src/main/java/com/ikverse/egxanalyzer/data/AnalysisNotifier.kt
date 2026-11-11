@@ -18,8 +18,8 @@ import com.ikverse.egxanalyzer.R
  * Tells the user how a run is going while they are elsewhere.
  *
  * An analysis takes long enough to leave the app during, so the only honest place to report it is
- * a notification. The running one cannot be dismissed - it is the handle on live work - while the
- * finished one can, and carries a way straight to what it produced.
+ * a notification. The running one cannot be dismissed - it is the handle on live work. How the run
+ * ended is [ReportReadyNotifier]'s, on a channel of its own that is allowed to make a sound.
  */
 class AnalysisNotifier(private val context: Context) {
 
@@ -30,9 +30,9 @@ class AnalysisNotifier(private val context: Context) {
             manager.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_ID,
-                    "Analysis",
+                    "A run in progress",
                     NotificationManager.IMPORTANCE_LOW,
-                ).apply { description = "Progress and results of EGX analyses." },
+                ).apply { description = "Shown while a run is going." },
             )
         }
     }
@@ -45,38 +45,12 @@ class AnalysisNotifier(private val context: Context) {
         ) == PackageManager.PERMISSION_GRANTED
 
     fun running(sources: Int, model: String): Notification = base()
-        .setContentTitle("Analysis running")
-        .setContentText("$sources ${if (sources == 1) "source" else "sources"} · $model")
+        .setContentTitle("Reading the posts")
+        .setContentText("$sources ${if (sources == 1) "post" else "posts"} · $model")
         .setProgress(0, 0, true)
         .setOngoing(true)
         .setContentIntent(openApp(null))
         .build()
-
-    fun finished(recommendations: Int, resultId: Long) {
-        show(
-            base()
-                .setContentTitle("Analysis finished")
-                .setContentText(
-                    "$recommendations ${if (recommendations == 1) "recommendation" else "recommendations"} saved",
-                )
-                .setAutoCancel(true)
-                .setContentIntent(openApp(resultId))
-                .addAction(0, "Open results", openApp(resultId))
-                .build(),
-        )
-    }
-
-    fun failed(reason: String) {
-        show(
-            base()
-                .setContentTitle("Analysis failed")
-                .setContentText(reason)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(reason))
-                .setAutoCancel(true)
-                .setContentIntent(openApp(null))
-                .build(),
-        )
-    }
 
     fun cancelled() = manager.cancel(NOTIFICATION_ID)
 
@@ -85,11 +59,6 @@ class AnalysisNotifier(private val context: Context) {
         .setColor(NotificationTone.TRADES.argb)
         .setPriority(NotificationCompat.PRIORITY_LOW)
         .setOnlyAlertOnce(true)
-
-    private fun show(notification: Notification) {
-        if (!permitted()) return
-        manager.notify(NOTIFICATION_ID, notification)
-    }
 
     /**
      * Reopens the app, optionally on a particular saved analysis.

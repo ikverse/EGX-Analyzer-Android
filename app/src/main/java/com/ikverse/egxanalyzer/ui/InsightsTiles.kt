@@ -24,7 +24,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.MutableState
+import androidx.compose.foundation.border
+import com.ikverse.egxanalyzer.model.reachedTarget1
+import com.ikverse.egxanalyzer.ui.kit.KitTag
+import com.ikverse.egxanalyzer.ui.kit.tileSignals
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,9 +65,10 @@ import com.ikverse.egxanalyzer.ui.kit.rememberDrawIn
 import com.ikverse.egxanalyzer.ui.theme.palette
 
 /**
- * The 5.0 Insights tiles above the record: who delivered, the ranking, what is still in play, and
- * what the feed cannot price. Every figure is one the scoring already measures; nothing here is
- * computed that the old cards did not already say somewhere.
+ * The Insights tiles above the record: the ranking of who delivered, what is still in play, and
+ * what the feed cannot price. Every figure is one the scoring already measures. The podium that
+ * led the page in 5.0 went in 5.1: the three leaders stand on tiles of their own in the ranking,
+ * where the podium had said the same thing a second time.
  */
 
 /** A source's calls as the kit's result bar divides them. Still running is what is left over. */
@@ -76,129 +81,12 @@ internal fun ChannelScore.outcomes(): Outcomes = Outcomes(
 
 private fun ChannelScore.ranked(): Boolean = judged >= PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
 
-/**
- * The ink podium: the three sources that lead the ranking, the leader in the middle and tallest,
- * each bar as tall as the share of its settled calls that reached a target.
- *
- * Only sources with enough settled calls to rank stand on it - the same floor the ranking uses -
- * so it can never crown a source the list below calls too thin to rank.
- */
-@Composable
-internal fun InsightsPodium(
-    report: PerformanceReport,
-    photoFor: (String) -> String?,
-    modifier: Modifier = Modifier,
-) {
-    val p = palette
-    val leaders = report.channels.filter { it.ranked() }.take(3)
-    Tile(modifier.fillMaxWidth(), tone = TileTone.INK, contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp)) {
-        val soft = LocalContentColor.current.copy(alpha = 0.75f)
-        Row(Modifier.fillMaxWidth()) {
-            Text("Who delivered", style = MaterialTheme.typography.bodySmall, color = soft, modifier = Modifier.weight(1f))
-            Text(
-                "${report.channels.size} sources · ${report.tracked} calls",
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = TabularFigures),
-                color = soft,
-            )
-        }
-        if (leaders.isEmpty()) {
-            Text(
-                "No source has ${PerformanceCalculator.MINIMUM_JUDGED_TO_RANK} settled calls yet, so none " +
-                    "of them leads. The rates below are measured exactly; they are just resting on too " +
-                    "little to rank.",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(vertical = 18.dp),
-            )
-        } else {
-            val grow = rememberDrawIn(key = leaders.map { it.channel }, durationMs = 900)
-            // Second, first, third, as a podium stands.
-            val order = listOfNotNull(leaders.getOrNull(1), leaders.first(), leaders.getOrNull(2))
-            Row(
-                Modifier.fillMaxWidth().padding(top = 18.dp).height(PodiumHeight),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                order.forEach { score ->
-                    val place = leaders.indexOf(score) + 1
-                    val (bar, onBar) = when (place) {
-                        1 -> p.highlight to p.onTile
-                        2 -> p.hero to p.onHero
-                        else -> p.alert to p.onTile
-                    }
-                    PodiumStep(score, place, photoFor(score.channel), bar, onBar, grow.value)
-                }
-            }
-        }
-        report.pricesTo?.let {
-            Text(
-                "Prices to ${AppDates.DayMonth.format(it)}",
-                style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-                color = soft,
-                modifier = Modifier.padding(vertical = 10.dp),
-            )
-        } ?: Spacer(Modifier.height(16.dp))
-    }
-}
-
-@Composable
-private fun RowScope.PodiumStep(
-    score: ChannelScore,
-    place: Int,
-    photoPath: String?,
-    bar: Color,
-    onBar: Color,
-    grow: Float,
-) {
-    val share = ((score.anyTargetRate ?: 0.0) / 100.0).toFloat().coerceIn(0.12f, 1f)
-    // The leader's step stands a fixed amount above the others whatever the rates, so a close race
-    // still reads as a podium.
-    val reach = if (place == 1) 1f else 0.78f
-    Column(
-        Modifier.weight(1f).fillMaxHeight(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
-    ) {
-        ChannelAvatar(score.channel, photoPath, if (place == 1) 48.dp else 44.dp)
-        Text(
-            "⁨${score.channel}⁩",
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(StepMax * share * reach + StepMin)
-                .graphicsLayer {
-                    transformOrigin = TransformOrigin(0.5f, 1f)
-                    scaleY = grow
-                }
-                .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
-                .background(bar),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                formatPercent(score.anyTargetRate, signed = false),
-                style = (if (place == 1) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.headlineSmall)
-                    .copy(fontFamily = TabularFigures),
-                color = onBar,
-                maxLines = 1,
-            )
-        }
-    }
-}
-
-private val PodiumHeight = 200.dp
-private val StepMin = 40.dp
-private val StepMax = 70.dp
-
 /** The key to every result bar on the page, drawn once above the ranking. */
 @Composable
 internal fun OutcomeKey(modifier: Modifier = Modifier) {
     val p = palette
     Row(modifier.padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        listOf("Hit" to p.gain, "Stopped" to p.loss, "Expired" to p.faint, "Open" to p.hero).forEach { (label, colour) ->
+        listOf("Hit" to p.gain, "Stopped" to p.loss, "Expired" to p.faint, "Open" to p.heroInk).forEach { (label, colour) ->
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(10.dp).clip(RoundedCornerShape(3.dp)).background(colour))
                 Text(label, style = MaterialTheme.typography.labelMedium, color = p.muted)
@@ -208,38 +96,65 @@ internal fun OutcomeKey(modifier: Modifier = Modifier) {
 }
 
 /**
- * The ranking, in the order [PerformanceCalculator] produced it: the first four, then the rest
- * behind Show all. A row opens how that source is scored. Only sources with enough settled calls
- * carry a place number; the rest keep their position and say they are too thin to rank.
+ * Who delivered: the ranking, in the order [PerformanceCalculator] produced it.
+ *
+ * The three that lead each stand on a tile of their own, in the page's three light colours, and the
+ * rest share one white tile - so the answer the tab exists for is the first thing read, without a
+ * podium restating it. The first four, then the rest behind Show all. A row opens that source's
+ * record. Only sources with enough settled calls carry a place number; the rest keep their position
+ * and say they are too new to rank.
+ *
+ * [selected] marks the row whose record is open beside the list, in book posture.
  */
 @Composable
-internal fun RankingTile(
+internal fun RankingTiles(
     channels: List<ChannelScore>,
+    tracked: Int,
     photoFor: (String) -> String?,
+    selected: String?,
+    onOpen: (ChannelScore) -> Unit,
     onExport: () -> Unit,
+    showAll: MutableState<Boolean>,
     modifier: Modifier = Modifier,
 ) {
     if (channels.isEmpty()) return
-    var showAll by rememberSaveable { mutableStateOf(false) }
-    var explaining by remember { mutableStateOf<ChannelScore?>(null) }
     val places = remember(channels) {
         var place = 0
         channels.associate { it.channel to if (it.ranked()) ++place else null }
     }
-    val shown = if (showAll) channels else channels.take(RankingPreview)
-    Tile(modifier.fillMaxWidth(), contentPadding = PaddingValues(6.dp)) {
-        shown.forEachIndexed { index, score ->
-            if (index > 0) Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(1.dp).background(palette.ground))
-            RankingRow(score, places[score.channel], photoFor(score.channel)) { explaining = score }
+    val shown = if (showAll.value) channels else channels.take(RankingPreview)
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Who delivered", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Text(
+                "${channels.size} sources · $tracked calls",
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = TabularFigures),
+                color = palette.muted,
+            )
+        }
+        shown.take(LeaderTones.size).forEachIndexed { index, score ->
+            val tone = LeaderTones[index]
+            Tile(Modifier.fillMaxWidth(), tone = tone, contentPadding = PaddingValues(6.dp)) {
+                RankingRow(score, places[score.channel], photoFor(score.channel), tone, score.channel == selected) { onOpen(score) }
+            }
+        }
+        val rest = shown.drop(LeaderTones.size)
+        if (rest.isNotEmpty()) {
+            Tile(Modifier.fillMaxWidth(), contentPadding = PaddingValues(6.dp)) {
+                rest.forEachIndexed { index, score ->
+                    if (index > 0) Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(1.dp).background(palette.ground))
+                    RankingRow(score, places[score.channel], photoFor(score.channel), TileTone.CARD, score.channel == selected) { onOpen(score) }
+                }
+            }
         }
         Row(
-            Modifier.fillMaxWidth().padding(8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         ) {
             if (channels.size > RankingPreview) {
                 KitButton(
-                    if (showAll) "Show the first $RankingPreview" else "Show all ${channels.size} sources",
-                    onClick = { showAll = !showAll },
+                    if (showAll.value) "Show the first $RankingPreview" else "Show all ${channels.size} sources",
+                    onClick = { showAll.value = !showAll.value },
                     kind = ButtonKind.SECONDARY,
                     size = ButtonSize.SMALL,
                 )
@@ -248,33 +163,48 @@ internal fun RankingTile(
             KitButton("Save as Excel", onClick = onExport, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
         }
     }
-    explaining?.let { score ->
-        ChannelScoreSheet(score, photoPath = photoFor(score.channel)) { explaining = null }
-    }
 }
 
 private const val RankingPreview = 4
 
+/** The leaders' fills, first to third. */
+private val LeaderTones = listOf(TileTone.HIGHLIGHT, TileTone.TILE3, TileTone.TILE2)
+
+/**
+ * One source: its place, picture and name, then the two figures it is judged on - what a call was
+ * worth, and how many finished calls reached a target. Calls posted, the sessions to a target and
+ * the rate as a percentage are on its record, a press away.
+ */
 @Composable
-private fun RankingRow(score: ChannelScore, place: Int?, photoPath: String?, onOpen: () -> Unit) {
-    val p = palette
+private fun RankingRow(
+    score: ChannelScore,
+    place: Int?,
+    photoPath: String?,
+    tone: TileTone,
+    selected: Boolean,
+    onOpen: () -> Unit,
+) {
     val thin = !score.ranked()
+    val ink = LocalContentColor.current
+    val soft = ink.copy(alpha = 0.66f)
+    val signals = tileSignals(tone)
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(22.dp))
-            .clickable(role = Role.Button, onClickLabel = "Explain how this source is scored", onClick = onOpen)
+            .then(if (selected) Modifier.border(2.dp, ink, RoundedCornerShape(22.dp)) else Modifier)
+            .clickable(role = Role.Button, onClickLabel = "Open this source's record", onClick = onOpen)
             .padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
                 place?.toString() ?: "",
                 style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
-                color = p.faint,
+                color = soft,
                 modifier = Modifier.width(PlaceWidth),
             )
             ChannelAvatar(score.channel, photoPath, 40.dp)
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     "⁨${score.channel}⁩",
                     style = MaterialTheme.typography.titleSmall,
@@ -282,26 +212,36 @@ private fun RankingRow(score: ChannelScore, place: Int?, photoPath: String?, onO
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    if (thin) {
-                        "${score.calls} calls · too few judged to rank"
-                    } else {
-                        listOfNotNull(
-                            "${score.calls} calls",
-                            "avg ${formatPercent(score.averageReturn)}",
-                            score.medianSessionsToHit?.let { "${formatPrice(it)} sessions" },
-                        ).joinToString(" · ")
-                    },
+                    if (thin) "${score.calls} calls" else "${score.judged} finished calls",
                     style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
-                    color = p.muted,
+                    color = soft,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
+                if (thin) KitTag("Too new to rank", tone = soft)
             }
-            Text(
-                formatPercent(score.anyTargetRate, signed = false),
-                style = MaterialTheme.typography.titleLarge.copy(fontFamily = TabularFigures),
-                color = if (thin) p.muted else p.ink,
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                val average = score.averageReturn
+                Text(
+                    formatPercent(average),
+                    style = MaterialTheme.typography.titleLarge.copy(fontFamily = TabularFigures),
+                    color = when {
+                        thin || average == null -> soft
+                        average >= 0 -> signals.gain
+                        else -> signals.loss
+                    },
+                    maxLines = 1,
+                )
+                Text("earned per call", style = MaterialTheme.typography.labelSmall, color = soft, maxLines = 1)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    "${score.reachedTarget1}/${score.judged}",
+                    style = MaterialTheme.typography.titleLarge.copy(fontFamily = TabularFigures),
+                    color = if (thin) soft else ink,
+                    maxLines = 1,
+                )
+                Text("reached target", style = MaterialTheme.typography.labelSmall, color = soft, maxLines = 1)
+            }
         }
         val split = score.outcomes()
         if (split.total > 0) {

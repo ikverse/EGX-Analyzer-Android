@@ -263,6 +263,7 @@ class SettingsRepository(
         ),
         sessionDigestEnabled = preferences.getBoolean(KEY_SESSION_DIGEST, false),
         feedAlertsEnabled = preferences.getBoolean(KEY_FEED_ALERTS, true),
+        reportReadyEnabled = preferences.getBoolean(KEY_REPORT_READY, true),
         updateChecksEnabled = preferences.getBoolean(KEY_UPDATE_CHECKS, true),
         portfolioOrder = enumPreference(KEY_PORTFOLIO_ORDER, PortfolioOrder.URGENT),
         callOrder = enumPreference(KEY_CALL_ORDER, CallOrder.TICKER),
@@ -291,6 +292,7 @@ class SettingsRepository(
             .putInt(KEY_APPROACH_THRESHOLD, value.approachThresholdPercent)
             .putBoolean(KEY_SESSION_DIGEST, value.sessionDigestEnabled)
             .putBoolean(KEY_FEED_ALERTS, value.feedAlertsEnabled)
+            .putBoolean(KEY_REPORT_READY, value.reportReadyEnabled)
             .putBoolean(KEY_UPDATE_CHECKS, value.updateChecksEnabled)
             // By name rather than by ordinal: reordering the options or dropping one would otherwise
             // silently reinterpret what every existing install had chosen.
@@ -711,6 +713,7 @@ class SettingsRepository(
         const val KEY_APPROACH_THRESHOLD = "approach_threshold_percent"
         const val KEY_SESSION_DIGEST = "session_digest_enabled"
         const val KEY_FEED_ALERTS = "feed_alerts_enabled"
+        const val KEY_REPORT_READY = "report_ready_enabled"
         const val KEY_MARKET_REFRESH_NOTE = "market_refresh_note"
         const val KEY_MARKET_REFRESH_NOTE_AT = "market_refresh_note_at"
         const val KEY_OPINION_SEARCH = "opinion_search_enabled"

@@ -39,6 +39,16 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.onLongClick
+import com.ikverse.egxanalyzer.ui.LocalReduceMotion
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -341,4 +351,54 @@ private object WindowRightEdge : androidx.compose.ui.window.PopupPositionProvide
         popupContentSize: androidx.compose.ui.unit.IntSize,
     ): androidx.compose.ui.unit.IntOffset =
         androidx.compose.ui.unit.IntOffset((windowSize.width - popupContentSize.width).coerceAtLeast(0), 0)
+}
+
+/**
+ * Something that opens its actions on a long press: the content lifts off the page and a [KitMenu]
+ * of [items] opens over it. A tap calls [onTap], or does nothing when there is none.
+ *
+ * The two branches are the reason this exists rather than a `combinedClickable` at every call site.
+ * With nothing to open on a tap, `combinedClickable` would still draw a press over a tap that does
+ * nothing, so the hold is heard through a plain pointer detector instead and offered to
+ * accessibility as a long-click action by hand. With a tap to answer, `combinedClickable` is right.
+ *
+ * Nothing here moves sideways: a row that answered a drag would fight the page for it.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun HoldMenu(
+    items: List<MenuItem>,
+    modifier: Modifier = Modifier,
+    onTap: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val still = LocalReduceMotion.current
+    val lift by animateFloatAsState(
+        targetValue = if (open && !still) 1f else 0f,
+        animationSpec = if (still) snap() else popSpring(),
+        label = "holdLift",
+    )
+    val press = if (onTap == null) {
+        Modifier
+            .pointerInput(Unit) { detectTapGestures(onLongPress = { open = true }) }
+            .semantics { onLongClick(label = "Actions") { open = true; true } }
+    } else {
+        Modifier.combinedClickable(onClick = onTap, onLongClickLabel = "Actions", onLongClick = { open = true })
+    }
+    Box(
+        modifier
+            .graphicsLayer {
+                val scale = 1f + 0.03f * lift
+                scaleX = scale
+                scaleY = scale
+                shadowElevation = 14.dp.toPx() * lift
+                shape = Kit.TileShape
+                clip = false
+            }
+            .then(press),
+    ) {
+        content()
+        KitMenu(expanded = open, onDismiss = { open = false }, items = items)
+    }
 }

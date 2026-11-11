@@ -178,3 +178,24 @@ fun targetPath(view: PositionView): TargetPath? {
     val t1 = p.target1?.takeIf { p.target2 != null }?.let { ((it - p.entryPrice) / span).toFloat().coerceIn(0f, 1f) }
     return TargetPath(progress, t1, losing = price < p.entryPrice)
 }
+
+/**
+ * Finished trades that made money, and the rest of the finished ones with a return.
+ *
+ * The rule `PortfolioCalculator` already applies to the win rate: expired trades count, and a
+ * return of exactly nothing is a loss - a trade that went nowhere was not a win.
+ */
+fun wonLost(positions: List<PositionView>): Pair<Int, Int> {
+    val returns = positions.filterNot(PositionView::open).mapNotNull(PositionView::returnPct)
+    val won = returns.count { it > 0 }
+    return won to (returns.size - won)
+}
+
+/**
+ * Which open trades are close to their stop or to target 2, by position id, for the tag on each
+ * card. Read off [needsYou], so a card and the approach notification agree about what close means;
+ * the overdue entries are left out, because Needs you itself is where those are said now.
+ */
+fun nearLevel(needs: List<NeedsYouItem>): Map<String, NeedReason> =
+    needs.filter { it.reason != NeedReason.OVERDUE }.associate { it.view.position.id to it.reason }
+

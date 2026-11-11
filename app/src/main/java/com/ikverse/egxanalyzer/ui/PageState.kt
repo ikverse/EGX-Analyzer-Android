@@ -120,24 +120,87 @@ class PageState {
     // ── Portfolio ────────────────────────────────────────────────────────────────────────────
 
     /**
-     * The trade a row was pressed on, unfolded; the hero chart's range; and whether the "needs you"
-     * panel is open. Here rather than in `rememberSaveable`, which does not survive the fold - see
-     * the head of this class.
+     * The trade open in full, in every posture: a sheet on the cover screen and unfolded, the right
+     * half in book posture, the upper half on tabletop - so a fold moves it between them rather than
+     * closing it. Then the hero chart's range. Here rather than in `rememberSaveable`, which does
+     * not survive the fold - see the head of this class.
      */
     internal val portfolioSelectedTrade: MutableState<String?> = mutableStateOf(null)
     internal val portfolioReturnRange: MutableState<com.ikverse.egxanalyzer.model.ReturnRange> =
         mutableStateOf(com.ikverse.egxanalyzer.model.ReturnRange.MONTH)
-    internal val portfolioDecisionsOpen: MutableState<Boolean> = mutableStateOf(false)
+    /** Which of the Portfolio's lists the chips show. A view, like the sort order, not a filter. */
+    internal val portfolioScope: MutableState<TradeScope> = mutableStateOf(TradeScope.OPEN)
+
+    /** "See all" on the Finished list. */
+    internal val portfolioFinishedAll: MutableState<Boolean> = mutableStateOf(false)
+
+    /** More numbers, in a trade opened in full. */
+    internal val portfolioMoreNumbers: MutableState<Boolean> = mutableStateOf(false)
+
+    /**
+     * The trade dialog that is open, if any: one host for the hold menu, the sheet and Needs you,
+     * and on PageState so a fold does not close it.
+     */
+    internal val portfolioDialog: MutableState<TradeDialogRequest?> = mutableStateOf(null)
 
     // ── Settings ─────────────────────────────────────────────────────────────────────────────
 
     /** The part of Settings that is open, or null for the hub. Here so a fold keeps it open. */
     internal val settingsSection: MutableState<SettingsSection?> = mutableStateOf(null)
 
+    /** The Reader page's Advanced row. A fold while editing the endpoint must not shut it. */
+    internal val settingsAdvancedOpen: MutableState<Boolean> = mutableStateOf(false)
+
+    /** The notification explained above the crease on tabletop. */
+    internal val settingsNotification: MutableState<NotificationKind> = mutableStateOf(NotificationKind.TRADE)
+
     // ── Results ──────────────────────────────────────────────────────────────────────────────
 
-    /** The run whose table is open, which needs the whole row and so cannot be held by a card. */
+    /**
+     * The run whose report is open. Written through [openReport], which is what clears the report's
+     * own view state below, so a second report never opens filtered the way the first was left.
+     */
     val openResultId: MutableState<Long?> = mutableStateOf(null)
+
+    /** The open report's status chips, as what they hide. See [com.ikverse.egxanalyzer.model.CallGroup]. */
+    internal val resultsHiddenGroups: MutableState<Set<com.ikverse.egxanalyzer.model.CallGroup>> =
+        mutableStateOf(emptySet())
+
+    /**
+     * Calls corrected while a chip was narrowing the report, by `(originalStockCode, parseIndex)`.
+     * The groups are fixed, so a call re-dated into a hidden group would otherwise vanish under the
+     * reader's finger - the fault "store what is hidden" was written against. Cleared by any chip.
+     */
+    internal val resultsKeptVisible: MutableState<Set<Pair<String, Int>>> = mutableStateOf(emptySet())
+
+    /** The call sheet's anchor, `(originalStockCode, parseIndex)`, so a fold keeps the sheet open. */
+    internal val resultsOpenCall: MutableState<Pair<String, Int>?> = mutableStateOf(null)
+
+    /** Tabletop's upper pane. Apart from [resultsOpenCall], so laying the phone flat opens no sheet. */
+    internal val resultsSelectedCall: MutableState<Pair<String, Int>?> = mutableStateOf(null)
+
+    /** The About this run sheet, opened from the report's bar. */
+    internal val resultsAboutOpen: MutableState<Boolean> = mutableStateOf(false)
+
+    /** The About this run row at the foot of the report. */
+    internal val resultsAboutRowOpen: MutableState<Boolean> = mutableStateOf(false)
+
+    /** For the curious, inside About this run. */
+    internal val resultsCuriousOpen: MutableState<Boolean> = mutableStateOf(false)
+
+    /** Opens [id]'s report, or closes the one open, and resets everything that belonged to it. */
+    fun openReport(id: Long?) {
+        if (openResultId.value != id) {
+            resultsHiddenGroups.value = emptySet()
+            resultsKeptVisible.value = emptySet()
+            resultsOpenCall.value = null
+            resultsSelectedCall.value = null
+            resultsAboutOpen.value = false
+            resultsAboutRowOpen.value = false
+            resultsCuriousOpen.value = false
+        }
+        openResultId.value = id
+    }
 
     val resultsChannels: MutableState<Set<String>> = mutableStateOf(emptySet())
     val resultsDate: MutableState<DateFilter?> = mutableStateOf(null)
@@ -176,10 +239,32 @@ class PageState {
     /** How many of the filtered sessions Insights draws; see [resultsVisibleCount]. */
     val insightsVisibleCount: MutableState<Int> = mutableStateOf(PAGE_SIZE)
 
-    // ── Portfolio ────────────────────────────────────────────────────────────────────────────
+    /**
+     * The call whose sheet is open, or on tabletop the call chosen for the upper half, keyed by
+     * `opinionId(ticker, openedOn, channel)`. Not `positionId`: two channels calling one stock for
+     * one session share that, and they are two calls.
+     */
+    internal val insightsOpenCall: MutableState<String?> = mutableStateOf(null)
 
-    /** Which session cards are open, by session date rather than by position in the list. */
-    val openPortfolioGroups: MutableState<Set<LocalDate>> = mutableStateOf(emptySet())
+    /** The source whose record is open: a sheet, or the right half of the page in book posture. */
+    internal val insightsOpenChannel: MutableState<String?> = mutableStateOf(null)
+
+    /** Show all sources. `rememberSaveable` did not survive a fold here, which is why it moved. */
+    internal val insightsRankingShowAll: MutableState<Boolean> = mutableStateOf(false)
+
+    /**
+     * The open day's chip. Deliberately not in [filtersActive]: it is on the page in plain sight,
+     * not folded behind the header's icon, so it needs no dot and no back press.
+     */
+    internal val insightsDayFilter: MutableState<String?> = mutableStateOf(null)
+
+    /** Which of the page's closed rows are open, by a key per row. */
+    internal val insightsOpenRows: MutableState<Set<String>> = mutableStateOf(emptySet())
+
+    /** One of [insightsOpenRows] as the open-or-shut state a [com.ikverse.egxanalyzer.ui.kit.MoreRow] takes. */
+    internal fun insightsRow(key: String): MutableState<Boolean> = SetMember(insightsOpenRows, key)
+
+    // ── Portfolio ────────────────────────────────────────────────────────────────────────────
 
     val portfolioDate: MutableState<DateFilter?> = mutableStateOf(null)
     /** The header's stock box for this page: the pick, and what the reader is doing to it. */
@@ -189,22 +274,19 @@ class PageState {
     val portfolioStock: MutableState<String> get() = portfolioStockBox.picked
     val portfolioFiltersOpen: MutableState<Boolean> = mutableStateOf(false)
 
-    /**
-     * Whether a position card's chart has been pressed open or shut, by position id, where the
-     * reader has actually pressed it.
-     *
-     * A card defaults to expanded once it is wide enough to draw the chart in the ladder's place
-     * and collapsed on a phone - see `PositionCard`'s own `chartExpanded` - so this holds only the
-     * override, not the shown/hidden state itself: an id absent from the map means "use whichever
-     * the current width defaults to", not "collapsed". Survives a fold for the reason everything on
-     * this page does: a bare `remember` in `PositionCard` died on every fold, which on the Fold 7 is
-     * not a rare event but the ordinary way the phone is used - expand a chart on the cover screen,
-     * open the phone the rest of the way, and the card that greeted the reader had quietly closed it
-     * again.
-     */
-    val expandedPositionCharts: MutableState<Map<String, Boolean>> = mutableStateOf(emptyMap())
-
     // ── Analyze ──────────────────────────────────────────────────────────────────────────────
+
+    /** What it will read, open on the cover screen. Here so a fold keeps it. */
+    internal val analyzePostsOpen: MutableState<Boolean> = mutableStateOf(false)
+
+    /** Analyze has been pressed: what blocks a run is now a complaint rather than guidance. */
+    internal val analyzeAttempted: MutableState<Boolean> = mutableStateOf(false)
+
+    /** The Stop this run? dialog. */
+    internal val analyzeConfirmingStop: MutableState<Boolean> = mutableStateOf(false)
+
+    /** The calendar for which day the calls are for. */
+    internal val analyzePickingDate: MutableState<Boolean> = mutableStateOf(false)
 
     /**
      * Whether the reader has waved away the setup card on Analyze.
@@ -345,4 +427,20 @@ class PageState {
             AppDestination.ANALYZE, AppDestination.SETTINGS -> Unit
         }
     }
+}
+
+/** Whether [key] is in [set], as a state a control can read and write. */
+private class SetMember(
+    private val set: MutableState<Set<String>>,
+    private val key: String,
+) : MutableState<Boolean> {
+    override var value: Boolean
+        get() = key in set.value
+        set(open) {
+            set.value = if (open) set.value + key else set.value - key
+        }
+
+    override fun component1(): Boolean = value
+
+    override fun component2(): (Boolean) -> Unit = { value = it }
 }

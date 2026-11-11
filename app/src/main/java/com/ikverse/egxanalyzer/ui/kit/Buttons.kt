@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -67,7 +68,13 @@ fun KitButton(
     val (fill, ink, edge) = when (kind) {
         ButtonKind.PRIMARY -> Triple(p.ink, p.onInk, null)
         ButtonKind.SECONDARY -> Triple(Color.Transparent, p.ink, p.ink)
-        ButtonKind.DANGER -> Triple(p.loss, Color.White, null)
+        // White on the dark theme's brighter red is 3.3:1; navy on it is 5.4:1. A light ink means
+        // the dark theme, whichever of its grounds is in force.
+        ButtonKind.DANGER -> Triple(
+            p.loss,
+            if (p.ink.luminance() > 0.5f) p.onTile else Color.White,
+            null,
+        )
         ButtonKind.ON_TONE -> Triple(Color.Transparent, onTone, onTone)
     }
     val press = remember { MutableInteractionSource() }

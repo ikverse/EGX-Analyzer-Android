@@ -10,6 +10,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
+import com.ikverse.egxanalyzer.ui.kit.MenuItem
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import java.time.LocalDate
@@ -30,7 +34,7 @@ import org.robolectric.RobolectricTestRunner
  * showed 64%, the bigger screen truncating harder than the small one. The same mistake is on record
  * against the `TodayCard` tile grid before it.
  *
- * Only `SourceWidth` and `ChevronWidth` are fixed now and every figure column is weighted, which
+ * Only `StockWidth` and `StatusWidth` are fixed now and every figure column is weighted, which
  * makes "no width shows fewer columns than a narrower one" a property rather than a number - and a
  * property is a thing a test can hold. The three widths below are the real containers on the three
  * devices this app runs on, taken from the table at the top of `CLAUDE.md`: what is left of the
@@ -46,19 +50,20 @@ class RecommendationTableTest {
     private val containers = listOf(614, 682, 715)
 
     private val columns =
-        listOf("Source", "Entry", "Target 1", "Target 2", "Stop", "Support", "Resistance")
+        listOf("Stock", "Now", "Entry", "Stop", "Target 1", "Target 2", "Stop to target")
 
     @Composable
-    private fun Table(width: Int, showContext: Boolean = false) {
+    private fun Table(width: Int, point: RecommendationDataPoint = point()) {
         EgxAnalyzerTheme(themeMode = ThemeMode.DARK) {
             Box(Modifier.size(width.dp, 2000.dp)) {
                 RecommendationTable(
-                    stocks = listOf(stock()),
+                    stocks = listOf(stock(point)),
                     channelFor = { it },
                     latestFor = { null },
                     onSelectPoint = { _, _ -> },
-                    imagePathFor = { null },
-                    showContext = showContext,
+                    holdItems = { _, _ ->
+                        listOf(MenuItem("I bought this") {}, MenuItem("Fix a wrong number") {})
+                    },
                 )
             }
         }
@@ -81,39 +86,43 @@ class RecommendationTableTest {
         }
     }
 
-    /**
-     * The dates are a toggle and deliberately not a breakpoint. They are true of a call and are not
-     * what anyone judges it by, so appearing because the screen got wider was the one arrangement
-     * that could not be right - the reader who wants them could not ask, and the reader who does
-     * not got them at the cost of the figures that decide something.
-     */
     @Test
-    fun `the dates line is asked for, never handed over by a wider screen`() {
-        compose.setContent { Table(containers.max()) }
+    fun `holding a row opens what can be done about the call`() {
+        compose.setContent { Table(containers.min()) }
 
-        compose.onNodeWithText("Target date 2026-09-01").assertDoesNotExist()
+        compose.onNodeWithText("AMOC").performTouchInput { longClick() }
+        compose.onNodeWithText("I bought this").assertIsDisplayed()
+        compose.onNodeWithText("Fix a wrong number").assertIsDisplayed()
     }
 
     @Test
-    fun `asking for the dates puts them under the row`() {
-        compose.setContent { Table(containers.min(), showContext = true) }
+    fun `a watched stock says what it waits for instead of drawing a ladder`() {
+        compose.setContent { Table(containers.min(), point(watching = true)) }
 
-        compose.onNodeWithText("Target date 2026-09-01").assertIsDisplayed()
+        compose.onNodeWithText("only above", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag(LadderCellTag, useUnmergedTree = true).assertDoesNotExist()
     }
 
-    private fun stock() = ConsolidatedRecommendation(
+    @Test
+    fun `an ordinary call draws its ladder`() {
+        compose.setContent { Table(containers.min()) }
+
+        compose.onNodeWithTag(LadderCellTag, useUnmergedTree = true).assertExists()
+    }
+
+    private fun stock(point: RecommendationDataPoint) = ConsolidatedRecommendation(
         stockCode = "AMOC",
         stockNameEnglish = "Alexandria Mineral Oils",
         stockNameArabic = "أموك",
         mentionCount = 1,
         rank = 1,
         notesSummary = null,
-        dataPoints = listOf(point()),
+        dataPoints = listOf(point),
     )
 
-    private fun point() = RecommendationDataPoint(
+    private fun point(watching: Boolean = false) = RecommendationDataPoint(
         date = LocalDate.of(2026, 9, 1),
-        effectiveDateBasis = "explicit",
+        effectiveDateBasis = if (watching) "watching" else "explicit",
         visibleSourceDate = null,
         dateEvidence = null,
         timingEvidence = null,

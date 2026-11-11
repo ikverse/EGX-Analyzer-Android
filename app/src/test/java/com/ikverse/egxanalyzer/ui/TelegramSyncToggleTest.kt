@@ -53,7 +53,7 @@ class TelegramSyncToggleTest {
         }
 
         // Since 5.0 the part is its own page, opened from its tile on the hub.
-        compose.onNodeWithText("Data & backup").performScrollTo().performClick()
+        compose.onNodeWithText("Backup and sync").performScrollTo().performClick()
 
         compose.onNodeWithText("Sync with Telegram").performScrollTo().assertIsOff()
         compose.onNodeWithText("Sync now").performScrollTo().assertIsNotEnabled()

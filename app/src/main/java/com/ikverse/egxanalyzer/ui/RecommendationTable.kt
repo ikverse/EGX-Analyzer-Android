@@ -1,419 +1,137 @@
 package com.ikverse.egxanalyzer.ui
 
-import com.ikverse.egxanalyzer.model.returnFrom
-import com.ikverse.egxanalyzer.model.timing
-
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.foundation.border
-import androidx.compose.ui.draw.clip
-import com.ikverse.egxanalyzer.ui.kit.Kit
-import com.ikverse.egxanalyzer.ui.theme.palette
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.zIndex
-import kotlin.math.max
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.model.CallGroup
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
+import com.ikverse.egxanalyzer.ui.kit.HoldMenu
+import com.ikverse.egxanalyzer.ui.kit.Kit
+import com.ikverse.egxanalyzer.ui.kit.MenuItem
+import com.ikverse.egxanalyzer.ui.theme.palette
 
 /**
- * The report's recommendations, one block per stock and one row per call.
+ * The report's calls as one table, one row per call.
  *
- * **It fits, and that is the whole of the redesign.** It was sixteen fixed-width columns behind a
- * horizontal scroll, and the width they came to was a function of nothing but how many of them had
- * been added: 889dp at the Fold's 614dp of container, 1277dp at the tablet's 682dp - because
- * crossing 620dp *appended* 388dp of context columns to buy 68dp of viewport. So the tablet showed
- * 49% of a row where the smaller Fold showed 64%, which is the same mistake `TodayCard` records
- * against itself, made a second time. Three things get the row under the width it actually has:
+ * **It fits, and that is the whole of the design.** It was sixteen fixed-width columns behind a
+ * horizontal scroll until 2026-09-09, and the width they came to was a function of how many had
+ * been added: crossing a breakpoint *appended* columns, so the tablet's 682dp showed 49% of a row
+ * where the smaller Fold's 614dp showed 64%. Only [StockWidth] and [StatusWidth] are fixed now and
+ * every other column is weighted, so a wider window widens the columns rather than adding more.
  *
- * - **A target and its return are one cell**, price over percent. They are read together and they
- *   were 162dp of two columns apiece; the three pairs cost 312dp instead of 486dp.
- * - **Timing rides the source**, as a chip under the channel's name, which is what kills the 96dp
- *   column whose two words wrapped and took the row's height with them.
- * - **The source image leaves the table.** Pressing the row opens [OccurrenceSheet], which already
- *   draws the screenshot at a size worth looking at - the 72dp thumbnail was a column spent
- *   restating that a press was available.
+ * Since 5.1 it is one flat block rather than a block per stock. The per-stock heading carried the
+ * latest price, which is a column of its own now (`Now`); the percentages under each level and the
+ * support and resistance went to the sheet a row opens, where a single call is the whole subject.
+ * At the narrowest container that earns a table, 600dp, the row spends [Space].m either side, 132dp
+ * on the stock and 92dp on the status, and divides the rest over 7.6 shares - about 46dp a share,
+ * with [AutoSizeText] holding the figures.
  *
- * What is left of a fixed width is [SourceWidth] and [ChevronWidth]; every figure column is
- * weighted, so a wider window widens the columns rather than adding more of them. **Width adds
- * nothing at all now**, which is the end of that argument rather than a new position in it: the
- * table draws the same six figure columns at every size it is drawn at.
- *
- * There was a breakpoint here until the last of it was deleted, and the reason it went is worth
- * keeping. It was measured on this composable's own container and compared against 600dp - the
- * same figure as the page's own `TableMinWidth`, which gates whether this table is drawn instead of
- * cards. Its doc argued the two were different numbers because one was measured outside the report
- * card's insets. They are not: the gate and this table sit in the same `BoxWithConstraints`, with
- * nothing but a `Column` between them, so both read one width. The flag was true wherever the table
- * existed and false nowhere, and every branch on it was dead.
- *
- * So the one thing that decides whether a reader sees this table at all is `TableMinWidth`, on the
- * page, and what they see once they do is fixed. The row spends [Space].m either side, [SourceWidth]
- * and [ChevronWidth], and divides what is left over 6.6 shares at [EntryWeight]: at the narrowest
- * container that earns a table, 600dp, that is 64dp a share - 56dp of text inside [Space].xs on
- * either side, against a six-character price of roughly 50dp at 14sp mono. `Resistance` is the one
- * label that does not fit at full size there and [AutoSizeText] steps it down; see [HeaderLabel].
+ * A tap opens the call; a hold opens [holdItems], the same menu a card offers.
  */
 @Composable
 internal fun RecommendationTable(
     stocks: List<ConsolidatedRecommendation>,
     channelFor: (String?) -> String?,
     /**
-     * Where the stock is now, for the heading of its block.
-     *
-     * A lambda rather than a map, beside `peakFor` and for the same reason: the report this table
-     * draws and the price record are two stores, and handing the table the second one whole would
-     * make every block recompose when any stock's price moved.
+     * Where a stock is now, for the `Now` column and the ladder's arrow. A lambda rather than a map,
+     * so a price moving on one stock does not hand the table the whole record.
      */
     latestFor: (String) -> LatestPrice?,
     onSelectPoint: (ConsolidatedRecommendation, RecommendationDataPoint) -> Unit,
-    /** The screenshot behind a call, looked up by the reference the model cited - for the row's
-     * own hold-to-view, the shortcut past opening the sheet just to reach its thumbnail. */
-    imagePathFor: (Int?) -> String?,
     modifier: Modifier = Modifier,
-    /**
-     * The two dates, under each row.
-     *
-     * A toggle rather than the width breakpoint it used to be. These are true of a call and are not
-     * what anyone judges it by - the file said so itself, above the column list - so appearing
-     * because the screen got wider was the one arrangement that could not be right: the reader who
-     * wants them cannot ask, and the reader who does not gets them at the cost of the figures that
-     * decide something. A second line rather than more columns, so asking for them never puts the
-     * table back into a sideways scroll.
-     *
-     * Support and resistance used to ride this line as well, on any row too narrow to column them.
-     * They are columns at every width now, so what is left here is what dated the call.
-     */
-    showContext: Boolean = false,
-    /**
-     * Drawn above the blocks and pinned with the scroll.
-     *
-     * The controls that decide what the table shows belong to the table: reaching them used to mean
-     * scrolling back past every row to the top of the report.
-     */
-    toolbar: (@Composable () -> Unit)? = null,
-    /** Holding the ticker+logo heading offers this; narrows the page's own stock filter to it. */
-    onFilterToTicker: (String) -> Unit = {},
+    /** The status word in the last column, and the group that colours it. */
+    statusFor: (ConsolidatedRecommendation, RecommendationDataPoint) -> Pair<String, CallGroup> =
+        { _, _ -> "Running" to CallGroup.RUNNING },
+    /** A hold on a row: what can be done about that call. */
+    holdItems: (ConsolidatedRecommendation, RecommendationDataPoint) -> List<MenuItem> = { _, _ -> emptyList() },
 ) {
     if (stocks.isEmpty()) return
-    // How far the table's own top has been scrolled past the top of the page's viewport. The
-    // toolbar is pushed back down by exactly that much, so it looks pinned without leaving the
-    // table: once the last row is gone it goes with it rather than hanging over the next card.
-    val viewportTop = LocalViewportTop.current
-    var pin by remember { mutableFloatStateOf(0f) }
-    var pinnedHeight by remember { mutableFloatStateOf(0f) }
-
     Box(
         modifier
             .fillMaxWidth()
-            .onGloballyPositioned { coordinates ->
-                val top = coordinates.positionInWindow().y
-                val height = coordinates.size.height.toFloat()
-                pin = (viewportTop - top).coerceIn(0f, max(0f, height - pinnedHeight))
-            },
+            .clip(Kit.TileShape)
+            .background(palette.card),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            toolbar?.let {
-                // **No fill, and the blocks are clipped out from under it instead.**
-                //
-                // It slides across the blocks rather than pushing them, so something has to stop a
-                // row reading through the controls that filter it, and painting the toolbar was the
-                // obvious answer for as long as the card under it was opaque. It is not: the card
-                // is see-through, so a fill here is the card's own colour laid over itself and
-                // comes out as a band across a card that has no band in it. Three colours were
-                // tried - the role, the role made solid, and the ground plus the role - and each
-                // was out by a different amount, because what the card actually composites to
-                // depends on the ground under it *and* the page's wash over that, neither of which
-                // a surface inside the card can know. Clipping needs to know none of it.
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .graphicsLayer { translationY = pin }
-                        .zIndex(1f)
-                        .onGloballyPositioned { pinnedHeight = it.size.height.toFloat() },
-                ) { it() }
-            }
-            // Everything the pinned toolbar has travelled over is clipped away rather than
-            // covered. `pin` is how far the toolbar has been pushed back down into the blocks, and
-            // the gap the Column leaves between the two is already spent before any block starts -
-            // so what is hidden is exactly what is behind the toolbar and never a row below it.
-            val gap = with(LocalDensity.current) { Space.s.toPx() }
-            Column(
-                Modifier.drawWithContent {
-                    clipRect(top = (pin - gap).coerceAtLeast(0f)) { this@drawWithContent.drawContent() }
-                },
-                verticalArrangement = Arrangement.spacedBy(Space.s),
-            ) {
-                stocks.forEach { stock ->
-                    StockBlock(
+        Column {
+            ColumnHeader()
+            var index = 0
+            stocks.forEach { stock ->
+                val latest = latestFor(stock.stockCode)
+                stock.dataPoints.forEach { point ->
+                    CallRow(
                         stock = stock,
-                        channelFor = channelFor,
-                        latest = latestFor(stock.stockCode),
-                        showContext = showContext,
-                        onSelectPoint = onSelectPoint,
-                        imagePathFor = imagePathFor,
-                        onFilterToTicker = onFilterToTicker,
+                        point = point,
+                        channel = channelFor(point.sourceMessageId) ?: point.sourceMessageId,
+                        latest = latest,
+                        status = statusFor(stock, point),
+                        striped = index % 2 == 1,
+                        onClick = { onSelectPoint(stock, point) },
+                        holdItems = holdItems(stock, point),
                     )
+                    index++
                 }
             }
         }
     }
 }
 
-/** The channel and its timing chip. The one column that holds words rather than figures. */
-private val SourceWidth = 132.dp
+/** The logo, the ticker, and the channel under it. The one column that holds words. */
+private val StockWidth = 132.dp
 
-/** Just enough for the chevron that says the row opens. */
-private val ChevronWidth = 24.dp
+/** The status word, unlabelled: the word says what it is. */
+private val StatusWidth = 92.dp
 
 /**
- * What the entry column gets for every 1 the other figure columns get.
- *
- * Entry is the only cell on the row that holds two prices and the dash between them - fifteen
- * characters where a target holds six - and it was given the same weight as the columns holding
- * half its content, so it was the one column that truncated while four beside it sat half empty.
- * 1.6 puts the longest real range inside the cell at the row's own type size at every width the
- * table is drawn at, which is what stops [AutoSizeText] from ever having to shrink it in practice.
+ * What the entry column gets for every 1 the other figure columns get. Entry is the only cell
+ * holding two prices and the dash between them, fifteen characters where a target holds six.
  */
 private const val EntryWeight = 1.6f
 
+/** The ladder's share: twice a figure, enough for the shape to read. */
+private const val LadderWeight = 2f
+
 /**
  * A minimum rather than a fixed height, so a large font scale grows the row instead of clipping it.
- *
- * Every cell is held to one line per figure, so at any one scale the rows are the same height and
- * the column reads down. That is what the old table could not do: two of its columns wrapped at
- * anything above the default scale, and a wrapped row stood half again as tall as the one above it.
- *
- * 64dp and no longer 56dp, because the tallest cell is [SourceCell] and it is taller than 56dp: an
- * Arabic channel name, the gap, the timing pill and the air the cell now asks for either side come
- * to 61dp. At 56dp a row carrying a pill would have stood on its own content and a row whose call
- * has no timing would have stopped at the minimum, so the table would have read down in two
- * heights - the one failure this minimum exists to prevent.
+ * 64dp holds the tallest cell, an Arabic channel name under a ticker.
  */
 private val RowHeight = 64.dp
 
 @Composable
-private fun StockBlock(
-    stock: ConsolidatedRecommendation,
-    channelFor: (String?) -> String?,
-    latest: LatestPrice?,
-    showContext: Boolean,
-    onSelectPoint: (ConsolidatedRecommendation, RecommendationDataPoint) -> Unit,
-    imagePathFor: (Int?) -> String?,
-    onFilterToTicker: (String) -> Unit = {},
-) {
-    // A card within a card goes one step up, the rule the Portfolio's session cards already follow.
-    // It was a full-bleed `surfaceContainerHighest` band under a 2dp rule - the heaviest divider in
-    // the app - which is what made a page of these read as a spreadsheet rather than as the report
-    // it sits inside.
-    // A block of the page's ground inside the report's white tile, with the tile's own corners.
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .clip(Kit.TileShape)
-            .background(palette.ground),
-    ) {
-        Column {
-            StockHeading(stock, latest, onFilterToTicker)
-            Hairline()
-            ColumnHeader()
-            stock.dataPoints.forEachIndexed { index, point ->
-                CallRow(
-                    point = point,
-                    channel = channelFor(point.sourceMessageId) ?: point.sourceMessageId,
-                    showContext = showContext,
-                    // The stripe does the separating on its own now. It shared the job with a rule
-                    // under every row and a vertical rule beside the first column, and three grid
-                    // devices at once is what a table looks like when none of them is trusted.
-                    striped = index % 2 == 1,
-                    onClick = { onSelectPoint(stock, point) },
-                    imagePath = imagePathFor(point.sourceImageRef),
-                )
-            }
-        }
-    }
-}
-
-/**
- * Which stock the block below is about, and where that stock is now.
- *
- * **The price is the point of this row.** Identity took the leading edge and nothing held the
- * trailing one, so a band that named one stock sat over a rule running the full width of the card -
- * left-heavy over something symmetrical, which is what made it read as unfinished. What fills it is
- * not decoration: the block underneath is made entirely of prices the sources chose, and the one
- * price nobody chose - what the stock actually costs today - was the figure the table never
- * carried. An entry of 2.25 - 2.23 against a last close of 2.31 says the entry is gone, and a
- * target of 2.55 at +13.3% says how much of that is still there. Neither could be read off this
- * table before.
- *
- * Drawn as [LatestPrice] is drawn in the stock sheet's own heading: the key over the figure, in
- * [PriceRole.market], and the key itself saying the one thing that changes the figure's meaning -
- * a session still trading is a price, not a close. No day move beside it, which that heading does
- * carry: the move is measured off stored history through a suspend read per stock, and a table
- * draws every stock in the report at once.
- *
- * Absent where the feed has nothing, with no dash and no placeholder. A column of figures earns a
- * dash because the reader is scanning down it for one; a heading is read once.
- */
-@Composable
-private fun StockHeading(
-    stock: ConsolidatedRecommendation,
-    latest: LatestPrice?,
-    onFilterToTicker: (String) -> Unit = {},
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.s),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // The logo and the code press together, as they do on a card: one thing to the eye is one
-        // target to the finger. The names beside them are deliberately left out - they wrap to two
-        // lines and a press target that tall over a heading reads as the whole heading being a
-        // button. See LocalOpenStock.
-        val openStock = LocalOpenStock.current
-        var filtering by remember(stock.stockCode) { mutableStateOf(false) }
-        Row(
-            Modifier.combinedClickable(
-                onClick = { openStock(stock.stockCode) },
-                onLongClick = { filtering = true },
-            ),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
-            // The anchor for everything under it, so it carries more weight than a row does.
-            Text(
-                stock.stockCode,
-                style = MaterialTheme.typography.titleMedium,
-                // Ink since the 2026-11 redesign: a column of vermilion tickers would be the accent
-                // spent as a figure. Still pressable, with the logo, to open the stock sheet.
-                color = palette.ink,
-            )
-            // Inside the press target with the logo and the code, as it is on the recommendation
-            // card: the badge is a fact about this stock, so it belongs to the thing that opens it.
-            // This heading was the one place in the app that drew a stock without it, which meant
-            // the same company was marked Shariah-compliant on its card and on its sheet and
-            // unmarked on the table between them.
-            Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
-        }
-        if (filtering) {
-            HoldPrompt(
-                title = stock.stockCode,
-                actions = listOf(
-                    HoldAction("Filter this page to ${stock.stockCode}", primary = true) {
-                        filtering = false
-                        onFilterToTicker(stock.stockCode)
-                    },
-                ),
-                onDismiss = { filtering = false },
-            )
-        }
-        Column(Modifier.weight(1f).padding(start = Space.m)) {
-            stock.stockNameArabic?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            // Dimmer than the Arabic name because the model supplies it from its own knowledge
-            // rather than reading it from the source, and it is regularly wrong.
-            stock.stockNameEnglish?.takeIf { it != stock.stockCode }?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = palette.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        if (stock.dataPoints.isNotEmpty() && stock.dataPoints.all(RecommendationDataPoint::isWatching)) {
-            // Every occurrence, not any: a stock called for a buy by one source and merely watched
-            // by another was labelled Watch list, which reads as though nobody had called it.
-            //
-            // The page's own hue, and no longer `tertiaryContainer` - which is the family
-            // `PriceRole.target` is drawn from, so a status chip was wearing the colour that means
-            // "a target price" on every other surface in the app. An accent is chrome and a signal
-            // is a figure; this is the first.
-            //
-            // [OutlinePill], which is the one pill in the app: this drew its own ring at its own
-            // corner and its own padding, so the table's marks and the cards' marks were two
-            // families of one thing seen a scroll apart.
-            TableTag("Watch list")
-        }
-        // Last, so the price closes the row's trailing edge whether or not the pill is there. The
-        // pill moves and the price does not, which is the way round that keeps the one figure the
-        // eye is looking for in the same place on every block of the report.
-        if (latest != null) {
-            Column(
-                Modifier.padding(start = Space.m),
-                horizontalAlignment = Alignment.End,
-            ) {
-                Text(
-                    if (latest.provisional) "LATEST PRICE" else "LAST CLOSE",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = palette.muted,
-                )
-                Text(
-                    formatPrice(latest.session.close),
-                    style = MaterialTheme.typography.bodyLarge.copy(fontFamily = TabularFigures),
-                    color = PriceRole.market,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun ColumnHeader() {
     Row(
-        Modifier.fillMaxWidth().padding(start = Space.m, end = Space.m, bottom = Space.xs),
+        Modifier.fillMaxWidth().padding(start = Space.m, end = Space.m, top = Space.s, bottom = Space.xs),
         verticalAlignment = Alignment.Bottom,
     ) {
-        HeaderLabel("Source", Modifier.width(SourceWidth), TextAlign.Start)
+        HeaderLabel("Stock", Modifier.width(StockWidth), TextAlign.Start)
+        HeaderLabel("Now", Modifier.weight(1f), TextAlign.End)
         HeaderLabel("Entry", Modifier.weight(EntryWeight), TextAlign.End)
+        HeaderLabel("Stop", Modifier.weight(1f), TextAlign.End)
         HeaderLabel("Target 1", Modifier.weight(1f), TextAlign.End)
         HeaderLabel("Target 2", Modifier.weight(1f), TextAlign.End)
-        HeaderLabel("Stop", Modifier.weight(1f), TextAlign.End)
-        HeaderLabel("Support", Modifier.weight(1f), TextAlign.End)
-        HeaderLabel("Resistance", Modifier.weight(1f), TextAlign.End)
-        Spacer(Modifier.width(ChevronWidth))
+        HeaderLabel("Stop to target", Modifier.weight(LadderWeight), TextAlign.Center)
+        Spacer(Modifier.width(StatusWidth))
     }
     Hairline()
 }
@@ -421,32 +139,22 @@ private fun ColumnHeader() {
 /**
  * A column's name, which shrinks with the same rule its figures do.
  *
- * `Resistance` is the one header longer than the column it names is guaranteed to be, and a header
- * reading `Resistan…` is a column whose meaning has to be guessed at from the figures under it.
+ * Above [StackHeadersAbove] a name made of several words is stacked one word to a line, each still
+ * shrinking on its own: at the shrink's floor "Target 1" and "Target 2" both end in `Targe…`, which
+ * is two columns the reader can no longer tell apart (seen at 1.6x, 2026-10-05).
  */
 @Composable
 private fun HeaderLabel(label: String, modifier: Modifier, align: TextAlign) {
-    // At a large system font the shrink reaches its floor and "Target 1" and "Target 2" both end
-    // in the same `Targe…`, which is two columns the reader can no longer tell apart (seen at 1.6x,
-    // 2026-10-05). Above that scale a name made of two words is stacked, one word to a line, each
-    // still shrinking on its own; at ordinary sizes it stays the single line it always was.
     val large = LocalDensity.current.fontScale > StackHeadersAbove
     val words = label.split(' ')
-    // A single long word cannot be stacked, so at a large font it is abbreviated instead of cut
-    // to `Supp…` / `Resis…`, which left two columns still guessed at from their figures.
-    val label = if (large) {
-        when (label) {
-            "Support" -> "Sup."
-            "Resistance" -> "Res."
-            else -> label
-        }
-    } else {
-        label
-    }
     if (large && words.size > 1) {
         Column(
             modifier.fillMaxWidth().padding(horizontal = Space.xs),
-            horizontalAlignment = if (align == TextAlign.Start) Alignment.Start else Alignment.End,
+            horizontalAlignment = when (align) {
+                TextAlign.Start -> Alignment.Start
+                TextAlign.Center -> Alignment.CenterHorizontally
+                else -> Alignment.End
+            },
         ) {
             words.forEach { word ->
                 AutoSizeText(
@@ -469,300 +177,113 @@ private fun HeaderLabel(label: String, modifier: Modifier, align: TextAlign) {
     }
 }
 
-/** The system font scale past which a two-word column name is stacked on two lines. */
+/** The system font scale past which a several-word column name is stacked. */
 private const val StackHeadersAbove = 1.15f
 
 @Composable
 private fun CallRow(
+    stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     channel: String?,
-    showContext: Boolean,
+    latest: LatestPrice?,
+    status: Pair<String, CallGroup>,
     striped: Boolean,
     onClick: () -> Unit,
-    /** The screenshot this row was read off - absent, a hold press opens nothing. */
-    imagePath: String?,
+    holdItems: List<MenuItem>,
 ) {
-    // A hold press is the shortcut past opening the sheet just to reach its thumbnail: the same
-    // zoomable viewer, one press sooner, for a reader who already knows which card they want.
-    var viewingImage by remember { mutableStateOf(false) }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(
-                if (striped) {
-                    // `surfaceContainer`'s own RGB sits only a few units per channel from the
-                    // block's `surfaceContainerHigh`, so no alpha over it reads as a separate
-                    // band - composited by hand it came out within 1 unit of the card in dark
-                    // theme and within 4 in light. `onSurface` is guaranteed to differ sharply
-                    // from any surface tier in both themes, so a low-alpha tint of it moves the
-                    // stripe a comparable amount either way: lighter in dark theme, darker in
-                    // light - the same state-layer trick Material uses for hover and press.
-                    palette.ink.copy(alpha = 0.04f)
-                } else {
-                    Color.Transparent
-                },
-            )
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = { viewingImage = true },
-            ),
-    ) {
+    val close = latest?.session?.close
+    val watching = point.isWatching
+    HoldMenu(items = holdItems, onTap = onClick) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = RowHeight).padding(horizontal = Space.m),
+            Modifier
+                .fillMaxWidth()
+                // A low-alpha tint of the ink rather than a surface tier: it moves the stripe the
+                // same visible amount in both themes, lighter in dark and darker in light.
+                .background(if (striped) palette.ink.copy(alpha = 0.04f) else Color.Transparent)
+                .heightIn(min = RowHeight)
+                .padding(horizontal = Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SourceCell(channel, point, Modifier.width(SourceWidth))
-            StackedCell(
-                Modifier.weight(EntryWeight),
-                value = entry(point),
-                tone = PriceRole.entry,
-                // Where risk to reward lives at every width now, rather than only below the
-                // breakpoint it used to have a column above. It reads as a caption to the entry
-                // rather than a figure of its own, which is what it is: a ratio measured from the
-                // price paid.
-                sub = riskReward(point),
-                subTone = PriceRole.muted,
-            )
-            TargetCell(Modifier.weight(1f), point, point.target1, point.returnTp1Pct)
-            TargetCell(Modifier.weight(1f), point, point.target2, point.returnTp2Pct)
-            StopCell(Modifier.weight(1f), point)
-            LevelCell(Modifier.weight(1f), point.support)
-            LevelCell(Modifier.weight(1f), point.resistance)
-            Icon(
-                Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-                contentDescription = null,
-                tint = palette.muted,
-                modifier = Modifier.width(ChevronWidth).height(IconSize.Inline),
-            )
+            StockCell(stock, channel, Modifier.width(StockWidth))
+            FigureCell(Modifier.weight(1f), formatPrice(close), if (close == null) PriceRole.muted else PriceRole.market)
+            FigureCell(Modifier.weight(EntryWeight), entryText(point), PriceRole.entry)
+            // A watched stock names no stop and no targets worth reading: the dash, not its levels.
+            FigureCell(Modifier.weight(1f), if (watching) Dash else formatPrice(point.stopLoss), PriceRole.stop)
+            FigureCell(Modifier.weight(1f), if (watching) Dash else formatPrice(point.target1), PriceRole.target)
+            FigureCell(Modifier.weight(1f), if (watching) Dash else formatPrice(point.target2), PriceRole.target)
+            Box(
+                Modifier.weight(LadderWeight).padding(horizontal = Space.xs),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (watching) {
+                    AutoSizeText(
+                        watchLevel(point)?.let { "only above ${formatPrice(it)}" } ?: "watching",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = palette.muted,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    PriceLadder(point, Modifier.testTag(LadderCellTag), reached = close, compact = true)
+                }
+            }
+            StatusCell(status, Modifier.width(StatusWidth))
         }
-        if (showContext) ContextLine(point)
-    }
-    if (viewingImage) {
-        SourceImageViewer(imagePath, point.sourceImageRef, onDismiss = { viewingImage = false })
     }
 }
 
-/**
- * The channel, then what dated the call.
- *
- * Both start at the leading edge. The channel names are Arabic and the app's layout is not, so a
- * cell that aligned them to its trailing edge would put one column of this table out of step with
- * every other name the app draws - including the stock's own, two rows above it.
- */
+/** On the ladder cell, so a test can tell a row that draws one from a row that does not. */
+internal const val LadderCellTag = "call-ladder"
+
+/** The logo and the ticker on one line, the channel under them. */
 @Composable
-private fun SourceCell(channel: String?, point: RecommendationDataPoint, modifier: Modifier) {
-    val label = timing(point)
-    // Space.s, and no longer the 3dp that was never on the spacing scale. That gap was set when
-    // the timing was a line of small print carrying 1dp of padding; it is a 20dp pill now, and at
-    // 3dp its edge closed on the channel name instead of standing under it.
-    //
-    // The vertical padding is what keeps the pill off the row's floor. This gap and the pill are
-    // 28dp between them, and the line above was budgeted at the 17dp a Latin `bodySmall` measures
-    // - 45dp of a 56dp row, with 5.5dp of air either side. The names here are Arabic, and Noto
-    // Naskh's ascent and descent make that same line measure about 25dp: the stack came to 53dp
-    // and the pill sat 1.5dp off the bottom edge of the row, which reads as touching it. Air
-    // asked for here rather than a line box trimmed to a number is the one form of this that
-    // holds whatever the script or the font does - a trim tight enough to buy back 8dp would be
-    // tighter than the ink of the hamza above `إ` and the tail of `ي`. The Latin case is unmoved
-    // at 53dp inside the 56dp minimum; an Arabic row grows to 61dp and says so.
+private fun StockCell(stock: ConsolidatedRecommendation, channel: String?, modifier: Modifier) {
     Column(
         modifier.padding(horizontal = Space.xs, vertical = Space.xs),
-        verticalArrangement = Arrangement.spacedBy(Space.s),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        // The one place in the table where the floor can actually be reached: channel names run
-        // long and this column is fixed, so a name that will not fit at 9sp still ends in a dot.
-        AutoSizeText(
-            channel ?: Dash,
-            style = MaterialTheme.typography.bodySmall,
-            color = LocalContentColor.current,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        label?.let {
-            // Neutral, and deliberately not a hue per timing. Every colour this app has spare means
-            // something about a price - market blue most of all - and a T+1 chip borrowing one
-            // would be spending a signal on chrome to save the reader reading two characters.
-            //
-            // Tappable since 2026-09-24, like the same pill on the card: a reader who has never
-            // seen "Watching" or "T+1" before had no way to ask what either meant.
-            var showing by remember(point) { mutableStateOf(false) }
-            TableTag(it, filled = true, onClick = { showing = true })
-            if (showing) {
-                InfoSheet(InfoNote(it, listOf(timingExplanation(point)))) { showing = false }
-            }
-        }
-    }
-}
-
-/**
- * A figure and, under it, the one thing that qualifies it.
- *
- * Right-aligned and monospaced, so a column can be compared down and not only read across - the
- * reason the old cells were, kept.
- */
-@Composable
-private fun StackedCell(
-    modifier: Modifier,
-    value: String,
-    tone: Color,
-    sub: String?,
-    subTone: Color,
-) {
-    Column(modifier.padding(horizontal = Space.xs), horizontalAlignment = Alignment.End) {
-        AutoSizeText(
-            value,
-            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
-            color = tone,
-            textAlign = TextAlign.End,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        sub?.let {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.xs))
             AutoSizeText(
-                it,
-                style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-                color = subTone,
-                textAlign = TextAlign.End,
-                modifier = Modifier.fillMaxWidth(),
+                stock.stockCode,
+                style = MaterialTheme.typography.titleSmall,
+                color = palette.ink,
             )
         }
+        // The one place the shrink's floor is reached in practice: channel names run long and this
+        // column is fixed, so a name that will not fit still ends in a dot.
+        AutoSizeText(
+            channel ?: Dash,
+            style = MaterialTheme.typography.labelSmall,
+            color = LocalContentColor.current.copy(alpha = 0.7f),
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
-/**
- * A target, with what reaching it is worth.
- *
- * The two were columns apart with another target between them; they are one cell because they are
- * one fact, and because the pair is what the width came from. The prompt leaves the percentage null
- * unless a card prints one, so most of these are worked out here - and a derived figure keeps its
- * sign's own hue and is softened, never greyed, exactly as it was when it had a column to itself.
- */
+/** A figure, right-aligned and monospaced, so a column can be compared down and not only across. */
 @Composable
-private fun TargetCell(
-    modifier: Modifier,
-    point: RecommendationDataPoint,
-    target: Double?,
-    stated: Double?,
-) {
-    val value = stated ?: returnFrom(point, target)
-    val tone = PriceRole.forReturn(value)
-    StackedCell(
-        modifier,
-        value = formatPrice(target),
-        tone = PriceRole.target,
-        sub = formatPercent(value).takeIf { target != null },
-        // Only a figure is softened: with no target there is nothing derived, just the dash every
-        // other cell draws for an absent value.
-        subTone = if (value != null && stated == null) PriceRole.derived(tone) else tone,
-    )
-}
-
-/**
- * The stop, with the move to it from the entry.
- *
- * The percentage is drawn in the stop's own colour whatever its sign, which is what the Risk %
- * column did: it is the distance to the level that ends the trade, and a figure that turned green
- * because a source printed it unsigned would be reporting a loss as a gain.
- */
-@Composable
-private fun StopCell(modifier: Modifier, point: RecommendationDataPoint) {
-    val stated = point.riskPct
-    val value = stated ?: returnFrom(point, point.stopLoss)
-    StackedCell(
-        modifier,
-        value = formatPrice(point.stopLoss),
-        tone = PriceRole.stop,
-        sub = formatPercent(value).takeIf { point.stopLoss != null },
-        subTone = if (value != null && stated == null) {
-            PriceRole.derived(PriceRole.stop)
-        } else {
-            PriceRole.stop
-        },
-    )
-}
-
-/**
- * A level the chart says the price has trouble getting through.
- *
- * The two figures the extra width goes to, in place of the risk to reward column and its bar.
- * Neither is the call's to make - a channel does not decide where a stock has been turned back, it
- * reads it off - so both are drawn in [PriceRole.market], the hue that already means a price the
- * market set rather than one the source chose. Entry, target and stop keep their three hues for the
- * levels that are decisions, which is the distinction the rest of the row is built on.
- *
- * One line and no second figure under it, so a support cannot be taken for a price with its
- * percentage beneath. The column head is the only label either of them needs.
- */
-@Composable
-private fun LevelCell(modifier: Modifier, level: Double?) {
+private fun FigureCell(modifier: Modifier, value: String, tone: Color) {
     AutoSizeText(
-        formatPrice(level),
+        value,
         style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
-        color = if (level == null) PriceRole.muted else PriceRole.market,
+        color = if (value == Dash) PriceRole.muted else tone,
         textAlign = TextAlign.End,
         modifier = modifier.fillMaxWidth().padding(horizontal = Space.xs),
     )
 }
 
-/**
- * The two dates, under the row they date.
- *
- * A line rather than two columns, so the toggle can never put the table back into the sideways
- * scroll this rebuild exists to end. Absent labels are dropped rather than drawn as dashes: this is
- * an aside, and an aside made mostly of em dashes is noise under every row in the report.
- *
- * Support and resistance were here too, on any row too narrow to column them. Nothing is that
- * narrow now - [LevelCell] draws both at every width the table is drawn at - and a figure printed
- * twice on one row teaches the reader that the two are different figures and sends them looking for
- * the difference.
- */
+/** A dot in the group's colour and the status word, the word shrinking before it is cut. */
 @Composable
-private fun ContextLine(point: RecommendationDataPoint) {
-    val parts = listOfNotNull(
-        point.date?.let { "Target date $it" },
-        point.visibleSourceDate?.takeIf(String::isNotBlank)?.let { "Source date $it" },
-    )
-    if (parts.isEmpty()) return
-    Text(
-        parts.joinToString("  ·  "),
-        style = MaterialTheme.typography.labelSmall,
-        color = PriceRole.muted,
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = Space.m, end = Space.m, bottom = Space.s),
-    )
-}
-
-/** Entry midpoint to target 1, over the distance to the stop. Null where the levels do not say. */
-private fun riskReward(point: RecommendationDataPoint): String? =
-    // "R:R 1:1.6" and not "R:R  1 : 1.6": the spaces were four characters of a line that has to fit
-    // under a price in a column, and at a large font they were what pushed the ratio into `1 : …`.
-    point.riskRewardRatio()?.let { "R:R 1:${"%.1f".format(it)}" }
-
-private fun entry(point: RecommendationDataPoint): String {
-    val low = point.buyPriceLow
-    val high = point.buyPriceHigh
-    return when {
-        low != null && high != null && low != high -> "${formatPrice(low)} – ${formatPrice(high)}"
-        else -> formatPrice(point.buyPrice ?: low ?: high)
-    }
-}
-
-/**
- * A word on a row of the table - the watch list, a timing - at the height of a line of figures
- * rather than a chip's 48dp touch target, so a row with one stands no taller than a row without.
- * [filled] is the timing, which opens an explanation; the hairline is a plain label.
- */
-@Composable
-private fun TableTag(text: String, filled: Boolean = false, onClick: (() -> Unit)? = null) {
-    val p = palette
-    Box(
-        Modifier
-            .clip(Kit.Capsule)
-            .then(if (filled) Modifier.background(p.ink.copy(alpha = 0.08f)) else Modifier.border(1.dp, p.line, Kit.Capsule))
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 8.dp, vertical = 2.dp),
-    ) {
-        Text(text, style = MaterialTheme.typography.labelMedium, color = p.muted, maxLines = 1)
+private fun StatusCell(status: Pair<String, CallGroup>, modifier: Modifier) {
+    val tone = status.second.tone()
+    Row(modifier.padding(start = Space.s), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(tone))
+        AutoSizeText(
+            status.first,
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.ink,
+            modifier = Modifier.padding(start = Space.xs).fillMaxWidth(),
+        )
     }
 }

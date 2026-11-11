@@ -5,6 +5,11 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import com.ikverse.egxanalyzer.model.AnalysisResult
 import com.ikverse.egxanalyzer.model.CallSanity
 import com.ikverse.egxanalyzer.model.CloudProvider
@@ -123,27 +128,29 @@ class ResultsPageTest {
     @Test
     fun `a shut run is named for its day and says how its calls went`() {
         show(FakeAppState(savedResults = listOf(run), performance = report))
-        compose.onNodeWithText("Monday morning").assertExists()
-        compose.onNodeWithText("#31 · 9 Nov 09:12").assertExists()
-        compose.onNodeWithText("2 calls · 1 hit · 1 stopped").assertExists()
+        compose.onNodeWithText("Mon 9 Nov").assertExists()
+        compose.onNodeWithText("2 calls on 2 stocks").assertExists()
+        compose.onNodeWithText("reached target").assertExists()
+        compose.onNodeWithText("stopped").assertExists()
         compose.onNodeWithContentDescription("1 hit, 1 stopped, 0 expired, 0 open").assertExists()
     }
 
     @Test
     fun `pressing a run opens its report with its figures`() {
         show(FakeAppState(savedResults = listOf(run), performance = report))
-        compose.onNodeWithText("Monday morning").performClick()
+        compose.onNodeWithText("Mon 9 Nov").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("STOCKS").assertExists()
-        compose.onNodeWithText("Source trace and diagnostics").assertExists()
+        compose.onNodeWithText("2 calls · 2 stocks").assertExists()
+        compose.onNodeWithText("About this run").assertExists()
     }
 
     @Test
     fun `delete asks first and then removes the run`() {
         val state = Recording(FakeAppState(savedResults = listOf(run), performance = report))
         show(state)
-        compose.onNodeWithContentDescription("Report options").performClick()
-        compose.onNodeWithText("Delete").performClick()
+        compose.onNodeWithText("Mon 9 Nov").performClick()
+        compose.onNodeWithText("About this run").performScrollTo().performClick()
+        compose.onNodeWithText("Delete this run").performScrollTo().performClick()
         compose.onNodeWithText("Delete this analysis?").assertExists()
         assertEquals(emptyList<Long>(), state.deleted)
         compose.onNodeWithText("Delete everywhere").performClick()
@@ -165,12 +172,89 @@ class ResultsPageTest {
     }
 
     @Test
-    fun `unfolded, a pressed run opens beside the list`() {
+    @Config(qualifiers = "w750dp-h891dp")
+    fun `unfolded, a pressed run opens as the table`() {
         show(FakeAppState(savedResults = listOf(run), performance = report), FoldPosture.Unfolded)
         compose.onNodeWithText("Pick a run").assertExists()
-        compose.onNodeWithText("Monday morning").performClick()
+        compose.onNodeWithText("Mon 9 Nov").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Pick a run").assertDoesNotExist()
-        compose.onNodeWithText("STOCKS").assertExists()
+        compose.onNodeWithText("Stock").assertExists()
+    }
+
+    /** COMI still running and ABUK stopped, so the chips have two groups to tell apart. */
+    private val mixed = PerformanceReport(
+        sessions = listOf(
+            ScoredSession(
+                targetDate = day, lastRunAt = Instant.EPOCH, model = "m", runCount = 1,
+                calls = listOf(scored("COMI", Outcome.OPEN), scored("ABUK", Outcome.STOPPED)),
+            ),
+        ),
+    )
+
+    private fun openRun(posture: FoldPosture = FoldPosture.Cover, state: AppState? = null) {
+        val shown = state ?: FakeAppState(savedResults = listOf(run), performance = mixed)
+        show(shown, posture)
+        compose.onNodeWithText("Mon 9 Nov").performClick()
+        compose.waitForIdle()
+    }
+
+    @Test
+    fun `a status chip narrows the report and All puts it back`() {
+        openRun()
+        compose.onNodeWithText("Stopped 1").performClick()
+        compose.onNodeWithText("ABUK").assertExists()
+        compose.onNodeWithText("COMI").assertDoesNotExist()
+        compose.onNodeWithText("All").performClick()
+        compose.onNodeWithText("COMI").assertExists()
+        compose.onNodeWithText("ABUK").assertExists()
+    }
+
+    @Test
+    fun `holding a call card opens its menu`() {
+        openRun()
+        compose.onNodeWithText("Running").performTouchInput { longClick() }
+        compose.onNodeWithText("Fix a wrong number").assertIsDisplayed()
+        compose.onNodeWithText("Show only COMI").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w750dp-h891dp")
+    fun `in book posture the runs stay beside the open report`() {
+        openRun(FoldPosture.Book(0.5f, 0.5f))
+        compose.onNodeWithText("open on the right", substring = true).assertExists()
+        compose.onNodeWithText("About this run").assertExists()
+    }
+
+    @Test
+    fun `on tabletop a call key chooses the call shown above the crease`() {
+        openRun(FoldPosture.Tabletop(0.5f, 0.52f))
+        assertEquals(0, compose.onAllNodesWithText("ABUK").fetchSemanticsNodes().size)
+        compose.onNodeWithText("● ABUK").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(1, compose.onAllNodesWithText("ABUK").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun `the technical lines stay shut until asked for`() {
+        openRun()
+        compose.onNodeWithText("About this run").performScrollTo().performClick()
+        compose.onNodeWithText("qwen3.7-plus", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("For the curious").performScrollTo().performClick()
+        compose.onNodeWithText("qwen3.7-plus", substring = true).assertExists()
+    }
+
+    @Test
+    fun `back closes an open report`() {
+        val state = FakeAppState(
+            savedResults = listOf(run),
+            performance = mixed,
+            destination = com.ikverse.egxanalyzer.ui.AppDestination.RESULTS,
+        )
+        openRun(state = state)
+        compose.onNodeWithText("Stopped 1").assertExists()
+        compose.runOnIdle { assertEquals(true, state.goBack()) }
+        compose.onNodeWithText("Stopped 1").assertDoesNotExist()
+        compose.onNodeWithText("2 calls on 2 stocks").assertExists()
     }
 }

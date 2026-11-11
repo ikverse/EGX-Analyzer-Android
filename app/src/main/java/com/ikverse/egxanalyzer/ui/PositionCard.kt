@@ -72,641 +72,399 @@ import com.ikverse.egxanalyzer.model.PositionView
 import com.ikverse.egxanalyzer.model.Sale
 import com.ikverse.egxanalyzer.model.recordedSale
 import com.ikverse.egxanalyzer.model.Scoring
+import com.ikverse.egxanalyzer.model.NeedReason
+import com.ikverse.egxanalyzer.model.plainWord
+import com.ikverse.egxanalyzer.ui.kit.HoldMenu
+import com.ikverse.egxanalyzer.ui.kit.KitTag
+import com.ikverse.egxanalyzer.ui.kit.MoreRow
+import com.ikverse.egxanalyzer.ui.kit.Timeline
+import com.ikverse.egxanalyzer.ui.kit.TimelineStep
+import com.ikverse.egxanalyzer.ui.kit.StepTone
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.SheetFooterSpacer
+import com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture
+import com.ikverse.egxanalyzer.ui.kit.KitButton
+import com.ikverse.egxanalyzer.ui.kit.ButtonKind
+import com.ikverse.egxanalyzer.ui.kit.ButtonSize
 import com.ikverse.egxanalyzer.ui.theme.pageAccent
 import java.time.LocalDate
 
 /**
- * A position card answers three questions at a glance, and a fourth on request: what did I buy,
- * where is it now, and how long is left, plus - open the chart, and only then - how did it get
- * here. The status outline says the third of those before any of it is read.
+ * What can be done about one trade, gathered once by `rememberTradeActions` so the hold menu, the
+ * sheet, the book pane and tabletop's buttons all do the same thing.
+ */
+internal class TradeActions(
+    /** Opens the sale dialog. */
+    val sell: () -> Unit,
+    /** Opens the right correction: the sale on a sold trade, the entry on any other. */
+    val edit: () -> Unit,
+    /** The call this trade was taken on, in Insights. Absent once its analysis is gone. */
+    val openCall: (() -> Unit)?,
+    val chart: () -> Unit,
+    /** Opens the Keep open dialog. */
+    val keepOpen: () -> Unit,
+    val stopKeepingOpen: () -> Unit,
+    val undoSale: () -> Unit,
+    val showOnly: () -> Unit,
+    val remove: () -> Unit,
+)
+
+/** The hold menu for [view]: every action that applies to it, Remove last and red. */
+internal fun TradeActions.menu(view: PositionView): List<MenuItem> = buildList {
+    if (view.awaitingSale) add(MenuItem("I sold it") { sell() })
+    add(MenuItem("Fix the trade") { edit() })
+    openCall?.let { add(MenuItem("See the call") { it() }) }
+    add(MenuItem("Chart") { chart() })
+    if (view.keptOpen) {
+        add(MenuItem("Stop keeping it open") { stopKeepingOpen() })
+    } else if (!view.finished && view.awaitingSale) {
+        add(MenuItem("Keep it open") { keepOpen() })
+    }
+    if (view.realized) add(MenuItem("Undo the sale") { undoSale() })
+    add(MenuItem("Show only ${view.ticker}") { showOnly() })
+    add(MenuItem("Remove", danger = true) { remove() })
+}
+
+/**
+ * A trade, short: what it is, what was paid against where it is now, the return, its tags, and its
+ * ladder marked "You paid". A tap opens it in full; a hold opens what can be done about it.
  *
- * The prices are drawn before they are listed. Eight figures at equal weight said what every level
- * was and nothing about how they stood against each other - whether the stop was a whisker away or
- * a mile off, whether the price had crept most of the way to target 1 or none of it. [PriceLadder]
- * answers that for every trade on the tab, at no cost in height. On a running trade the header
- * slides a full [PriceChart] open beneath it on a press - the same drawing [StockSheet] uses, range
- * chips and all - which is the one thing the ladder cannot say: whether a close sitting near the
- * stop got there over three flat weeks or on one bad session. Hidden until asked for, because that
- * is a question worth a press rather than height every card on the tab spends whether or not it is
- * read. A trade with nothing left to run - sold, stopped, expired - opens no chart at all; there is
- * no "since" left for one to answer, and its outcome is already told in full by the figures below.
- *
- * Then two groups rather than two unlabelled rows - what the trade is, and where it stands. The
- * split is what lets each figure carry a line of its own underneath, a distance from the entry or
- * the session a high was set on, without the card reading as a table of ten loose numbers.
+ * Until 5.1 this card was the whole trade - a chart toggle, two figure panels, a menu, the Sold and
+ * Keep open buttons. All of that is in [TradeDetail] now, a press away, so a list of open trades can
+ * be read down for where each stands.
  */
 @Composable
 internal fun PositionCard(
     view: PositionView,
-    appState: AppState,
-    /** Opens the call this trade was taken on, in Insights. Absent once its analysis is gone. */
-    onOpenCall: (() -> Unit)?,
+    /** Whether the trade is close to its stop or to target 2, for the tag that says so. */
+    near: NeedReason?,
     highlighted: Boolean,
     onHighlightShown: () -> Unit,
-    onSell: (Sale) -> Unit,
-    onEditTrade: (Double, LocalDate, Int?) -> Unit,
-    onKeepOpen: (keep: Boolean, note: String?) -> Unit,
-    onRemove: () -> Unit,
-    /** Puts a sold trade back the way it was before the sale, so it can be sold again correctly. */
-    onReopen: () -> Unit,
+    onOpen: () -> Unit,
+    actions: List<MenuItem>,
     modifier: Modifier = Modifier,
-    /** True on the one card a Record sale action in the shade named. See `TradeStatusNotifier`. */
-    startSelling: Boolean = false,
-    onSellingShown: () -> Unit = {},
 ) {
     val position = view.position
-    var menuOpen by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf(false) }
-    var editingSale by remember { mutableStateOf(false) }
     // Set by the menu's Remove. The card closes up first and the trade is removed when it has, so
     // the rows below slide into the gap rather than snapping into it - and there is no question,
     // because the status line offers Undo for the next ten seconds (see `deletePosition`).
     var leaving by remember { mutableStateOf(false) }
+    val remove = actions.firstOrNull { it.danger }?.onClick
     LaunchedEffect(leaving) {
         if (leaving) {
             delay(ExitMs.toLong())
-            onRemove()
+            remove?.invoke()
         }
     }
-
+    val items = actions.map { if (it.danger) it.copy(onClick = { leaving = true }) else it }
     // The arrival flash takes the edge for as long as it runs, then the status outline has it back.
     val border = arrivalFlash(highlighted, onHighlightShown, view.status.tone()) ?: heldBorder(view)
-    val body: @Composable ColumnScope.() -> Unit = {
-        // Measured once, at the top: a two-column grid never splits this card any more (see the
-        // Portfolio grid), so a card's own width is the container's. `wide` decides whether the
-        // chart defaults open, in the ladder's place, and whether the two figure panels stack or
-        // sit side by side - the same three-way switch the Insights call card already makes off
-        // its own width.
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val wide = maxWidth >= WideCardMinWidth
-            // Defaults to expanded once the card is wide enough that the chart draws in the
-            // ladder's place - the same width switch Insights' call card makes - and collapsed on
-            // a phone, where it used to cost nothing until pressed. A press flips either default
-            // the other way now, and what the reader chose is remembered per trade rather than per
-            // width, so folding the phone does not silently reopen or close it. Held on
-            // `PageState` rather than a bare `remember`, because a bare one does not survive a
-            // fold: `EgxAnalyzerApp` disposes the compact shell's whole subtree and composes the
-            // rail shell from nothing (or back), which on the Fold 7 is the ordinary way the phone
-            // is used.
-            var chartOverrides by appState.pages.expandedPositionCharts
-            val chartExpanded = chartOverrides[position.id] ?: wide
-            val chevronRotation by animateFloatAsState(if (chartExpanded) 180f else 0f, label = "chartChevron")
-            Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                // A fixed two lines for the name, so a company whose name wraps does not make its
-                // card taller than the one beside it. Clickable on a running trade - anywhere
-                // outside the ticker row's own press, which still opens the stock sheet - to slide
-                // the chart open or shut beneath it, on any width; a settled trade has no chart to
-                // open, so the header stays inert.
-                Row(
-                    Modifier
-                        .heightIn(min = PositionHeaderHeight)
-                        .clickable(
-                            enabled = view.open,
-                            onClickLabel = if (chartExpanded) "Hide price chart" else "Show price chart",
-                        ) {
-                            chartOverrides = chartOverrides + (position.id to !chartExpanded)
-                        },
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                        // One target for the logo and the ticker, as on the call card. The card
-                        // itself carries no press, so this takes none away. See LocalOpenStock.
-                        //
-                        // The logo sits beside the ticker-and-name pair rather than the ticker
-                        // alone, and CenterVertically is what centers it against both lines rather
-                        // than just the first - which is also what puts the name flush under the
-                        // ticker with no padding hack: it is simply the next line in the same column.
-                        val openStock = LocalOpenStock.current
-                        var filteringTicker by remember(position.ticker) { mutableStateOf(false) }
-                        Row(
-                            Modifier.combinedClickable(
-                                onClick = { openStock(position.ticker) },
-                                onLongClick = { filteringTicker = true },
-                            ),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            StockLogo(position.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(position.ticker, style = MaterialTheme.typography.headlineSmall)
-                                    Egx33Badge(position.ticker, Modifier.padding(start = Space.s))
-                                }
-                                // Arabic only - the English name read as a second, redundant label
-                                // beside a ticker that already says the stock in Latin letters.
-                                position.companyArabic?.takeIf(String::isNotBlank)?.let {
-                                    Text(
-                                        it,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        }
-                        if (filteringTicker) {
-                            HoldPrompt(
-                                title = position.ticker,
-                                actions = listOf(
-                                    HoldAction("Filter this page to ${position.ticker}", primary = true) {
-                                        filteringTicker = false
-                                        appState.pages.portfolioStock.value = position.ticker
-                                    },
-                                ),
-                                onDismiss = { filteringTicker = false },
-                            )
-                        }
-                        // Every pill on this card, still in the one row the card says them all in -
-                        // moved up into the header itself, so identity and status read as one block
-                        // above the rule that now separates them from the trade's own facts below it.
-                        // Scrolls sideways rather than wrapping to a second line when it does not fit -
-                        // the same `scrollableRow` a chip row already uses in the stock sheet's own
-                        // chart controls, and for the same reason: a card carrying five chips at once
-                        // (status, T+1, overdue, kept open, price scale) next to a ticker and a badge
-                        // has nowhere to wrap to without pushing the company name down.
-                        //
-                        // Every chip inside is named in the condition. Price scale was not, and a split
-                        // under a trade that was neither overdue nor kept open had its chip written and
-                        // never drawn.
-                        Row(
-                            Modifier.padding(top = Space.xs).scrollableRow(),
-                            horizontalArrangement = Arrangement.spacedBy(Space.s),
-                        ) {
-                            // Where the trade stands leads, because it is the one fact here that is
-                            // true of every trade and the one the rest of the row qualifies.
-                            PositionStatusChip(view)
-                            // Then the fact that was true the day the trade was taken, which is what
-                            // the deadline further down the card is measured by.
-                            if (position.isTPlusOne) TPlusOneChip(position)
-                            if (view.overdue) OverdueChip(view.overdueDays)
-                            // One chip, not two saying the same thing: a trade can only be overdue by
-                            // being kept open now, so Overdue already carries the state and adds how
-                            // late it is. The instruction the chip also held is not lost - the Sell
-                            // button below is on the card for as long as no sale has been recorded.
-                            if (view.keptOpen && !view.overdue) KeptOpenChip()
-                            if (view.priceScaleChanged) PriceScaleChip()
-                        }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Points at what the header's own press does, and flips with it - the same
-                        // "arrow that flips with the section" a `DisclosureButton` draws, borrowed here
-                        // because the trigger is the header itself rather than a button of its own.
-                        if (view.open) {
-                            Icon(
-                                Icons.Outlined.ExpandMore,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier
-                                    .padding(end = Space.xs)
-                                    .size(IconSize.Inline)
-                                    .rotate(chevronRotation),
-                            )
-                        }
-                        Box {
-                            KitIconButton(Icons.Outlined.MoreVert, label = "Trade options", onClick = { menuOpen = true }, filled = true, size = 40.dp)
-                            // The same four entries the card has always offered, in the kit's ink
-                            // menu. Edit on a sold trade corrects the sale rather than the entry,
-                            // since a sold trade has no entry or window left to change; Follow the
-                            // deadline again undoes Keep open; Reopen undoes a mistaken Sold for as
-                            // long as the sale stands; Remove is the one red entry, and the status
-                            // line offers Undo after it.
-                            KitMenu(
-                                expanded = menuOpen,
-                                onDismiss = { menuOpen = false },
-                                items = listOfNotNull(
-                                    MenuItem("Edit trade") { if (view.realized) editingSale = true else editing = true },
-                                    if (view.keptOpen) MenuItem("Follow the deadline again") { onKeepOpen(false, null) } else null,
-                                    if (view.realized) MenuItem("Reopen trade") { onReopen() } else null,
-                                    MenuItem("Remove", danger = true) { leaving = true },
-                                ),
-                            )
-                        }
-                    }
-                }
-
-                // Separates identity and status, read together above it, from the trade's own facts
-                // below - the same rule the two figure groups further down are already ruled apart by.
-                com.ikverse.egxanalyzer.ui.kit.KitRule(color = palette.line)
-
-                // The neutral tile "Your trade" is tinted with, wrapped around whichever of the
-                // ladder or the chart is showing: neither is a verdict the app is drawing
-                // attention to, unlike "Where it stands"' own indigo wash.
-                val panel: @Composable (@Composable () -> Unit) -> Unit = { content ->
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .tradePanel(),
-                    ) {
-                        content()
-                    }
-                }
-                // The ladder, named once so both the wide fallback below and the narrow gate
-                // further down can draw it without stating the same six lines twice.
-                val ladder: @Composable () -> Unit = {
-                    panel {
-                        PriceLadder(
-                            stopLoss = position.stopLoss,
-                            // One price, not a band. The trade opened where it opened, and the
-                            // drawing keeps a zero-width band visible rather than losing the mark;
-                            // the levels either side of it are still the call's, which is what
-                            // makes the picture worth reading at all.
-                            entryLow = position.entryPrice,
-                            entryHigh = position.entryPrice,
-                            target1 = position.target1,
-                            target2 = position.target2,
-                            // The arrow is where this trade stands: today's close while it runs,
-                            // and where it ended once it has. Nothing is plotted across a change
-                            // of scale - the levels are quoted in the old money and the price in
-                            // the new, so the arrow would point at a place on the axis that does
-                            // not exist.
-                            reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
-                        )
-                    }
-                }
-                // Slides open under the header on a running trade - see the header's own
-                // `clickable`, togglable and defaulted the same way on any width now. A settled
-                // trade never gets one: `chartExpanded` can only be true on a trade that was open
-                // when it was pressed, and `view.open` is checked again here rather than trusted,
-                // since a trade can settle while its card is expanded.
-                if (view.open) {
-                    AnimatedVisibility(
-                        visible = chartExpanded,
-                        enter = ExpandIn,
-                        exit = CollapseOut,
-                    ) {
-                        // Fetched only once this content is actually composing, so a card left
-                        // collapsed never pays for the query - and whether to fall back to the
-                        // ladder is a decision made before there is a line to draw either way, on
-                        // any width now: showing a chart with too little history to plot said less
-                        // than the ladder already does for free.
-                        val history = rememberPriceHistory(appState, position.ticker)
-                        if (history.count { it.close != null } > 1) {
-                            // The panel's own tint, not the card's - see the same note on
-                            // Insights' CallChartSection for why.
-                            panel {
-                                PositionChartSection(
-                                    position,
-                                    MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    history,
-                                )
-                            }
-                        } else {
-                            ladder()
-                        }
-                    }
-                }
-
-                // The line that names the call, which is exactly what a press on this card opens. The
-                // date is the app's own short form rather than the raw ISO one this line used to
-                // print: the tiles on the Overdue card above already date a trade "14 Aug", and this
-                // was the only card in the app where two dates disagreed about how to look.
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // Three pieces rather than one joined string, so the middot between them can carry
-                    // real dp padding - Space.s each side - instead of riding on a couple of characters
-                    // of the string's own spacing.
-                    Row(
-                        // fill = false so the arrow sits against the end of the line rather than out at
-                        // the card's edge, where it would read as unrelated to it.
-                        modifier = Modifier.weight(1f, fill = false),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        position.channel?.takeIf(String::isNotBlank)?.let { channel ->
-                            Text(
-                                channel,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                "·",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = Space.s),
-                            )
-                        }
+    val edge = view.status.tone()
+    AnimatedVisibility(visible = !leaving, exit = CollapseOut) {
+        HoldMenu(items = items, modifier = modifier.fillMaxWidth(), onTap = onOpen) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(Kit.TileShape)
+                    .background(palette.card)
+                    .then(if (border != null) Modifier.border(border, Kit.TileShape) else Modifier)
+                    // The trade's status as a coloured edge down its left side - the one edge a
+                    // card keeps, because it means something.
+                    .drawBehind { drawRect(edge, size = Size(StatusEdge.toPx(), size.height)) }
+                    .padding(Space.m),
+                verticalArrangement = Arrangement.spacedBy(Space.s),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StockLogo(position.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+                    Text(position.ticker, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            "called ${shortDate(position.recommendationDate)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            formatPercent(view.returnPct),
+                            style = MaterialTheme.typography.titleLarge.copy(fontFamily = TabularFigures),
+                            color = PriceRole.forReturn(view.returnPct),
                         )
-                    }
-                    // The one hint that the card leads somewhere: a whole card being pressable is
-                    // invisible otherwise.
-                    if (onOpenCall != null) {
-                        Icon(
-                            Icons.AutoMirrored.Outlined.ArrowForward,
-                            // The press is described where it is declared; a reader announcing the
-                            // glyph as well would say it twice.
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(IconSize.Inline),
-                        )
+                        if (view.open) Text("so far", style = MaterialTheme.typography.labelSmall, color = palette.muted)
                     }
                 }
-
-                position.keepOpenNote?.takeIf(String::isNotBlank)?.let { why ->
-                    Text(
-                        why,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
-                // Hidden while the chart is open: the chart already draws these same levels
-                // against the close, so the two would only ever say the same thing twice, one
-                // above the other. Returns the moment the chart above is collapsed, in the space
-                // it just gave up - on any width now.
-                if (!chartExpanded) {
-                    ladder()
-                }
-
-                // Two panels rather than two loose groups: a neutral tile for what the trade was, the
-                // page's own indigo wash for where it stands now - the same split and the same two
-                // tokens (`surfaceContainerHighest` / `pageAccent.soft`) the call card in Insights
-                // draws, with headings in Portfolio's own hue rather than Insights' rose. Taken as
-                // `Modifier ->` lambdas so the wide branch below can hand them to `AdaptivePanes`
-                // instead of drawing each in a fixed place.
-                val yourTradePanel: @Composable (Modifier) -> Unit = { panelModifier ->
-                    Box(
-                        panelModifier
-                            .tradePanel(),
-                    ) {
-                        FigureGroup(
-                            "Your trade",
-                            listOfNotNull(
-                                {
-                                    Figure(
-                                        "Entry",
-                                        formatPrice(position.entryPrice),
-                                        Modifier.weight(1f),
-                                        tone = PriceRole.entry,
-                                        // The one date that says how long the trade has actually been
-                                        // held. The session this card sits under is titled by the
-                                        // call's date, and on a trade bought late the two are not the
-                                        // same day.
-                                        caption = "bought ${shortDate(position.entryDate)}",
-                                    )
-                                },
-                                // A price on its own says nothing across stocks: 7.95 is a wide stop on
-                                // one share and a tight one on another, and the distance is the half
-                                // that compares. Measured from what was paid, so it is the room this
-                                // trade actually has left.
-                                {
-                                    Figure(
-                                        "Stop loss",
-                                        formatPrice(position.stopLoss),
-                                        Modifier.weight(1f),
-                                        tone = PriceRole.stop,
-                                        caption = view.fromEntry(position.stopLoss).distance(),
-                                    )
-                                },
-                                {
-                                    Figure(
-                                        "Target 1",
-                                        formatPrice(position.target1),
-                                        Modifier.weight(1f),
-                                        tone = PriceRole.target,
-                                        caption = view.fromEntry(position.target1).distance(),
-                                    )
-                                },
-                                {
-                                    Figure(
-                                        "Target 2",
-                                        formatPrice(position.target2),
-                                        Modifier.weight(1f),
-                                        tone = PriceRole.target,
-                                        caption = view.fromEntry(position.target2).distance(),
-                                    )
-                                },
-                                // What the four figures above come to, as a figure of its own rather
-                                // than text in the heading - worked out from the price actually paid,
-                                // which is what makes it a different figure from the one Insights
-                                // prints for the same call: buying above the band buys a worse trade
-                                // out of the same advice. The market's own blue, the same reason
-                                // Insights' own risk:reward figure wears it.
-                                view.riskReward?.let { ratio ->
-                                    {
-                                        Figure(
-                                            "Risk : reward", ratio.asRatio(), Modifier.weight(1f),
-                                            tone = PriceRole.market,
-                                        )
-                                    }
-                                },
-                            ),
-                            
-                        )
-                    }
-                }
-                val whereItStandsPanel: @Composable (Modifier) -> Unit = { panelModifier ->
-                    Box(
-                        panelModifier
-                            .tradePanel(),
-                    ) {
-                        FigureGroup(
-                            "Where it stands",
-                            listOf(
-                                {
-                                    Figure(
-                                        if (view.realized) "Return" else "Return so far",
-                                        formatPercent(view.returnPct),
-                                        Modifier.weight(1f),
-                                        tone = PriceRole.forReturn(view.returnPct),
-                                    )
-                                },
-                                {
-                                    Figure(
-                                        // "Last close" rather than "Market". The daily feed settles
-                                        // once a day and can be several sessions behind on a phone
-                                        // that has not refreshed; undated, the figure claimed to be
-                                        // today's, which is the one thing it is not.
-                                        "Last close",
-                                        formatPrice(view.currentPrice),
-                                        Modifier.weight(1f),
-                                        tone = PriceRole.market,
-                                        // Through the card's own short date rather than the shared
-                                        // `on` slot, so every date on this card follows one rule: the
-                                        // year comes back for a session in another one, and stays
-                                        // away for all the rest.
-                                        caption = view.currentPriceOn?.let(::shortDate),
-                                    )
-                                },
-                                // How far the trade actually got, which this card could not say at
-                                // all. The scorer has always worked both out across the held sessions
-                                // and they were thrown away, so a trade that ran up 7% and gave it
-                                // all back read exactly like one that never moved.
-                                {
-                                    Figure(
-                                        "Peak since entry",
-                                        formatPrice(view.peakSinceEntry),
-                                        Modifier.weight(1f),
-                                        tone = PriceRole.market,
-                                        caption = view.extremeCaption(view.peakSinceEntry, view.peakOn),
-                                    )
-                                },
-                                {
-                                    Figure(
-                                        "Trough since entry",
-                                        formatPrice(view.troughSinceEntry),
-                                        Modifier.weight(1f),
-                                        tone = PriceRole.market,
-                                        caption = view.extremeCaption(view.troughSinceEntry, view.troughOn),
-                                    )
-                                },
-                                {
-                                    Figure(
-                                        "Deadline",
-                                        view.deadline(),
-                                        Modifier.weight(1f),
-                                        tone = PriceRole.muted,
-                                        // Sessions held, not sessions elapsed: the deadline counts
-                                        // from the call and this counts from the entry, and on a
-                                        // trade bought late the two are answering different questions
-                                        // about one window.
-                                        caption = "${view.sessionsHeld} ${view.sessionsHeld.sessionWord()} held",
-                                        // Prose rather than a price. "3 of 10 left" in monospaced
-                                        // digits sets it apart from the figures beside it for no
-                                        // reason.
-                                        valueStyle = MaterialTheme.typography.bodyMedium,
-                                    )
-                                },
-                            ),
-                            
-                        )
-                    }
-                }
-                // A pair of equals - AdaptivePanes with mainWeight 1f - rather than the plain divider
-                // the two groups used to be ruled apart by: two panels of equal standing ending at two
-                // different heights reads as one of them having failed to load, exactly the reasoning
-                // Insights' own pair follows. `minWidth` matches `wide`, so this card never disagrees
-                // with itself about when there is room to stand the panels side by side.
-                AdaptivePanes(
-                    minWidth = WideCardMinWidth,
-                    mainWeight = 1f,
-                    alignHeights = true,
-                    // fillMaxHeight, because alignHeights stretches the two *columns* and the
-                    // tinted Box inside each panel keeps its own height regardless - so the
-                    // shorter panel's stretch was invisible empty space under it, which is the
-                    // exact mismatch alignHeights exists to remove. See AnalyzeScreen's own pair
-                    // for the same fix, hit first.
-                    main = { yourTradePanel(Modifier.fillMaxWidth().fillMaxHeight()) },
-                    side = { whereItStandsPanel(Modifier.fillMaxWidth().fillMaxHeight()) },
-                )
-
-                // The window as steps, under the figures, while the trade still runs against it.
-                if (view.open) DeadlineSteps(view)
                 Text(
-                    view.profitLine(),
-                    style = MaterialTheme.typography.bodySmall,
-                    // The figure this line used to carry is a figure above it now, and the colour went
-                    // with it. What is left says whether the return is a fact or an estimate and where
-                    // it was struck, and that is not in itself good news or bad.
+                    "You paid ${formatPrice(position.entryPrice)} · now ${formatPrice(view.currentPrice)}",
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = TabularFigures),
                     color = palette.muted,
                 )
-                // Selling early is the point of the button, so it stays available for as long as no
-                // sale has been recorded - including on a trade that reached target 2, where recording
-                // what the user actually got out at turns an estimate into a fact, and on one the
-                // deadline closed while they were still holding it.
-                if (view.awaitingSale) {
-                    // The rule a call card ends with, in the one place it means the same thing: what is
-                    // above it is the trade as it stands, and what is below it is what can be done about
-                    // it. It used to sit a line higher, above the estimate - which reads as a figure and
-                    // belongs with the figures it qualifies - and that left the pills ending the card
-                    // with nothing between them and the record. Inside the `if`, so a settled trade with
-                    // nothing to press does not finish on a rule under no buttons.
-                    com.ikverse.egxanalyzer.ui.kit.KitRule(color = palette.line)
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(Space.s),
-                        verticalArrangement = Arrangement.spacedBy(Space.xs),
-                    ) {
-                        // The estimate rather than today's close. While the trade is open the two are
-                        // the same thing; once the deadline has closed it, today's price is the least
-                        // likely figure the user sold at, and the estimate is already marked at the
-                        // stop, the target, or the last close of the window.
-                        SellButton(
-                            held = view,
-                            suggestedExit = view.exitPrice ?: view.currentPrice,
-                            onSell = onSell,
-                            openNow = startSelling,
-                            onOpened = onSellingShown,
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                    verticalArrangement = Arrangement.spacedBy(Space.xs),
+                ) {
+                    PositionStatusChip(view)
+                    if (view.open) {
+                        KitTag(
+                            "${view.sessionsRemaining} trading ${if (view.sessionsRemaining == 1) "day" else "days"} left",
+                            tone = palette.muted,
                         )
-                        // Not on a trade already being kept open - the pill says that, and the menu
-                        // undoes it - and not on one that reached target 2, which is the single ending
-                        // Keep Open cannot argue with.
-                        if (!view.keptOpen && !view.finished) KeepOpenButton(onKeepOpen = onKeepOpen)
                     }
+                    when (near) {
+                        NeedReason.NEAR_STOP -> KitTag("Close to its stop", tone = palette.loss)
+                        NeedReason.NEAR_TARGET2 -> KitTag("Close to target 2", tone = palette.gain)
+                        else -> Unit
+                    }
+                    if (view.overdue) OverdueChip(view.overdueDays)
+                    // A trade can only be overdue by being kept open, so Overdue already says it.
+                    if (view.keptOpen && !view.overdue) KitTag("Kept open", tone = palette.muted)
+                    if (position.isTPlusOne) TPlusOneChip(position)
+                    if (view.priceScaleChanged) PriceScaleChip()
                 }
+                TradeLadder(view)
             }
         }
     }
+}
 
-    // Two overloads over one body rather than a clickable wrapped round the card: Material's own
-    // pressable card is what keeps the ripple inside the corners, and a trade whose call is gone
-    // must not answer a press at all. The menu, Sold and Keep Open take their own taps as before.
-    // **A white card tile since 5.0**, with the trade's status as a coloured edge down its left side
-    // - the one edge a card keeps, because it means something. The arrival flash takes the outline
-    // while it runs. Pressable through to the call when the call still exists; a trade whose analysis
-    // is gone answers no press at all.
-    val edge = view.status.tone()
-    AnimatedVisibility(visible = !leaving, exit = CollapseOut) {
-        Column(
-            modifier
+/**
+ * The trade's ladder: the price paid as the entry, marked "You paid", and the arrow where it stands -
+ * today's close while it runs, where it ended once it has. Nothing is plotted across a change of
+ * scale: the levels are in the old money and the price in the new.
+ */
+@Composable
+private fun TradeLadder(view: PositionView, modifier: Modifier = Modifier, compact: Boolean = false) {
+    val position = view.position
+    PriceLadder(
+        stopLoss = position.stopLoss,
+        entryLow = position.entryPrice,
+        entryHigh = position.entryPrice,
+        target1 = position.target1,
+        target2 = position.target2,
+        modifier = modifier,
+        reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
+        compact = compact,
+        entryLabel = if (compact) null else "You paid",
+    )
+}
+
+/** A finished trade as one row: the stock, how it ended, and what it made. */
+@Composable
+internal fun FinishedRow(view: PositionView, onOpen: () -> Unit, actions: List<MenuItem>, modifier: Modifier = Modifier) {
+    HoldMenu(items = actions, modifier = modifier.fillMaxWidth(), onTap = onOpen) {
+        Row(
+            Modifier
                 .fillMaxWidth()
-                .clip(Kit.TileShape)
+                .clip(Kit.PanelShape)
                 .background(palette.card)
-                .then(if (border != null) Modifier.border(border, Kit.TileShape) else Modifier)
-                .drawBehind { drawRect(edge, size = Size(StatusEdge.toPx(), size.height)) }
-                .then(
-                    if (onOpenCall != null) {
-                        Modifier.clickable(onClickLabel = "Open this call in Insights", role = Role.Button, onClick = onOpenCall)
-                    } else {
-                        Modifier
-                    },
-                ),
-            content = body,
-        )
+                .padding(horizontal = Space.m, vertical = Space.s),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            StockLogo(view.ticker, LogoSize.Row)
+            Text(view.ticker, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            KitTag(view.status.plainWord(), tone = view.status.tone(), filled = true, ink = palette.ink)
+            Text(
+                formatPercent(view.returnPct),
+                style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures),
+                color = PriceRole.forReturn(view.returnPct),
+            )
+        }
     }
+}
 
-    if (editing) {
-        TradeDialog(
-            title = "Edit the trade",
-            explanation = "Corrects what this trade was recorded at, and how long it runs. " +
-                "Everything the position reports is measured from the entry; changing the window " +
-                "moves the deadline, so it can close a running trade or reopen a finished one.",
-            priceLabel = "Entry price",
-            dateLabel = "Entry date",
-            confirmLabel = "Save",
-            initialPrice = position.entryPrice,
-            initialDate = position.entryDate,
-            initialWindow = position.windowSessions,
-            windowHelp = "Trading sessions from ${position.recommendationDate}, the session this " +
-                "call was made for.",
-            onDismiss = { editing = false },
-            onConfirm = { price, date, window ->
-                editing = false
-                onEditTrade(price, date, window)
-            },
+/**
+ * One trade in full: what it is, its chart, the time left, what happened, three figures, the line
+ * that says how much of the return is a fact, More numbers, and every action. The sheet, the book
+ * pane and tabletop's upper half all draw this; [brief] cuts it to the header, ladder and time
+ * left, and [showButtons] leaves the actions to the caller.
+ */
+@Composable
+internal fun ColumnScope.TradeDetail(
+    view: PositionView,
+    appState: AppState,
+    actions: TradeActions,
+    showButtons: Boolean = true,
+    brief: Boolean = false,
+) {
+    val position = view.position
+    Row(verticalAlignment = Alignment.Top) {
+        Column(Modifier.weight(1f)) {
+            Text(position.ticker, style = MaterialTheme.typography.headlineSmall)
+            position.companyArabic?.takeIf(String::isNotBlank)?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                formatPercent(view.returnPct),
+                style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
+                color = PriceRole.forReturn(view.returnPct),
+            )
+            Text(if (view.realized) "you made" else "since you bought", style = MaterialTheme.typography.labelSmall, color = palette.muted)
+        }
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        PositionStatusChip(view)
+        position.channel?.takeIf(String::isNotBlank)?.let { KitTag(it, tone = palette.muted) }
+    }
+    // The full chart where a running trade has more than one close to draw; the ladder otherwise.
+    val history = if (view.open && !brief) rememberPriceHistory(appState, position.ticker) else emptyList()
+    Box(Modifier.fillMaxWidth().tradePanel()) {
+        if (history.count { it.close != null } > 1) {
+            PositionChartSection(position, MaterialTheme.colorScheme.surfaceContainerHighest, history)
+        } else {
+            TradeLadder(view)
+        }
+    }
+    if (view.open) {
+        Text(
+            "Time left · ${view.sessionsRemaining} of ${position.windowSessions} trading days",
+            style = MaterialTheme.typography.titleSmall,
+        )
+        DeadlineSteps(view)
+    }
+    if (brief) {
+        if (showButtons) TradeButtons(view, actions)
+        return
+    }
+    Timeline(view.timeline())
+    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+        FigureCell(formatPercent(view.fromEntry(view.peakSinceEntry)), "Best so far", Modifier.weight(1f), PriceRole.target)
+        FigureCell(formatPercent(view.fromEntry(view.troughSinceEntry)), "Worst dip", Modifier.weight(1f), PriceRole.stop)
+        FigureCell(view.riskReward?.let { "${"%.1f".format(it)}×" } ?: Dash, "Gain vs risk", Modifier.weight(1f))
+    }
+    Text(view.profitLine(), style = MaterialTheme.typography.bodySmall, color = palette.muted)
+    position.keepOpenNote?.takeIf(String::isNotBlank)?.let { why ->
+        Text(why, style = MaterialTheme.typography.bodySmall, color = palette.muted)
+    }
+    MoreRow("More numbers", appState.pages.portfolioMoreNumbers) {
+        FigureGroup(
+            "The numbers",
+            listOf(
+                {
+                    Figure(
+                        "Entry", formatPrice(position.entryPrice), Modifier.weight(1f), tone = PriceRole.entry,
+                        caption = "bought ${shortDate(position.entryDate)}",
+                    )
+                },
+                {
+                    Figure(
+                        "Stop loss", formatPrice(position.stopLoss), Modifier.weight(1f), tone = PriceRole.stop,
+                        caption = view.fromEntry(position.stopLoss).distance(),
+                    )
+                },
+                {
+                    Figure(
+                        "Target 1", formatPrice(position.target1), Modifier.weight(1f), tone = PriceRole.target,
+                        caption = view.fromEntry(position.target1).distance(),
+                    )
+                },
+                {
+                    Figure(
+                        "Target 2", formatPrice(position.target2), Modifier.weight(1f), tone = PriceRole.target,
+                        caption = view.fromEntry(position.target2).distance(),
+                    )
+                },
+                {
+                    Figure(
+                        "Last close", formatPrice(view.currentPrice), Modifier.weight(1f), tone = PriceRole.market,
+                        caption = view.currentPriceOn?.let(::shortDate),
+                    )
+                },
+                {
+                    Figure(
+                        "Peak", formatPrice(view.peakSinceEntry), Modifier.weight(1f), tone = PriceRole.market,
+                        caption = view.extremeCaption(view.peakSinceEntry, view.peakOn),
+                    )
+                },
+                {
+                    Figure(
+                        "Trough", formatPrice(view.troughSinceEntry), Modifier.weight(1f), tone = PriceRole.market,
+                        caption = view.extremeCaption(view.troughSinceEntry, view.troughOn),
+                    )
+                },
+                {
+                    Figure(
+                        "Deadline", view.deadline(), Modifier.weight(1f), tone = PriceRole.muted,
+                        // Sessions held, not elapsed: the deadline counts from the call and this
+                        // from the entry, and on a trade bought late they differ.
+                        caption = "${view.sessionsHeld} ${view.sessionsHeld.sessionWord()} held",
+                        valueStyle = MaterialTheme.typography.bodyMedium,
+                    )
+                },
+            ),
         )
     }
-    if (editingSale) {
-        SellDialog(
-            held = view,
-            suggestedExit = view.exitPrice,
-            existing = position.recordedSale(),
-            onDismiss = { editingSale = false },
-            onConfirm = { sale ->
-                editingSale = false
-                onSell(sale)
-            },
-        )
+    if (showButtons) TradeButtons(view, actions)
+}
+
+/** The trade's actions as buttons, in the order the hold menu lists them. */
+@Composable
+internal fun TradeButtons(view: PositionView, actions: TradeActions) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        if (view.awaitingSale) KitButton("I sold it", onClick = actions.sell, size = ButtonSize.SMALL)
+        KitButton("Fix the trade", onClick = actions.edit, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
+        actions.openCall?.let { KitButton("See the call", onClick = it, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL) }
+        KitButton("Chart", onClick = actions.chart, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
+        if (view.keptOpen) {
+            KitButton("Stop keeping it open", onClick = actions.stopKeepingOpen, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
+        } else if (!view.finished && view.awaitingSale) {
+            KitButton("Keep it open", onClick = actions.keepOpen, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
+        }
+        if (view.realized) KitButton("Undo the sale", onClick = actions.undoSale, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
+        KitButton("Remove", onClick = actions.remove, kind = ButtonKind.DANGER, size = ButtonSize.SMALL)
     }
+}
+
+/** [TradeDetail] in the kit's sheet, titled with the ticker: a side panel unfolded. */
+@Composable
+internal fun TradeSheet(view: PositionView, appState: AppState, actions: TradeActions, onDismiss: () -> Unit) {
+    KitSheet(onDismiss = onDismiss, posture = LocalFoldPosture.current, title = view.ticker) {
+        TradeDetail(view, appState, actions)
+        SheetFooterSpacer()
+    }
+}
+
+/**
+ * What happened to the trade, from dated facts only: the purchase, each leg of a sale, the stop,
+ * target 2, the deadline, and where it is now. The day target 1 was reached is not kept on a trade,
+ * so it has no step; the status tag says it.
+ */
+private fun PositionView.timeline(): List<TimelineStep> {
+    val p = position
+    val dated = buildList {
+        val band = if (p.entryLow != null && p.entryHigh != null) {
+            " · the call said ${formatPrice(p.entryLow)}–${formatPrice(p.entryHigh)}"
+        } else {
+            ""
+        }
+        add(p.entryDate to TimelineStep("You bought at ${formatPrice(p.entryPrice)}$band", date = shortDate(p.entryDate)))
+        if (soldInParts) {
+            p.exitDate1?.let { add(it to TimelineStep("Sold ${formatPrice(p.exitSplitPct)}% at ${formatPrice(p.exitPrice1)}", date = shortDate(it))) }
+            p.exitDate?.let { add(it to TimelineStep("Sold the rest at ${formatPrice(p.exitPrice2)}", date = shortDate(it))) }
+        } else if (realized) {
+            p.exitDate?.let { add(it to TimelineStep("You sold at ${formatPrice(exitPrice)}", date = shortDate(it))) }
+        }
+        when (marketStatus) {
+            PositionStatus.STOPPED_OUT -> (stoppedOn ?: settledOn)?.let {
+                add(it to TimelineStep("Hit the stop", date = shortDate(it), tone = StepTone.BAD))
+            }
+            PositionStatus.FULL_TARGET_HIT -> settledOn?.let {
+                add(it to TimelineStep("Reached target 2", date = shortDate(it), tone = StepTone.GOOD))
+            }
+            else -> if (stoppedAfterPartial) {
+                stoppedOn?.let { add(it to TimelineStep("Fell back to the stop", date = shortDate(it), tone = StepTone.BAD)) }
+            }
+        }
+        deadlineDate?.let { add(it to TimelineStep("The deadline passed", date = shortDate(it))) }
+    }.sortedBy { it.first }.map { it.second }
+    val now = if (open) {
+        val price = currentPrice
+        val t1 = p.target1
+        val where = if (price != null && t1 != null && price > 0) {
+            val gap = (t1 - price) / price * 100
+            if (gap > 0) " · ${"%.1f".format(gap)}% below target 1" else " · above target 1"
+        } else {
+            ""
+        }
+        listOf(TimelineStep("Now ${formatPrice(price)}$where", date = currentPriceOn?.let(::shortDate), tone = StepTone.ACTIVE))
+    } else {
+        emptyList()
+    }
+    return dated + now
 }
 
 /**

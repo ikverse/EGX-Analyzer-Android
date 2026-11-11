@@ -172,7 +172,7 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   replayed. See below.
 - `ui/ChannelScoreSheet.kt` — how a source is scored, opened by pressing its card in the ranking.
 - `data/PriceHealth.kt` — which stocks the feed has gone quiet about and what it costs. The Settings
-  card that explained it in words was removed on 2026-09-03; one line in `Data and backup → Prices`
+  card that explained it in words was removed on 2026-09-03; one line in `Prices and trades → Prices`
   is what is left on screen, and `feed_checks` / `feed_faults` in `LocalDataStore` are the log that replaced
   the rest of it, for a diagnostics copy read off a device. See below.
 - `data/PortfolioCalculator.kt` + `model/Position.kt` — the trades the user actually took. See below.
@@ -351,6 +351,13 @@ floating bar, this section is what is true now.
   side panel unfolded or in book posture), `KitDialog`, `KitMenu`, `KitCalendarSheet`,
   `KitExpandable`, `KitTag`, `KitProgress`, `KitSplitBar`, `KitSpinner`, `KitRule`, and the market
   pieces — `TickerTape`, `OutcomeStrip`, `TargetProgress`, `BreadthBar`, `LiveDot`.
+- **5.1 made it plainer, not different.** Statuses are plain words (`model/StatusWords.kt`: "Target
+  1 reached", "Ran out of time"), a call or trade's levels are a compact `PriceLadder` with loss, near and
+  far zones, a long press opens a card's menu (`HoldMenu`), a call's life is a `Timeline`, what few
+  readers need sits behind a closed `MoreRow`, and a figure drawn on a coloured tile takes that
+  tile's own gain and loss (`tileSignals`), because the plain ones fail on lime and on the light ink
+  tile of dark mode. `PaletteContrastTest` measures every such pair. Plan and stages are in
+  `docs/redesign-5.1-plan.md` and `docs/redesign-5.1/`.
 - **`NoOldElementsTest` holds the rule.** It reads every file in `ui/` and `ui/theme/` and fails on
   any call to a Material component or a pre-5.0 control, by name. A new file is held to it the day
   it is added. Material's colour names (`onSurfaceVariant` and the like) still appear in places and
@@ -607,15 +614,11 @@ floating bar, this section is what is true now.
   warning and so may take the app's own voice. True, and not a reason to be the one differently
   coloured ring in a row of them; the wording already says the call named its own deadline. Asked
   for on 2026-09-11. It is still tappable in the two places it explains itself.
-- **A report card toggles on a press, open or shut.** `Card(onClick = { onExpandedChange(!expanded) })`
-  in `SavedAnalysisCard`; release 3.8.4 dropped the earlier `enabled = !expanded`, so a press on the
-  card's own area closes an open report as well as opening a shut one. That means any region inside
-  an open report that answers no tap of its own closes it. **The wide-screen table is the case that
-  bit**: a stock block's heading (names, latest price, padding) and its column titles are plain
-  rows, so tapping them fell through and closed the report. `ResultDetail` now hands the table
-  `Modifier.pointerInput(Unit) { detectTapGestures { } }`, which swallows taps nothing in the table
-  answers; rows, the ticker, the toolbar and Hide take theirs first. The narrow layout's cards and
-  the source trace are not covered by that.
+- **An open report is a page of its own, and back closes it** (since 5.1). A report used to be a
+  card that unfolded in place on a press and folded on the next, which meant any part of an open
+  report that answered no tap of its own closed it - the wide table's headings were the case that
+  bit. `PageState.openReport(id)` opens one; back handling has an "open report" step in
+  `canGoBack`/`goBack`, mirrored in `FakeAppState`. The runs list is tiles, each pressed to open.
 - **A page's filters live in a sheet the header opens, not on a shelf on the page.** The page
   header's filter icon opens a `ModalBottomSheet` holding that page's filters; it replaced
   `FilterBar` on 2026-09-09, the day after the stock box left that shelf for the header.
@@ -638,8 +641,8 @@ floating bar, this section is what is true now.
   panel over a scrolling page would have to re-solve, in a second place, the pinning the shelf was
   written to solve. The width is the rest of it: the choices are **shown open**, as chips under a
   heading, where the shelf had room only for a chip that opened a menu. `MultiSelectSection` and
-  `SortSection` are that; the in-report toolbar uses `CheckedSetFilter` and `StockFilterField`, and
-  the menu-style `MultiSelectFilter`, `SingleSelectFilter`, `SortFilter` and `SingleSelectSection`
+  `SortSection` are that. A report's own calls are narrowed by chips above them since 5.1, and
+  `CheckedSetFilter`, `StockFilterField` and `FilterRow` went with the old toolbar; the menu-style `MultiSelectFilter`, `SingleSelectFilter`, `SortFilter` and `SingleSelectSection`
   were deleted on 2026-10-11 as unused.
 - **The `All` chip leads every section and is selected while nothing else is.** "Untouched means
   everything" is the rule the menus had to state in words; on a surface with room for it, it is just

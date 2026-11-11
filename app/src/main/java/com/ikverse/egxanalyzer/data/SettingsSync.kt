@@ -85,6 +85,7 @@ data class SettingsSnapshot(
             .put("approachThresholdPercent", preferences.approachThresholdPercent)
             .put("sessionDigestEnabled", preferences.sessionDigestEnabled)
             .put("feedAlertsEnabled", preferences.feedAlertsEnabled)
+            .put("reportReadyEnabled", preferences.reportReadyEnabled)
             .put("portfolioOrder", preferences.portfolioOrder.name)
             .put("callOrder", preferences.callOrder.name)
             .put("updateChecksEnabled", preferences.updateChecksEnabled)
@@ -174,6 +175,10 @@ data class SettingsSnapshot(
                         "feedAlertsEnabled",
                         defaults.feedAlertsEnabled,
                     ),
+                    reportReadyEnabled = json.optBoolean(
+                        "reportReadyEnabled",
+                        defaults.reportReadyEnabled,
+                    ),
                     portfolioOrder = json.enumOr("portfolioOrder", defaults.portfolioOrder),
                     callOrder = json.enumOr("callOrder", defaults.callOrder),
                     updateChecksEnabled = json.optBoolean(
@@ -239,7 +244,7 @@ data class SettingsSnapshot(
             "correctionRetries", "catalogEnrichmentEnabled", "scoringWindowSessions",
             "overdueRemindersEnabled", "tradeAlertsEnabled", "callAlertsEnabled",
             "approachAlertsEnabled", "approachThresholdPercent", "sessionDigestEnabled",
-            "feedAlertsEnabled",
+            "feedAlertsEnabled", "reportReadyEnabled",
             "portfolioOrder", "callOrder",
             "updateChecksEnabled",
             "useDefaultPromptOnly", "provider", "providers",

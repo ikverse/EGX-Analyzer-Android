@@ -60,6 +60,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.RecommendationDataPoint
+import com.ikverse.egxanalyzer.model.CallGroup
+import com.ikverse.egxanalyzer.model.LatestPrice
+import com.ikverse.egxanalyzer.ui.kit.HoldMenu
+import com.ikverse.egxanalyzer.ui.kit.KitTag
 
 /**
  * Every occurrence of one stock, one card each, swiped through sideways.
@@ -67,36 +71,36 @@ import com.ikverse.egxanalyzer.model.RecommendationDataPoint
  * A stock is often called twice in a report - by two channels, or once as a watch and once for a
  * named date - and those calls have different entries and different targets. Folding them into a
  * single card showed the first and silently dropped the rest, which is the one thing a table row
- * never did.
+ * never did. So two channels are still two cards here, each with its own channel tag, rather than
+ * one card wearing "2 channels".
+ *
+ * Since 5.1 a card answers the one question a page of them is scanned for - where does this call
+ * stand - and everything else is a press away: a tap opens the call in full, a hold opens what can
+ * be done about it ([holdItems]).
  */
 @Composable
 internal fun RecommendationCards(
     stock: ConsolidatedRecommendation,
     /** The channel behind an occurrence, looked up by the message the model cited. */
     channelFor: (String?) -> String?,
-    /** The stored photo behind an occurrence, looked up by the reference the model cited. */
-    imagePathFor: (Int?) -> String?,
     /** Records what the user did about a call. Absent, the cards are read-only. */
     trades: TradeBook? = null,
     /** Corrects what the model read off the card. Absent, the figures cannot be changed. */
     editor: CallEditor? = null,
-    /** Holding the ticker offers this; narrows the page to it. See [HoldPrompt]. */
-    onFilterToTicker: (String) -> Unit = {},
+    /** The status word on a call's tag, and the group that colours it. */
+    statusFor: (RecommendationDataPoint) -> Pair<String, CallGroup> = { "Running" to CallGroup.RUNNING },
+    /** Where the stock is now, for the price beside the name and the ladder's arrow. */
+    latest: LatestPrice? = null,
+    /** A tap: the call in full. */
+    onOpen: (RecommendationDataPoint) -> Unit = {},
+    /** A hold: what can be done about the call. */
+    holdItems: (RecommendationDataPoint) -> List<MenuItem> = { emptyList() },
     modifier: Modifier = Modifier,
 ) {
     val points = stock.dataPoints
     if (points.isEmpty()) {
         Box(modifier.fillMaxWidth().callBlock(null)) {
-            Column(Modifier.padding(Space.l)) {
-                StockHeader(
-                    stock,
-                    point = null,
-                    page = 0,
-                    pageCount = 0,
-                    editor = null,
-                    onFilterToTicker = onFilterToTicker,
-                )
-            }
+            Column(Modifier.padding(Space.l)) { StockHeader(stock, latest, point = null) }
         }
         return
     }
@@ -107,7 +111,7 @@ internal fun RecommendationCards(
             state = pager,
             // No peek, deliberately: insetting only the stocks with several occurrences made their
             // cards narrower than the rest, and a row of cards that do not match reads as a fault
-            // before it reads as a hint. The dots in the header carry the hint instead.
+            // before it reads as a hint. The dots under the card carry the hint instead.
             pageSpacing = Space.s,
             verticalAlignment = Alignment.Top,
         ) { page ->
@@ -116,306 +120,166 @@ internal fun RecommendationCards(
                 stock = stock,
                 point = point,
                 channel = channelFor(point.sourceMessageId),
-                imagePath = imagePathFor(point.sourceImageRef),
+                status = statusFor(point),
+                latest = latest,
                 trades = trades,
                 editor = editor,
                 page = page,
                 pageCount = points.size,
-                onFilterToTicker = onFilterToTicker,
+                onOpen = { onOpen(point) },
+                holdItems = holdItems(point),
             )
         }
     }
 }
 
 /**
- * One occurrence: what this source, on this date, actually said.
+ * One occurrence: the stock, where it is now, what the call is, and where it stands on its ladder.
  *
- * Collapsed it answers "what is the trade"; expanded it answers "where did this come from",
- * which matters because the app's whole claim is that every number is traceable to a source.
+ * The levels grid, risk to reward, the source and the trade controls all moved to the sheet a tap
+ * opens. The held ring stays, so a page of calls can still be read for what is held before any card
+ * is opened.
  */
 @Composable
 private fun RecommendationCard(
     stock: ConsolidatedRecommendation,
     point: RecommendationDataPoint,
     channel: String?,
-    imagePath: String?,
+    status: Pair<String, CallGroup>,
+    latest: LatestPrice?,
     trades: TradeBook?,
     editor: CallEditor?,
     page: Int,
     pageCount: Int,
-    onFilterToTicker: (String) -> Unit = {},
+    onOpen: () -> Unit,
+    holdItems: List<MenuItem>,
     modifier: Modifier = Modifier,
 ) {
-    var expanded by remember(point) { mutableStateOf(false) }
-    var viewingImage by remember(point) { mutableStateOf(false) }
     var editing by remember(point) { mutableStateOf(false) }
-    // Held on the card rather than reached through the menu: the owner's own habit is that Edit
-    // call is the item in CallMenu actually worth pressing and Copy call is not, so the one worth
-    // a shortcut gets one.
-    var quickEditOpen by remember(point) { mutableStateOf(false) }
     val held = trades?.heldFor(stock, point)
+    val close = latest?.session?.close
 
-    // A block of the page's own ground inside the report's white tile, rounded like every tile, and
-    // ringed in the colour of where it stands when the reader is in the stock - so a page of calls
-    // can be read for what is held before any card is opened.
-    Box(
-        modifier
-            .fillMaxWidth()
-            .callBlock(heldBorder(held))
-            .combinedClickable(
-                onClick = { expanded = !expanded },
-                // Absent rather than always-on where there is no editor to open: a read-only card
-                // holding on it would show a shortcut to a screen it cannot reach.
-                onLongClick = editor?.let { { quickEditOpen = true } },
-            ),
-    ) {
-        Column(Modifier.padding(Space.m)) {
-            StockHeader(
-                stock, point, page, pageCount, editor,
-                onEdit = { editing = true },
-                onFilterToTicker = onFilterToTicker,
-            )
-            Spacer(Modifier.height(Space.m))
-
-            // What the channel printed, set off from what it printed it about.
-            Hairline()
-            Spacer(Modifier.height(Space.m))
-
-            // Full width rather than sharing the header's own left column: it answers a
-            // different question from the identity block above it and reads cramped squeezed
-            // under the ticker's own width. Below the header's rule rather than above it, so
-            // it reads as an answer to what the header just named rather than a third line
-            // inside the header itself.
-            channel?.takeIf(String::isNotBlank)?.let {
-                SourceLine(it)
+    HoldMenu(items = holdItems, modifier = modifier.fillMaxWidth(), onTap = onOpen) {
+        Box(Modifier.fillMaxWidth().callBlock(heldBorder(held))) {
+            Column(Modifier.padding(Space.m)) {
+                StockHeader(stock, latest, point)
+                Spacer(Modifier.height(Space.s))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                    verticalArrangement = Arrangement.spacedBy(Space.xs),
+                ) {
+                    KitTag(status.first, tone = status.second.tone(), filled = true, ink = palette.ink)
+                    channel?.takeIf(String::isNotBlank)?.let { KitTag(it, tone = palette.muted) }
+                    if (point.isTPlusOne) KitTag("T+1", tone = palette.muted)
+                    if (editor?.editFor(stock, point) != null) EditedChip { editing = true }
+                }
                 Spacer(Modifier.height(Space.m))
-            }
-
-            // No ladder here, deliberately. This card is a row of the report that would not fit as
-            // a row: what it owes the reader is the call's figures, and a drawing of the same five
-            // numbers doubled the card's height to say what LevelGrid says underneath it. The
-            // occurrence sheet and the Portfolio card still draw it, where a single call is the
-            // whole subject rather than one of a dozen being scanned.
-            //
-            // Tinted, in the same recipe Insights' own call card tints "The call" and "The market"
-            // panels with (see SectionPanelShape in InsightsScreen.kt) - a card's six busiest
-            // figures earn the same grouping those panels give a call's figures there. Only at this
-            // call site: the occurrence sheet's copy of LevelGrid is a single call read in full and
-            // was not asked to change.
-            Panel(Modifier.fillMaxWidth(), color = palette.card) {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                    LevelGrid(point)
-                    // Inside the same panel as the six prices it is measured from, rather than a
-                    // line loose on the card below it - tinted the market's own blue, the same
-                    // treatment Insights gives risk : reward on its own call card.
-                    point.riskRewardRatio()?.let { ratio ->
-                        Level(
-                            "Risk / reward",
-                            "1 : ${"%.1f".format(ratio)}",
-                            PriceRole.market,
-                            Modifier.fillMaxWidth().height(IntrinsicSize.Min),
-                        )
+                if (point.isWatching) {
+                    Text(
+                        watchingSentence(point),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = palette.muted,
+                    )
+                } else {
+                    PriceLadder(point, reached = close)
+                }
+                if (pageCount > 1) {
+                    Spacer(Modifier.height(Space.s))
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        PageDots(page, pageCount)
                     }
                 }
             }
-            Spacer(Modifier.height(Space.m))
-
-            // A line under the figures, because the two things below it are the only parts of this
-            // card that answer a press. Everything above is the call as the channel printed it.
-            Hairline()
-            Spacer(Modifier.height(Space.m))
-
-            // One row, and the two ends of it are the two kinds of press this card offers: what it
-            // records, and what it opens. They sat on separate lines and read as two afterthoughts.
-            //
-            // A FlowRow rather than a Row, for the reason the position card's controls are one: a
-            // held call puts its status, its overdue and its price-scale pills on the left of this
-            // line, and on a cover screen three of those beside the source button is a line that
-            // has to wrap rather than one that may clip.
-            FlowRow(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalArrangement = Arrangement.spacedBy(Space.xs),
-            ) {
-                // Only where the call has a session to belong to: an occurrence the model left
-                // undated cannot be scored, so a trade filed against it would have no deadline to
-                // run to. A spacer holds the source button on the right where there is no trade
-                // control, rather than letting it slide into the ticker's column.
-                if (trades != null && trades.dateOf(point) != null) {
-                    TradeAction(
-                        held = held,
-                        suggestedEntry = point.entryMidpoint(),
-                        defaultWindow = trades.windowFor(point),
-                        tPlusOne = point.isTPlusOne,
-                        onBuy = { price, date, window ->
-                            trades.buy(stock, point, channel, price, date, window)
-                        },
-                        onSell = { sale -> held?.let { trades.sell(it, sale) } },
-                        // Recording a purchase belongs on the card the call was read off; closing a
-                        // position does not. A sale is the end of a trade, and it is made where the
-                        // trade lives - Portfolio, or the occurrence sheet - not off a card being
-                        // scanned for what to buy next. The held and overdue chips still show here.
-                        canSell = false,
-                    )
-                } else {
-                    Spacer(Modifier.width(0.dp))
-                }
-                // The same press the whole card already answers, said in a place the reader can
-                // aim at - and the arrow is what makes the card's own press discoverable at all.
-                KitButton(
-                    if (expanded) "Hide source" else "Source",
-                    onClick = { expanded = !expanded },
-                    kind = ButtonKind.SECONDARY,
-                    size = ButtonSize.SMALL,
-                )
-            }
-
-            AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {
-                Column(
-                    Modifier.padding(top = Space.m),
-                    verticalArrangement = Arrangement.spacedBy(Space.s),
-                ) {
-                    Hairline()
-                    OccurrenceDetail(point, imagePath) { viewingImage = true }
-                }
-            }
-            // A dedicated Space.s here rather than a shared spacedBy on the outer column: the
-            // collapsed AnimatedVisibility above is still a layout node even at zero height, and
-            // a uniform arrangement charged a gap on both sides of it - 24dp of dead air between
-            // this row and the dots for a card showing nothing in between. Asked for on 2026-09-20.
-            if (pageCount > 1) {
-                Spacer(Modifier.height(Space.s))
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    PageDots(page, pageCount)
-                }
-            }
         }
-    }
-
-    if (viewingImage) {
-        SourceImageViewer(imagePath, point.sourceImageRef, onDismiss = { viewingImage = false })
-    }
-    if (quickEditOpen) {
-        HoldPrompt(
-            title = stock.stockCode,
-            actions = listOf(
-                HoldAction("Edit call", primary = true) { quickEditOpen = false; editing = true },
-            ),
-            onDismiss = { quickEditOpen = false },
-        )
     }
     if (editing && editor != null) {
         EditCallSheet(stock, point, editor, onDismiss = { editing = false })
     }
 }
 
-@Composable
-private fun StockHeader(
-    stock: ConsolidatedRecommendation,
-    point: RecommendationDataPoint?,
-    page: Int,
-    pageCount: Int,
-    editor: CallEditor?,
-    onEdit: () -> Unit = {},
-    onFilterToTicker: (String) -> Unit = {},
-) {
-    // Ticker style and name style match the identity block Insights draws on its own call card
-    // (InsightsScreen.kt's ScoredCallRow) - same stock, two screens, one look. The pills sit where
-    // the ⋮ menu used to: that menu is gone from this card (Copy call went unused and Edit call is
-    // reached by holding the card instead - see QuickEditPrompt), so the corner it occupied is free
-    // for the one thing worth a glance without opening anything.
-    Row(verticalAlignment = Alignment.Top) {
-        Column(Modifier.weight(1f)) {
-            val openStock = LocalOpenStock.current
-            // The logo sits beside the ticker-and-name pair rather than the ticker alone, and
-            // CenterVertically is what centers it against both lines rather than just the
-            // first - which is also what puts the name flush under the ticker with no padding
-            // hack: it is simply the next line in the same column.
-            var filtering by remember(stock.stockCode) { mutableStateOf(false) }
-            Row(
-                Modifier.combinedClickable(
-                    onClick = { openStock(stock.stockCode) },
-                    onLongClick = { filtering = true },
-                ),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(stock.stockCode, style = MaterialTheme.typography.titleLarge)
-                        Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
-                    }
-                    stock.stockNameArabic?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = palette.muted,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-            if (filtering) {
-                HoldPrompt(
-                    title = stock.stockCode,
-                    actions = listOf(
-                        HoldAction("Filter this page to ${stock.stockCode}", primary = true) {
-                            filtering = false
-                            onFilterToTicker(stock.stockCode)
-                        },
-                    ),
-                    onDismiss = { filtering = false },
-                )
-            }
-        }
-        if (point != null) {
-            Spacer(Modifier.width(Space.s))
-            // Grouped and left-aligned to each other rather than centred, so Edited (narrower)
-            // starts at the same edge as Watching/T+1 instead of wandering to the middle under it.
-            // Top-aligned with the ticker: the outer Row's own Alignment.Top is what puts this
-            // group where the ⋮ menu used to sit. The trailing padding is its own: with nothing
-            // else on this side of the card, the pills sat flush against the card's own edge.
-            Column(
-                Modifier.padding(end = Space.s),
-                horizontalAlignment = Alignment.Start,
-                verticalArrangement = Arrangement.spacedBy(Space.xs),
-            ) {
-                TimingChip(point)
-                if (editor?.editFor(stock, point) != null) {
-                    EditedChip(onEdit)
-                }
-            }
-        }
+/**
+ * What a watched stock is waiting for, said in place of a ladder it does not have.
+ *
+ * The level is the top of the entry band: a watch is a stock worth buying once it clears it.
+ */
+internal fun watchingSentence(point: RecommendationDataPoint): String {
+    val level = watchLevel(point)
+    return if (level != null) {
+        "Worth buying only if it closes above ${formatPrice(level)}. Not a call to take yet."
+    } else {
+        "On the watch list. Not a call to take yet."
     }
 }
 
-/**
- * The channel this occurrence came from, on its own line below the header and its rule.
- *
- * Left inside [StockHeader] until 2026-09-20, squeezed under the ticker's own column width and
- * sharing it with the timing pills on the other side of the row. It answers a different question
- * from the identity block above it, so it gets the card's full width instead of the narrower one.
- */
+/** The price a watched stock has to clear: the top of its entry band. */
+internal fun watchLevel(point: RecommendationDataPoint): Double? =
+    point.buyPriceHigh ?: point.buyPrice ?: point.buyPriceLow
+
+/** The colour a call's status tag is drawn in. */
 @Composable
-private fun SourceLine(channel: String) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(Space.xs),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // A grey label and an ink name since the 2026-11 redesign: this line is not pressable.
-        Text(
-            "Source:",
-            style = MaterialTheme.typography.labelMedium,
-            color = palette.muted,
-        )
-        Text(
-            channel,
-            style = MaterialTheme.typography.labelMedium,
-            color = palette.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+internal fun CallGroup.tone(): androidx.compose.ui.graphics.Color = when (this) {
+    CallGroup.RUNNING -> palette.heroInk
+    CallGroup.REACHED -> palette.gain
+    CallGroup.STOPPED -> palette.loss
+    CallGroup.WATCHING, CallGroup.ENDED -> palette.muted
+}
+
+/** The move from the entry's midpoint to [close], as a percentage. Null where either is missing. */
+internal fun moveVsEntry(point: RecommendationDataPoint, close: Double?): Double? {
+    val entry = point.entryMidpoint() ?: return null
+    if (close == null || entry == 0.0) return null
+    return (close - entry) / entry * 100
+}
+
+@Composable
+private fun StockHeader(
+    stock: ConsolidatedRecommendation,
+    latest: LatestPrice?,
+    point: RecommendationDataPoint?,
+) {
+    // Ticker style and name style match the identity block Insights draws on its own call card, so
+    // one stock looks the same on two screens. The price takes the corner the pills used to: the
+    // tags row under the header says what they said.
+    Row(verticalAlignment = Alignment.Top) {
+        val openStock = LocalOpenStock.current
+        Row(
+            Modifier.weight(1f).clickable { openStock(stock.stockCode) },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StockLogo(stock.stockCode, LogoSize.Row, Modifier.padding(end = Space.s))
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stock.stockCode, style = MaterialTheme.typography.titleLarge)
+                    Egx33Badge(stock.stockCode, Modifier.padding(start = Space.s))
+                }
+                stock.stockNameArabic?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.muted,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        val close = latest?.session?.close
+        if (close != null) {
+            Column(Modifier.padding(start = Space.s), horizontalAlignment = Alignment.End) {
+                Text(
+                    formatPrice(close),
+                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
+                )
+                // Against the entry, and said so: the app keeps no day's move behind AppState.
+                point?.let { moveVsEntry(it, close) }?.let { move ->
+                    Text(
+                        "${formatPercent(move)} vs entry",
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                        color = if (move >= 0) palette.gain else palette.loss,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -630,39 +494,6 @@ private val LevelKeyWidth = 3.dp
 private val LevelFigure = 15.sp
 private val LevelFigureLine = 18.sp
 
-@Composable
-private fun OccurrenceDetail(
-    point: RecommendationDataPoint,
-    imagePath: String?,
-    onOpenImage: () -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-        Text(
-            listOfNotNull(
-                point.visibleSourceDate?.let { "Source date $it" },
-                point.sourceImageRef?.let { "Image $it" },
-                point.sourceMessageId?.let { "Message $it" },
-            ).joinToString(" · ").ifBlank { "Source not recorded" },
-            style = MaterialTheme.typography.labelMedium,
-            color = palette.muted,
-        )
-        // The card the numbers were read off, where a pressed table row would have shown it. The
-        // thumbnail says `#4` when the photo has gone from Telegram's cache rather than a blank.
-        SourceImageThumbnail(
-            path = imagePath,
-            reference = point.sourceImageRef,
-            size = 88.dp,
-            onOpen = onOpenImage,
-        )
-        point.recommendationEvidence?.let {
-            Text("“$it”", style = MaterialTheme.typography.bodySmall)
-        }
-        point.timingEvidence?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = palette.hero)
-        }
-    }
-}
-
 /**
  * The buy band as one string, or the single price where the source printed one.
  *
@@ -709,14 +540,14 @@ private fun impliedReturn(point: RecommendationDataPoint, target: Double?): Doub
 }
 
 /**
- * A call's block inside the report tile: the page's own ground, the tile's corners, and the held
- * ring where there is one.
+ * A call's block on the page: a white card since 5.1, when the report stopped being drawn inside a
+ * tile of its own, with the tile's corners and the held ring where there is one.
  */
 @Composable
 private fun Modifier.callBlock(edge: androidx.compose.foundation.BorderStroke?): Modifier =
     this
         .clip(Kit.TileShape)
-        .background(palette.ground)
+        .background(palette.card)
         .then(if (edge != null) Modifier.border(edge, Kit.TileShape) else Modifier)
 
 /** The one rule a call card draws between what was printed and what can be pressed. */

@@ -69,7 +69,7 @@ internal fun AnalysisModelCard(appState: AppState) {
         onClick = { picking = true },
         onClickLabel = "Choose the analysis model",
     ) {
-        Text("Analysis model", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text("Which AI", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Text(
             if (chosen) configuration.model else "No model chosen",
             style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),

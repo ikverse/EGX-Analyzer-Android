@@ -116,6 +116,25 @@ import com.ikverse.egxanalyzer.model.positionId
 import com.ikverse.egxanalyzer.model.reachedTarget1
 import com.ikverse.egxanalyzer.model.riskReward
 import com.ikverse.egxanalyzer.model.sessionFor
+import com.ikverse.egxanalyzer.model.CallStep
+import com.ikverse.egxanalyzer.model.CallStepKind
+import com.ikverse.egxanalyzer.model.timeline
+import com.ikverse.egxanalyzer.model.plainWord
+import com.ikverse.egxanalyzer.model.relativeDay
+import com.ikverse.egxanalyzer.model.ScheduleClock
+import com.ikverse.egxanalyzer.ui.kit.HoldMenu
+import com.ikverse.egxanalyzer.ui.kit.MenuItem
+import com.ikverse.egxanalyzer.ui.kit.MoreRow
+import com.ikverse.egxanalyzer.ui.kit.Timeline
+import com.ikverse.egxanalyzer.ui.kit.TimelineStep
+import com.ikverse.egxanalyzer.ui.kit.StepTone
+import com.ikverse.egxanalyzer.ui.kit.KitTag
+import com.ikverse.egxanalyzer.ui.kit.KitChip
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.ui.kit.SheetFooterSpacer
+import com.ikverse.egxanalyzer.ui.kit.OutcomeStrip
+import com.ikverse.egxanalyzer.ui.kit.Outcomes
+import com.ikverse.egxanalyzer.ui.kit.tileSignals
 import com.ikverse.egxanalyzer.ui.theme.extraColors
 import com.ikverse.egxanalyzer.ui.theme.pageAccent
 import kotlinx.coroutines.delay
@@ -187,7 +206,7 @@ internal fun InsightsScreen(appState: AppState) {
         // does: an order hides nothing. See AppPreferences.callOrder.
         val callOrder = appState.appPreferences.callOrder
         // Read once for the whole page, so every card is judged against one reading of when
-        // the reader last looked. See SessionCard's `seenAt`.
+        // the reader last looked. See DayCard's `seenAt`.
         val seenAt = appState.insightsSeenAt
         val everyChannel = remember(full.channels) { full.channels.map(ChannelScore::channel).sorted() }
 
@@ -275,6 +294,8 @@ internal fun InsightsScreen(appState: AppState) {
                 channels = emptySet()
                 outcomes = emptySet()
                 stock = ""
+                // The day's own chip too: it hides calls as surely as a filter in the sheet does.
+                appState.pages.insightsDayFilter.value = null
             }
         }
 
@@ -328,67 +349,95 @@ internal fun InsightsScreen(appState: AppState) {
                 .associate { it.displayName to it.photoPath }
         }
 
-        // The answer leads: who delivered, then the full ranking. Both follow the filters, as the
-        // rates under them do. What is still in play, the last session and the feed are true of
-        // the whole record, so they read [full] and ignore the filters.
-        @Composable
-        fun ColumnScope.tiles(podiumFloor: Dp) {
-            InsightsPodium(
-                report,
-                photoFor = { channelPhotos[it] },
-                modifier = Modifier.heightIn(min = podiumFloor).popIn(0),
-            )
-            OutcomeKey()
-            RankingTile(
-                report.channels,
-                photoFor = { channelPhotos[it] },
-                onExport = { appState.startAction { appState.saveRankingToDownloads() } },
-                modifier = Modifier.popIn(1),
-            )
-            InPlayRow(play, Modifier.popIn(2))
-            TodayCard(appState)
-            FeedNote(appState.priceHealth)
-            WatchlistCard(appState)
+        // Built once for the page rather than searched per card. Keyed on the filtered report, so a
+        // channel filter narrows the record a card quotes to the same calls the page is counting.
+        val scoreByChannel = remember(report.channels) {
+            report.channels.associateBy(ChannelScore::channel)
         }
-        // What used to sit here and does not any more:
-        //
-        // **Stocks ranked** answered a question this tab is not asking. Which stock the market has
-        // been kind to is not which source is worth reading, and a second ranking under the first
-        // one invited the two to be read as halves of one answer. The record itself is untouched -
-        // `PerformanceReport.stocks` is still measured, and the Ask AI prompt and a card's own
-        // signals still read it - only the section is gone.
-        //
-        // **Price feed** is a diagnostic, and it now lives with the diagnostics, in Settings. It
-        // explains why a figure is missing rather than being one, and every reader of this page had
-        // to scroll past a fault report about four stocks to reach the record of every call.
-        //
-        // **Does it matter?** set two halves of the record beside each other - calls several
-        // sources named for one session, calls a source kept re-posting - and stated no verdict
-        // about either, because at the counts behind them the gap between two means is noise. A
-        // section a reader opens to be told that two figures differ by less than can be read costs
-        // more than it says. The arithmetic went with it, so nothing is computed and left unread;
-        // `alsoCalledBy` and `repostings` stay, and the call cards still say a stock had company
-        // and a call was kept standing.
+        val env = CallEnv(
+            appState = appState,
+            latestFor = { ticker -> report.latestPrices[ticker] },
+            scoreFor = { channel -> scoreByChannel[channel] },
+            askModel = askModel,
+            searching = searching,
+            newsWindow = newsWindow,
+        )
+        val posture = LocalFoldPosture.current
+        val book = posture is FoldPosture.Book
+        var openChannel by appState.pages.insightsOpenChannel
+        // In book posture the record beside the ranking always shows a source: the one pressed, or
+        // the one that leads. Elsewhere it is a sheet, and only while one is open.
+        val recordChannel = report.channels.firstOrNull { it.channel == openChannel }
+            ?: if (book) report.channels.firstOrNull() else null
 
-        // One collapsed card per row wasted most of a wide screen: each held a single line of
-        // text across the full width. The count is derived, so an untested width still behaves.
-        // Collapsed cards share a row; an open one takes the whole width, because its contents are
-        // a table of figures and half a row squeezes every price onto two lines.
+        // Collapsed cards share a row; an open one takes the whole width.
         var openSession by appState.pages.openInsightsSession
         // How many of the filtered sessions are drawn - the filters and the stock search above
         // have already run over the whole record, so this only trims what they left.
         var visibleCount by appState.pages.insightsVisibleCount
-        // Where the call being pointed at sits, so the page can scroll to it inside whichever
-        // session card holds it.
+        var dayFilter by appState.pages.insightsDayFilter
+
+        /** A source's newest calls, repeats out, for the record's Latest calls. */
+        fun latestCallsOf(channel: String): List<ScoredCall> = report.sessions.asSequence()
+            .flatMap { it.calls.asSequence() }
+            .filter { it.channel == channel && it.repeatOf == null }
+            .sortedByDescending { it.openedOn }
+            .take(LatestCallsShown)
+            .toList()
+
+        // A call pressed on a source's record opens its day and its sheet.
+        val onOpenCall: (ScoredCall) -> Unit = { call ->
+            report.sessions.firstOrNull { session -> session.calls.any { it === call } }?.let { session ->
+                val index = report.sessions.indexOf(session)
+                if (index >= visibleCount) visibleCount = (index / PAGE_SIZE + 1) * PAGE_SIZE
+                openSession = session.key()
+            }
+            dayFilter = null
+            appState.pages.insightsOpenCall.value = call.opinionKey()
+            if (!book) openChannel = null
+        }
+
+        // The ranking follows the filters, as the rates under it do. What is still in play, the
+        // last session and the feed are true of the whole record, so they read [full].
+        @Composable
+        fun ColumnScope.tiles() {
+            TodayCard(appState)
+            OutcomeKey()
+            RankingTiles(
+                report.channels,
+                tracked = report.tracked,
+                photoFor = { channelPhotos[it] },
+                selected = if (book) recordChannel?.channel else null,
+                onOpen = { openChannel = it.channel },
+                onExport = { appState.startAction { appState.saveRankingToDownloads() } },
+                showAll = appState.pages.insightsRankingShowAll,
+                modifier = Modifier.popIn(0),
+            )
+            InPlayRow(play, Modifier.popIn(1))
+            FeedNote(appState.priceHealth)
+            WatchlistCard(appState)
+        }
+        if (!book) {
+            recordChannel?.let { channel ->
+                ChannelScoreSheet(
+                    channel,
+                    photoPath = channelPhotos[channel.channel],
+                    latestCalls = latestCallsOf(channel.channel),
+                    onOpenCall = onOpenCall,
+                    rowState = { appState.pages.insightsRow(it) },
+                    onDismiss = { openChannel = null },
+                )
+            }
+        }
+
+        // Where the call being pointed at sits, so the page can scroll to it inside its day.
         val reveal = remember { BringIntoViewRequester() }
         LaunchedEffect(pendingCall, report) {
             if (pendingCall == null) return@LaunchedEffect
             val session = report.sessionFor(pendingCall)
             if (session == null) {
                 // Hidden by a filter, which the effect above is already clearing - or gone, if the
-                // analysis behind that trade was deleted between the press and the arrival. Gone is
-                // dropped rather than left waiting: a re-run of that session months later would
-                // otherwise flash a card for a press nobody remembers making.
+                // analysis behind that trade was deleted between the press and the arrival.
                 if (full.sessionFor(pendingCall) == null) appState.consumePendingCall()
                 return@LaunchedEffect
             }
@@ -404,142 +453,131 @@ internal fun InsightsScreen(appState: AppState) {
             delay(REVEAL_SETTLE_MS)
             reveal.revealIfOnScreen(appState, AppDestination.INSIGHTS)
         }
-        // Built once for the page rather than searched per card. Keyed on the filtered report, so a
-        // channel filter narrows the record a card quotes to the same calls the page is counting -
-        // a card quoting the whole record beside a hero that had been narrowed would be the screen
-        // disagreeing with itself about one source.
-        val scoreByChannel = remember(report.channels) {
-            report.channels.associateBy(ChannelScore::channel)
+
+        @Composable
+        fun dayCard(session: ScoredSession, expanded: Boolean, modifier: Modifier = Modifier) {
+            DayCard(
+                session,
+                env,
+                expanded = expanded,
+                onExpandedChange = { open ->
+                    openSession = if (open) session.key() else null
+                    dayFilter = null
+                },
+                order = callOrder,
+                seenAt = seenAt,
+                revealCall = pendingCall,
+                onRevealShown = appState::consumePendingCall,
+                reveal = reveal,
+                modifier = modifier,
+            )
         }
+
         @Composable
         fun record() {
-        BoxWithConstraints {
-            val columns = responsiveColumns(minColumnWidth = SessionCardMinWidth, maxColumns = 3)
-            val shownSessions = remember(report.sessions, visibleCount) {
-                report.sessions.take(visibleCount)
-            }
-            // Grouped before rendering rather than while: the open session interrupts the grid, and
-            // where it does so cannot be decided one card at a time.
-            val bands = remember(shownSessions, openSession) {
-                expandableBands(shownSessions) { openSession == it.key() }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                bands.forEach { (band, open) ->
-                    if (open) {
-                        SessionCard(
-                            band.single(),
-                            appState,
-                            expanded = true,
-                            onExpandedChange = { openSession = null },
-                            heldFor = appState::heldFor,
-                            latestFor = { ticker -> report.latestPrices[ticker] },
-                            scoreFor = { channel -> scoreByChannel[channel] },
-                            order = callOrder,
-                            seenAt = seenAt,
-                            opinionFor = appState::opinionFor,
-                            askingFor = { call -> appState.opinionPending == call.opinionKey() },
-                            askModel = askModel,
-                            searching = searching,
-                            newsWindow = newsWindow,
-                            onAsk = { call, again -> appState.askAboutCall(call, again) },
-                            onOpenTrade = { id ->
-                                appState.openPosition(
-                                    id,
-                                    NavStop(AppDestination.INSIGHTS, callId = id),
-                                )
-                            },
-                            revealCall = pendingCall,
-                            onRevealShown = appState::consumePendingCall,
-                            reveal = reveal,
-                        )
-                    } else {
-                        ResponsiveRows(band, columns) { session, cardModifier ->
-                            SessionCard(
-                                session,
-                                appState,
-                                expanded = false,
-                                onExpandedChange = { openSession = session.key() },
-                                heldFor = appState::heldFor,
-                                latestFor = { ticker -> report.latestPrices[ticker] },
-                                scoreFor = { channel -> scoreByChannel[channel] },
-                                order = callOrder,
-                                seenAt = seenAt,
-                                opinionFor = appState::opinionFor,
-                                askingFor = { call -> appState.opinionPending == call.opinionKey() },
-                                askModel = askModel,
-                                searching = searching,
-                                newsWindow = newsWindow,
-                                onAsk = { call, again -> appState.askAboutCall(call, again) },
-                                // The call being left is what back should come back to, so the
-                                // press names it. Both tabs key on ScoredCall.positionId, which
-                                // is why one id serves as the trade to open and the call to
-                                // return to. See NavStop.
-                                onOpenTrade = { id ->
-                                    appState.openPosition(
-                                        id,
-                                        NavStop(AppDestination.INSIGHTS, callId = id),
-                                    )
-                                },
-                                // A folded card draws none of its calls, so the highlight only ever
-                                // lands on the one this arrival opened.
-                                revealCall = pendingCall,
-                                onRevealShown = appState::consumePendingCall,
-                                reveal = reveal,
-                                modifier = cardModifier,
+            Text("Day by day", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 8.dp))
+            BoxWithConstraints {
+                val columns = responsiveColumns(minColumnWidth = SessionCardMinWidth, maxColumns = 3)
+                val shownSessions = remember(report.sessions, visibleCount) { report.sessions.take(visibleCount) }
+                // Grouped before rendering rather than while: the open day interrupts the grid.
+                val bands = remember(shownSessions, openSession) {
+                    expandableBands(shownSessions) { openSession == it.key() }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                    bands.forEach { (band, open) ->
+                        if (open) {
+                            dayCard(band.single(), expanded = true)
+                        } else {
+                            ResponsiveRows(band, columns) { session, cardModifier ->
+                                dayCard(session, expanded = false, modifier = cardModifier)
+                            }
+                        }
+                    }
+                    if (report.sessions.size > visibleCount) {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            KitButton(
+                                "Show older",
+                                onClick = { visibleCount += PAGE_SIZE },
+                                kind = ButtonKind.SECONDARY,
+                                size = ButtonSize.SMALL,
                             )
                         }
                     }
                 }
+            }
+        }
+
+        /** The days as chips, for the postures that show one day at a time; the newest by default. */
+        val shownSessions = report.sessions.take(visibleCount)
+        val chosenDay = shownSessions.firstOrNull { it.key() == openSession } ?: shownSessions.firstOrNull()
+
+        @Composable
+        fun dayPicker() {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                shownSessions.forEach { session ->
+                    KitChip(
+                        session.dayName(),
+                        selected = session === chosenDay,
+                        onClick = {
+                            openSession = session.key()
+                            dayFilter = null
+                        },
+                    )
+                }
                 if (report.sessions.size > visibleCount) {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        KitButton(
-                            "Show older",
-                            onClick = { visibleCount += PAGE_SIZE },
-                            kind = ButtonKind.SECONDARY,
-                            size = ButtonSize.SMALL,
-                        )
-                    }
+                    KitChip("Older", selected = false, onClick = { visibleCount += PAGE_SIZE })
                 }
             }
         }
-        }
 
-        when (val posture = LocalFoldPosture.current) {
-            is FoldPosture.Unfolded, is FoldPosture.Book -> {
-                // Side by side: the tiles on one half, the record of every session on the other. In
-                // book posture the split falls on the hinge.
+        when (posture) {
+            is FoldPosture.Unfolded -> {
+                // The tiles on one half; on the other, one day at a time as a table.
                 SplitColumns(posture, unfoldedStart = 0.45f, start = {
-                        tiles(0.dp)
-                    }, end = {
-                        record()
-                    })
+                    tiles()
+                }, end = {
+                    dayPicker()
+                    chosenDay?.let { run ->
+                        DayOpened(run, remember(run.calls) { PerformanceCalculator.tally(run.calls) })
+                        DayCallTable(run, env, callOrder)
+                    }
+                })
+            }
+            is FoldPosture.Book -> {
+                // The ranking and the record of days on the left; the source's record on the right,
+                // split on the hinge, with no sheet.
+                SplitColumns(posture, unfoldedStart = 0.45f, start = {
+                    tiles()
+                    record()
+                }, end = {
+                    recordChannel?.let { channel ->
+                        ChannelRecord(
+                            channel,
+                            photoPath = channelPhotos[channel.channel],
+                            latestCalls = latestCallsOf(channel.channel),
+                            onOpenCall = onOpenCall,
+                            rowState = { appState.pages.insightsRow(it) },
+                        )
+                    }
+                })
+            }
+            is FoldPosture.Tabletop -> {
+                // The chosen day and call on the upright half, what is pressed on the flat one, and
+                // the rest of the page after it.
+                chosenDay?.let { TabletopDay(it, env, posture, callOrder) { dayPicker() } }
+                tiles()
+                record()
             }
             else -> {
-                // One column. In tabletop the podium ends at the crease, so it stands on the upright
-                // half and everything pressed is on the flat one.
-                tiles((posture as? FoldPosture.Tabletop)?.let { tabletopHeroHeight(it) } ?: 0.dp)
+                tiles()
                 record()
             }
         }
     }
 }
 
-@Composable
-private fun OutcomeLabel(call: ScoredCall) {
-    // Every label explains itself, not just the puzzling one: a chip that is sometimes tappable
-    // teaches nobody that it can be tapped.
-    var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
-    ToneTag(call.outcome.label, call.outcome.outlineTone(), onClick = { showing = true })
-    if (showing) {
-        // Built from the call rather than passed to `infoNote`: that helper's callers are checked
-        // by InfoNoteTest for static prose, and a call's reason is the one explanation in the app
-        // that is different on every card - so it is `InfoNote`'s own constructor, not the checked
-        // factory function, on purpose.
-        InfoSheet(InfoNote("${call.ticker} · ${call.outcome.label}", listOf(call.reason()))) {
-            showing = false
-        }
-    }
-}
+/** How many of a source's calls its record lists. */
+private const val LatestCallsShown = 4
 
 /**
  * The one line that says why this call ended up where it did.
@@ -629,303 +667,126 @@ private fun ScoredSession.key(): String = (targetDate ?: lastRunAt).toString()
 /** Two lines of channel name, so a row of source cards stays level. */
 private val ChannelHeaderHeight = 44.dp
 
+/** What every call on the page needs from the page, gathered once so each call is handed one thing. */
+private class CallEnv(
+    val appState: AppState,
+    /** Where a stock stands as of the last refresh, by ticker. */
+    val latestFor: (String) -> LatestPrice?,
+    /** The record of the source that made a call, by channel name. */
+    val scoreFor: (String) -> ChannelScore?,
+    /** Named in the Ask AI confirmation, because it is what the request will be billed against. */
+    val askModel: String,
+    val searching: Boolean,
+    val newsWindow: Int,
+)
+
+/** Which item of a call's hold menu this is, so tabletop and the sheet can draw some as buttons. */
+private enum class CallMenuKind { TRADE, ASK, CHART, POST, COPY, REPORT, ONLY }
+
+/** Outcomes that say nothing about the source, drawn as a dashed "Not counted" card. */
+private val NotCountedOutcomes = setOf(Outcome.ENTRY_NOT_REACHED, Outcome.UNPRICED, Outcome.PRICE_BREAK, Outcome.AMBIGUOUS)
+
+private fun ScoredCall.notCounted(): Boolean = outcome in NotCountedOutcomes
+
+/** The chip a call sits under in an opened day; null for one that is not counted. */
+private fun ScoredCall.dayGroup(): String? = when (outcome) {
+    Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> "Reached"
+    Outcome.STOPPED -> "Stopped"
+    Outcome.EXPIRED -> "Out of time"
+    Outcome.OPEN -> "Running"
+    else -> null
+}
+
+private val DayGroups = listOf("Reached", "Stopped", "Out of time", "Running")
+
+/** A call's status tag colour. */
+@Composable
+private fun Outcome.cardTone(): Color = when (this) {
+    Outcome.FULL_HIT, Outcome.PARTIAL_HIT -> palette.gain
+    Outcome.STOPPED -> palette.loss
+    Outcome.OPEN -> palette.heroInk
+    else -> palette.muted
+}
+
 /**
- * How a session went, under its own date, so a folded card still says something.
+ * Everything one call can do, held in one place: its hold menu, the Ask AI confirmation and answer,
+ * the screenshot, recording a purchase, and its sheet. [content] draws the call however the posture
+ * wants it - a card, a table row, tabletop's pane - and is handed what a tap and a hold do.
  *
- * The same shape the Portfolio's session cards have carried for months: every verdict named,
- * counted, and drawn in the colour the outcome wears everywhere else in the app. It replaces a run
- * of grey text that read `19 calls · 3 partial · 1 full · 2 stopped` in one colour, where the
- * reader had to parse the words to find out whether the day had gone well.
- *
- * A partial hit and a full one share the target's green, exactly as they do on a trade's chip: they
- * are the same kind of event at two depths, and the words beside them are what separate them. Out
- * of time is amber rather than red for the reason the Portfolio gives - a call that ran out of time
- * can be up 5%, and red would report a loss it never made.
- *
- * Under the counts, what a call from that session was actually worth. It is the figure the whole
- * page is ordered on, and until now a session card could show four counts and never say whether
- * they added up to a good day.
+ * The sheet opens when the page's [PageState.insightsOpenCall] names this call, so a fold keeps it
+ * open; [showSheet] is false on tabletop, where the call is drawn on the upper half instead.
  */
 @Composable
-private fun SessionSummary(run: ScoredSession, tally: CallTally, isNew: Boolean = false) {
-    val counts = listOf(
-        // Target 1 before target 2, the same order the outcome bars read in and the same order the
-        // levels are printed in on every card. Fixed, so it can be learned once.
-        Triple(tally.partialHits, "partial", PriceRole.target),
-        Triple(tally.fullHits, "full", PriceRole.target),
-        Triple(tally.stopped, "stopped", PriceRole.stop),
-        Triple(tally.expired, "out of time", extraColors.expired),
-        // Everything the market has not answered yet, in the colour of something with nothing to
-        // say. Counted here rather than taken off the tally, which reports what was judged - and
-        // counted over the same calls the tally counts, or a re-posted call still running would be
-        // pending on a line that had already left it out of the total beside it.
-        Triple(
-            run.calls.count { it.repeatOf == null && !it.outcome.judged },
-            "pending",
-            palette.muted,
-        ),
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(Space.s),
-            verticalArrangement = Arrangement.spacedBy(Space.xs),
-        ) {
-            // First on the line, before any count. It is the only thing here that is about the
-            // reader rather than about the market, and what it answers - "is there anything I have
-            // not seen" - is the question they arrive at this page with.
-            if (isNew) {
-                Text(
-                    "New",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = palette.heroInk,
-                )
-            }
-            counts.forEach { (count, word, tone) ->
-                if (count == 0) return@forEach
-                Text(
-                    "$count $word",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = tone,
-                )
-            }
-        }
-        Text(
-            listOfNotNull(
-                "${tally.calls} ${if (tally.calls == 1) "call" else "calls"}",
-                run.calls.map(ScoredCall::channel).distinct().size.let {
-                    "$it ${if (it == 1) "source" else "sources"}"
-                },
-                // Absent rather than a dash on a session nothing has settled on. The counts above
-                // already say so, and a blank figure beside them says it twice.
-                tally.averageReturn?.let { "${it.signedPercent()} per call" },
-                // Said here for the reason the channel card says it: the same call posted again is
-                // the same bet, and a session showing fewer counted calls than cards needs to
-                // explain the difference on the line where the difference shows.
-                tally.repeats.takeIf { it > 0 }?.let { "$it re-posted, counted once" },
-            ).joinToString(" · "),
-            style = MaterialTheme.typography.labelSmall,
-            color = palette.muted,
-        )
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun SessionCard(
-    run: ScoredSession,
-    /** For a call card's own chart, once it is wide enough to draw one. Nothing else here reads it. */
-    appState: AppState,
-    expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
-    /** The position taken on a call, so a stock actually held is marked as such. */
-    heldFor: (String, java.time.LocalDate?) -> PositionView?,
-    /** Where a stock stands as of the last refresh, by ticker. */
-    latestFor: (String) -> LatestPrice?,
-    /** The record of the source that made a call, by channel name. */
-    scoreFor: (String) -> ChannelScore?,
-    /** How the calls inside this card are laid out. Orders them; never hides one. */
-    order: CallOrder,
-    /**
-     * When the reader last had this tab open, for the New chip.
-     *
-     * Passed down rather than read from `AppState` in here, so every card on one page is judged
-     * against one reading: taking the mark while a page of cards is composing would leave the ones
-     * composed after it unflagged and the ones before it flagged.
-     */
-    seenAt: Long,
-    /** What Ask AI has said about a call, if anything. */
-    opinionFor: (ScoredCall) -> StockOpinion?,
-    /** Whether that call's own request is currently out. */
-    askingFor: (ScoredCall) -> Boolean,
-    askModel: String,
-    searching: Boolean,
-    /** How far back a searched request would look, which the confirmation names. */
-    newsWindow: Int,
-    onAsk: (ScoredCall, Boolean) -> Unit,
-    /** Opens a held call's trade on the Portfolio tab, by the id the two share. */
-    onOpenTrade: (String) -> Unit,
-    /** The trade the reader has just pressed their way here from, if this is that arrival. */
-    revealCall: String?,
-    onRevealShown: () -> Unit,
-    reveal: BringIntoViewRequester,
-    modifier: Modifier = Modifier,
-) {
-    val ranAt = remember(run.lastRunAt) {
-        AppDates.Stamp
-            .withZone(ZoneId.systemDefault())
-            .format(run.lastRunAt)
-    }
-    // One piece of arithmetic for the icon's colour and the line under the title, and the same one
-    // every rate in the app is built from - repeats out, judged calls only. A second count assembled
-    // here would be a second set of rules about what a session is worth.
-    val tally = remember(run.calls) { PerformanceCalculator.tally(run.calls) }
-    // Analysed since the reader last had this tab open. `lastRunAt` is when the session was last
-    // read rather than when it traded, which is the right clock: a session re-run this morning has
-    // something new on it however old the trading day was.
-    //
-    // Nothing is new on a reader who has never opened the tab. A fresh install would otherwise
-    // flag every session at once, which says exactly what flagging none of them says and takes a
-    // page of chips to say it.
-    val isNew = seenAt > 0L && run.lastRunAt.toEpochMilli() > seenAt
-    // Holding the header offers the one thing a session card cannot otherwise reach: the report
-    // this reading actually came from. Absent on a session with no report behind it, which is
-    // every test fixture and nothing on a device.
-    var holdingSession by remember(run.reportId) { mutableStateOf(false) }
-    // Closed by default: a run is a summary line until asked for, so a page of them stays
-    // readable however many analyses have been saved.
-    RecordTile(
-        // The weekday, because a run is aimed at a trading session and Sunday is one here. A bare
-        // 2026-08-18 is the same date with the one part a reader actually orients by removed.
-        title = run.targetDate?.format(AppDates.WeekdaySession) ?: "Target not recorded",
-        // The dot says how the session went before a word of it is read: the app's own rule for
-        // colouring a return, on the figure the line underneath prints. Grey where nothing has
-        // settled yet, which is what a session with nothing to say should look like.
-        tone = PriceRole.forReturn(tally.averageReturn),
-        summary = { SessionSummary(run, tally, isNew) },
-        expanded = expanded,
-        onExpandedChange = onExpandedChange,
-        onHeaderLongClick = run.reportId?.let { { holdingSession = true } },
-        modifier = modifier,
-    ) {
-        // Where the card's contents came from. Built from more than one run it is not a single
-        // analysis, and reading it as one would misplace the responsibility for a call.
-        Text(
-            if (run.runCount > 1) {
-                "${run.channelsTotal} chats · ${run.channelsFromLatest} from the run at $ranAt · " +
-                    "the rest from ${run.runCount - 1} earlier " +
-                    (if (run.runCount == 2) "run" else "runs")
-            } else {
-                "${run.channelsTotal} ${if (run.channelsTotal == 1) "chat" else "chats"} · " +
-                    "run $ranAt · ${run.model}"
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = palette.muted,
-        )
-        // One call card per row, on every width. A two-column grid here used to leave a call
-        // card - a header, a price chart and two figure panels - about 300dp to draw itself in on
-        // an unfolded screen; a single full-width card spends that width instead, inside
-        // ScoredCallRow's own width check.
-        //
-        // Two channels naming one stock for one session are two cards and one holding, so both of
-        // them flash - each really is a call behind that trade. Only the first is scrolled to,
-        // because a requester pointed at two places would travel to one and then the other.
-        val scrollTo = remember(run.calls, revealCall) {
-            revealCall?.let { id -> run.calls.firstOrNull { it.positionId == id } }
-        }
-        // Sorted on every composition rather than remembered: the key would have to include the
-        // channel records the order reads, and a `remember` holding a stale one would lay the
-        // cards out by a ranking the page no longer agrees with. Forty items is nothing beside
-        // composing forty cards.
-        val ordered = order.sort(run.calls, scoreFor)
-        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            ordered.forEach { call ->
-                val held = heldFor(call.ticker, call.openedOn)
-                ScoredCallRow(
-                    call,
-                    appState,
-                    latestFor(call.ticker),
-                    scoreFor(call.channel),
-                    opinionFor(call),
-                    asking = askingFor(call),
-                    askModel = askModel,
-                    searching = searching,
-                    newsWindow = newsWindow,
-                    onAsk = { again -> onAsk(call, again) },
-                    held = held,
-                    // Only a call the user is actually in leads anywhere: there is no trade to
-                    // open for one they read and left alone.
-                    onOpenTrade = held?.let { { onOpenTrade(it.position.id) } },
-                    highlighted = revealCall != null && call.positionId == revealCall,
-                    onHighlightShown = onRevealShown,
-                    modifier = if (call === scrollTo) {
-                        Modifier.fillMaxWidth().bringIntoViewRequester(reveal)
-                    } else {
-                        Modifier.fillMaxWidth()
-                    },
-                )
-            }
-        }
-    }
-    if (holdingSession) {
-        HoldPrompt(
-            title = run.targetDate?.format(AppDates.WeekdaySession) ?: "Target not recorded",
-            actions = listOf(
-                HoldAction("Open this session's report", primary = true) {
-                    holdingSession = false
-                    run.reportId?.let { appState.openSavedResult(it) }
-                },
-            ),
-            onDismiss = { holdingSession = false },
-        )
-    }
-}
-
-@Composable
-private fun ScoredCallRow(
+private fun InsightsCall(
     call: ScoredCall,
-    /** For the chart's own price history, once the card is wide enough to draw one. */
-    appState: AppState,
-    /** Where this stock stands as of the last refresh. Absent for a stock with no prices at all. */
-    latest: LatestPrice?,
-    /**
-     * What the source that made this call has delivered elsewhere.
-     *
-     * The record was measured for every channel and reached only the ranking, which is a page the
-     * reader has to go and read separately - so the one screen where a call is actually weighed
-     * knew nothing about who made it.
-     */
-    channelScore: ChannelScore?,
-    /** What Ask AI has already said about this call, if it has been asked. */
-    opinion: StockOpinion?,
-    /** True while this card's own request is out. */
-    asking: Boolean,
-    /** Named in the confirmation, because it is what the request will be billed against. */
-    askModel: String,
-    /** Whether a live search would be attached, which the confirmation also has to say. */
-    searching: Boolean,
-    /** The news lookback that search would be given, in days. Named in the confirmation too. */
-    newsWindow: Int,
-    /** Sends the question. The flag is a deliberate re-ask, the only way to pay for one twice. */
-    onAsk: (askAgain: Boolean) -> Unit,
-    held: PositionView?,
-    /** Opens the trade taken on this call. Absent where none was, which is most cards. */
-    onOpenTrade: (() -> Unit)?,
-    highlighted: Boolean,
-    onHighlightShown: () -> Unit,
-    modifier: Modifier = Modifier,
+    env: CallEnv,
+    showSheet: Boolean = true,
+    content: @Composable (onOpen: () -> Unit, menu: List<Pair<CallMenuKind, MenuItem>>) -> Unit,
 ) {
-    var expanded by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
-    // Chrome, so a `remember` is the right home for all three: a fold closes the sheet, and the
-    // answer behind it is on disk rather than in the composition. See PageState.
-    var confirming by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
-    var showing by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
-    // Set while this card's own request is out, so the answer opens itself when it lands. Without
-    // it every card already holding an opinion would spring open the moment any request finished.
-    var awaiting by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
-    // Holding the card offers what a card cannot otherwise reach without opening something first.
-    var holding by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
-    var viewingImage by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
-    var buying by remember(call.ticker, call.openedOn) { mutableStateOf(false) }
-    // Resolved once per card rather than per action: View screenshot needs it to find the image
-    // and Copy call/Bought/Open its report do not, but all four are decided together for the one
-    // hold prompt the card offers.
+    val appState = env.appState
+    val key = call.opinionKey()
+    // Chrome, so a `remember` is the right home: a fold closes a dialog, and the answer behind it
+    // is on disk rather than in the composition.
+    var confirming by remember(key) { mutableStateOf(false) }
+    var showing by remember(key) { mutableStateOf(false) }
+    // Set while this call's own request is out, so the answer opens itself when it lands. Without
+    // it every call already holding an opinion would spring open the moment any request finished.
+    var awaiting by remember(key) { mutableStateOf(false) }
+    var viewingImage by remember(key) { mutableStateOf(false) }
+    var buying by remember(key) { mutableStateOf(false) }
     val occurrence = remember(call, appState.savedResults) { appState.occurrenceFor(call) }
+    val held = appState.heldFor(call.ticker, call.openedOn)
+    val opinion = appState.opinionFor(call)
+    val asking = appState.opinionPending == key
+    var openCall by appState.pages.insightsOpenCall
+    val openStock = LocalOpenStock.current
+    val clipboard = LocalClipboardManager.current
     LaunchedEffect(opinion) {
         if (awaiting && opinion != null) {
             awaiting = false
             showing = true
         }
     }
+    val menu = buildList {
+        if (held != null) {
+            add(
+                CallMenuKind.TRADE to MenuItem("Open your trade") {
+                    // The call being left is what back should come back to, so the press names it.
+                    appState.openPosition(held.position.id, NavStop(AppDestination.INSIGHTS, callId = held.position.id))
+                },
+            )
+        } else {
+            add(CallMenuKind.TRADE to MenuItem("I bought this") { buying = true })
+        }
+        // A second request while the first is out would be paid for twice, so none is offered.
+        if (!asking) {
+            add(
+                CallMenuKind.ASK to MenuItem(if (opinion != null) "AI Response" else "Ask AI") {
+                    if (opinion == null) confirming = true else showing = true
+                },
+            )
+        }
+        add(CallMenuKind.CHART to MenuItem("Open the chart") { openStock(call.ticker) })
+        if (occurrence?.let { it.saved.result.imagePathFor(it.point.sourceImageRef) } != null) {
+            add(CallMenuKind.POST to MenuItem("See the original post") { viewingImage = true })
+        }
+        add(CallMenuKind.COPY to MenuItem("Copy") { clipboard.setText(AnnotatedString(call.asCopyText())) })
+        call.reportId?.let { id -> add(CallMenuKind.REPORT to MenuItem("Open its report") { appState.openSavedResult(id) }) }
+        add(CallMenuKind.ONLY to MenuItem("Show only ${call.ticker}") { appState.pages.insightsStock.value = call.ticker })
+    }
+
+    content({ openCall = key }, menu)
+
     if (confirming) {
         AskAiDialog(
             call = call,
-            model = askModel,
-            searching = searching,
-            newsWindowDays = newsWindow,
+            model = env.askModel,
+            searching = env.searching,
+            newsWindowDays = env.newsWindow,
             onConfirm = {
                 confirming = false
                 awaiting = true
-                onAsk(false)
+                appState.askAboutCall(call, false)
             },
             onDismiss = { confirming = false },
         )
@@ -940,582 +801,11 @@ private fun ScoredCallRow(
                 {
                     showing = false
                     awaiting = true
-                    onAsk(true)
+                    appState.askAboutCall(call, true)
                 }
             },
             onDismiss = { showing = false },
         )
-    }
-    // The arrival flash takes the edge for as long as it runs, then the held outline has it back.
-    // Outlined where the user is actually in the trade, in the colour of where that stands: the
-    // figures on this card judge the channel, and the outline says what it cost or made you.
-    val border = arrivalFlash(highlighted, onHighlightShown, held?.status?.tone()) ?: heldBorder(held)
-    val body: @Composable ColumnScope.() -> Unit = {
-        // Measured once, at the top: a two-column grid never splits this card any more (see
-        // SessionCard), so a card's own width is the container's - ~380-411dp on a phone, 614dp
-        // or more once the Fold opens or on a tablet. `wide` decides three things below: whether
-        // the header runs as one column or two panes side by side, whether PriceLadder or the full
-        // PriceChart draws under it, and whether the two figure panels stack or sit side by side.
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val wide = maxWidth >= WideCardMinWidth
-            Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                // The stock and the verdict on it - logo, ticker, badge, the Arabic name, the
-                // outcome/timing pills.
-                val identityBlock: @Composable ColumnScope.() -> Unit = {
-                    // The logo and the ticker press together as one target rather than the text
-                    // alone, exactly as they do on the recommendation card: a 12sp glyph beside a
-                    // title is two touch targets where the reader sees one thing. The card's own
-                    // press, where it has one, opens the trade taken on this call - so this is a
-                    // second target on a card that already had one, and the smaller of the two is
-                    // the one that leads to the stock. See LocalOpenStock.
-                    val nameBlock: @Composable () -> Unit = {
-                        val openStock = LocalOpenStock.current
-                        var filteringTicker by remember(call.ticker) { mutableStateOf(false) }
-                        // The logo sits beside the ticker-and-name pair rather than the ticker
-                        // alone, and CenterVertically is what centers it against both lines
-                        // rather than just the first - which is also what puts the name flush
-                        // under the ticker with no padding hack: it is simply the next line in
-                        // the same column.
-                        Row(
-                            Modifier.combinedClickable(
-                                onClick = { openStock(call.ticker) },
-                                onLongClick = { filteringTicker = true },
-                            ),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(call.ticker, style = MaterialTheme.typography.titleSmall)
-                                    Egx33Badge(call.ticker, Modifier.padding(start = Space.s))
-                                }
-                                // Arabic only - the English name read as a second, redundant
-                                // label beside a ticker that already says the stock in Latin
-                                // letters.
-                                call.companyArabic?.takeIf(String::isNotBlank)?.let {
-                                    Text(
-                                        it,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = palette.muted,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        }
-                        if (filteringTicker) {
-                            HoldPrompt(
-                                title = call.ticker,
-                                actions = listOf(
-                                    HoldAction("Filter this page to ${call.ticker}", primary = true) {
-                                        filteringTicker = false
-                                        appState.pages.insightsStock.value = call.ticker
-                                    },
-                                ),
-                                onDismiss = { filteringTicker = false },
-                            )
-                        }
-                    }
-                    if (wide) {
-                        // Wrapped rather than stacked in the top-right corner: a fixed vertical
-                        // stack there forced the header's height to the taller of the name block
-                        // and the two pills, which left empty air under whichever was shorter -
-                        // most often the name. Flowed here, left-aligned like everything else in
-                        // the header, the row costs only the height it actually needs and grows
-                        // sideways before it grows down. Kept on the unfolded/wide layout only -
-                        // the top-right column below is the narrow case's own. Asked for on
-                        // 2026-09-20.
-                        nameBlock()
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                            OutcomeLabel(call)
-                            TimingLabel(call)
-                        }
-                    } else {
-                        // Top-aligned, and the pills sit in a column of their own on the right -
-                        // the same place and the same shape the recommendation card puts its own
-                        // Timing and Edited chips, so a call read on one tab and again on the
-                        // other has its verdict in the same corner both times. The cover screen's
-                        // own case: narrow enough that a name block and a pill column are already
-                        // reading as two separate things rather than one crowded header. Asked
-                        // for on 2026-09-20.
-                        Row(verticalAlignment = Alignment.Top) {
-                            Box(Modifier.weight(1f)) { nameBlock() }
-                            Spacer(Modifier.width(Space.s))
-                            // Each pill is an OutlinePill Surface(onClick = ...), and Material3's
-                            // clickable Surface silently pads itself out to a 48dp touch target,
-                            // centering the small pill inside that invisible box. Stacked tightly
-                            // here, that padding - not the 4dp spacedBy below - was the real gap
-                            // between "Still open" and "T+1", and it was also what pushed the
-                            // narrower T+1 pill off the left edge the Column already asks for.
-                            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-                                Column(
-                                    Modifier.padding(top = Space.s, end = Space.s),
-                                    horizontalAlignment = Alignment.Start,
-                                    verticalArrangement = Arrangement.spacedBy(Space.xs),
-                                ) {
-                                    OutcomeLabel(call)
-                                    TimingLabel(call)
-                                }
-                            }
-                        }
-                    }
-                }
-                // Who made the call, when, and what they're worth - a fact about the source, not
-                // about the stock, so on a narrow card it starts at the card's own edge rather
-                // than falling in under the name block above it, and on a wide one it gets a pane
-                // of its own rather than sharing the identity's.
-                val sourceBlock: @Composable ColumnScope.() -> Unit = {
-                    // "called <date>" rides on the channel's own line now rather than opening the
-                    // row below - it is the one fact about a call's dating that every card has, so
-                    // it reads as part of naming the source rather than as the first of a list.
-                    FlowRow(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                        Text(
-                            call.channel,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = palette.ink,
-                        )
-                        Text(
-                            "·",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = palette.muted,
-                            modifier = Modifier.padding(horizontal = Space.xs),
-                        )
-                        Text(
-                            "called ${call.openedOn.format(AppDates.DayMonthYear)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = palette.muted,
-                        )
-                    }
-                    // Pieces rather than one joined string, so the middot between them can carry
-                    // real dp padding - Space.s each side - instead of riding on a couple of
-                    // characters of the string's own spacing. A FlowRow rather than a Row: both
-                    // can be present at once, and the single Text this replaced used to wrap onto
-                    // a second line rather than run off the card. Guarded on there being anything
-                    // to say: "called" moved up onto the channel's line above, so most calls have
-                    // neither a settled date nor a repeat, and an empty FlowRow would still claim
-                    // the gap that used to be "called"'s.
-                    val segments = listOfNotNull(
-                        call.settledOn?.let { "settled ${it.format(AppDates.DayMonthYear)}" },
-                        // The channel did post it that day, so the card stays; it is the same
-                        // bet as the call it repeats, so no rate counts it twice.
-                        call.repeatOf?.let {
-                            "repeat of ${it.format(AppDates.DayMonthYear)}, counted once"
-                        },
-                    )
-                    if (segments.isNotEmpty()) {
-                        FlowRow(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                            segments.forEachIndexed { index, segment ->
-                                Text(
-                                    segment,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = palette.muted,
-                                )
-                                if (index != segments.lastIndex) {
-                                    Text(
-                                        "·",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = palette.muted,
-                                        modifier = Modifier.padding(horizontal = Space.s),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    // The source's own record and what the other channels around this call are
-                    // doing - both are about who made the call rather than about the call's own
-                    // numbers, so they read with the rest of the header instead of falling below
-                    // the rule with the figures the app measured.
-                    SourceRecord(channelScore)
-                    CallContext(call)
-                }
-                if (wide) {
-                    // Two panes rather than one wide column: the identity and the source are two
-                    // different questions ("what, and what does it look like" against "who, and
-                    // are they worth reading"), and a phone reads them stacked only because there
-                    // is nowhere else to put the second one.
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.xl)) {
-                        Column(
-                            Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(Space.xs),
-                            content = identityBlock,
-                        )
-                        Column(
-                            Modifier.weight(1.6f),
-                            verticalArrangement = Arrangement.spacedBy(Space.xs),
-                            content = sourceBlock,
-                        )
-                    }
-                } else {
-                    // sourceBlock is a flat ColumnScope lambda - its four lines land as direct
-                    // siblings of identityBlock in this one Column, so a wider arrangement here
-                    // would space every line of the source info apart, not just the one gap that
-                    // was asked to widen. The arrangement stays .xs, matching every other gap in
-                    // both blocks, and the one extra step - a 2dp spacer standing only between
-                    // the two blocks, on top of the two Space.xs gaps arrangement already puts
-                    // around it - takes that one gap to 10dp: the Arabic name and the channel
-                    // name below it read as one run-on block at .xs alone, where the wide layout
-                    // already keeps them apart in separate panes. Asked for on 2026-09-20.
-                    Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                        identityBlock()
-                        Spacer(Modifier.height(2.dp))
-                        sourceBlock()
-                    }
-                }
-                Hairline()
-                ExtractionWarning(call, appState)
-                // What the outline means, in one line. Everything else on this card judges the
-                // channel on the levels it printed; this is the only figure here measured from
-                // what was paid.
-                held?.let { position ->
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "${position.status.label} · bought at " +
-                                "${formatPrice(position.position.entryPrice)} · " +
-                                formatPercent(position.returnPct),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = position.status.tone(),
-                            // fill = false so the arrow sits against the end of the line rather than
-                            // out at the card's edge, where it would read as unrelated to it.
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        // The one hint that the card leads somewhere. A whole card being pressable is
-                        // invisible otherwise, and this is the line the trade is named on.
-                        if (onOpenTrade != null) {
-                            Icon(
-                                Icons.AutoMirrored.Outlined.ArrowForward,
-                                // The press is described where it is declared; a reader announcing the
-                                // glyph as well would say it twice.
-                                contentDescription = null,
-                                tint = position.status.tone(),
-                                modifier = Modifier.size(IconSize.Inline),
-                            )
-                        }
-                    }
-                }
-                // The shape of the call, which four prices in a column cannot show: whether it
-                // risked a little for a lot or the reverse, and how far up that scale the stock
-                // actually got. The same drawing the Results tab has always used for the same five
-                // levels, so a call read on one tab and again on the other is the same picture in
-                // both places. Named once so the wide fallback below can draw it too, and wrapped
-                // in the same neutral tile "The call" is tinted with - neither the ladder nor the
-                // chart is a verdict the app is drawing attention to, unlike "What happened"'s own
-                // rose wash.
-                val ladder: @Composable () -> Unit = {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .kitPanel(),
-                    ) {
-                        PriceLadder(
-                            stopLoss = call.stopLoss,
-                            entryLow = call.entryLow,
-                            entryHigh = call.entryHigh,
-                            target1 = call.target1,
-                            target2 = call.target2,
-                            // The extreme inside the judged window, which the figure below it says too.
-                            reached = call.peakHigh,
-                        )
-                    }
-                }
-                if (wide) {
-                    // Fetched eagerly, because whether to fall back to the ladder is a decision
-                    // this card has to make before it knows whether there is a line to draw - a
-                    // wide card shows one or the other, never an empty chart.
-                    val history = rememberPriceHistory(appState, call.ticker)
-                    if (history.count { it.close != null } > 1) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .kitPanel(),
-                        ) {
-                            // The full chart in the ladder's place: there's finally width to spend
-                            // on how the stock actually got from the entry to wherever it settled,
-                            // not only where the five levels sit.
-                            CallChartSection(call, history)
-                        }
-                    } else {
-                        ladder()
-                    }
-                } else {
-                    ladder()
-                }
-                // Two groups rather than eight loose figures: what the channel asked for, and what
-                // the market did about it. Each in its own tinted panel now rather than ruled apart
-                // by a hairline - a boundary the eye lost once a group wrapped onto three rows -
-                // and the heading takes the page's own accent, so the two read as the card's
-                // structure rather than another muted caption. Taken as `Modifier ->` lambdas
-                // rather than drawn in place, so the wide branch below can weight them side by
-                // side instead of wrapping each in a second Box just to size it.
-                val theCallPanel: @Composable (Modifier) -> Unit = { panelModifier ->
-                    Box(
-                        panelModifier
-                            .kitPanel(),
-                    ) {
-                        FigureGroup(
-                            "The call",
-                            listOfNotNull(
-                                // Paid and risked first, aimed at second: wrapped two-up this keeps the targets
-                                // side by side in reading order rather than splitting them across rows.
-                                {
-                                    Figure(
-                                        "Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry,
-                                        // The base the three percentages below are measured from, said once
-                                        // where they can all be read against it.
-                                        caption = call.entryMidCaption(),
-                                    )
-                                },
-                                // A price on its own says nothing across stocks: 59.80 is a wide stop on one
-                                // share and a tight one on another, and the distance is the half that compares.
-                                {
-                                    Figure(
-                                        "Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f),
-                                        tone = PriceRole.stop, caption = call.fromEntry(call.stopLoss).distance(),
-                                    )
-                                },
-                                {
-                                    Figure(
-                                        "Target 1", formatPrice(call.target1), Modifier.weight(1f),
-                                        tone = PriceRole.target, caption = call.fromEntry(call.target1).distance(),
-                                    )
-                                },
-                                {
-                                    Figure(
-                                        "Target 2", formatPrice(call.target2), Modifier.weight(1f),
-                                        tone = PriceRole.target, caption = call.fromEntry(call.target2).distance(),
-                                    )
-                                },
-                                // What the four figures above come to, as a figure of its own rather than a
-                                // caption underneath - absent rather than blank for a call missing a level it
-                                // needs. The market's own blue: it is read off the four prices above it, not
-                                // printed by the channel, the same reason Peak/Trough/Latest close wear it.
-                                call.riskReward?.let { ratio ->
-                                    {
-                                        Figure(
-                                            "Risk : reward", ratio.asRatio(), Modifier.weight(1f),
-                                            tone = PriceRole.market,
-                                        )
-                                    }
-                                },
-                            ),
-                            
-                        )
-                    }
-                }
-                // The market's own hue, not the neutral tile above: it is the one group on this
-                // card measured from what actually happened rather than what the channel asked for.
-                val whatHappenedPanel: @Composable (Modifier) -> Unit = { panelModifier ->
-                    Box(
-                        panelModifier
-                            .kitPanel(),
-                    ) {
-                        FigureGroup(
-                            "What happened",
-                            listOf(
-                                // Bare, with the session that set each underneath. Neither "in window" nor
-                                // "since call" is true any more: there is no window to be in, and the scorer
-                                // stops at the session a call settles on, so on a call settled three weeks ago
-                                // these are the extremes up to that day and not up to today - while a partial
-                                // hit goes on collecting them after its own settlement. One label cannot say
-                                // all three, and the date under the figure says the only part that matters.
-                                {
-                                    Figure(
-                                        "Peak", formatPrice(call.peakHigh), Modifier.weight(1f),
-                                        tone = PriceRole.market, on = call.peakOn,
-                                    )
-                                },
-                                {
-                                    Figure(
-                                        "Trough", formatPrice(call.troughLow), Modifier.weight(1f),
-                                        tone = PriceRole.market, on = call.troughOn,
-                                    )
-                                },
-                                {
-                                    Figure(
-                                        // Two different facts under one label: sessions to settlement on a call
-                                        // that settled, sessions so far on one still running. Said, rather than
-                                        // left to the reader to infer from the outcome chip.
-                                        if (call.settledOn != null) "Sessions to settle" else "Sessions elapsed",
-                                        // The bare count, where it used to be read against a denominator. There
-                                        // is no deadline to be twelve-of-twelve against any more: a call runs
-                                        // until the market settles it, so how long that took is the whole of
-                                        // the figure and the fraction only invited it to be read as progress
-                                        // toward expiring.
-                                        call.sessionsElapsed.toString(),
-                                        Modifier.weight(1f),
-                                        // The one call that does have a deadline, printed by the channel on the
-                                        // card itself. Without it a T+1 call reading "2" looks like a fast
-                                        // settlement rather than the only two sessions it was ever given. The
-                                        // chip above names it as T+1; this says how many sessions that was.
-                                        caption = "${call.windowSessions} in all"
-                                            .takeIf { call.isTPlusOne },
-                                    )
-                                },
-                                {
-                                    Figure(
-                                        "Return",
-                                        // Withheld, not corrected, where the level it was measured at is one
-                                        // the fault chip above already says cannot be right - a dash beside
-                                        // "Stop sits above the buy zone" is the honest pair. See
-                                        // CallSanity.invalidatesReturn.
-                                        call.believableReturn.signedPercent(),
-                                        Modifier.weight(1f),
-                                        // Amber, not green. The figure is the return to target 1 and it is
-                                        // correct, but the trade gave it back - and drawn in the target's own
-                                        // colour it read as a win on a card whose only other word for it was
-                                        // hidden behind the chip.
-                                        tone = if (call.stoppedAfterPartial) {
-                                            extraColors.expired
-                                        } else {
-                                            PriceRole.forReturn(call.believableReturn)
-                                        },
-                                        // A call that ran out of time reached no level it named, so its return
-                                        // is measured to wherever the horizon left it. Said on the card,
-                                        // because that is a different kind of figure from a return to a target
-                                        // the market actually got to.
-                                        caption = when {
-                                            call.believableReturn == null -> "not measurable from these levels"
-                                            call.stoppedAfterPartial -> "to target 1, then stopped"
-                                            call.outcome == Outcome.EXPIRED -> "to the last close"
-                                            else -> null
-                                        },
-                                    )
-                                },
-                                // Where the stock actually is, which every other figure here stops short of
-                                // saying: peak and trough are the extremes of the window and the return is
-                                // measured to wherever the call settled, so a card could report a target hit
-                                // three weeks ago and give no clue what the price has done since.
-                                {
-                                    Figure(
-                                        "Latest close",
-                                        formatPrice(latest?.session?.close),
-                                        Modifier.weight(1f),
-                                        tone = PriceRole.market,
-                                        caption = latest?.let { price ->
-                                            listOfNotNull(
-                                                price.session.date.format(AppDates.DayMonth),
-                                                call.fromEntry(price.session.close).distance(),
-                                                // Named as what it is rather than as a warning: the session has
-                                                // not closed, so the figure beside it is going to move.
-                                                if (price.provisional) "still trading" else null,
-                                            ).joinToString(" · ")
-                                        },
-                                    )
-                                },
-                            ),
-                            
-                        )
-                    }
-                }
-                // A pair of equals - AdaptivePanes with mainWeight 1f, its own house rule for
-                // exactly this - rather than a bespoke Row: two panels of equal standing ending at
-                // two different heights reads as one of them having failed to load, and a second
-                // hand-rolled height tracker would be a second thing this app measures panes with.
-                // `minWidth` matches `wide` exactly, so the panels never disagree with the header
-                // and the chart about when there is room to stand side by side.
-                AdaptivePanes(
-                    minWidth = WideCardMinWidth,
-                    mainWeight = 1f,
-                    alignHeights = true,
-                    // fillMaxHeight, because alignHeights stretches the two *columns* and the
-                    // tinted Box inside each panel keeps its own height regardless - so the
-                    // shorter panel's stretch was invisible empty space under it, which is the
-                    // exact mismatch alignHeights exists to remove. See AnalyzeScreen's own pair
-                    // for the same fix, hit first.
-                    main = { theCallPanel(Modifier.fillMaxWidth().fillMaxHeight()) },
-                    side = { whatHappenedPanel(Modifier.fillMaxWidth().fillMaxHeight()) },
-                )
-                // Separates the figures, read together above it, from what this footer answers -
-                // the same rule the recommendation card's own footer divider already follows.
-                Hairline()
-                // Wrapped rather than laid in a row: at 280dp the two labels together are wider than
-                // the card, and a button pushed off the edge is a button nobody can press.
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    AskAiButton(
-                        label = when {
-                            asking -> "Asking\u2026"
-                            // Named for what it holds once there is something to open. The button that
-                            // spends money and the button that reopens a saved answer must not read
-                            // alike, or the free press looks like the paid one - which is why the saved
-                            // one is drawn as a ring rather than a filled pill, not only worded apart.
-                            opinion != null -> "AI Response"
-                            else -> "Ask AI"
-                        },
-                        onClick = { if (opinion == null) confirming = true else showing = true },
-                        look = if (opinion != null && !asking) AiLook.Outlined else AiLook.Filled,
-                        // A second request while the first is still out would be paid for twice and
-                        // answer the same question.
-                        enabled = !asking,
-                        working = asking,
-                    )
-                    if (call.sessions.isNotEmpty()) {
-                        PriceFeedButton(expanded) { expanded = !expanded }
-                    }
-                }
-                if (call.sessions.isNotEmpty()) {
-                    AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) { SessionTable(call.sessions) }
-                }
-            }
-        }
-    }
-
-    // Two overloads over one body rather than a clickable wrapped round the card: Material's own
-    // pressable card is what keeps the ripple inside the corners, and an unheld call must not
-    // answer a *tap* at all - there is nothing to open. A hold is offered either way - see
-    // [HoldPrompt] - so the unheld branch still listens for one, through a plain pointer detector
-    // rather than `combinedClickable`, which cannot offer a long click without also drawing a tap
-    // ripple over a press that would otherwise do nothing.
-    if (onOpenTrade == null) {
-        Column(
-            modifier
-                .fillMaxWidth()
-                .callTile(border)
-                .pointerInput(Unit) { detectTapGestures(onLongPress = { holding = true }) },
-            content = body,
-        )
-    } else {
-        Column(
-            modifier = modifier.fillMaxWidth()
-                .callTile(border)
-                .combinedClickable(
-                    onClickLabel = "Open this trade in the Portfolio",
-                    onClick = onOpenTrade,
-                    onLongClick = { holding = true },
-                ),
-            content = body,
-        )
-    }
-    if (holding) {
-        val imagePath = occurrence?.let { it.saved.result.imagePathFor(it.point.sourceImageRef) }
-        val clipboard = LocalClipboardManager.current
-        val actions = buildList {
-            if (imagePath != null) {
-                add(HoldAction("View screenshot") { holding = false; viewingImage = true })
-            }
-            add(
-                HoldAction("Copy call") {
-                    holding = false
-                    clipboard.setText(AnnotatedString(call.asCopyText()))
-                },
-            )
-            call.reportId?.let { reportId ->
-                add(
-                    HoldAction("Open its report") {
-                        holding = false
-                        appState.openSavedResult(reportId)
-                    },
-                )
-            }
-            if (held == null) {
-                add(HoldAction("Bought", primary = true) { holding = false; buying = true })
-            }
-        }
-        if (actions.isNotEmpty()) {
-            HoldPrompt(title = call.ticker, actions = actions, onDismiss = { holding = false })
-        }
     }
     if (viewingImage && occurrence != null) {
         SourceImageViewer(
@@ -1525,11 +815,7 @@ private fun ScoredCallRow(
         )
     }
     if (buying) {
-        val offeredWindow = if (call.isTPlusOne) {
-            call.windowSessions
-        } else {
-            appState.appPreferences.defaultTradeWindowSessions
-        }
+        val offeredWindow = if (call.isTPlusOne) call.windowSessions else appState.appPreferences.defaultTradeWindowSessions
         TradeDialog(
             title = "Record the purchase",
             explanation = "The price you actually paid, which is what every figure for this " +
@@ -1570,6 +856,681 @@ private fun ScoredCallRow(
                 )
             },
         )
+    }
+    if (showSheet && openCall == key && LocalFoldPosture.current !is FoldPosture.Tabletop) {
+        CallSheet(call, env, held, menu, onDismiss = { openCall = null })
+    }
+}
+
+/** The logo, ticker, badge and Arabic name. The logo and ticker press together, to the stock. */
+@Composable
+private fun CallName(call: ScoredCall, modifier: Modifier = Modifier) {
+    val openStock = LocalOpenStock.current
+    Row(
+        modifier.clickable(onClickLabel = "Open ${call.ticker}") { openStock(call.ticker) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.s))
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(call.ticker, style = MaterialTheme.typography.titleSmall)
+                Egx33Badge(call.ticker, Modifier.padding(start = Space.s))
+            }
+            call.companyArabic?.takeIf(String::isNotBlank)?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.muted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** The return, in the card's top-right corner, with what it is measured to underneath. */
+@Composable
+private fun CallReturn(call: ScoredCall) {
+    // Amber, not green, where the trade gave target 1 back: drawn in the target's own colour it
+    // read as a win on a card whose only other word for it was hidden behind the chip.
+    val tone = if (call.stoppedAfterPartial) extraColors.expired else PriceRole.forReturn(call.believableReturn)
+    val caption = when {
+        call.believableReturn == null -> null
+        call.stoppedAfterPartial -> "to target 1, then stopped"
+        call.isTPlusOne -> "next-day call"
+        call.outcome == Outcome.EXPIRED -> "at the last close"
+        !call.outcome.judged -> "so far"
+        else -> "in ${call.sessionsElapsed} trading ${if (call.sessionsElapsed == 1) "day" else "days"}"
+    }
+    Column(horizontalAlignment = Alignment.End) {
+        // Withheld, not corrected, where the level it was measured at is one the fault warning
+        // already says cannot be right. See CallSanity.invalidatesReturn.
+        Text(
+            call.believableReturn.signedPercent(),
+            style = MaterialTheme.typography.titleLarge.copy(fontFamily = TabularFigures),
+            color = tone,
+        )
+        caption?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = palette.muted) }
+    }
+}
+
+/** What the outline means, in one line: the one figure here measured from what was paid. */
+@Composable
+private fun HeldLine(position: PositionView) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "${position.status.label} · bought at ${formatPrice(position.position.entryPrice)} · " +
+                formatPercent(position.returnPct),
+            style = MaterialTheme.typography.labelMedium,
+            color = position.status.tone(),
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Icon(
+            Icons.AutoMirrored.Outlined.ArrowForward,
+            contentDescription = null,
+            tint = position.status.tone(),
+            modifier = Modifier.size(IconSize.Inline),
+        )
+    }
+}
+
+/** The ladder with the stretch the price travelled drawn along it, and the peak's arrow. */
+@Composable
+private fun CallLadder(call: ScoredCall, modifier: Modifier = Modifier, compact: Boolean = false) {
+    val low = call.troughLow
+    val high = call.peakHigh
+    PriceLadder(
+        stopLoss = call.stopLoss,
+        entryLow = call.entryLow,
+        entryHigh = call.entryHigh,
+        target1 = call.target1,
+        target2 = call.target2,
+        modifier = modifier,
+        reached = high,
+        compact = compact,
+        travelled = if (low != null && high != null && low <= high) low..high else null,
+    )
+}
+
+/**
+ * A finished - or still running - call: who and what, its return, its status, and where it went on
+ * its ladder. A tap opens the call in full; a hold opens what can be done about it. Until 5.1 a tap
+ * opened the trade and an unheld card answered none; the trade is in the hold menu and the sheet.
+ */
+@Composable
+private fun FinishedCallCard(
+    call: ScoredCall,
+    appState: AppState,
+    held: PositionView?,
+    highlighted: Boolean,
+    onHighlightShown: () -> Unit,
+    onOpen: () -> Unit,
+    menu: List<MenuItem>,
+    modifier: Modifier = Modifier,
+) {
+    // The arrival flash takes the edge for as long as it runs, then the held outline has it back.
+    val border = arrivalFlash(highlighted, onHighlightShown, held?.status?.tone()) ?: heldBorder(held)
+    HoldMenu(items = menu, modifier = modifier.fillMaxWidth(), onTap = onOpen) {
+        Column(
+            Modifier.fillMaxWidth().callTile(border).padding(Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                CallName(call, Modifier.weight(1f))
+                Spacer(Modifier.width(Space.s))
+                CallReturn(call)
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(Space.xs),
+                verticalArrangement = Arrangement.spacedBy(Space.xs),
+            ) {
+                KitTag(call.outcome.plainWord(), tone = call.outcome.cardTone(), filled = true, ink = palette.ink)
+                KitTag(call.channel, tone = palette.muted)
+                TimingLabel(call)
+            }
+            ExtractionWarning(call, appState)
+            held?.let { HeldLine(it) }
+            CallLadder(call)
+        }
+    }
+}
+
+/**
+ * A call the scorer set aside - the entry never traded, no prices, a change of scale, or two levels
+ * that cannot be ordered. Dashed, with the reason and no return or ladder: it says nothing about
+ * the source, and a figure on it would be read as though it did.
+ */
+@Composable
+private fun NotCountedCard(call: ScoredCall, onOpen: () -> Unit, menu: List<MenuItem>, modifier: Modifier = Modifier) {
+    HoldMenu(items = menu, modifier = modifier.fillMaxWidth(), onTap = onOpen) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(Kit.TileShape)
+                .dashedOutline(palette.line)
+                .padding(Space.m),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CallName(call, Modifier.weight(1f))
+                KitTag("Not counted", tone = palette.muted)
+            }
+            Text(call.notCountedReason(), style = MaterialTheme.typography.bodySmall, color = palette.muted)
+        }
+    }
+}
+
+/** The first sentence of [reason], said plainly for the one case it words technically. */
+private fun ScoredCall.notCountedReason(): String =
+    if (outcome == Outcome.ENTRY_NOT_REACHED) {
+        "The price never came into the buying range"
+    } else {
+        reason().substringBefore(". ").removeSuffix(".")
+    }
+
+/**
+ * One call in full: its chart, what happened in order, three figures, and everything else behind
+ * More numbers. Opened by a tap on any call; a side panel unfolded and in book posture.
+ */
+@Composable
+private fun CallSheet(
+    call: ScoredCall,
+    env: CallEnv,
+    held: PositionView?,
+    menu: List<Pair<CallMenuKind, MenuItem>>,
+    onDismiss: () -> Unit,
+) {
+    val appState = env.appState
+    val latest = env.latestFor(call.ticker)
+    KitSheet(onDismiss = onDismiss, posture = LocalFoldPosture.current, title = call.ticker) {
+        Row(verticalAlignment = Alignment.Top) {
+            CallName(call, Modifier.weight(1f))
+            CallReturn(call)
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+            KitTag(call.outcome.plainWord(), tone = call.outcome.cardTone(), filled = true, ink = palette.ink)
+            KitTag(call.channel, tone = palette.muted)
+            TimingLabel(call)
+        }
+        held?.let { HeldLine(it) }
+        // The chart where there is more than one close to draw a line through, else the ladder.
+        val history = rememberPriceHistory(appState, call.ticker)
+        Box(Modifier.fillMaxWidth().kitPanel()) {
+            if (history.count { it.close != null } > 1) CallChartSection(call, history) else CallLadder(call)
+        }
+        Timeline(call.timeline().map { it.asStep() })
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            FigureCell(call.fromEntry(call.troughLow).signedPercent(), "Lowest dip", Modifier.weight(1f), PriceRole.stop)
+            FigureCell(call.riskReward?.asRatio() ?: Dash, "Gain vs risk", Modifier.weight(1f))
+            FigureCell(formatPrice(latest?.session?.close), "Now", Modifier.weight(1f), PriceRole.market)
+        }
+        MoreRow("More numbers", appState.pages.insightsRow("call:${call.opinionKey()}")) {
+            TheCallPanel(call, Modifier.fillMaxWidth())
+            WhatHappenedPanel(call, latest, Modifier.fillMaxWidth())
+            CallSourceLines(call)
+            SourceRecord(env.scoreFor(call.channel))
+            CallContext(call)
+            if (call.sessions.isNotEmpty()) SessionTable(call.sessions)
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            menu.forEach { (kind, item) ->
+                val label = when (kind) {
+                    CallMenuKind.ASK, CallMenuKind.TRADE -> item.label
+                    CallMenuKind.POST -> "Original post"
+                    CallMenuKind.CHART -> "Chart"
+                    else -> null
+                }
+                label?.let { KitButton(it, onClick = item.onClick, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL) }
+            }
+        }
+        SheetFooterSpacer()
+    }
+}
+
+/** A step of the model's timeline as the kit draws it. */
+private fun CallStep.asStep(): TimelineStep = TimelineStep(
+    text = text,
+    detail = detail,
+    date = date?.format(AppDates.DayMonth),
+    tone = when (kind) {
+        CallStepKind.DONE -> StepTone.DONE
+        CallStepKind.ACTIVE -> StepTone.ACTIVE
+        CallStepKind.WAITING -> StepTone.WAITING
+        CallStepKind.GOOD -> StepTone.GOOD
+        CallStepKind.BAD -> StepTone.BAD
+    },
+)
+
+/** Who made the call and when, and when it settled - the lines the card used to carry. */
+@Composable
+private fun CallSourceLines(call: ScoredCall) {
+    Text(
+        "${call.channel} · called ${call.openedOn.format(AppDates.DayMonthYear)}",
+        style = MaterialTheme.typography.bodySmall,
+        color = palette.muted,
+    )
+    val segments = listOfNotNull(
+        call.settledOn?.let { "settled ${it.format(AppDates.DayMonthYear)}" },
+        // The channel did post it that day, so the card stays; it is the same bet as the call it
+        // repeats, so no rate counts it twice.
+        call.repeatOf?.let { "repeat of ${it.format(AppDates.DayMonthYear)}, counted once" },
+    )
+    if (segments.isNotEmpty()) {
+        Text(segments.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = palette.muted)
+    }
+}
+
+/** What the channel asked for: the four levels, each with its distance from the entry. */
+@Composable
+private fun TheCallPanel(call: ScoredCall, modifier: Modifier = Modifier) {
+    Box(modifier.kitPanel()) {
+        FigureGroup(
+            "The call",
+            listOfNotNull(
+                {
+                    Figure(
+                        "Entry", call.entryRange(), Modifier.weight(1f), tone = PriceRole.entry,
+                        caption = call.entryMidCaption(),
+                    )
+                },
+                {
+                    Figure(
+                        "Stop loss", formatPrice(call.stopLoss), Modifier.weight(1f),
+                        tone = PriceRole.stop, caption = call.fromEntry(call.stopLoss).distance(),
+                    )
+                },
+                {
+                    Figure(
+                        "Target 1", formatPrice(call.target1), Modifier.weight(1f),
+                        tone = PriceRole.target, caption = call.fromEntry(call.target1).distance(),
+                    )
+                },
+                {
+                    Figure(
+                        "Target 2", formatPrice(call.target2), Modifier.weight(1f),
+                        tone = PriceRole.target, caption = call.fromEntry(call.target2).distance(),
+                    )
+                },
+                call.riskReward?.let { ratio ->
+                    { Figure("Risk : reward", ratio.asRatio(), Modifier.weight(1f), tone = PriceRole.market) }
+                },
+            ),
+        )
+    }
+}
+
+/** What the market did about it, measured rather than printed. */
+@Composable
+private fun WhatHappenedPanel(call: ScoredCall, latest: LatestPrice?, modifier: Modifier = Modifier) {
+    Box(modifier.kitPanel()) {
+        FigureGroup(
+            "What happened",
+            listOf(
+                { Figure("Peak", formatPrice(call.peakHigh), Modifier.weight(1f), tone = PriceRole.market, on = call.peakOn) },
+                { Figure("Trough", formatPrice(call.troughLow), Modifier.weight(1f), tone = PriceRole.market, on = call.troughOn) },
+                {
+                    Figure(
+                        if (call.settledOn != null) "Sessions to settle" else "Sessions elapsed",
+                        call.sessionsElapsed.toString(),
+                        Modifier.weight(1f),
+                        // The one call that does have a deadline, printed by the channel itself.
+                        caption = "${call.windowSessions} in all".takeIf { call.isTPlusOne },
+                    )
+                },
+                {
+                    Figure(
+                        "Return",
+                        call.believableReturn.signedPercent(),
+                        Modifier.weight(1f),
+                        tone = if (call.stoppedAfterPartial) extraColors.expired else PriceRole.forReturn(call.believableReturn),
+                        caption = when {
+                            call.believableReturn == null -> "not measurable from these levels"
+                            call.stoppedAfterPartial -> "to target 1, then stopped"
+                            call.outcome == Outcome.EXPIRED -> "to the last close"
+                            else -> null
+                        },
+                    )
+                },
+                {
+                    Figure(
+                        "Latest close",
+                        formatPrice(latest?.session?.close),
+                        Modifier.weight(1f),
+                        tone = PriceRole.market,
+                        caption = latest?.let { price ->
+                            listOfNotNull(
+                                price.session.date.format(AppDates.DayMonth),
+                                call.fromEntry(price.session.close).distance(),
+                                if (price.provisional) "still trading" else null,
+                            ).joinToString(" · ")
+                        },
+                    )
+                },
+            ),
+        )
+    }
+}
+
+/** A session's calls as the result bar divides them; what has not settled is still open. */
+private fun ScoredSession.outcomeSplit(tally: CallTally): Outcomes = Outcomes(
+    hit = tally.partialHits + tally.fullHits,
+    stopped = tally.stopped,
+    expired = tally.expired,
+    open = calls.count { it.repeatOf == null && !it.outcome.judged },
+)
+
+/** "Mon 9 Nov", the way a day of the record is named everywhere on the page. */
+private fun ScoredSession.dayName(): String = targetDate?.format(DayFormat) ?: "Target not recorded"
+
+private val DayFormat: java.time.format.DateTimeFormatter = java.time.format.DateTimeFormatter.ofPattern("EEE d MMM")
+
+/**
+ * An opened day's head, on lime: the date, how many calls from how many channels, what a call was
+ * worth, the bar, and every outcome counted. [onClose] makes it the press that folds the day away.
+ */
+@Composable
+private fun DayOpened(run: ScoredSession, tally: CallTally, onClose: (() -> Unit)? = null) {
+    val channels = run.calls.map(ScoredCall::channel).distinct().size
+    Tile(
+        Modifier.fillMaxWidth(),
+        tone = TileTone.HIGHLIGHT,
+        onClick = onClose,
+        onClickLabel = onClose?.let { "Close this day" },
+    ) {
+        Text(run.dayName(), style = MaterialTheme.typography.headlineSmall)
+        Text(
+            "${tally.calls} ${if (tally.calls == 1) "call" else "calls"} from $channels " +
+                (if (channels == 1) "channel" else "channels"),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        tally.averageReturn?.let {
+            val signals = tileSignals(TileTone.HIGHLIGHT)
+            Text(
+                "${it.signedPercent()} per call",
+                style = MaterialTheme.typography.titleLarge.copy(fontFamily = TabularFigures),
+                color = if (it >= 0) signals.gain else signals.loss,
+                modifier = Modifier.padding(top = Space.xs),
+            )
+        }
+        val split = run.outcomeSplit(tally)
+        if (split.total > 0) OutcomeStrip(split, Modifier.padding(top = Space.s))
+        Text(
+            "${tally.partialHits + tally.fullHits} reached target · ${tally.expired} ran out of time · " +
+                "${tally.stopped} stopped · ${split.open} running",
+            style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
+            modifier = Modifier.padding(top = Space.s),
+        )
+    }
+}
+
+/** The chips that narrow an opened day, `All` first; a chip is drawn only where it has calls. */
+@Composable
+private fun DayChips(calls: List<ScoredCall>, selected: String?, onSelect: (String?) -> Unit) {
+    val counts = calls.groupingBy { it.dayGroup() }.eachCount()
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        KitChip("All", selected = selected == null, onClick = { onSelect(null) })
+        DayGroups.forEach { group ->
+            val count = counts[group] ?: 0
+            if (count > 0) KitChip("$group $count", selected = selected == group, onClick = { onSelect(group) })
+        }
+    }
+}
+
+/**
+ * One day of the record. Shut, it says the day, how many calls reached a target, what a call was
+ * worth and the bar; opened, it is the lime head, the day's report, the chips, and its calls.
+ */
+@Composable
+private fun DayCard(
+    run: ScoredSession,
+    env: CallEnv,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    /** How the calls inside are laid out. Orders them; never hides one. */
+    order: CallOrder,
+    /** When the reader last had this tab open, for the New mark, read once for the page. */
+    seenAt: Long,
+    revealCall: String?,
+    onRevealShown: () -> Unit,
+    reveal: BringIntoViewRequester,
+    modifier: Modifier = Modifier,
+) {
+    val appState = env.appState
+    // One piece of arithmetic for every figure here, and the same one every rate is built from.
+    val tally = remember(run.calls) { PerformanceCalculator.tally(run.calls) }
+    // Analysed since the reader last had this tab open; nothing is new to a reader who never has.
+    val isNew = seenAt > 0L && run.lastRunAt.toEpochMilli() > seenAt
+    if (!expanded) {
+        Tile(
+            modifier.fillMaxWidth(),
+            onClick = { onExpandedChange(true) },
+            onClickLabel = "Open this day",
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val word = run.targetDate?.let { relativeDay(it, java.time.LocalDate.now(ScheduleClock.ZONE)) }
+                word?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = palette.muted) }
+                if (isNew) {
+                    Text(
+                        "New",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.heroInk,
+                        modifier = Modifier.padding(start = if (word != null) Space.s else 0.dp),
+                    )
+                }
+            }
+            Text(run.dayName(), style = MaterialTheme.typography.titleLarge)
+            Row(Modifier.padding(top = Space.xs), verticalAlignment = Alignment.Bottom) {
+                Text(
+                    "${tally.partialHits + tally.fullHits}/${tally.calls}",
+                    style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
+                )
+                Spacer(Modifier.weight(1f))
+                tally.averageReturn?.let {
+                    Text(
+                        it.signedPercent(),
+                        style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
+                        color = PriceRole.forReturn(it),
+                    )
+                }
+            }
+            val split = run.outcomeSplit(tally)
+            if (split.total > 0) OutcomeStrip(split, Modifier.padding(top = Space.s))
+        }
+        return
+    }
+    var dayFilter by appState.pages.insightsDayFilter
+    val ranAt = remember(run.lastRunAt) { AppDates.Stamp.withZone(ZoneId.systemDefault()).format(run.lastRunAt) }
+    Tile(modifier.fillMaxWidth(), contentPadding = PaddingValues(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            DayOpened(run, tally, onClose = { onExpandedChange(false) })
+            run.reportId?.let { id ->
+                KitButton(
+                    "Open that day's report",
+                    onClick = { appState.openSavedResult(id) },
+                    kind = ButtonKind.SECONDARY,
+                    size = ButtonSize.SMALL,
+                )
+            }
+            DayChips(run.calls, dayFilter) { dayFilter = it }
+            Text(
+                "The dark line on each bar is how far the price travelled.",
+                style = MaterialTheme.typography.labelSmall,
+                color = palette.muted,
+            )
+            // Two channels naming one stock for one session are two cards and one holding, so both
+            // flash; only the first is scrolled to.
+            val scrollTo = remember(run.calls, revealCall) {
+                revealCall?.let { id -> run.calls.firstOrNull { it.positionId == id } }
+            }
+            order.sort(run.calls, env.scoreFor)
+                .filter { dayFilter == null || it.dayGroup() == dayFilter }
+                .forEach { call ->
+                    val cardModifier = if (call === scrollTo) Modifier.bringIntoViewRequester(reveal) else Modifier
+                    InsightsCall(call, env) { onOpen, menu ->
+                        if (call.notCounted()) {
+                            NotCountedCard(call, onOpen, menu.map { it.second }, cardModifier)
+                        } else {
+                            FinishedCallCard(
+                                call,
+                                appState,
+                                held = appState.heldFor(call.ticker, call.openedOn),
+                                highlighted = revealCall != null && call.positionId == revealCall,
+                                onHighlightShown = onRevealShown,
+                                onOpen = onOpen,
+                                menu = menu.map { it.second },
+                                modifier = cardModifier,
+                            )
+                        }
+                    }
+                }
+            // Where the day's calls came from, and what was counted once. Said at the foot, because
+            // built from more than one run the day is not a single analysis.
+            Text(
+                listOfNotNull(
+                    if (run.runCount > 1) {
+                        "${run.channelsTotal} chats · ${run.channelsFromLatest} from the run at $ranAt · " +
+                            "the rest from ${run.runCount - 1} earlier " + (if (run.runCount == 2) "run" else "runs")
+                    } else {
+                        "${run.channelsTotal} ${if (run.channelsTotal == 1) "chat" else "chats"} · run $ranAt · ${run.model}"
+                    },
+                    tally.repeats.takeIf { it > 0 }?.let { "$it re-posted, counted once" },
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = palette.muted,
+            )
+        }
+    }
+}
+
+/**
+ * Unfolded, a day's calls as a table: the stock, where it went on its ladder, what it made, and
+ * how it stands. A row opens the call's sheet beside the page; a hold opens its menu.
+ */
+@Composable
+private fun DayCallTable(run: ScoredSession, env: CallEnv, order: CallOrder) {
+    Tile(Modifier.fillMaxWidth(), contentPadding = PaddingValues(vertical = 8.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+            TableHead("Stock", Modifier.width(DayTableStockWidth))
+            TableHead("Stop to target", Modifier.weight(1f))
+            TableHead("Made", Modifier.width(DayTableMadeWidth))
+            Spacer(Modifier.width(DayTableStatusWidth))
+        }
+        order.sort(run.calls, env.scoreFor).forEach { call ->
+            InsightsCall(call, env) { onOpen, menu ->
+                HoldMenu(items = menu.map { it.second }, onTap = onOpen) {
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.width(DayTableStockWidth)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                StockLogo(call.ticker, LogoSize.Row, Modifier.padding(end = Space.xs))
+                                Text(call.ticker, style = MaterialTheme.typography.titleSmall)
+                            }
+                            Text(call.channel, style = MaterialTheme.typography.labelSmall, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Box(Modifier.weight(1f).padding(horizontal = Space.xs)) {
+                            if (call.notCounted()) {
+                                Text(Dash, style = MaterialTheme.typography.bodyMedium, color = palette.muted)
+                            } else {
+                                CallLadder(call, compact = true)
+                            }
+                        }
+                        Text(
+                            if (call.notCounted()) Dash else call.believableReturn.signedPercent(),
+                            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
+                            color = PriceRole.forReturn(call.believableReturn),
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.width(DayTableMadeWidth),
+                        )
+                        Row(Modifier.width(DayTableStatusWidth).padding(start = Space.s), verticalAlignment = Alignment.CenterVertically) {
+                            val word = if (call.notCounted()) "Not counted" else call.outcome.plainWord()
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(call.outcome.cardTone()))
+                            AutoSizeText(word, style = MaterialTheme.typography.labelMedium, color = palette.ink, modifier = Modifier.padding(start = Space.xs).fillMaxWidth())
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TableHead(label: String, modifier: Modifier) {
+    Text(label, style = MaterialTheme.typography.labelSmall, color = palette.muted, modifier = modifier)
+}
+
+private val DayTableStockWidth = 120.dp
+private val DayTableMadeWidth = 64.dp
+private val DayTableStatusWidth = 104.dp
+
+/**
+ * Tabletop: on the upright half, the day's head, the chosen call and its story as tags; on the
+ * flat half, the days, a key per call and the call's actions. No sheet opens in this posture.
+ */
+@Composable
+private fun TabletopDay(
+    run: ScoredSession,
+    env: CallEnv,
+    posture: FoldPosture.Tabletop,
+    order: CallOrder,
+    dayPicker: @Composable () -> Unit,
+) {
+    val appState = env.appState
+    val calls = order.sort(run.calls, env.scoreFor)
+    var openCall by appState.pages.insightsOpenCall
+    val chosen = calls.firstOrNull { it.opinionKey() == openCall } ?: calls.firstOrNull { !it.notCounted() } ?: calls.firstOrNull()
+    val tally = remember(run.calls) { PerformanceCalculator.tally(run.calls) }
+    if (chosen == null) {
+        DayOpened(run, tally)
+        dayPicker()
+        return
+    }
+    InsightsCall(chosen, env, showSheet = false) { _, menu ->
+        Column(verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
+            Column(
+                Modifier.fillMaxWidth().heightIn(min = tabletopHeroHeight(posture)),
+                verticalArrangement = Arrangement.spacedBy(Kit.TileGap),
+            ) {
+                DayOpened(run, tally)
+                if (chosen.notCounted()) {
+                    NotCountedCard(chosen, onOpen = {}, menu = menu.map { it.second })
+                } else {
+                    FinishedCallCard(
+                        chosen, appState, appState.heldFor(chosen.ticker, chosen.openedOn),
+                        highlighted = false, onHighlightShown = {}, onOpen = {}, menu = menu.map { it.second },
+                    )
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    chosen.timeline().forEach { KitTag(it.text, tone = palette.muted) }
+                }
+            }
+            dayPicker()
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                calls.forEach { call ->
+                    KitChip(
+                        "● ${call.ticker} ${if (call.notCounted()) Dash else call.believableReturn.signedPercent()}",
+                        selected = call === chosen,
+                        onClick = { openCall = call.opinionKey() },
+                    )
+                }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                menu.forEach { (kind, item) ->
+                    val label = when (kind) {
+                        CallMenuKind.ASK -> item.label
+                        CallMenuKind.POST -> "Original post"
+                        CallMenuKind.CHART -> "Chart"
+                        else -> null
+                    }
+                    label?.let { KitButton(it, onClick = item.onClick, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL) }
+                }
+                run.reportId?.let { id ->
+                    KitButton("That day's report", onClick = { appState.openSavedResult(id) }, kind = ButtonKind.SECONDARY, size = ButtonSize.SMALL)
+                }
+            }
+        }
     }
 }
 
@@ -1746,7 +1707,7 @@ private fun CallContext(call: ScoredCall) {
  * behind the chip, so a two-session call and a thirty-session one looked identical until one of
  * them expired.
  *
- * Tappable and outlined like the outcome chip it sits under, for the reason [OutcomeLabel] gives:
+ * Tappable and outlined like the outcome chip it sits under, for the reason the status tags give:
  * a chip that is only sometimes tappable teaches nobody that it can be tapped. Neutral since
  * 2026-09-11: it was `primary` on the reasoning that it is neither a verdict nor a warning, which
  * is true and is not a reason to be the one differently coloured ring in a row of them.
@@ -1792,7 +1753,7 @@ private fun TimingLabel(call: ScoredCall) {
  * means the stop took the call out, and a second red saying something quite different is one the
  * reader has to stop and disambiguate.
  *
- * Tappable, and it says so by looking the same as [OutcomeLabel] - a chip that is only sometimes
+ * Tappable, and it says so by looking the same as the status tag - a chip that is only sometimes
  * tappable teaches nobody that it can be tapped.
  *
  * The sheet also offers View screenshot and Edit call, where [AppState.occurrenceFor] can still
@@ -1897,7 +1858,7 @@ internal fun AppState.occurrenceFor(call: ScoredCall): CallOccurrence? {
 /**
  * The chart [PriceLadder]'s five ticks cannot draw: how the stock actually got from the entry to
  * wherever it settled, rather than only where the five levels sit. Drawn in the ladder's place once
- * a card has the width for it - see the wide check in `ScoredCallRow`, which also decides whether
+ * a card has the width for it - see `CallSheet`, which decides whether
  * there is enough of [history] to draw a line from at all before calling this.
  *
  * Reads the same widest-range price history the position card's own chart does - [history] is
@@ -1986,18 +1947,6 @@ private fun CallChartSection(call: ScoredCall, history: List<DailySession>) {
         // levels are the reason this card exists.
         ChartControls(range = range, onRange = { range = it }, levels = null, onLevels = {})
     }
-}
-
-@Composable
-private fun PriceFeedButton(expanded: Boolean, onClick: () -> Unit) {
-    // The kit's quiet button since 5.0, beside the paid Ask AI pill: it opens a table, it spends
-    // nothing, and its arrow says which way it goes.
-    KitButton(
-        if (expanded) "Hide price feed ▴" else "Price feed ▾",
-        onClick = onClick,
-        kind = ButtonKind.SECONDARY,
-        size = ButtonSize.SMALL,
-    )
 }
 
 /** Exactly what the price feed reported for each session the call was judged on. */
@@ -2238,48 +2187,3 @@ private fun Modifier.callTile(edge: BorderStroke?): Modifier =
         .background(palette.ground)
         .then(if (edge != null) Modifier.border(edge, Kit.TileShape) else Modifier)
 
-/**
- * One session of the record: a white tile whose header says how the session went and opens it, with
- * the calls inside. Holding the header offers what [onHeaderLongClick] does.
- */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun RecordTile(
-    title: String,
-    tone: Color,
-    summary: @Composable () -> Unit,
-    expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
-    onHeaderLongClick: (() -> Unit)?,
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val p = palette
-    Tile(modifier.fillMaxWidth(), contentPadding = PaddingValues(0.dp)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .combinedClickable(
-                    onClickLabel = if (expanded) "Close this session" else "Open this session",
-                    onLongClick = onHeaderLongClick,
-                    onClick = { onExpandedChange(!expanded) },
-                )
-                .padding(16.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Box(Modifier.padding(top = 8.dp).size(10.dp).clip(CircleShape).background(tone))
-            Column(Modifier.weight(1f).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                Text(title, style = MaterialTheme.typography.titleLarge)
-                summary()
-            }
-            Text(if (expanded) "−" else "+", style = MaterialTheme.typography.titleLarge, color = p.muted)
-        }
-        AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {
-            Column(
-                Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(Space.s),
-                content = content,
-            )
-        }
-    }
-}

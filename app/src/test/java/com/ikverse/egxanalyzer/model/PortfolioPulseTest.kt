@@ -150,4 +150,28 @@ class PortfolioPulseTest {
         assertTrue(down.losing)
         assertNull(targetPath(view("NONE", 10.0, current = 10.0)))
     }
+
+    @Test
+    fun `won and lost count finished trades, and a flat one is lost`() {
+        val positions = listOf(
+            view("WIN", 10.0, exit = 11.0).copy(returnPct = 10.0),
+            view("FLAT", 10.0, exit = 10.0).copy(returnPct = 0.0),
+            view("LOSS", 10.0, exit = 9.0).copy(returnPct = -10.0),
+            // Expired, never sold: still finished, and counted.
+            view("LATE", 10.0, current = 10.5, open = false, status = PositionStatus.EXPIRED).copy(returnPct = 5.0),
+            // Still running: neither won nor lost yet.
+            view("OPEN", 10.0, current = 12.0).copy(returnPct = 20.0),
+            // Finished with no return to judge it on: left out.
+            view("NONE", 10.0, open = false, status = PositionStatus.EXPIRED),
+        )
+        assertEquals(2 to 2, wonLost(positions))
+    }
+
+    @Test
+    fun `near level leaves the late trades to Needs you`() {
+        val near = view("NEAR", 10.0, current = 9.9, stop = 9.8)
+        val late = view("LATE", 10.0, current = 10.0, overdueDays = 2)
+        val levels = nearLevel(needsYou(listOf(near, late), thresholdPercent = 2))
+        assertEquals(mapOf(near.position.id to NeedReason.NEAR_STOP), levels)
+    }
 }

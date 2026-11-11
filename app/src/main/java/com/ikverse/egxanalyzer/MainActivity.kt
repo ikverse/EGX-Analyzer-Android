@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.ikverse.egxanalyzer.data.AnalysisNotifier
+import com.ikverse.egxanalyzer.data.ReportReadyNotifier
 import com.ikverse.egxanalyzer.data.OverdueNotifier
 import com.ikverse.egxanalyzer.data.AppShortcuts
 import com.ikverse.egxanalyzer.data.AttentionNotifier
@@ -75,6 +76,10 @@ class MainActivity : ComponentActivity() {
     private fun openRequestedResult(intent: Intent?) {
         val id = intent?.getLongExtra(AnalysisNotifier.EXTRA_RESULT_ID, -1L) ?: -1L
         if (id > 0) appState.openSavedResult(id, returnTo = null)
+        // A run that did not finish: back to where it can be run again.
+        if (intent?.getBooleanExtra(ReportReadyNotifier.EXTRA_SHOW_ANALYZE, false) == true) {
+            appState.navigate(AppDestination.ANALYZE)
+        }
         // The overdue reminder names trades, so it has to land on the tab that holds them. Opening
         // the app somewhere else and leaving the user to find them would waste the notification.
         if (intent?.getBooleanExtra(OverdueNotifier.EXTRA_SHOW_PORTFOLIO, false) == true) {

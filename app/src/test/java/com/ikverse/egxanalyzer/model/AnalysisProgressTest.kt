@@ -66,8 +66,10 @@ class AnalysisProgressTest {
 
     @Test
     fun `the batch in flight is named, and never past the last`() {
-        assertEquals("Reading batch 1 of 7 · 0 of 56 images read", reading(0, 7, 0, 56).line())
-        assertEquals("Reading batch 3 of 7 · 16 of 56 images read", reading(2, 7, 16, 56).line())
+        assertEquals("Reading the posts · 0 of 56 pictures", reading(0, 7, 0, 56).line())
+        assertEquals("Reading the posts · 16 of 56 pictures", reading(2, 7, 16, 56).line())
+        // A text-only run has no pictures to count, so it counts batches.
+        assertEquals("Reading the posts · batch 3 of 7", reading(2, 7, 0, 0).line())
         // Defensive rather than expected: a count that ran past the end would read as "batch 8 of
         // 7", which is the kind of line that makes a reader distrust every other figure on screen.
         assertEquals("Batch 7 of 7", reading(9, 7, 56, 56).badge())
@@ -84,5 +86,22 @@ class AnalysisProgressTest {
         assertEquals("Correcting the report, attempt 2", writing(2).line())
         assertEquals("Writing", writing(0).badge())
         assertEquals("Correcting", writing(1).badge())
+    }
+
+    @Test
+    fun `the estimate counts pictures, and batches where there are none`() {
+        val pictures = reading(2, 7, 16, 56)
+        assertEquals(16, pictures.unitsDone)
+        assertEquals(56, pictures.units)
+        val text = reading(2, 7, 0, 0)
+        assertEquals(2, text.unitsDone)
+        assertEquals(7, text.units)
+    }
+
+    @Test
+    fun `writing gives the estimate nothing to go on`() {
+        val writing = AnalysisProgress(stage = AnalysisProgress.Stage.WRITING, batchesDone = 7, batches = 7, imagesDone = 56, images = 56)
+        // Every unit is done, so the estimate has nothing left to time.
+        assertNull(ReadingEstimate.endsAt(java.time.Instant.EPOCH, java.time.Instant.EPOCH.plusSeconds(60), writing.unitsDone, writing.units))
     }
 }

@@ -61,6 +61,12 @@ import com.ikverse.egxanalyzer.model.opinionId
 import com.ikverse.egxanalyzer.model.targetPath
 import com.ikverse.egxanalyzer.model.weeklyHitRates
 import com.ikverse.egxanalyzer.model.within
+import com.ikverse.egxanalyzer.model.wonLost
+import com.ikverse.egxanalyzer.model.PortfolioStats
+import com.ikverse.egxanalyzer.model.PositionStatus
+import com.ikverse.egxanalyzer.ui.kit.TileSignals
+import com.ikverse.egxanalyzer.ui.kit.tileSignals
+import androidx.compose.ui.graphics.Color
 import com.ikverse.egxanalyzer.ui.kit.BreadthBar
 import com.ikverse.egxanalyzer.ui.kit.ButtonKind
 import com.ikverse.egxanalyzer.ui.kit.ButtonSize
@@ -76,63 +82,54 @@ import com.ikverse.egxanalyzer.ui.theme.palette
 import java.time.LocalDate
 
 /**
- * The top of the 5.0 Portfolio page: the tiles that say how the open trades are going, which of
- * them want a decision, and how the market moved - above the full position list, which follows.
+ * The top of the Portfolio page: how your trades have done, which of them are late, and - unless
+ * [compact] - how the market moved, the best source, the AI's last read and the feed. The trades
+ * themselves follow, drawn by the screen.
  *
  * Every figure is a percentage. No trade size is recorded, so nothing here is money; averages weight
  * every trade the same, as "Your record" always has.
  *
  * @param heroHeight the hero tile's height in tabletop posture, sized to end at the crease so the
  *   chart sits on the upright half and everything pressed sits on the flat one. Null elsewhere.
- * @param onSelectTrade a press on a position row. Unfolded this selects the trade into the pane
- *   beside the tiles; on the cover screen it reveals the trade in the list below.
+ * @param compact the book list and tabletop: the top tile without its chart, and nothing after it -
+ *   those postures draw Needs you and the trades themselves.
  */
 @Composable
-internal fun ColumnScope.PortfolioTiles(
+internal fun ColumnScope.PortfolioRecord(
     appState: AppState,
     portfolio: Portfolio,
     heroHeight: Dp?,
-    onSelectTrade: (String) -> Unit,
+    compact: Boolean,
 ) {
     val today = remember { LocalDate.now(ScheduleClock.ZONE) }
     val positions = portfolio.positions
-    val needs = remember(positions, appState.appPreferences.approachThresholdPercent) {
-        needsYou(positions, appState.appPreferences.approachThresholdPercent)
-    }
-    var decisionsOpen by appState.pages.portfolioDecisionsOpen
-
-    HeroTile(appState.returnByDay, appState.indexByDay, portfolio, today, heroHeight, appState.pages.portfolioReturnRange, Modifier.popIn(0))
-
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
-        HitRateTile(portfolio, today, Modifier.weight(1f).popIn(1))
-        NeedsYouTile(
-            needs = needs,
-            open = decisionsOpen,
-            onToggle = { decisionsOpen = !decisionsOpen },
-            modifier = Modifier.weight(1f).popIn(2),
-        )
-    }
-    AnimatedVisibility(visible = decisionsOpen && needs.isNotEmpty(), enter = ExpandIn, exit = CollapseOut) {
-        DecisionPanel(needs, appState, onSelectTrade)
-    }
-
-    PositionsTile(
-        open = remember(positions) { positions.filter { it.open }.sortedWith(PortfolioOrder.URGENT.positions) },
-        onSelect = onSelectTrade,
-        modifier = Modifier.popIn(3),
+    HeroTile(appState.returnByDay, appState.indexByDay, portfolio, today, heroHeight, appState.pages.portfolioReturnRange, compact, Modifier.popIn(0))
+    if (compact) return
+    NeedsYouTile(
+        late = remember(positions) { overdueRoster(positions) },
+        appState = appState,
+        onOpen = { appState.pages.portfolioSelectedTrade.value = it },
+        oneLine = false,
+        modifier = Modifier.popIn(1),
     )
-
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
-        TodayTile(appState, Modifier.weight(1f).popIn(4))
-        BestSourceTile(appState, Modifier.weight(1f).popIn(5))
+        TodayTile(appState, Modifier.weight(1f).popIn(2))
+        BestSourceTile(appState, Modifier.weight(1f).popIn(3))
     }
-
-    AiReadTile(appState, positions, Modifier.popIn(6))
-    ClosedThisMonthTile(positions, today, onSelectTrade, Modifier.popIn(7))
+    AiReadTile(appState, positions, Modifier.popIn(4))
     FeedFooter(appState)
 }
 
-/** The cobalt tile: average open return, the open count, and the return line by day. */
+/**
+ * The cobalt tile: what a trade has made on average, set beside what the EGX30 did over the range
+ * the chart shows, then the return line by day and how many trades are open, won and lost.
+ *
+ * The two figures are not like for like and the caption does not pretend they are: the average is
+ * per trade, and the index's move is over the chart's days, which is the only figure of the market's
+ * the app keeps. Naming the range is what keeps the comparison honest.
+ *
+ * [compact] is the book list's and tabletop's: no chart and no range control, the counts on one line.
+ */
 @Composable
 private fun HeroTile(
     points: List<ReturnPoint>,
@@ -141,6 +138,7 @@ private fun HeroTile(
     today: LocalDate,
     height: Dp?,
     rangeState: androidx.compose.runtime.MutableState<ReturnRange>,
+    compact: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val p = palette
@@ -148,26 +146,37 @@ private fun HeroTile(
     var range by rangeState
     val shown = remember(points, range, today) { points.within(range, today) }
     val market = remember(shown, index) { marketAlong(shown, index) }
+    val (won, lost) = remember(portfolio) { wonLost(portfolio.positions) }
     Tile(
-        modifier = modifier.fillMaxWidth().then(if (height != null) Modifier.height(height) else Modifier),
+        modifier = modifier.fillMaxWidth().then(if (height != null && !compact) Modifier.height(height) else Modifier),
         tone = TileTone.HERO,
         contentPadding = PaddingValues(vertical = 18.dp),
     ) {
         Text(
-            "Open trades · ${stats.openCount} · average return",
+            "Your trades so far",
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(horizontal = 20.dp),
         )
         Text(
-            formatPercent(stats.openReturnPct),
-            style = MaterialTheme.typography.displayLarge.copy(fontFamily = TabularFigures),
+            formatPercent(stats.averageReturnPct),
+            style = (if (compact) MaterialTheme.typography.displaySmall else MaterialTheme.typography.displayLarge)
+                .copy(fontFamily = TabularFigures),
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
         )
+        val move = if (market.isEmpty()) null else indexMove(shown, index)
         Text(
-            "Settled ${formatPercent(stats.settledReturnPct)} · ${stats.settledCount} trades",
+            "average per trade" + (move?.let { " · EGX30 did ${formatPercent(it)} over ${range.label}" } ?: ""),
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(horizontal = 20.dp),
         )
+        if (compact) {
+            Text(
+                "$won won · $lost lost · ${stats.openCount} open",
+                style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                modifier = Modifier.padding(horizontal = 20.dp).padding(top = 8.dp),
+            )
+            return@Tile
+        }
         ReturnLine(
             shown,
             market,
@@ -193,7 +202,33 @@ private fun HeroTile(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
             )
         }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 12.dp)) {
+            HeroCount(stats.openCount, "open now", Modifier.weight(1f))
+            HeroCount(won, "won", Modifier.weight(1f))
+            HeroCount(lost, "lost", Modifier.weight(1f))
+        }
     }
+}
+
+@Composable
+private fun HeroCount(value: Int, label: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(value.toString(), style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures))
+        Text(label, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+/**
+ * How far the EGX30 moved across the shown days: its change on the last of them against the first,
+ * compounded off the same base [marketAlong] starts the line from. Null without two such days.
+ */
+internal fun indexMove(shown: List<ReturnPoint>, index: List<IndexPoint>): Double? {
+    val byDay = index.associate { it.date to it.changePct }
+    val placed = shown.mapNotNull { byDay[it.date] }
+    if (placed.size < 2) return null
+    val base = 1.0 + placed.first() / 100.0
+    if (base <= 0.0) return null
+    return ((1.0 + placed.last() / 100.0) / base - 1.0) * 100.0
 }
 
 /**
@@ -278,126 +313,68 @@ private fun ChartLegend() {
     }
 }
 
-/** The lime tile: win rate, and the last five weeks as bars that grow in. */
-@Composable
-private fun HitRateTile(portfolio: Portfolio, today: LocalDate, modifier: Modifier = Modifier) {
-    val p = palette
-    val weeks = remember(portfolio, today) { weeklyHitRates(portfolio.positions, 5, today) }
-    val grow = rememberDrawIn(key = weeks, durationMs = 900)
-    Tile(modifier = modifier.height(160.dp), tone = TileTone.HIGHLIGHT) {
-        Text("Hit rate · 5 weeks", style = MaterialTheme.typography.titleSmall)
-        Spacer(Modifier.weight(1f))
-        Text(
-            formatPercent(portfolio.stats.winRate, signed = false),
-            style = MaterialTheme.typography.displaySmall.copy(fontFamily = TabularFigures),
-        )
-        Row(
-            Modifier
-                .padding(top = 8.dp)
-                .fillMaxWidth()
-                .height(30.dp)
-                .semantics {
-                    contentDescription = weeks.joinToString(prefix = "Weekly hit rate: ") {
-                        it.rate?.let { r -> "${(r * 100).toInt()}%" } ?: "none settled"
-                    }
-                },
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            weeks.forEach { week ->
-                val share = (week.rate ?: 0.0).toFloat().coerceIn(0.06f, 1f)
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight((share * grow.value).coerceAtLeast(0.02f))
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(if (week.rate == null) p.onTile.copy(alpha = 0.2f) else p.onTile),
-                )
-            }
-        }
-    }
-}
-
-/** The coral tile: how many trades want a decision. Pressing it opens the decision panel. */
-@Composable
-private fun NeedsYouTile(needs: List<NeedsYouItem>, open: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
-    val lines = needs.take(2).joinToString("\n") { it.line() }
-    Tile(
-        modifier = modifier.height(160.dp),
-        tone = if (needs.isEmpty()) TileTone.CARD else TileTone.ALERT,
-        onClick = if (needs.isEmpty()) null else onToggle,
-        onClickLabel = if (open) "Hide the decisions" else "Show the decisions",
-    ) {
-        Text("Needs you", style = MaterialTheme.typography.titleSmall)
-        Spacer(Modifier.weight(1f))
-        Text("${needs.size}", style = MaterialTheme.typography.displaySmall.copy(fontFamily = TabularFigures))
-        Text(
-            if (needs.isEmpty()) "Nothing is near a level or past its deadline" else lines,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-private fun NeedsYouItem.line(): String = when (reason) {
-    NeedReason.OVERDUE -> "${view.ticker} overdue ${view.overdueDays}d"
-    NeedReason.NEAR_STOP -> "${view.ticker} ${"%.1f".format(distancePercent ?: 0.0)}% from stop"
-    NeedReason.NEAR_TARGET2 -> "${view.ticker} ${"%.1f".format(distancePercent ?: 0.0)}% to T2"
-}
-
 /**
- * The decision panel the coral tile opens: each trade, how close it is, and what can be done now.
- * Record sale is the entrance the Record sale notification action uses. An overdue trade also offers
- * Follow the deadline again; a trade near a level offers Open trade, since deciding whether to sell
- * near a stop starts with looking at it.
+ * The trades that are late, and what to do about each: the coral tile, one ink card per trade, a
+ * sentence saying what happened and two buttons. Fed by [overdueRoster] - the whole portfolio,
+ * unfiltered, so a date picked on the page cannot hide a trade that is late. Absent with none.
+ *
+ * Close-to-a-level used to be here too; it is a tag on the trade's own card now, where the reader
+ * is already looking at the trade it is about.
+ *
+ * @param oneLine book posture's form: each trade's title and one question, and a press selects it
+ *   into the pane beside the list rather than offering the buttons here.
  */
 @Composable
-private fun DecisionPanel(needs: List<NeedsYouItem>, appState: AppState, onSelectTrade: (String) -> Unit) {
-    val p = palette
-    Tile(modifier = Modifier.fillMaxWidth(), tone = TileTone.ALERT) {
-        Text("Needs you · ${needs.size}", style = MaterialTheme.typography.headlineSmall)
-        needs.forEach { item ->
-            val view = item.view
-            run {
-                Tile(modifier = Modifier.padding(top = 12.dp).fillMaxWidth(), tone = TileTone.INK, contentPadding = PaddingValues(14.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(view.ticker, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+internal fun NeedsYouTile(
+    late: List<PositionView>,
+    appState: AppState,
+    onOpen: (String) -> Unit,
+    oneLine: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (late.isEmpty()) return
+    // The ink tile swaps lightness with the theme, so its money colours come from tileSignals: the
+    // dark theme's red on it was 2.7:1.
+    val signals = tileSignals(TileTone.INK)
+    Tile(modifier = modifier.fillMaxWidth(), tone = TileTone.ALERT) {
+        Text("Needs you · ${late.size}", style = MaterialTheme.typography.headlineSmall)
+        late.forEach { view ->
+            val (title, sentence) = lateWords(view)
+            Tile(
+                modifier = Modifier.padding(top = 12.dp).fillMaxWidth(),
+                tone = TileTone.INK,
+                contentPadding = PaddingValues(14.dp),
+                onClick = if (oneLine) ({ onOpen(view.position.id) }) else null,
+                onClickLabel = if (oneLine) "Open this trade" else null,
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    if (!oneLine) {
                         Text(
-                            "${view.currentPrice?.let { "%.2f".format(it) } ?: "—"} · ${formatPercent(view.returnPct)}",
+                            formatPercent(view.returnPct),
                             style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures),
-                            color = if ((view.returnPct ?: 0.0) < 0) p.loss else LocalContentColor.current,
+                            color = returnTone(view.returnPct, signals),
                         )
                     }
-                    Text(
-                        item.detail(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = LocalContentColor.current.copy(alpha = 0.75f),
-                    )
-                    if (item.reason == NeedReason.NEAR_STOP) {
-                        val stop = view.position.stopLoss
-                        val entry = view.position.entryPrice
-                        val price = view.currentPrice
-                        if (stop != null && price != null && entry > stop) {
-                            TargetProgress(
-                                progress = ((price - stop) / (entry - stop)).toFloat(),
-                                losing = true,
-                                label = "${"%.1f".format(item.distancePercent ?: 0.0)}% above the stop",
-                                modifier = Modifier.padding(top = 10.dp),
-                            )
-                        }
-                    }
+                }
+                Text(
+                    if (oneLine) "Sold it, or keep it open?" else sentence,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = 0.75f),
+                )
+                if (!oneLine) {
                     Row(Modifier.padding(top = 12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         KitButton(
-                            "Record sale",
+                            "I sold it",
+                            // The entrance the Record sale notification action uses.
                             onClick = { appState.openPositionToSell(view.position.id) },
                             kind = ButtonKind.DANGER,
                             size = ButtonSize.SMALL,
                             modifier = Modifier.weight(1f),
                         )
-                        if (item.reason == NeedReason.OVERDUE) {
+                        if (view.keptOpen) {
                             KitButton(
-                                "Follow the deadline",
+                                "Stop keeping it open",
                                 onClick = { appState.setKeepOpen(view.position, keepOpen = false) },
                                 kind = ButtonKind.ON_TONE,
                                 size = ButtonSize.SMALL,
@@ -405,8 +382,11 @@ private fun DecisionPanel(needs: List<NeedsYouItem>, appState: AppState, onSelec
                             )
                         } else {
                             KitButton(
-                                "Open trade",
-                                onClick = { onSelectTrade(view.position.id) },
+                                "Keep it open",
+                                onClick = {
+                                    appState.pages.portfolioDialog.value =
+                                        TradeDialogRequest(view.position.id, TradeDialogKind.KEEP_OPEN)
+                                },
                                 kind = ButtonKind.ON_TONE,
                                 size = ButtonSize.SMALL,
                                 modifier = Modifier.weight(1f),
@@ -419,82 +399,52 @@ private fun DecisionPanel(needs: List<NeedsYouItem>, appState: AppState, onSelec
     }
 }
 
-private fun NeedsYouItem.detail(): String {
-    val channel = view.position.channel?.let { "$it · " }.orEmpty()
-    return channel + when (reason) {
-        NeedReason.OVERDUE -> "kept open ${view.overdueDays} days past its deadline"
-        NeedReason.NEAR_STOP -> "${"%.1f".format(distancePercent ?: 0.0)}% from its stop at ${view.position.stopLoss?.let { "%.2f".format(it) }}"
-        NeedReason.NEAR_TARGET2 -> "${"%.1f".format(distancePercent ?: 0.0)}% from target 2 at ${view.position.target2?.let { "%.2f".format(it) }}"
+/** What a late trade's card says: a title, and the sentence under it. */
+internal fun lateWords(view: PositionView): Pair<String, String> {
+    val ticker = view.ticker
+    if (view.keptOpen) {
+        return "$ticker is ${view.overdueDays} ${if (view.overdueDays == 1L) "day" else "days"} past its deadline" to
+            "You are keeping it open."
     }
+    val ended = view.deadlineDate?.let { " ended ${shortDate(it)}" } ?: " ended"
+    val window = view.position.windowSessions
+    val how = if (view.marketStatus == PositionStatus.PARTIAL_TARGET_HIT || view.status == PositionStatus.PARTIAL_TARGET_HIT) {
+        " after reaching target 1."
+    } else {
+        " without reaching a target or the stop."
+    }
+    return "$ticker has run out of time" to "Its $window trading days$ended$how"
 }
 
-/** The open trades, closest to target first, each with the bar from entry to target 2. */
+/** A return's colour on a tile, from that tile's own signals. */
+internal fun returnTone(ret: Double?, signals: TileSignals): Color =
+    if ((ret ?: 0.0) < 0) signals.loss else signals.gain
+
+/** Unfolded only: the best and the worst trade, each with when and how much. */
 @Composable
-private fun PositionsTile(open: List<PositionView>, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
-    if (open.isEmpty()) return
-    val p = palette
-    Tile(modifier = modifier.fillMaxWidth(), contentPadding = PaddingValues(vertical = 10.dp, horizontal = 6.dp)) {
-        Text("Open positions", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
-        open.take(PositionsShown).forEachIndexed { index, view ->
-            val path = targetPath(view)
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(Kit.PanelShape)
-                    .clickable(role = Role.Button, onClickLabel = "Open this trade") { onSelect(view.position.id) }
-                    .padding(12.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    StockLogo(view.ticker, LogoSize.Row)
-                    Column(Modifier.weight(1f)) {
-                        Text(view.ticker, style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            listOfNotNull(view.position.channel, "${view.sessionsHeld} sessions").joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = p.muted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            formatPercent(view.returnPct),
-                            style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
-                            color = if ((view.returnPct ?: 0.0) < 0) p.loss else p.gain,
-                        )
-                        Text(
-                            view.currentPrice?.let { "%.2f".format(it) } ?: "—",
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = TabularFigures),
-                            color = p.muted,
-                        )
-                    }
+internal fun BestWorstTile(stats: PortfolioStats, modifier: Modifier = Modifier) {
+    val best = stats.best
+    val worst = stats.worst
+    if (best == null && worst == null) return
+    Tile(modifier = modifier.fillMaxWidth()) {
+        Text("Best and worst", style = MaterialTheme.typography.titleSmall)
+        listOfNotNull(best, worst.takeIf { it !== best }).forEach { view ->
+            val on = view.position.exitDate ?: view.settledOn ?: view.currentPriceOn
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                StockLogo(view.ticker, LogoSize.Row, Modifier.padding(end = 8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(view.ticker, style = MaterialTheme.typography.titleSmall)
+                    on?.let { Text(shortDate(it), style = MaterialTheme.typography.labelSmall, color = palette.muted) }
                 }
-                if (path != null) {
-                    TargetProgress(
-                        progress = path.progress,
-                        tickAt = path.target1At,
-                        losing = path.losing,
-                        label = "${view.ticker}: ${(path.progress * 100).toInt()}% of the way to target 2",
-                        modifier = Modifier.padding(top = 10.dp),
-                    )
-                }
+                Text(
+                    formatPercent(view.returnPct),
+                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
+                    color = PriceRole.forReturn(view.returnPct),
+                )
             }
-            if (index < open.take(PositionsShown).lastIndex) {
-                com.ikverse.egxanalyzer.ui.kit.KitRule(Modifier.padding(horizontal = 12.dp), thickness = 1.dp, color = p.ground)
-            }
-        }
-        if (open.size > PositionsShown) {
-            Text(
-                "${open.size - PositionsShown} more in the list below",
-                style = MaterialTheme.typography.labelLarge,
-                color = p.heroInk,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            )
         }
     }
 }
-
-private const val PositionsShown = 5
 
 /** The ink tile: how the market split, and what the day did to the calls. */
 @Composable
@@ -515,7 +465,7 @@ private fun TodayTile(appState: AppState, modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
                 modifier = Modifier.padding(top = 8.dp),
             )
-            BreadthBar(breadth.up, breadth.flat, breadth.down, Modifier.padding(top = 8.dp))
+            BreadthBar(breadth.up, breadth.flat, breadth.down, Modifier.padding(top = 8.dp), tone = TileTone.INK)
             Text(
                 "of ${breadth.total} listings",
                 style = MaterialTheme.typography.bodySmall,
@@ -600,46 +550,6 @@ private fun AiReadTile(appState: AppState, positions: List<PositionView>, modifi
         }
     }
 }
-
-/** Trades sold or settled this calendar month, newest first. */
-@Composable
-private fun ClosedThisMonthTile(positions: List<PositionView>, today: LocalDate, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
-    val p = palette
-    val closed = remember(positions, today) {
-        positions.filter { !it.open }
-            .mapNotNull { v -> (v.position.exitDate ?: v.settledOn)?.let { v to it } }
-            .filter { (_, on) -> on.year == today.year && on.month == today.month }
-            .sortedByDescending { it.second }
-    }
-    if (closed.isEmpty()) return
-    Tile(modifier = modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Closed this month", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-            val avg = closed.mapNotNull { it.first.returnPct }.takeIf { it.isNotEmpty() }?.average()
-            Text(formatPercent(avg), style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures), color = if ((avg ?: 0.0) < 0) p.loss else p.gain)
-        }
-        closed.take(ClosedShown).forEach { (view, on) ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(Kit.PanelShape)
-                    .clickable(role = Role.Button, onClickLabel = "Open this trade") { onSelect(view.position.id) }
-                    .padding(vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(view.ticker, style = MaterialTheme.typography.titleSmall, modifier = Modifier.width(72.dp))
-                Text("${view.status.label.lowercase()} · ${shortDate(on)}", style = MaterialTheme.typography.bodySmall, color = p.muted, modifier = Modifier.weight(1f))
-                Text(
-                    formatPercent(view.returnPct),
-                    style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures),
-                    color = if ((view.returnPct ?: 0.0) < 0) p.loss else p.gain,
-                )
-            }
-        }
-    }
-}
-
-private const val ClosedShown = 5
 
 /** Whether every stock the record names is priced, and when the prices came. */
 @Composable

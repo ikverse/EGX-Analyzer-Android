@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.background
-import androidx.compose.material3.HorizontalDivider
 import com.ikverse.egxanalyzer.ui.theme.palette
 import com.ikverse.egxanalyzer.ui.kit.popIn
 import com.ikverse.egxanalyzer.ui.kit.TileTone
@@ -66,17 +65,11 @@ import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.TextFields
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.AlertDialog
+import com.ikverse.egxanalyzer.ui.kit.MoreRow
 import java.time.format.DateTimeFormatter
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -145,25 +138,15 @@ internal fun AnalyzeScreen(appState: AppState) {
         // The run starts either way. A notification is how you watch a run, not a condition for one.
         appState.startAnalysis()
     }
-    // Computed here rather than inside the content, because the floating action needs it too.
+    // Computed here rather than inside the content, because the hero and the tiles all read it.
     val blocker = analyzeBlocker(appState)
-    // What pressing the button will cost at most, worked out by the same function that will do the
-    // splitting, so the figure on the button and the run's own splitting cannot disagree about how
-    // the sources divide. At most rather than exactly: the wording filter drops sources at the run,
-    // and a message an earlier run has already read is not sent at all - both of which can only
-    // ever make it fewer. This is the only screen that spends the owner's money, and the count used
-    // to sit as grey text inside a card two thirds of the way up the page.
-    val requests = remember(appState.inputs) {
-        appState.inputs.takeIf(List<AnalysisInput>::isNotEmpty)
-            ?.let { AnalysisChunking.chunk(it).size }
-    }
     // Until Analyze is pressed this is guidance, not a complaint: painting it red on a freshly
-    // opened app tells someone who has done nothing wrong that something is broken.
-    var attempted by remember { mutableStateOf(false) }
-    // A stray tap on the floating button while a run is going used to cancel it outright - no
-    // confirmation, and everything the run had already read and paid for thrown away, since a
-    // cancelled run's batches are only saved when it finishes. This asks first.
-    var confirmingCancel by remember { mutableStateOf(false) }
+    // opened app tells someone who has done nothing wrong that something is broken. On PageState,
+    // like the two below, so a fold keeps it.
+    var attempted by appState.pages.analyzeAttempted
+    // A stray tap on Stop while a run is going would throw away everything the run had already
+    // read and paid for, since a cancelled run's batches are only saved when it finishes. This asks.
+    var confirmingStop by appState.pages.analyzeConfirmingStop
     // Pressing Analyze: what blocks a run is said rather than acted on, and the notification
     // permission is asked here rather than at first launch - a prompt before the app has done
     // anything is the one people decline, and Android never asks twice.
@@ -176,9 +159,10 @@ internal fun AnalyzeScreen(appState: AppState) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
-    val onCancel: () -> Unit = { confirmingCancel = true }
+    val onStop: () -> Unit = { confirmingStop = true }
     val signedIn = appState.telegramAuthState.step == TelegramAuthStep.READY
     val posture = LocalFoldPosture.current
+    val running = appState.analysisStatus == AnalysisStatus.RUNNING
     Screen(
         appState = appState,
         destination = AppDestination.ANALYZE,
@@ -198,18 +182,15 @@ internal fun AnalyzeScreen(appState: AppState) {
         },
         refreshing = appState.chatsRefreshing,
     ) {
-        // **The 5.0 page.** The run's summary and its button first, the checklist while setup is
-        // unfinished, then what a run reads (the sources, what kind of message, for which session,
-        // on which model), the messages it would start from, and the last report.
-        // The target session, picked on the kit's calendar. Never later than today: the target runs
-        // ahead of today on a Friday, a Saturday or after the close, and a historical run refuses a
-        // future date anyway. Picking the session the app would resolve on its own is how the
-        // reader goes back to live mode.
-        var pickingDate by remember { mutableStateOf(false) }
+        // The day the calls are for, picked on the kit's calendar. Never later than today: the
+        // target runs ahead of today on a Friday, a Saturday or after the close, and a historical
+        // run refuses a future date anyway. Picking the day the app would resolve on its own is how
+        // the reader goes back to live mode.
+        var pickingDate by appState.pages.analyzePickingDate
         if (pickingDate) {
             val today = LocalDate.now(ScheduleClock.ZONE)
             com.ikverse.egxanalyzer.ui.kit.KitCalendarSheet(
-                title = "Calls for which session",
+                title = "Calls for which day",
                 selected = minOf(appState.recommendationTargetDate, today),
                 onPick = { picked ->
                     if (picked == egxTargetSession()) {
@@ -226,72 +207,91 @@ internal fun AnalyzeScreen(appState: AppState) {
             )
         }
         val hero: @Composable (Boolean) -> Unit = { withButton ->
-            AnalyzeHero(appState, blocker, attempted, requests, onAnalyze, onCancel, Modifier.popIn(0), showButton = withButton)
+            AnalyzeHero(appState, blocker, attempted, onAnalyze, Modifier.popIn(0), showButton = withButton)
         }
-        val sources: @Composable () -> Unit = {
-            // Before Telegram is signed in this is the sign-in itself, which keeps its look until the
-            // Settings stage redraws it - the steps are shared with Settings.
-            if (signedIn) SourcesTile(appState, Modifier.popIn(2)) else ChannelsSection(appState)
-        }
-        val readAndDate: @Composable () -> Unit = {
+        // What a run reads, in four tiles; locked while a run is going, because what it reads was
+        // fixed when it started.
+        val tiles: @Composable (Boolean) -> Unit = { locked ->
+            // Before Telegram is signed in this is the sign-in itself, whose steps are shared with
+            // Settings.
+            if (signedIn) SourcesTile(appState, locked, Modifier.popIn(2)) else ChannelsSection(appState)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
-                ReadTile(appState, blocker, attempted, Modifier.weight(1f).popIn(3))
-                CallsForTile(appState, onPick = { pickingDate = true }, modifier = Modifier.weight(1f).popIn(4))
+                ReadTile(appState, blocker, attempted, locked, Modifier.weight(1f).popIn(3))
+                CallsForTile(appState, onPick = { pickingDate = true }, locked = locked, modifier = Modifier.weight(1f).popIn(4))
             }
+            ModelTile(appState, blocker, attempted, locked, Modifier.popIn(5))
         }
         val notifications: @Composable () -> Unit = {
-            if (appState.analysisStatus != AnalysisStatus.RUNNING && !notificationsAllowed) NotificationsOffTile(appState)
+            if (!running && !notificationsAllowed) NotificationsOffTile(appState)
         }
         when (posture) {
             is FoldPosture.Unfolded, is FoldPosture.Book -> {
                 SplitColumns(posture, unfoldedStart = 0.5f, start = {
+                    if (running) {
+                        RunningTile(appState, onStop, Modifier.popIn(0))
+                        RunNotesTile(appState)
+                    } else {
                         hero(true)
                         SetupCard(appState)
-                        notifications()
-                        ModelTile(appState, blocker, attempted, Modifier.popIn(5))
-                        LastRunTile(appState, Modifier.popIn(6))
-                    }, end = {
-                        sources()
-                        readAndDate()
-                        MessagesPreview(appState, scope, blocker, attempted)
-                    })
+                    }
+                    notifications()
+                    tiles(running)
+                    LastRunTile(appState, Modifier.popIn(6))
+                }, end = {
+                    PostsPreview(appState, blocker, attempted, expanded = true)
+                })
             }
             is FoldPosture.Tabletop -> {
-                // The summary stands on the upright half; the button and everything pressed are on
-                // the flat half under the crease.
-                hero(false)
-                AnalyzeButton(appState, blocker, requests, onAnalyze, onCancel)
-                SetupCard(appState)
-                notifications()
-                sources()
-                readAndDate()
-                ModelTile(appState, blocker, attempted)
-                MessagesPreview(appState, scope, blocker, attempted)
-                LastRunTile(appState)
+                if (running) {
+                    // The run on the upright half; what is locked, and the way out, on the flat one.
+                    RunningTile(appState, onStop, showStop = false)
+                    RunNotesTile(appState)
+                    tiles(true)
+                    Text(
+                        "These unlock when the run finishes. You can leave this page and it carries on.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.muted,
+                    )
+                    KitButton("Stop this run", onClick = onStop, kind = ButtonKind.DANGER)
+                } else {
+                    // The summary stands on the upright half; the button and everything pressed are
+                    // on the flat half under the crease.
+                    hero(false)
+                    AnalyzeButton(blocker, onAnalyze)
+                    SetupCard(appState)
+                    notifications()
+                    tiles(false)
+                    PostsPreview(appState, blocker, attempted, expanded = false)
+                    LastRunTile(appState)
+                }
             }
             else -> {
-                hero(true)
-                SetupCard(appState)
-                notifications()
-                sources()
-                readAndDate()
-                ModelTile(appState, blocker, attempted, Modifier.popIn(5))
-                MessagesPreview(appState, scope, blocker, attempted)
-                LastRunTile(appState, Modifier.popIn(6))
+                if (running) {
+                    RunningTile(appState, onStop, Modifier.popIn(0))
+                    RunNotesTile(appState)
+                    tiles(true)
+                } else {
+                    hero(true)
+                    SetupCard(appState)
+                    notifications()
+                    tiles(false)
+                    PostsPreview(appState, blocker, attempted, expanded = false)
+                    LastRunTile(appState, Modifier.popIn(6))
+                }
             }
         }
         DuplicateAnalysisDialog(appState)
-        if (confirmingCancel) {
+        if (confirmingStop) {
             KitDialog(
                 title = "Stop this analysis?",
                 text = "What it has read so far is lost.",
                 confirmLabel = "Stop",
                 onConfirm = {
-                    confirmingCancel = false
+                    confirmingStop = false
                     scope.launch { appState.cancelAnalysis() }
                 },
                 dismissLabel = "Keep running",
-                onDismiss = { confirmingCancel = false },
+                onDismiss = { confirmingStop = false },
                 posture = posture,
                 destructive = true,
             )
@@ -299,46 +299,45 @@ internal fun AnalyzeScreen(appState: AppState) {
     }
 }
 
-
-/**
- * What would be sent, before it is sent.
- *
- * Analysis loads its own sources, so this is not a required step - it is here so the size of a
- * paid request can be seen first, and so the window can be sanity-checked against the chats.
- */
-/** The busy label the preview button raises, and the only one it reacts to. */
+/** The busy label the load button raises, and the only one it reacts to. */
 private const val LoadingMessagesLabel = "Loading messages from Telegram"
 
+/** How many posts the cover screen lists before the rest are a press away. */
+private const val PostsShown = 4
+
+/**
+ * What a run will read, before it reads it: the posts it would start from, each saying whether an
+ * earlier run has already read it or its kind is not being read.
+ *
+ * Analysis loads its own posts, so loading them here is not a required step - it is here so the
+ * size of a paid run can be seen first, and so the window can be checked against the chats.
+ * [expanded] is the unfolded and book half of the page, which has the room to list them all.
+ */
 @Composable
-private fun MessagesPreview(
+private fun PostsPreview(
     appState: AppState,
-    scope: kotlinx.coroutines.CoroutineScope,
-    /** What is stopping a run, or nothing when nothing is. Only [AnalyzeBlocker.NO_SOURCES] is
-     * this card's to answer for; the others are drawn by the cards they are about. */
+    /** What is stopping a run. Only [AnalyzeBlocker.NO_SOURCES] is this tile's to answer for. */
     blocker: AnalyzeBlocker?,
     /** Whether Analyze has been pressed: until it has, this is guidance rather than an error. */
     attempted: Boolean,
+    expanded: Boolean,
 ) {
     val selected = appState.channels.count(ChannelSelection::selected)
     val sources = appState.telegramSources
+    val readEarlier = appState.sourcesReadEarlier
     // This button's own work and nothing else's: read as "anything is busy" it spun and greyed
     // during a price fetch and a sign-out, neither of which it could do anything about.
     val loading = appState.busyLabel == LoadingMessagesLabel
-    // **A kit tile since 5.0**, with the list folded shut until it is asked for: the count says what
-    // is loaded, and the messages themselves are a press away rather than a screen of them between
-    // the settings and the last report.
     val p = palette
-    var showing by remember { mutableStateOf(false) }
     Tile(modifier = Modifier.fillMaxWidth()) {
-        Text("Messages", style = MaterialTheme.typography.headlineSmall)
-        // With messages on screen the standing line only restates the list, so it gives way to the
-        // count. With none, telegramSyncMessage is the only thing that can say why - read forty and
-        // none fell in the window, Telegram refused - and none of that is anywhere else.
+        Text("What it will read", style = MaterialTheme.typography.headlineSmall)
+        // With posts loaded the standing line only restates the list, so it gives way to the
+        // count. With none, telegramSyncMessage is the only thing that can say why.
         Text(
             if (sources.isEmpty()) {
-                appState.telegramSyncMessage ?: "See which messages a run would start from."
+                appState.telegramSyncMessage ?: "See which posts a run would start from."
             } else {
-                "${sources.size} ${if (sources.size == 1) "message" else "messages"} from " +
+                "${sources.size} ${if (sources.size == 1) "post" else "posts"} from " +
                     "$selected ${if (selected == 1) "chat" else "chats"}"
             },
             style = MaterialTheme.typography.bodySmall,
@@ -353,76 +352,80 @@ private fun MessagesPreview(
                 modifier = Modifier.padding(top = Space.xs),
             )
         }
-        Row(Modifier.padding(top = Space.m), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            KitButton(
-                when {
-                    loading -> "Loading…"
-                    sources.isEmpty() -> "Preview messages"
-                    else -> "Refresh messages"
-                },
-                onClick = {
-                    appState.startAction {
-                        appState.runAction(
-                            label = LoadingMessagesLabel,
-                            success = { load -> load.message },
-                        ) {
-                            // A failed load throws here so the status line paints it as the
-                            // failure it is; the tile already shows the same sentence.
-                            val load = appState.syncTelegramSources()
-                            if (!load.succeeded) error(load.message)
-                            load
-                        }
+        KitButton(
+            when {
+                loading -> "Loading…"
+                sources.isEmpty() -> "Load the posts"
+                else -> "Reload"
+            },
+            onClick = {
+                appState.startAction {
+                    appState.runAction(
+                        label = LoadingMessagesLabel,
+                        success = { load -> load.message },
+                    ) {
+                        // A failed load throws here so the status line paints it as the failure it
+                        // is; the tile already shows the same sentence.
+                        val load = appState.syncTelegramSources()
+                        if (!load.succeeded) error(load.message)
+                        load
                     }
-                },
-                enabled = selected > 0 && !loading,
-                kind = ButtonKind.SECONDARY,
-                size = ButtonSize.SMALL,
-            )
-            if (sources.isNotEmpty()) {
-                KitButton(
-                    if (showing) "Hide messages" else "Show messages",
-                    onClick = { showing = !showing },
-                    kind = ButtonKind.SECONDARY,
-                    size = ButtonSize.SMALL,
-                )
-            }
-        }
-        AnimatedVisibility(visible = showing && sources.isNotEmpty(), enter = ExpandIn, exit = CollapseOut) {
-            // Bounded like the chat list, so a busy day does not bury the rest of the page.
-            Column(
-                Modifier
-                    .padding(top = Space.m)
-                    .heightIn(max = MessageListMaxHeight)
-                    .scrollableColumn(),
-                verticalArrangement = Arrangement.spacedBy(Space.s),
-            ) {
-                sources.forEach { source -> MessageTile(source) }
+                }
+            },
+            enabled = selected > 0 && !loading,
+            kind = ButtonKind.SECONDARY,
+            size = ButtonSize.SMALL,
+            modifier = Modifier.padding(top = Space.m),
+        )
+        if (sources.isEmpty()) return@Tile
+        @Composable
+        fun row(source: SourceTrace) = PostRow(
+            source,
+            readEarlier = source.sourceId in readEarlier,
+            notRead = source.contentType !in appState.selectedContentTypes,
+        )
+        Column(Modifier.padding(top = Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+            if (expanded) {
+                sources.forEach { row(it) }
+            } else {
+                sources.take(PostsShown).forEach { row(it) }
+                if (sources.size > PostsShown) {
+                    val open = appState.pages.analyzePostsOpen
+                    MoreRow(
+                        if (open.value) "Hide the posts" else "Show the posts",
+                        open,
+                        summary = "${sources.size - PostsShown} more",
+                    ) {
+                        sources.drop(PostsShown).forEach { row(it) }
+                    }
+                }
             }
         }
     }
 }
 
 /**
- * One message, as a tile rather than four stacked lines under a rule.
+ * One post: its chat, when, what kind it is with what it says, and whether this run will skip it.
  *
- * A step up in container colour is what makes a message read as something sitting in the card
- * rather than another paragraph of it, which is the job a column of dividers was doing badly.
+ * There are no captions to show for a picture or a voice note - the preview is whatever text came
+ * with it, often none - so the kind of post is what leads the second line.
  */
 @Composable
-private fun MessageTile(source: SourceTrace) {
-    Box(Modifier.clip(Kit.PanelShape).background(palette.ground)) {
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.s),
-            verticalArrangement = Arrangement.spacedBy(Space.xs),
-        ) {
+private fun PostRow(source: SourceTrace, readEarlier: Boolean, notRead: Boolean) {
+    val p = palette
+    val kind = postKind(source.contentType)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(Kit.PanelShape)
+            .background(p.ground)
+            .padding(horizontal = Space.m, vertical = Space.s),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        ChannelAvatar(source.channelName, null, 32.dp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    contentTypeIcon(source.contentType),
-                    contentDescription = source.contentType.name.lowercase(),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(IconSize.Inline),
-                )
-                Spacer(Modifier.width(Space.s))
                 Text(
                     source.channelName,
                     style = MaterialTheme.typography.labelLarge,
@@ -430,52 +433,46 @@ private fun MessageTile(source: SourceTrace) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.width(Space.s))
                 Text(
                     MessageTimeFormat.format(source.timestamp.atZone(ZoneId.systemDefault())),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = p.muted,
                 )
             }
-            // An image or a voice note carries no text of its own, and drawing the blank left a
-            // gap that read as a message which had failed to load.
-            source.preview.takeIf(String::isNotBlank)?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            Text(
+                kind + source.preview.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty(),
+                style = MaterialTheme.typography.bodySmall,
+                color = p.muted,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (readEarlier) Text("Already read earlier · skipped", style = MaterialTheme.typography.labelSmall, color = p.heroInk)
+            if (notRead) Text("$kind · not being read", style = MaterialTheme.typography.labelSmall, color = p.muted)
         }
     }
 }
 
+/** A post's kind, as the row names it. */
+private fun postKind(type: AnalysisContentType): String = when (type) {
+    AnalysisContentType.TEXT -> "Text"
+    AnalysisContentType.IMAGES -> "Picture"
+    AnalysisContentType.AUDIO -> "Voice note"
+}
+
 /**
- * The word for a content type, for the checkboxes that offer it.
+ * The word for a content type, for the chips that offer it.
  *
  * Exhaustive over the enum rather than over OFFERED, so a type added to one is a compile error
- * here rather than a row drawn with no label.
+ * here rather than a chip drawn with no label.
  */
 internal fun contentTypeLabel(type: AnalysisContentType): String = when (type) {
     AnalysisContentType.TEXT -> "Text"
-    AnalysisContentType.IMAGES -> "Images"
-    AnalysisContentType.AUDIO -> "Voice"
-}
-
-/** What kind of message it is, as a glyph: the word for it, repeated down a column, is noise. */
-private fun contentTypeIcon(type: AnalysisContentType): ImageVector = when (type) {
-    AnalysisContentType.TEXT -> Icons.Outlined.TextFields
-    AnalysisContentType.IMAGES -> Icons.Outlined.Image
-    AnalysisContentType.AUDIO -> Icons.Outlined.Mic
+    AnalysisContentType.IMAGES -> "Pictures"
+    AnalysisContentType.AUDIO -> "Voice notes"
 }
 
 /** Built once. The formatter this replaces was constructed per message, per recomposition. */
-private val MessageTimeFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM · HH:mm")
-
-/** Enough to scan the window without pushing the run off the screen. */
-private val MessageListMaxHeight = 320.dp
+private val MessageTimeFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
 /**
  * Asks before repeating an analysis that has already been paid for.
@@ -529,8 +526,8 @@ internal enum class AnalyzeBlocker(
 ) {
     NO_CREDENTIAL("Save the provider API key in Settings first.", belongsToModelCard = true),
     NO_MODEL("Choose the model this run will be sent to.", belongsToModelCard = true),
-    NO_CONTENT_TYPE("Select at least one content type."),
-    NO_SOURCES("No messages are loaded. Select chats in Telegram, then load them here."),
+    NO_CONTENT_TYPE("Choose at least one thing to read."),
+    NO_SOURCES("No posts are loaded. Choose chats, then load their posts."),
 }
 
 /**
@@ -684,61 +681,6 @@ private fun analyzeBlocker(appState: AppState): AnalyzeBlocker? = when {
             appState.channels.none(ChannelSelection::selected)) -> AnalyzeBlocker.NO_SOURCES
     else -> null
 }
-
-/**
- * What the button says while a run is going.
- *
- * The clock is there because a run takes anywhere from seventy seconds to eleven minutes, one has
- * already died on a timeout, and nothing else on screen says how long this one has been waiting.
- *
- * **It used to count elapsed and nothing else, and the comment here said why**: the repository
- * reported nothing until it finished, so any figure claiming to know how far along a run was would
- * have been invented. It reports now - see [AnalysisProgress] - so the figure beside the clock is
- * measured rather than guessed, and the two answer different questions. How far along says whether
- * the run is nearly done; how long says whether it is moving at all, which on a run that has
- * stalled is the only one of the two that changes.
- *
- * The batch alone, not the image count: this line shares a button with the clock, and the fuller
- * version of the same fact is on the page. See [AnalysisProgress.badge].
- */
-@Composable
-internal fun RunningLabel(
-    startedAt: java.time.Instant?,
-    progress: AnalysisProgress?,
-    big: Boolean,
-) {
-    var elapsed by remember(startedAt) { mutableStateOf(elapsedSince(startedAt)) }
-    LaunchedEffect(startedAt) {
-        while (startedAt != null) {
-            elapsed = elapsedSince(startedAt)
-            delay(1_000)
-        }
-    }
-    Column {
-        Text(
-            "Cancel analysis",
-            style = if (big) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge,
-        )
-        // Null until the first batch goes out, which is the gap between the press and the first
-        // request - so the clock stands alone there rather than the line jumping from one shape to
-        // another, and the button's height never changes.
-        listOfNotNull(progress?.badge(), elapsed).takeIf { it.isNotEmpty() }?.let {
-            Text(
-                it.joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-private fun elapsedSince(startedAt: java.time.Instant?): String? {
-    val start = startedAt ?: return null
-    val seconds = java.time.Duration.between(start, java.time.Instant.now()).seconds.coerceAtLeast(0)
-    return "%d:%02d elapsed".format(seconds / 60, seconds % 60)
-}
-
 
 /** How strongly the read part of a run is drawn over the button's own container. */
 internal const val RunFillAlpha = 0.30f
