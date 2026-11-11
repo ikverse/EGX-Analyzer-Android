@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import com.ikverse.egxanalyzer.ui.kit.MenuItem
 import androidx.compose.ui.unit.dp
+import com.ikverse.egxanalyzer.model.CallGroup
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.LatestPrice
@@ -52,20 +53,22 @@ class RecommendationTableTest {
     /** The Fold unfolded, the Huawei tablet, and the emulator, as the table actually meets them. */
     private val containers = listOf(614, 682, 715)
 
-    /** Said above the figures of a tile's first call, since 2026-11-11, and not in a shared header. */
-    private val columns =
-        listOf("Entry", "Stop", "Target 1", "Target 2", "Since entry", "To target 1")
+    /** Said once, on the ink band across the top, since 2026-11-12. */
+    private val columns = (listOf("Channel") + TableColumns).map(String::uppercase)
 
     @Composable
     private fun Table(
         width: Int,
         vararg points: RecommendationDataPoint = arrayOf(point()),
         close: Double? = null,
+        peak: Double? = null,
+        stocks: List<ConsolidatedRecommendation> = listOf(stock(points.toList())),
+        stopped: Boolean = false,
     ) {
         EgxAnalyzerTheme(themeMode = ThemeMode.DARK) {
             Box(Modifier.size(width.dp, 2000.dp)) {
                 RecommendationTable(
-                    stocks = listOf(stock(points.toList())),
+                    stocks = stocks,
                     channelFor = { it },
                     latestFor = { code ->
                         close?.let {
@@ -73,6 +76,10 @@ class RecommendationTableTest {
                         }
                     },
                     onSelectPoint = { _, _ -> },
+                    statusFor = { _, _ ->
+                        if (stopped) "Stopped out" to CallGroup.STOPPED else "Running" to CallGroup.RUNNING
+                    },
+                    peakFor = { _, _ -> peak },
                     holdItems = { _, _ ->
                         listOf(MenuItem("I bought this") {}, MenuItem("Fix a wrong number") {})
                     },
@@ -144,10 +151,21 @@ class RecommendationTableTest {
     }
 
     @Test
-    fun `a second call on a stock lines up under the names without repeating them`() {
-        compose.setContent { Table(containers.min(), point(), point(channel = "Cairo Desk")) }
+    fun `the column names are said once for every stock and call in the table`() {
+        compose.setContent {
+            Table(
+                containers.min(),
+                stocks = listOf(
+                    stock(listOf(point(), point(channel = "Cairo Desk"))),
+                    stock(listOf(point())).copy(stockCode = "SWDY"),
+                ),
+            )
+        }
 
         columns.forEach { assertEquals(it, 1, compose.onAllNodesWithText(it).fetchSemanticsNodes().size) }
+        // A band per stock.
+        compose.onNodeWithText("AMOC").assertIsDisplayed()
+        compose.onNodeWithText("SWDY").assertIsDisplayed()
     }
 
     @Test
@@ -165,6 +183,31 @@ class RecommendationTableTest {
         compose.onNodeWithText("+2.4%").assertIsDisplayed()
         compose.onNodeWithText("3.8%").assertIsDisplayed()
         compose.onNodeWithText("now").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a live call says how far it stands above its stop and short of target 2`() {
+        compose.setContent { Table(containers.min(), close = 10.6) }
+
+        // Stop 9.8 against 10.6, and target 2 at 12.
+        compose.onNodeWithText("7.5%").assertIsDisplayed()
+        compose.onNodeWithText("13.2%").assertIsDisplayed()
+    }
+
+    @Test
+    fun `the peak since the call says how far above the entry it went`() {
+        compose.setContent { Table(containers.min(), close = 10.6, peak = 11.3) }
+
+        compose.onNodeWithText("11.3").assertIsDisplayed()
+        compose.onNodeWithText("+9.2%").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a stopped call says its stop was hit`() {
+        compose.setContent { Table(containers.min(), close = 10.6, stopped = true) }
+
+        compose.onNodeWithText("hit").assertIsDisplayed()
+        compose.onNodeWithText("7.5%").assertDoesNotExist()
     }
 
     @Test

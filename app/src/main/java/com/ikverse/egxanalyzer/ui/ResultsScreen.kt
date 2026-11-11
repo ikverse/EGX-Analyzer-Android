@@ -357,15 +357,13 @@ internal fun ResultsScreen(appState: AppState) {
                 }
 
                 @Composable
-                fun card(day: List<SavedAnalysis>, cardModifier: Modifier, compact: Boolean) {
+                fun card(day: List<SavedAnalysis>, cardModifier: Modifier) {
                     val newest = remember(day) { newestReading(day) }
                     DayCard(
                         saved = newest,
                         readings = day.size,
                         report = appState.performance,
                         today = today,
-                        compact = compact,
-                        isOpen = day.any { it.id == openRun },
                         onOpen = { open(newest) },
                         highlighted = day.any { it.id == appState.pendingResultId },
                         onHighlightShown = { appState.consumePendingResult() },
@@ -390,7 +388,7 @@ internal fun ResultsScreen(appState: AppState) {
                 // The sessions, week by week. [firstFloor] is tabletop's: the first card stands to
                 // the crease, so what is read is on the upright half and the rest on the flat one.
                 @Composable
-                fun list(grid: Int, compact: Boolean, firstFloor: Dp = 0.dp) {
+                fun list(grid: Int, firstFloor: Dp = 0.dp) {
                     Column(verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
                         weeks.forEachIndexed { index, (heading, weekDays) ->
                             heading?.let {
@@ -404,7 +402,7 @@ internal fun ResultsScreen(appState: AppState) {
                             ResponsiveRows(weekDays, grid) { day, cardModifier ->
                                 key(day.first().id) {
                                     val first = index == 0 && day === weekDays.first()
-                                    card(day, if (first) cardModifier.heightIn(min = firstFloor) else cardModifier, compact)
+                                    card(day, if (first) cardModifier.heightIn(min = firstFloor) else cardModifier)
                                 }
                             }
                         }
@@ -439,17 +437,16 @@ internal fun ResultsScreen(appState: AppState) {
 
                 val tabletopFloor = (posture as? FoldPosture.Tabletop)?.let { tabletopHeroHeight(it) } ?: 0.dp
                 when {
-                    openSaved == null -> list(columns, compact = false, firstFloor = tabletopFloor)
-                    // Unfolded and book: the sessions stay down the left and the report reads on the
-                    // right, the crease between them in book posture. The cards are the short form
-                    // there. The right half is narrower than the table needs on every device this
-                    // runs on, so it reads as stocks and their calls; a pane wide enough gets the table.
-                    posture is FoldPosture.Unfolded || posture is FoldPosture.Book -> SplitColumns(
-                        posture,
-                        unfoldedStart = 0.42f,
-                        start = { list(1, compact = true) },
-                        end = { report(if (posture is FoldPosture.Unfolded) ReportLayout.TABLE else ReportLayout.CARDS) },
-                    )
+                    openSaved == null -> list(columns, firstFloor = tabletopFloor)
+                    // An open report has the page to itself in every posture; back and its own bar
+                    // return to the sessions. Until 2026-11-12 the sessions stayed down the left
+                    // unfolded, which left the report a 400dp column: too narrow for the table, so it
+                    // drew ladders, and one scroll moved both halves. The owner asked for the list
+                    // gone and the table across the screen.
+                    posture is FoldPosture.Unfolded -> report(ReportLayout.TABLE)
+                    // Book: the report splits itself on the crease - what it amounts to on the left,
+                    // its calls on the right - rather than a table being folded down the middle.
+                    posture is FoldPosture.Book -> report(ReportLayout.BOOK)
                     posture is FoldPosture.Tabletop -> report(ReportLayout.TABLETOP)
                     else -> report(ReportLayout.CARDS)
                 }
@@ -614,7 +611,7 @@ internal fun groupDaysByWeek(
  *
  * Its colour is its state, not its place in the list: a session still to come is the one cobalt
  * tile, and says what is waiting rather than three noughts; every other session is a white card
- * whose strip carries the colour. [compact] is the short form beside an open report.
+ * whose strip carries the colour.
  */
 @Composable
 private fun DayCard(
@@ -623,8 +620,6 @@ private fun DayCard(
     readings: Int,
     report: PerformanceReport,
     today: LocalDate,
-    compact: Boolean,
-    isOpen: Boolean,
     onOpen: () -> Unit,
     /** Opened from a notification: its edge flashes briefly. */
     highlighted: Boolean,
@@ -648,15 +643,14 @@ private fun DayCard(
         val label = listOfNotNull(
             runLabel(target, today, lastFinal),
             "waiting for the open".takeIf { upcoming },
-            "open on the right".takeIf { isOpen },
         ).joinToString(" · ").replaceFirstChar(Char::uppercase).takeIf(String::isNotEmpty)
         val date = target?.format(RUN_DATE_FORMAT) ?: runTitle(saved.result.completedAt)
         val read = readLine(readings, saved.result.completedAt)
         if (upcoming) {
-            UpcomingBody(saved, label, date, read, soft, compact)
+            UpcomingBody(saved, label, date, read, soft)
         } else {
             SettledBody(
-                saved, report, label, date, read, soft, compact,
+                saved, report, label, date, read, soft,
                 stillOpen = target != null && target == today && lastFinal < target,
             )
         }
@@ -671,7 +665,6 @@ private fun ColumnScope.UpcomingBody(
     date: String,
     read: String,
     soft: Color,
-    compact: Boolean,
 ) {
     label?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = soft, maxLines = 1) }
     Text(date, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -688,10 +681,8 @@ private fun ColumnScope.UpcomingBody(
     )
     val tickers = saved.result.consolidated.map { it.stockCode }
     if (tickers.isNotEmpty()) {
-        if (!compact) {
-            Row(Modifier.padding(top = Space.m), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                tickers.take(MaxLogos).forEach { StockLogo(it, 28.dp) }
-            }
+        Row(Modifier.padding(top = Space.m), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+            tickers.take(MaxLogos).forEach { StockLogo(it, 28.dp) }
         }
         Text(
             shortList(tickers, MaxNamed, " · "),
@@ -720,7 +711,6 @@ private fun ColumnScope.SettledBody(
     date: String,
     read: String,
     soft: Color,
-    compact: Boolean,
     stillOpen: Boolean,
 ) {
     val outcomes = remember(saved, report) { runOutcomes(saved, report) }
@@ -764,44 +754,29 @@ private fun ColumnScope.SettledBody(
         runExtremes(saved) { code -> report.latestPrices[Scoring.normalizeTicker(code)]?.session?.close }
     }
     if (best != null) {
-        if (compact) {
-            Text(
-                listOfNotNull(
-                    "Best ${best.ticker} ${formatPercent(best.pct)}",
-                    worst?.let { "worst ${it.ticker} ${formatPercent(it.pct)}" },
-                ).joinToString(" · "),
-                style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = Space.s),
-            )
-        } else {
-            Row(Modifier.padding(top = Space.m), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                ExtremeBox("Best so far", best, Modifier.weight(1f))
-                if (worst != null) ExtremeBox("Worst so far", worst, Modifier.weight(1f))
-            }
+        Row(Modifier.padding(top = Space.m), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            ExtremeBox("Best so far", best, Modifier.weight(1f))
+            if (worst != null) ExtremeBox("Worst so far", worst, Modifier.weight(1f))
         }
     }
-    if (!compact) {
-        val standings = remember(saved, report) { stockStandings(saved, report) }
-        if (standings.isNotEmpty()) {
-            FlowRow(
-                Modifier.padding(top = Space.s),
-                horizontalArrangement = Arrangement.spacedBy(Space.xs),
-                verticalArrangement = Arrangement.spacedBy(Space.xs),
-            ) {
-                standings.take(MaxNamed).forEach { standing ->
-                    KitTag(
-                        standing.ticker,
-                        tone = when (standing.group) {
-                            CallGroup.REACHED -> palette.gain
-                            CallGroup.STOPPED -> palette.loss
-                            else -> palette.muted
-                        },
-                    )
-                }
-                if (standings.size > MaxNamed) KitTag("+${standings.size - MaxNamed} more", tone = palette.muted)
+    val standings = remember(saved, report) { stockStandings(saved, report) }
+    if (standings.isNotEmpty()) {
+        FlowRow(
+            Modifier.padding(top = Space.s),
+            horizontalArrangement = Arrangement.spacedBy(Space.xs),
+            verticalArrangement = Arrangement.spacedBy(Space.xs),
+        ) {
+            standings.take(MaxNamed).forEach { standing ->
+                KitTag(
+                    standing.ticker,
+                    tone = when (standing.group) {
+                        CallGroup.REACHED -> palette.gain
+                        CallGroup.STOPPED -> palette.loss
+                        else -> palette.muted
+                    },
+                )
             }
+            if (standings.size > MaxNamed) KitTag("+${standings.size - MaxNamed} more", tone = palette.muted)
         }
     }
     val channels = saved.channelNames().size
@@ -930,7 +905,7 @@ internal fun runLabel(target: LocalDate?, today: LocalDate, lastFinal: LocalDate
 }
 
 /** How an open report is laid out, which is the posture's business. */
-internal enum class ReportLayout { CARDS, TABLE, TABLETOP }
+internal enum class ReportLayout { CARDS, TABLE, TABLETOP, BOOK }
 
 /** One call in an open report, with what the screen works out about it, worked out once. */
 private class ReportCall(
@@ -1106,8 +1081,87 @@ private fun OpenReport(
         AboutRunContent(saved, appState, editor, pages.resultsCuriousOpen)
     }
 
+    val legacy = saved.result.consolidated.isEmpty()
+    // The report's stocks, each carrying only its calls still shown.
+    val unsorted = saved.result.consolidated.mapNotNull { stock ->
+        shownCalls.filter { it.stock === stock }.map(ReportCall::point)
+            .takeIf(List<RecommendationDataPoint>::isNotEmpty)
+            ?.let { stock.copy(dataPoints = it) }
+    }
+    fun callOf(stock: ConsolidatedRecommendation, point: RecommendationDataPoint) =
+        byAnchor[stock.anchorOf(point) to point.parseIndex]
+    var sort by pages.resultsCallSort
+    fun closeOf(stock: ConsolidatedRecommendation) = latestFor(stock.stockCode)?.session?.close
+    // Stable, so stocks the chosen order cannot tell apart stay in the report's own order.
+    val stocks = when (sort) {
+        CallSort.REPORT -> unsorted
+        CallSort.CLOSEST -> unsorted.sortedBy { stock ->
+            stock.dataPoints.minOf { point ->
+                closenessKey(callOf(stock, point)?.group ?: CallGroup.RUNNING, point.target1, closeOf(stock))
+            }
+        }
+        CallSort.MOVE -> unsorted.sortedByDescending { stock ->
+            stock.dataPoints.mapNotNull { moveVsEntry(it, closeOf(stock)) }.maxOrNull() ?: Double.NEGATIVE_INFINITY
+        }
+    }
+
+    // What the report amounts to: its bar and its summary tile.
+    @Composable
+    fun lead() {
+        bar()
+        ReportHeader(
+            saved = saved,
+            taken = calls.count { it.group != CallGroup.WATCHING },
+            watching = counts[CallGroup.WATCHING] ?: 0,
+            tradedCount = tradedCount,
+            outcomes = outcomes,
+            best = if (layout == ReportLayout.TABLE) bestSoFar(calls, latestFor) else null,
+            readings = readings,
+            onReadings = { pages.resultsReadingsOpen.value = true },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+
+    // What narrows and orders the calls.
+    @Composable
+    fun controls() {
+        StatusChips(counts, hidden, onToggleGroup, onAllGroups)
+        if (shownCalls.isEmpty()) {
+            Text(
+                "Nothing in this report matches those filters.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.muted,
+            )
+        }
+        if (stocks.size > 1) SortRow(stocks.size, sort) { sort = it }
+    }
+
+    @Composable
+    fun cards() {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
+            stocks.forEach { stock ->
+                StockCallsCard(
+                    stock = stock,
+                    channelFor = { messageId -> channelNames[messageId] },
+                    trades = trades,
+                    editor = editor,
+                    statusFor = { point -> callOf(stock, point)?.status ?: ("Running" to CallGroup.RUNNING) },
+                    latest = latestFor(stock.stockCode),
+                    onOpen = { point -> openCall = stock.anchorOf(point) to point.parseIndex },
+                    holdItems = { point -> callOf(stock, point)?.let { actions(it).map { a -> a.second } }.orEmpty() },
+                )
+            }
+        }
+    }
+
+    @Composable
+    fun legacyCalls() {
+        // Analyses saved before the consolidated contract have no nested occurrences, so they
+        // fall back to a flat list, with no chips: there is nothing to sort into groups.
+        saved.result.recommendations.forEach { LegacyDetail(it) }
+    }
+
     Column(modifier, verticalArrangement = Arrangement.spacedBy(Kit.TileGap)) {
-        val legacy = saved.result.consolidated.isEmpty()
         if (layout == ReportLayout.TABLETOP && !legacy) {
             TabletopReport(
                 appState = appState,
@@ -1123,54 +1177,26 @@ private fun OpenReport(
             about()
             return@Column
         }
-        bar()
-        ReportHeader(
-            saved = saved,
-            taken = calls.count { it.group != CallGroup.WATCHING },
-            watching = counts[CallGroup.WATCHING] ?: 0,
-            tradedCount = tradedCount,
-            outcomes = outcomes,
-            best = if (layout == ReportLayout.TABLE) bestSoFar(calls, latestFor) else null,
-            readings = readings,
-            onReadings = { pages.resultsReadingsOpen.value = true },
-            modifier = Modifier.fillMaxWidth(),
-        )
+        if (layout == ReportLayout.BOOK) {
+            // Split on the crease: what the report amounts to on the left, its calls on the right,
+            // as cards - a table folded down the middle would put a column under the hinge.
+            SplitColumns(
+                LocalFoldPosture.current,
+                unfoldedStart = 0.5f,
+                start = {
+                    lead()
+                    if (!legacy) controls()
+                    about()
+                },
+                end = { if (legacy) legacyCalls() else cards() },
+            )
+            return@Column
+        }
+        lead()
         if (legacy) {
-            // Analyses saved before the consolidated contract have no nested occurrences, so they
-            // fall back to a flat list, with no chips: there is nothing to sort into groups.
-            saved.result.recommendations.forEach { LegacyDetail(it) }
+            legacyCalls()
         } else {
-            StatusChips(counts, hidden, onToggleGroup, onAllGroups)
-            if (shownCalls.isEmpty()) {
-                Text(
-                    "Nothing in this report matches those filters.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = palette.muted,
-                )
-            }
-            // The report's stocks, each carrying only its calls still shown.
-            val unsorted = saved.result.consolidated.mapNotNull { stock ->
-                shownCalls.filter { it.stock === stock }.map(ReportCall::point)
-                    .takeIf(List<RecommendationDataPoint>::isNotEmpty)
-                    ?.let { stock.copy(dataPoints = it) }
-            }
-            fun callOf(stock: ConsolidatedRecommendation, point: RecommendationDataPoint) =
-                byAnchor[stock.anchorOf(point) to point.parseIndex]
-            var sort by pages.resultsCallSort
-            fun closeOf(stock: ConsolidatedRecommendation) = latestFor(stock.stockCode)?.session?.close
-            // Stable, so stocks the chosen order cannot tell apart stay in the report's own order.
-            val stocks = when (sort) {
-                CallSort.REPORT -> unsorted
-                CallSort.CLOSEST -> unsorted.sortedBy { stock ->
-                    stock.dataPoints.minOf { point ->
-                        closenessKey(callOf(stock, point)?.group ?: CallGroup.RUNNING, point.target1, closeOf(stock))
-                    }
-                }
-                CallSort.MOVE -> unsorted.sortedByDescending { stock ->
-                    stock.dataPoints.mapNotNull { moveVsEntry(it, closeOf(stock)) }.maxOrNull() ?: Double.NEGATIVE_INFINITY
-                }
-            }
-            if (stocks.size > 1) SortRow(stocks.size, sort) { sort = it }
+            controls()
             BoxWithConstraints {
                 if (layout == ReportLayout.TABLE && maxWidth >= TableMinWidth) {
                     RecommendationTable(
@@ -1179,23 +1205,11 @@ private fun OpenReport(
                         latestFor = latestFor,
                         onSelectPoint = { stock, point -> openCall = stock.anchorOf(point) to point.parseIndex },
                         statusFor = { stock, point -> callOf(stock, point)?.status ?: ("Running" to CallGroup.RUNNING) },
+                        peakFor = { stock, point -> appState.peakSince(stock.stockCode, point.date) },
                         holdItems = { stock, point -> callOf(stock, point)?.let { actions(it).map { a -> a.second } }.orEmpty() },
                     )
                 } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
-                        stocks.forEach { stock ->
-                            StockCallsCard(
-                                stock = stock,
-                                channelFor = { messageId -> channelNames[messageId] },
-                                trades = trades,
-                                editor = editor,
-                                statusFor = { point -> callOf(stock, point)?.status ?: ("Running" to CallGroup.RUNNING) },
-                                latest = latestFor(stock.stockCode),
-                                onOpen = { point -> openCall = stock.anchorOf(point) to point.parseIndex },
-                                holdItems = { point -> callOf(stock, point)?.let { actions(it).map { a -> a.second } }.orEmpty() },
-                            )
-                        }
-                    }
+                    cards()
                 }
             }
         }

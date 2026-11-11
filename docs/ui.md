@@ -653,6 +653,30 @@ things had to move with them:
   gold mark were the glass design's and are gone; while a request is out a band of light sweeps
   across it, built only while working and still under reduce motion.
 
+## A report's calls on screen (rebuilt 2026-11-12)
+
+An open report has the page to itself in every posture. Until 2026-11-12 the unfolded Fold kept
+the list of sessions down the left and the report in a ~400dp column on the right: too narrow for
+the table, so it drew ladder cards, and one scroll moved both halves. The owner asked for the list
+gone and the table across the screen. The report's own back arrow and system back return to the
+sessions.
+
+- **Unfolded**: `ReportLayout.TABLE`, the whole width. `RecommendationTable` from 600dp of
+  container; cards below that.
+- **Book**: `ReportLayout.BOOK` splits the report itself on the crease with `SplitColumns` - the
+  bar, the summary tile, the chips, the sort and About this run on the left, the calls as cards on
+  the right. A table folded down the middle would put a column under the hinge.
+- **Cover and tabletop** are unchanged.
+- **The table is one card with three levels, each its own fill.** The column names once, on an
+  ink band (`tileColors(TileTone.INK)`), the live figures' names in that tile's accent. A band per
+  stock in `palette.raised` with its logo, ticker, name, call count and price now. A line per call
+  on the card, led by the channel and its status dot.
+- **Columns**: Entry, Stop, Target 1, Target 2 (each level with its distance from the entry under
+  it), then Since entry, Peak (`AppState.peakSince`, with how far above the entry), To stop ("hit"
+  once stopped), To T1, To T2 ("reached" once there). A watched call's note takes the five live
+  columns. Only the channel column is fixed; every other is weighted, so a wider window widens the
+  columns and never adds one. `RecommendationTableTest` holds every column at 614, 682 and 715dp.
+
 ## The price ladder (redrawn 2026-11-11)
 
 `PriceLadder` was redrawn to the owner's mockup, and it is one component, so every place that draws it changed together.

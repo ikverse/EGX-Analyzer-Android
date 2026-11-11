@@ -184,7 +184,9 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `data/PromptComposer.kt` — generates the prompt sent to the model.
 - `data/ReportSync.kt` + `data/RuleSync.kt` + `data/PositionSync.kt` — what travels between devices.
 - `ui/RecommendationTable.kt` + `ui/RecommendationCard.kt` — a report's calls, as a table above
-  600dp of container and as cards below it. See **A report's calls on screen** below.
+  600dp of container and as cards below it. An open report fills the page with no list beside it
+  since 2026-11-12, and book posture splits it on the crease. See **A report's calls on screen** in
+  `docs/ui.md`.
 - `ui/OccurrenceSheet.kt` — one call in full, opened by pressing a table row. See **The sheet a row
   opens** below.
 - `data/XlsxWriter.kt` + `ui/ReportExport.kt` — a report as a spreadsheet, saved to Downloads or

@@ -4,6 +4,15 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.4.0] — 2026-11-12
+
+- **An open report fills the screen on the unfolded Fold.** The list of sessions no longer sits beside it; the back arrow or system back returns to the list. Before, the report had a narrow column, and scrolling either side moved both.
+- **A report's calls are one table of numbers.** Column names are said once on a dark band at the top, each stock has its own shaded band with its price now, and each call is a row under it. The ladder is still in the sheet a row opens.
+- **More figures per call:** the peak since the call and how far above the entry it went, how far the price is above the stop ("hit" once stopped), and how far it is from target 2 as well as target 1.
+- **Held as a book,** a report splits on the hinge: what it amounts to on the left, its calls on the right.
+
+---
+
 ## [5.3.0] — 2026-11-12
 
 - **Settings is laid out for each way the Fold is held.** Unfolded, the list of parts stays where it is while the part you opened scrolls beside it under its own name. Before, both shared one scroll, so reading down a long part took the list away and left half the screen empty.
