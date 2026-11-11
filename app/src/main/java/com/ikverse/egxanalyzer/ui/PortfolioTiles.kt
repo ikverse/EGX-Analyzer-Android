@@ -502,7 +502,7 @@ private fun BestSourceTile(appState: AppState, modifier: Modifier = Modifier) {
         } else {
             Text(best.channel, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
             Text(
-                formatPercent(best.anyTargetRate!! * 100, signed = false),
+                formatPercent(best.anyTargetRate!!, signed = false),
                 style = MaterialTheme.typography.headlineMedium.copy(fontFamily = TabularFigures),
                 modifier = Modifier.padding(top = 6.dp),
             )

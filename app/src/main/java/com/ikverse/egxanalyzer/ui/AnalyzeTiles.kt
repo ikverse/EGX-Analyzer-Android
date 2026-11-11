@@ -371,7 +371,7 @@ internal fun SourcesTile(appState: AppState, locked: Boolean = false, modifier: 
                     Text(
                         listOfNotNull(
                             rank?.let { "#$it" },
-                            score?.anyTargetRate?.let { "${formatPercent(it * 100, signed = false)} hit" },
+                            score?.anyTargetRate?.let { "${formatPercent(it, signed = false)} hit" },
                         ).joinToString(" · ").ifBlank { "Not scored yet" },
                         style = MaterialTheme.typography.bodySmall,
                         color = p.muted,
