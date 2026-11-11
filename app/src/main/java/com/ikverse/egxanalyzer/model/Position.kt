@@ -300,6 +300,15 @@ data class PositionView(
     val troughSinceEntry: Double? = null,
     val troughOn: LocalDate? = null,
     /**
+     * What this trade would have returned had it ended where the call did - at the stop the market
+     * broke, or at the close the deadline arrived on.
+     *
+     * Only on a trade the user is keeping open past that point, where it is the other half of the
+     * return printed above it: the difference between the two is what staying in has cost or made.
+     * Null on every other trade, and across a change of price scale.
+     */
+    val callEndedReturnPct: Double? = null,
+    /**
      * The deadline passed and the trade ended at no level of its own - no target 2, no stop.
      *
      * The one shape of unfinished business the app can recognise, and the whole basis of the

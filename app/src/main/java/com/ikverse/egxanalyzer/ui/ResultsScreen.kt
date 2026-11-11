@@ -1382,6 +1382,9 @@ private fun OpenReport(
                 channel = channelNames[point.sourceMessageId],
                 trades = trades,
                 editor = editor,
+                latest = latestFor(stock.stockCode),
+                status = byAnchor[code to slot]?.status,
+                scored = byAnchor[code to slot]?.scored,
                 onDismiss = { openCall = null },
             )
         }
