@@ -4,6 +4,28 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.3.0] — 2026-11-12
+
+- **Settings is laid out for each way the Fold is held.** Unfolded, the list of parts stays where it is while the part you opened scrolls beside it under its own name. Before, both shared one scroll, so reading down a long part took the list away and left half the screen empty.
+- **Held as a book,** the same two columns split on the hinge, and each part shows its full summary.
+- **Half folded on a table,** the upright half stays put: the status, or on Notifications the one you picked with its example. Pressing a question mark shows its explanation there, not in a sheet over the half you are pressing. The parts and the settings are on the flat half.
+- **On the cover screen,** an open part keeps its back button and name in place while it scrolls.
+- **Reader is split in two.** Reader keeps the AI, the provider and key, and Advanced. A new part, Reading rules, holds what to send, the wording to keep and drop, the prompt and company names.
+- **The theme is on the Settings hub,** with Pure black under it whenever the theme can be dark. It was inside Prices and trades.
+- **The status tile is coral when something needs a look** and dark only when everything works. A part with something wrong carries a dot.
+- **A Check key button** on Reader's status tile, while a saved key has never been tried.
+- **Cards on a settings page are white.** Colour is kept for a status, an update that is ready, and Delete all analyses.
+- **Coral is lighter everywhere:** tiles, the widget, notifications and the launcher shortcut.
+- The Ask AI model card named its one field three times. It has one heading and one question mark now.
+- The question marks down a settings card stand in one column.
+- An opened row showed a lone "I" where its arrow should be, across the app. It is a chevron now.
+- The update switch on the blue About tile showed only its knob. Its track is visible, and Download or Install leads the row of buttons.
+- A long endpoint address wraps onto a second line. It was cut off mid-word.
+- Token usage lines up with the settings above it.
+- The prompt history rows show each version's code, so three versions no longer read the same.
+
+---
+
 ## [5.2.0] — 2026-11-12
 
 - **A new first tab, Home, and the app opens on it.** It shows the market before your trades: the EGX30 with its level, its move on the day and a line over a week, a month or three months, then EGX70 EWI, EGX100 EWI and the Shariah 33 on a row of their own.
