@@ -1888,62 +1888,50 @@ private fun CallChartSection(call: ScoredCall, history: List<DailySession>) {
         )
     }
     var touched by remember(visible) { mutableStateOf<DailySession?>(null) }
+    // It sits on the sheet's panel rather than on a card, so the range track takes the hairline
+    // tone: the raised one is the panel's own colour and would not show against it.
+    val p = palette
+    val colors = remember(p) { chartCardColors(p, surface = p.card, track = p.line) }
 
-    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            SheetSectionLabel("Price chart")
+    Column {
+        // The reading takes the headline's two places rather than a line of its own: a caption
+        // that arrived on touch would push the chart about under the finger that asked for it.
+        val reading = chartReading(visible, touched)
+        ChartHeadline(
+            title = reading?.first ?: range.title,
             // What the visible line adds up to, which is the one thing its shape cannot say.
-            if (move != null) {
-                Text(
-                    formatPercent(move),
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-                    color = PriceRole.forReturn(move),
-                )
-            }
-        }
+            figure = reading?.second ?: move?.let { formatPercent(it) }.orEmpty(),
+            colors = colors,
+            figureColor = if (reading == null && move != null) PriceRole.forReturn(move) else colors.text,
+        )
         if (visible.count { it.close != null } > 1) {
             PriceChart(
                 sessions = visible,
                 levels = levels,
-                // The one date this section is about is the call itself, ringed the same way the
-                // stock sheet rings every call on a stock.
+                // The one date this section is about is the call itself, marked the same way the
+                // stock sheet marks every call on a stock.
                 calls = setOf(call.openedOn),
-                // The panel's own tint, not the card's - the ring and the touch dot are punched
-                // through whatever surface the chart is actually sitting on, which since the
-                // neutral tile wrap is one shade lighter than the card underneath it.
-                on = palette.card,
+                colors = colors,
                 selected = touched,
                 onSelect = { touched = it },
+                modifier = Modifier.padding(top = Space.s),
                 height = CallChartHeight,
             )
-            // The readout takes the dates' own line rather than appearing above it, exactly as it
-            // does in the sheet: a caption that arrived on touch would push the chart up under the
-            // finger that asked for it.
-            val reading = touched
-            if (reading?.close != null) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    Text(
-                        shortDate(reading.date) + " · " + formatPrice(reading.close),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-                        color = palette.ink,
-                    )
-                    visible.moveTo(reading)?.let {
-                        ChartCaption(formatPercent(it) + " since " + shortDate(visible.first().date))
-                    }
-                }
-            } else {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    ChartCaption(shortDate(visible.first().date))
-                    ChartCaption(shortDate(visible.last().date))
-                }
-            }
+            ChartLegend("The call · levels from " + call.channel, colors, Modifier.padding(top = Space.s))
         } else {
             // Absent rather than an empty box, which reads as a chart that failed to load.
-            ChartCaption("No sessions stored in this range.")
+            ChartLegend("No sessions stored in this range.", colors, Modifier.padding(top = Space.s), dot = false)
         }
-        // No Levels chip: unlike the position card, there's nothing to toggle off - the call's own
-        // levels are the reason this card exists.
-        ChartControls(range = range, onRange = { range = it }, levels = null, onLevels = {})
+        // No Levels button: unlike the stock sheet, there is nothing to turn off - the call's own
+        // levels are the reason this chart exists. No Call range either: the call is the subject.
+        ChartRanges(
+            options = ChartRange.entries.filter { it != ChartRange.CALL },
+            selected = range,
+            onSelect = { range = it },
+            label = { it.label },
+            colors = colors,
+            modifier = Modifier.padding(top = Space.m),
+        )
     }
 }
 

@@ -223,13 +223,16 @@ internal fun PositionCard(
 }
 
 /**
- * The trade's ladder: the price paid as the entry, unnamed because the card says it just above, and the arrow where it stands -
- * today's close while it runs, where it ended once it has. Nothing is plotted across a change of
- * scale: the levels are in the old money and the price in the new.
+ * The trade's ladder: the price paid as the entry, named "You paid", the dot where it stands -
+ * today's close while it runs, where it ended once it has - and a stripe from the lowest to the
+ * highest it has been since it was bought. Nothing is plotted across a change of scale: the levels
+ * are in the old money and the price in the new.
  */
 @Composable
 private fun TradeLadder(view: PositionView, modifier: Modifier = Modifier, compact: Boolean = false) {
     val position = view.position
+    val low = view.troughSinceEntry
+    val high = view.peakSinceEntry
     PriceLadder(
         stopLoss = position.stopLoss,
         entryLow = position.entryPrice,
@@ -239,6 +242,8 @@ private fun TradeLadder(view: PositionView, modifier: Modifier = Modifier, compa
         modifier = modifier,
         reached = if (view.priceScaleChanged) null else view.exitPrice ?: view.currentPrice,
         compact = compact,
+        travelled = if (!view.priceScaleChanged && low != null && high != null && low <= high) low..high else null,
+        entryLabel = "You paid",
     )
 }
 
@@ -694,71 +699,70 @@ private fun TradeChart(position: Position, on: Color, history: List<DailySession
         }
     }
     var touched by remember(visible) { mutableStateOf<DailySession?>(null) }
+    val p = palette
+    val colors = remember(p, on) { chartCardColors(p, surface = on) }
 
-    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            SheetSectionLabel(if (range == null) "Price since you bought" else "Price over ${range.label}")
+    Column {
+        // The reading takes the headline's two places rather than a line of its own: a caption
+        // that arrived on touch would push the chart about under the finger that asked for it.
+        val reading = chartReading(visible, touched) { formatPrice(it, decimals) }
+        ChartHeadline(
+            title = reading?.first ?: if (range == null) {
+                "Since you bought · ${closes.size} sessions"
+            } else {
+                range.title
+            },
             // What the visible line adds up to, which is the one thing its shape cannot say.
-            if (move != null) {
-                Text(
-                    formatPercent(move),
-                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
-                    color = PriceRole.forReturn(move),
-                )
-            }
-        }
+            figure = reading?.second ?: move?.let { formatPercent(it) }.orEmpty(),
+            colors = colors,
+            figureColor = if (reading == null && move != null) PriceRole.forReturn(move) else colors.text,
+        )
         if (closes.size > 1) {
             PriceChart(
                 sessions = visible,
                 levels = levels,
-                // The one ring on this chart is the day the trade was bought.
+                // The one dot on this chart is the day the trade was bought.
                 calls = setOf(position.entryDate),
-                on = on,
+                colors = colors,
                 selected = touched,
                 onSelect = { touched = it },
+                modifier = Modifier.padding(top = Space.s),
                 height = PositionChartHeight,
             )
-            // The readout takes the dates' own line rather than appearing above it: a caption that
-            // arrived on touch would push the chart up under the finger that asked for it.
-            val reading = touched
-            if (reading?.close != null) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    Text(
-                        shortDate(reading.date) + " · " + formatPrice(reading.close, decimals),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    visible.moveTo(reading)?.let {
-                        ChartCaption(formatPercent(it) + " since " + shortDate(visible.first().date))
-                    }
-                }
-            } else {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    ChartCaption(shortDate(visible.first().date))
-                    ChartCaption(shortDate(visible.last().date))
-                }
+            if (visible.any { it.date == position.entryDate }) {
+                ChartLegend("The day you bought", colors, Modifier.padding(top = Space.s))
             }
-            // The scale the line is drawn on, which a chart with no axis cannot otherwise say.
-            Text(
-                buildAnnotatedString {
-                    append("Lowest close ")
-                    figure(formatPrice(closes.min(), decimals))
-                    append(" · highest ")
-                    figure(formatPrice(closes.max(), decimals))
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = palette.muted,
-            )
+            // The scale the line is drawn on. With no level near enough to draw, the chart's own
+            // High and Low tags already say it.
+            if (levels != null) {
+                Text(
+                    buildAnnotatedString {
+                        append("Lowest close ")
+                        figure(formatPrice(closes.min(), decimals))
+                        append(" · highest ")
+                        figure(formatPrice(closes.max(), decimals))
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.muted,
+                    modifier = Modifier.padding(top = Space.xs),
+                )
+            }
         } else {
             // Absent rather than an empty box, which reads as a chart that failed to load.
-            Text("No sessions stored in this range.", style = MaterialTheme.typography.bodySmall, color = palette.muted)
+            ChartLegend("No sessions stored in this range.", colors, Modifier.padding(top = Space.s), dot = false)
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.xs), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-            if (canShowSinceBought) KitChip("Since you bought", selected = range == null, onClick = { picked = null })
-            TradeChartRanges.forEach { option ->
-                KitChip(option.label, selected = range == option, onClick = { picked = option })
-            }
-        }
+        // Null is "since you bought", which leads the track where the trade has a line to show.
+        ChartRanges(
+            options = buildList<ChartRange?> {
+                if (canShowSinceBought) add(null)
+                addAll(TradeChartRanges)
+            },
+            selected = range,
+            onSelect = { picked = it },
+            label = { it?.label ?: "Since buy" },
+            colors = colors,
+            modifier = Modifier.padding(top = Space.m),
+        )
     }
 }
 
