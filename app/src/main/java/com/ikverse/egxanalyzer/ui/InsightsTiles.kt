@@ -128,7 +128,7 @@ internal fun RankingTiles(
             Text("Who delivered", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             Text(
                 "${channels.size} sources · $tracked calls",
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = TabularFigures),
+                style = MaterialTheme.typography.bodySmall,
                 color = palette.muted,
             )
         }
@@ -213,13 +213,20 @@ private fun RankingRow(
                 )
                 Text(
                     if (thin) "${score.calls} calls" else "${score.judged} finished calls",
-                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
+                    style = MaterialTheme.typography.labelMedium,
                     color = soft,
                     maxLines = 1,
                 )
                 if (thin) KitTag("Too new to rank", tone = soft)
             }
-            Column(horizontalAlignment = Alignment.End) {
+        }
+        // The two figures on a line of their own, under the name, so the name keeps the whole width
+        // of the row and neither figure is pushed past the tile's edge on the cover screen.
+        Row(
+            Modifier.fillMaxWidth().padding(start = FigureIndent, top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
                 val average = score.averageReturn
                 Text(
                     formatPercent(average),
@@ -231,16 +238,16 @@ private fun RankingRow(
                     },
                     maxLines = 1,
                 )
-                Text("earned per call", style = MaterialTheme.typography.labelSmall, color = soft, maxLines = 1)
+                Text("earned per call", style = MaterialTheme.typography.bodySmall, color = soft, maxLines = 1)
             }
-            Column(horizontalAlignment = Alignment.End) {
+            Column(Modifier.weight(1f)) {
                 Text(
                     "${score.reachedTarget1}/${score.judged}",
                     style = MaterialTheme.typography.titleLarge.copy(fontFamily = TabularFigures),
                     color = if (thin) soft else ink,
                     maxLines = 1,
                 )
-                Text("reached target", style = MaterialTheme.typography.labelSmall, color = soft, maxLines = 1)
+                Text("reached target", style = MaterialTheme.typography.bodySmall, color = soft, maxLines = 1)
             }
         }
         val split = score.outcomes()
@@ -251,6 +258,9 @@ private fun RankingRow(
 }
 
 private val PlaceWidth: Dp = 22.dp
+
+/** Where the name starts: past the place, the 40dp picture and the two 12dp gaps. */
+private val FigureIndent: Dp = PlaceWidth + 12.dp + 40.dp + 12.dp
 
 /**
  * The cobalt count of calls still in play, beside the lime one stock the record says is on offer
