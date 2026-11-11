@@ -1,6 +1,8 @@
 package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -256,5 +258,21 @@ class ResultsPageTest {
         compose.runOnIdle { assertEquals(true, state.goBack()) }
         compose.onNodeWithText("Stopped 1").assertDoesNotExist()
         compose.onNodeWithText("2 calls on 2 stocks").assertExists()
+    }
+
+    @Test
+    fun `a report deleted while open is closed, so back is not swallowed`() {
+        var results by androidx.compose.runtime.mutableStateOf(listOf(run))
+        val base = FakeAppState(performance = mixed, destination = com.ikverse.egxanalyzer.ui.AppDestination.RESULTS)
+        val state = object : AppState by base {
+            override val savedResults get() = results
+        }
+        show(state)
+        compose.runOnIdle { state.pages.openReport(run.id) }
+        compose.onNodeWithText("Stopped 1").assertExists()
+        // The record without it, and one more run so the list is still drawn.
+        results = listOf(run.copy(id = run.id + 1))
+        compose.waitForIdle()
+        assertEquals(null, state.pages.openResultId.value)
     }
 }

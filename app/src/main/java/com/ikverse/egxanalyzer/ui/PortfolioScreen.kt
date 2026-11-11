@@ -126,6 +126,25 @@ internal fun PortfolioScreen(appState: AppState) {
 
         val posture = LocalFoldPosture.current
         var selected by appState.pages.portfolioSelectedTrade
+        // The shade's Record sale: here rather than in a list, so it is heard in every posture.
+        val pendingSell = appState.pendingSellPositionId
+        LaunchedEffect(pendingSell) {
+            pendingSell?.let { id ->
+                appState.pages.portfolioDialog.value = TradeDialogRequest(id, TradeDialogKind.SELL)
+                appState.consumePendingSell()
+            }
+        }
+        // Unfolded and tabletop draw no card to scroll to and flash, so arriving at a trade opens
+        // it - the sheet unfolded, the upper half on tabletop - and the arrival is done. The cover
+        // screen and book posture keep TradeLists' own reveal.
+        val pendingPosition = appState.pendingPositionId
+        val opensOnArrival = posture is FoldPosture.Unfolded || posture is FoldPosture.Tabletop
+        LaunchedEffect(pendingPosition, opensOnArrival) {
+            val id = pendingPosition ?: return@LaunchedEffect
+            if (!opensOnArrival) return@LaunchedEffect
+            if (portfolio.positions.any { it.position.id == id }) selected = id
+            appState.consumePendingPosition()
+        }
         val positions = portfolio.positions
         val selectedView = positions.firstOrNull { it.position.id == selected }
         // Book and tabletop always show a trade in full: the one pressed, or the most urgent open
@@ -402,7 +421,6 @@ private fun ColumnScope.TradeLists(portfolio: Portfolio, appState: AppState, lay
     }
 
     val pendingPosition = appState.pendingPositionId
-    val pendingSell = appState.pendingSellPositionId
     val reveal = remember { BringIntoViewRequester() }
     LaunchedEffect(pendingPosition, portfolio.groups, dateFilter, stockFilter) {
         if (pendingPosition == null) return@LaunchedEffect
@@ -426,15 +444,13 @@ private fun ColumnScope.TradeLists(portfolio: Portfolio, appState: AppState, lay
         if (!held.open && finished.indexOfFirst { it.position.id == pendingPosition } >= FinishedShown) {
             finishedAll = true
         }
+        // Book posture shows the trade in full beside the list.
+        if (layout == TradeListLayout.COMPACT) selected = pendingPosition
         delay(REVEAL_SETTLE_MS)
         reveal.revealIfOnScreen(appState, AppDestination.PORTFOLIO)
-    }
-    // The Record sale action in the shade: the sale dialog opens on arrival, once.
-    LaunchedEffect(pendingSell) {
-        pendingSell?.let { id ->
-            appState.pages.portfolioDialog.value = TradeDialogRequest(id, TradeDialogKind.SELL)
-            appState.consumePendingSell()
-        }
+        // Only an open trade's card flashes, and it ends the arrival when it has. A row has no
+        // flash, so the arrival ends here - left pending, every recompute would scroll back to it.
+        if (!(held.open && layout == TradeListLayout.CARDS)) appState.consumePendingPosition()
     }
 
     if (shown.isEmpty()) {

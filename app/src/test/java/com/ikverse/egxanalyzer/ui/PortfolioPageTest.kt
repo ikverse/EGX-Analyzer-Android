@@ -259,4 +259,44 @@ class PortfolioPageTest {
         compose.waitForIdle()
         assertTrue(state.pages.portfolioFinishedAll.value)
     }
+
+    /** Counts the arrivals a screen marks as done. */
+    private class Arrivals(base: AppState) : AppState by base {
+        var positions = 0
+        var sells = 0
+        override fun consumePendingPosition() { positions++ }
+        override fun consumePendingSell() { sells++ }
+    }
+
+    @Test
+    @Config(qualifiers = "w750dp-h891dp")
+    fun `unfolded, Record sale from the shade opens the sale`() {
+        val state = Arrivals(FakeAppState(portfolio = portfolio, pendingSellPositionId = comi.position.id))
+        show(FoldPosture.Unfolded, state)
+        compose.waitForIdle()
+        assertEquals(TradeDialogRequest(comi.position.id, TradeDialogKind.SELL), state.pages.portfolioDialog.value)
+        assertEquals(1, state.sells)
+    }
+
+    @Test
+    @Config(qualifiers = "w750dp-h891dp")
+    fun `unfolded, arriving at a trade opens it and ends the arrival`() {
+        val state = Arrivals(FakeAppState(portfolio = portfolio, pendingPositionId = abuk.position.id))
+        show(FoldPosture.Unfolded, state)
+        compose.waitForIdle()
+        assertEquals(abuk.position.id, state.pages.portfolioSelectedTrade.value)
+        assertEquals(1, state.positions)
+    }
+
+    @Test
+    fun `arriving at a finished trade ends the arrival`() {
+        val base = FakeAppState(
+            portfolio = Portfolio(groups = listOf(PortfolioGroup(called, listOf(late, abuk))), stats = portfolio.stats),
+            pendingPositionId = late.position.id,
+        )
+        val state = Arrivals(base)
+        show(FoldPosture.Cover, state)
+        compose.waitForIdle()
+        assertEquals(1, state.positions)
+    }
 }

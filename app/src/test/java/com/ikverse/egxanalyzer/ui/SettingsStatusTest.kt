@@ -22,6 +22,7 @@ class SettingsStatusTest {
         lastAt: Long = now.minusSeconds(3_600).toEpochMilli(),
         refreshing: Boolean = false,
         clean: Boolean = true,
+        at: Instant = now,
     ) = settingsStatus(
         telegramReady = telegram,
         credentialVerified = verified,
@@ -32,7 +33,7 @@ class SettingsStatusTest {
         feedClean = clean,
         feedFaults = if (clean) 0 else 3,
         stocksNamed = 40,
-        now = now,
+        now = at,
         zone = zone,
     )
 
@@ -86,5 +87,27 @@ class SettingsStatusTest {
     @Test
     fun `the headline counts what is wrong`() {
         assertEquals("3 things need a look", status(telegram = false, verified = false, clean = false).headline)
+    }
+
+    private fun cairo(text: String): Instant = java.time.LocalDateTime.parse(text).atZone(zone).toInstant()
+
+    @Test
+    fun `on a Saturday Thursday's prices are not late`() {
+        val sat = status(lastAt = cairo("2026-11-12T15:00").toEpochMilli(), at = cairo("2026-11-14T12:00"))
+        assertEquals(true, sat.lines[2].ok)
+        assertEquals("Everything is working", sat.headline)
+    }
+
+    @Test
+    fun `before Sunday's bell Thursday's prices are not late`() {
+        val sun = status(lastAt = cairo("2026-11-12T15:00").toEpochMilli(), at = cairo("2026-11-15T08:00"))
+        assertEquals(true, sun.lines[2].ok)
+    }
+
+    @Test
+    fun `after Thursday's close a morning refresh is late`() {
+        val thu = status(lastAt = cairo("2026-11-12T10:00").toEpochMilli(), at = cairo("2026-11-12T16:00"))
+        assertEquals(false, thu.lines[2].ok)
+        assertEquals(SettingsSection.GENERAL, thu.firstFault)
     }
 }

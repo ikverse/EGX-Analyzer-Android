@@ -1077,7 +1077,7 @@ class LiveAppState(
      * The loaded posts an earlier run has read under this model, prompt and language.
      *
      * Worked out in the getter and kept against everything it depends on - the model, the reading
-     * key, the window, the loaded posts and how many reports there are - so a change to any of
+     * key, the window, the loaded posts and which reports there are - so a change to any of
      * them recomputes it and nothing else does. One small query, not a recomposition's worth.
      */
     override val sourcesReadEarlier: Set<String>
@@ -1088,7 +1088,8 @@ class LiveAppState(
             val readingKey = analysisReadingKey()
             val start = runCatching { resolveAnalysisWindow(analysisMode, recommendationTargetDate).start }
                 .getOrNull() ?: return emptySet()
-            val key = listOf(model, readingKey, start, loaded, savedResults.size)
+            // The reports by id, not by count: one deleted and another run keeps the count.
+            val key = listOf(model, readingKey, start, loaded, savedResults.map { it.id })
             readEarlierCache?.takeIf { it.first == key }?.let { return it.second }
             val read = runCatching { localDataStore.sourceReads(model, readingKey, start).keys }
                 .getOrDefault(emptySet())
