@@ -28,7 +28,7 @@ internal enum class NotificationTone(val argb: Int) {
     /** A trade of yours changed, or is overdue, or a run finished. */
     TRADES(0xFF1E2BFF.toInt()),
     /** A trade of yours is closing on its stop or target 2. */
-    APPROACH(0xFFFF6B4A.toInt()),
+    APPROACH(0xFFFFB8A3.toInt()),
     /** A price reached a buy zone, or a level you set an alert at. */
     BUY_ZONE(0xFFC8FF4D.toInt()),
     /** What the whole session did. */
@@ -56,7 +56,7 @@ internal sealed interface StockBadge {
             0xFFFFD12E.toInt(), // tile1
             0xFFE2D4FF.toInt(), // tile2
             0xFFBFE3FF.toInt(), // tile3
-            0xFFFF6B4A.toInt(), // alert
+            0xFFFFB8A3.toInt(), // alert
         )
 
         fun forTicker(ticker: String): StockBadge {

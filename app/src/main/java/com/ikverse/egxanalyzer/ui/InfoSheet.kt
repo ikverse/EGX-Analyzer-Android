@@ -95,6 +95,9 @@ internal fun InfoButton(
     dense: Boolean = false,
 ) {
     var open by remember { mutableStateOf(false) }
+    // Where a page shows explanations in place of a sheet, the note goes there. See [LocalInfoNoteSink].
+    val sink = LocalInfoNoteSink.current
+    val show = { if (sink != null) sink(note) else open = true }
     // The kit's look since 5.0: a muted glyph on a raised disc, at a row's own height.
     val glyph = @Composable {
         Icon(
@@ -108,7 +111,7 @@ internal fun InfoButton(
         Box(
             modifier
                 .size(IconSize.Inline)
-                .clickable(role = Role.Button) { open = true },
+                .clickable(role = Role.Button) { show() },
             contentAlignment = Alignment.Center,
         ) { glyph() }
     } else {
@@ -118,12 +121,21 @@ internal fun InfoButton(
                 .size(32.dp)
                 .clip(com.ikverse.egxanalyzer.ui.kit.Kit.Capsule)
                 .background(palette.raised)
-                .clickable(role = Role.Button, onClickLabel = "Explain") { open = true },
+                .clickable(role = Role.Button, onClickLabel = "Explain") { show() },
             contentAlignment = Alignment.Center,
         ) { glyph() }
     }
     if (open) InfoSheet(note) { open = false }
 }
+
+/**
+ * Where a pressed question mark sends its note, when the page has somewhere better than a sheet.
+ *
+ * Null everywhere but Settings in tabletop, where the upright half is for reading and the flat half
+ * for pressing: a sheet would rise over the half being pressed, so the note is shown above the
+ * crease instead and the controls stay under the finger.
+ */
+internal val LocalInfoNoteSink = androidx.compose.runtime.compositionLocalOf<((InfoNote) -> Unit)?> { null }
 
 /**
  * An [InfoNote] as a sheet, on the same terms as `ChannelScoreSheet`.
@@ -191,6 +203,15 @@ internal fun InfoSheet(
 private val ChevronGutter: Dp = IconSize.Action
 
 /**
+ * The width of a switch, held open after the question mark of a row that has no control.
+ *
+ * So the marks down a card stand in one column: just inboard of the switches, whether the row they
+ * are on has a switch or not. Until 5.3 a row without one spent [ChevronGutter] instead, which put
+ * its mark 28dp to the right of the marks on the rows with switches.
+ */
+private val SwitchGutter: Dp = 52.dp
+
+/**
  * The touch target a settings row's question mark gets.
  *
  * Not [IconButton]'s own 48dp, which is a third taller than anything it sits beside: a switch is
@@ -237,7 +258,7 @@ internal fun SettingRow(
                     // target down to 12dp rather than move it. Only a row that ends at the question
                     // mark spends the gutter - where a control follows, the control is what has to
                     // reach the chevron's column, and padding the glyph holds it short of it.
-                    .padding(end = if (trailing == null) ChevronGutter else 0.dp)
+                    .padding(end = if (trailing == null) SwitchGutter else 0.dp)
                     .size(InfoTarget),
             )
         }
@@ -278,6 +299,8 @@ internal fun SettingToggle(
     enabled: Boolean = true,
     /** A second, quieter line under the label: when the thing it switches happens. */
     detail: String? = null,
+    /** On the cobalt tile, where the ordinary track is cobalt on cobalt. See `KitSwitchFace`. */
+    onHero: Boolean = false,
 ) {
     SettingRow(
         // The row is the switch: one accessible node that carries the name, the state and the
@@ -290,7 +313,7 @@ internal fun SettingToggle(
             onValueChange = onCheckedChange,
         ),
         about,
-        trailing = { com.ikverse.egxanalyzer.ui.kit.KitSwitchFace(checked = checked, enabled = enabled) },
+        trailing = { com.ikverse.egxanalyzer.ui.kit.KitSwitchFace(checked = checked, enabled = enabled, onHero = onHero) },
     ) {
         Column(
             Modifier
@@ -298,7 +321,13 @@ internal fun SettingToggle(
                 .padding(end = Space.s),
         ) {
             Text(label, style = MaterialTheme.typography.bodyLarge)
-            detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = palette.muted) }
+            detail?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (onHero) androidx.compose.material3.LocalContentColor.current.copy(alpha = 0.78f) else palette.muted,
+                )
+            }
         }
     }
 }

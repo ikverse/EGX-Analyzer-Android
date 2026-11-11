@@ -96,20 +96,27 @@ internal fun GeneratedPromptSection(appState: AppState) {
         }
 
         Column {
+            // Why each version was made is said only where it tells two rows apart: a list of
+            // three reading "First run" three times says nothing three times.
+            val reasonsDiffer = appState.promptVersions.take(10).map { it.reason }.distinct().size > 1
             appState.promptVersions.take(10).forEachIndexed { index, version ->
                 if (index > 0) KitRule()
                 Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
+                        // The code leads, because it is the one thing that differs on every row.
                         Text(
-                            "v${version.sequence}" + if (version.id == active.id) " · active" else "",
+                            "v${version.sequence} · ${version.id}" + if (version.id == active.id) " · in use" else "",
                             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = TabularFigures),
                             fontWeight = FontWeight.Bold,
                             color = if (version.id == active.id) p.ink else p.muted,
                         )
-                        Text(version.reason, style = MaterialTheme.typography.labelSmall, color = p.muted)
                         Text(
-                            "${version.createdAt.asLocalStamp()} · ${version.device}",
-                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = TabularFigures),
+                            listOfNotNull(
+                                version.reason.takeIf { reasonsDiffer },
+                                version.createdAt.asLocalStamp(),
+                                version.device,
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
                             color = p.muted,
                         )
                     }

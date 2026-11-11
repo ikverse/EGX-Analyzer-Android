@@ -4,7 +4,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -27,8 +30,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * The 5.0 Settings page, on the cover screen: a hub of tiles, each opening its part as a page of
- * its own, with a way back. Every action is recorded, never carried out.
+ * The Settings page, on the cover screen unless a test says otherwise: a hub of tiles, each
+ * opening its part as a page of its own, with a way back. Every action is recorded, never carried
+ * out.
+ *
+ * The posture tests at the foot hold what 5.3 was for: the list of parts and the upright half stay
+ * where they are while the open part scrolls. Both used to ride the page's one scroll.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w411dp-h891dp")
@@ -88,10 +95,10 @@ class SettingsPageTest {
             }
         }
         compose.onNodeWithText("Prices and trades").performScrollTo().performClick()
-        compose.onNodeWithText("Appearance").assertExists()
+        compose.onNodeWithText("Trade defaults").assertExists()
         generation++
         compose.waitForIdle()
-        compose.onNodeWithText("Appearance").assertExists()
+        compose.onNodeWithText("Trade defaults").assertExists()
         compose.onNodeWithText("Telegram is signed out").assertDoesNotExist()
     }
 
@@ -112,9 +119,11 @@ class SettingsPageTest {
     fun `the theme control and the stepper change their settings`() {
         val state = Recording(FakeAppState(appPreferences = AppPreferences()))
         show(state)
-        compose.onNodeWithText("Prices and trades").performScrollTo().performClick()
-        compose.onNodeWithText("Dark").performClick()
+        // The theme is on the hub itself since 5.3, with no part to open first.
+        compose.onNodeWithText("Dark").performScrollTo().performClick()
         assertEquals(listOf(ThemeMode.DARK), state.themes)
+        compose.onNodeWithText("Prices and trades").performScrollTo().performClick()
+        compose.onNodeWithText("Appearance").assertDoesNotExist()
         val window = AppPreferences().defaultTradeWindowSessions
         compose.onNodeWithContentDescription("More").performScrollTo().performClick()
         assertEquals(listOf(window + 1), state.windows)
@@ -168,7 +177,10 @@ class SettingsPageTest {
         override fun updateSessionDigest(enabled: Boolean) { changed += "digest" }
     }
 
+    // At the width tabletop really has: the phone open and on its side. On the cover screen's 411dp
+    // the flat half has no room for a column of parts beside two columns of keys.
     @Test
+    @Config(qualifiers = "w832dp-h750dp")
     fun `on tabletop a key chooses what is explained and switches nothing`() {
         val state = Toggles(FakeAppState())
         state.pages.settingsSection.value = SettingsSection.NOTIFICATIONS
@@ -186,5 +198,95 @@ class SettingsPageTest {
         compose.waitForIdle()
         assertEquals(2, compose.onAllNodesWithText(NotificationKind.DIGEST.label).fetchSemanticsNodes().size)
         assertEquals(emptyList<String>(), state.changed)
+    }
+
+    @Test
+    fun `reading rules is a part of its own, split out of the reader`() {
+        show(FakeAppState())
+        compose.onNodeWithText("Reading rules").performScrollTo().performClick()
+        listOf("What to send", "Wording", "Prompt", "Company names").forEach {
+            compose.onNodeWithText(it).performScrollTo().assertExists()
+        }
+        compose.onNodeWithText("Advanced").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Back to Settings").performClick()
+        compose.onNodeWithText("Reader").performScrollTo().performClick()
+        compose.onNodeWithText("What to send").assertDoesNotExist()
+        compose.onNodeWithText("Advanced").performScrollTo().assertExists()
+    }
+
+    @Test
+    fun `a part with something wrong is marked on the hub`() {
+        // Signed out and with no key: two of the three things the status tile reports.
+        show(FakeAppState())
+        val marked = compose.onAllNodesWithContentDescription("Needs a look").fetchSemanticsNodes().size
+        assertEquals(true, marked >= 2)
+    }
+
+    @Test
+    fun `the back button and the part's name stay put while the part scrolls`() {
+        val state = FakeAppState()
+        state.pages.settingsSection.value = SettingsSection.READING_RULES
+        show(state)
+        compose.onNodeWithText("What to send").assertIsDisplayed()
+        compose.onNodeWithText("Company names").performScrollTo()
+        compose.onNodeWithText("What to send").assertIsNotDisplayed()
+        compose.onNodeWithContentDescription("Back to Settings").assertIsDisplayed()
+        compose.onNodeWithText("Reading rules").assertIsDisplayed()
+    }
+
+    private fun showIn(posture: com.ikverse.egxanalyzer.model.FoldPosture, state: AppState) {
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.LIGHT) {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    com.ikverse.egxanalyzer.ui.kit.LocalFoldPosture provides posture,
+                ) { SettingsScreen(state) }
+            }
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "w750dp-h832dp")
+    fun `unfolded, the list of parts stays where it is while the open part scrolls`() {
+        val state = FakeAppState()
+        state.pages.settingsSection.value = SettingsSection.READING_RULES
+        showIn(com.ikverse.egxanalyzer.model.FoldPosture.Unfolded, state)
+        compose.onNodeWithText("What to send").assertIsDisplayed()
+        compose.onNodeWithText("Company names").performScrollTo()
+        // The part moved...
+        compose.onNodeWithText("What to send").assertIsNotDisplayed()
+        // ...and the list beside it, the first part in it and the last, did not.
+        compose.onNodeWithText("Telegram").assertIsDisplayed()
+        compose.onNodeWithText("About").assertIsDisplayed()
+        // Its name is over the column still: once in the list, once as the heading.
+        val names = compose.onAllNodesWithText("Reading rules")
+        assertEquals(2, names.fetchSemanticsNodes().size)
+        names[0].assertIsDisplayed()
+        names[1].assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w832dp-h750dp")
+    fun `on tabletop the upright half stays while the flat half scrolls`() {
+        val state = FakeAppState()
+        state.pages.settingsSection.value = SettingsSection.READING_RULES
+        showIn(com.ikverse.egxanalyzer.model.FoldPosture.Tabletop(0.5f, 0.51f), state)
+        compose.onNodeWithText("Telegram is signed out").assertIsDisplayed()
+        compose.onNodeWithText("Company names").performScrollTo()
+        compose.onNodeWithText("What to send").assertIsNotDisplayed()
+        compose.onNodeWithText("Telegram is signed out").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w832dp-h750dp")
+    fun `on tabletop a question mark explains above the crease and opens no sheet`() {
+        val state = FakeAppState()
+        state.pages.settingsSection.value = SettingsSection.ASK_AI
+        showIn(com.ikverse.egxanalyzer.model.FoldPosture.Tabletop(0.5f, 0.51f), state)
+        compose.onNodeWithText("Ask AI · explained").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Ask AI model").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Ask AI · explained").assertIsDisplayed()
+        // The status gave way to the note rather than a sheet rising over the controls.
+        compose.onNodeWithText("Telegram is signed out").assertDoesNotExist()
     }
 }

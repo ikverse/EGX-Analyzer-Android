@@ -231,7 +231,7 @@ class TodayWidget : GlanceAppWidget() {
          */
         val Cobalt = Color(0xFF1E2BFF)
         val Lime = Color(0xFFC8FF4D)
-        val Coral = Color(0xFFFF6B4A)
+        val Coral = Color(0xFFFFB8A3)
         val Sunflower = Color(0xFFFFD12E)
         val Ink = Color(0xFF101828)
         val Paper = Color(0xFFEFEDE6)

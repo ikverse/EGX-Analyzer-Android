@@ -180,14 +180,30 @@ fun KitExpandable(
                     .size(32.dp)
                     .clip(CircleShape)
                     .background(if (expanded) p.ink else p.raised)
-                    .graphicsLayer { rotationZ = 90f * turn },
+                    .graphicsLayer { rotationZ = 180f * turn },
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    if (expanded) "−" else "+",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (expanded) p.onInk else p.ink,
-                )
+                // A chevron, down when shut and turned up when open. It was a plus that became a
+                // minus and was then turned a quarter with the disc, which stood the minus on its
+                // end: an open row showed a lone "I".
+                val stroke = if (expanded) p.onInk else p.ink
+                androidx.compose.foundation.Canvas(Modifier.size(14.dp)) {
+                    val w = size.width
+                    val path = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(w * 0.14f, w * 0.34f)
+                        lineTo(w * 0.5f, w * 0.68f)
+                        lineTo(w * 0.86f, w * 0.34f)
+                    }
+                    drawPath(
+                        path,
+                        stroke,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                            width = 2.2.dp.toPx(),
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                            join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                        ),
+                    )
+                }
             }
         }
         AnimatedVisibility(expanded, enter = ExpandIn, exit = CollapseOut) {

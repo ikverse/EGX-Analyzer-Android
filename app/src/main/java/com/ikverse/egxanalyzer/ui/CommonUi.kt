@@ -196,6 +196,13 @@ internal fun Screen(
     refreshing: Boolean = false,
     /** What the band a pull opens says. Prices on three pages, the chat list on Analyze. */
     pullWords: PullWords = PullWords.Prices,
+    /**
+     * Given, the page lays itself out in a frame that does not scroll and brings its own scrolling
+     * columns ([ScrollPane]); this is the one of them that counts as "the page" for the header's
+     * collapse, the return to the top and the saved offset. Settings is the page that needs it: its
+     * list of parts has to stay still while the open part scrolls beside it.
+     */
+    paneScroll: ScrollState? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     // Seeded from PageState rather than starting at 0, so a fold restores exactly where the
@@ -204,7 +211,7 @@ internal fun Screen(
     // `remember` only evaluates its lambda on this composable's first composition; the effect
     // below is what keeps it current for the fold after this one.
     val savedScroll = appState.pages.scrollOffset(destination)
-    val scroll = rememberScrollState(initial = savedScroll.value)
+    val scroll = paneScroll ?: rememberScrollState(initial = savedScroll.value)
     LaunchedEffect(scroll) {
         snapshotFlow { scroll.value }.collect { savedScroll.value = it }
     }
@@ -272,6 +279,24 @@ internal fun Screen(
     val swipe = LocalTabSwipe.current
     val leanMax = with(LocalDensity.current) { TabSwipe.LeanMax.toPx() }
     val page = @Composable {
+        if (paneScroll != null) {
+            // A frame, not a scroller: the columns inside scroll on their own, each a ScrollPane.
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val lean = swipe?.lean() ?: 0f
+                        translationX = lean * leanMax
+                        alpha = 1f - kotlin.math.abs(lean) * TabSwipe.LeanFade
+                    }
+                    .onGloballyPositioned { viewportTop = it.positionInWindow().y }
+                    .padding(horizontal = Space.l)
+                    .padding(top = Space.l),
+                verticalArrangement = Arrangement.spacedBy(Space.m),
+            ) {
+                content()
+            }
+        } else
         Column(
             Modifier
                 .fillMaxSize()
@@ -373,6 +398,45 @@ internal fun Screen(
       }
     }
     }
+}
+
+/**
+ * One column of a page that scrolls on its own, for a [Screen] given a `paneScroll`.
+ *
+ * It carries what the page's own scroller carries - the soft edges, the fading scrollbar, the gap a
+ * revealed card is held clear of the foot by - so a column of Settings reads like any other page.
+ */
+@Composable
+internal fun ScrollPane(
+    scroll: ScrollState,
+    modifier: Modifier = Modifier,
+    gap: Dp = Space.m,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val revealClearance = with(LocalDensity.current) { Space.m.toPx() }
+    val clear = remember(revealClearance) {
+        object : BringIntoViewResponder {
+            override fun calculateRectForParent(localRect: Rect): Rect =
+                localRect.copy(bottom = localRect.bottom + revealClearance)
+
+            override suspend fun bringChildIntoView(localRect: () -> Rect?) = Unit
+        }
+    }
+    val fadeBand = with(LocalDensity.current) { PageEdgeFade.toPx() }
+    Column(
+        modifier
+            .fadeEdges(
+                fade = PageEdgeFade,
+                top = { scroll.value / fadeBand },
+                bottom = { (scroll.maxValue - scroll.value) / fadeBand },
+            )
+            .fadingScrollbar(scroll)
+            .verticalScroll(scroll)
+            .bringIntoViewResponder(clear)
+            .padding(bottom = Space.xl),
+        verticalArrangement = Arrangement.spacedBy(gap),
+        content = content,
+    )
 }
 
 /**
