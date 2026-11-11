@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.graphics.graphicsLayer
 import com.ikverse.egxanalyzer.ui.theme.palette
 import androidx.compose.foundation.layout.WindowInsets
@@ -121,6 +122,11 @@ internal fun PageHeader(
     collapse: () -> Float,
     search: StockBox?,
     current: Boolean,
+    /**
+     * A pick opens the stock's sheet and closes the box, instead of narrowing the page to it.
+     * Analyze's box, which has no list to narrow - see `PageState.analyzeStockBox`.
+     */
+    pickOpensStock: Boolean = false,
     filters: MutableState<Boolean>?,
     filtered: Boolean,
     /** The tickers this page holds, for the picker's **On this page** group. See `pageStocks`. */
@@ -180,7 +186,16 @@ internal fun PageHeader(
         }
     }
 
+    // Declared ahead of [pick], which uses it on a page whose pick opens the sheet.
+    val openStock = LocalOpenStock.current
+
     fun pick(ticker: String) {
+        if (pickOpensStock) {
+            // The box goes first: a list left standing over a modal sheet is a scrim across it.
+            close()
+            openStock(ticker)
+            return
+        }
         search?.picked?.value = ticker
         search?.typed?.value = ""
         search?.listing?.value = false
@@ -188,8 +203,8 @@ internal fun PageHeader(
     }
     // The same entrance every ticker in the app opens the stock sheet through. Read here rather
     // than inside the list, because the list has to be put away before the sheet is raised: one
-    // left standing over a modal sheet is a scrim across the thing it was asked to open.
-    val openStock = LocalOpenStock.current
+    // left standing over a modal sheet is a scrim across the thing it was asked to open. ([openStock]
+    // is read above [pick].)
     // Closing the box is not navigation and never reaches `AppState.goBack`: back closes what is
     // open on the screen, which is what the press means while a keyboard is up. Enabled only while
     // the box is open **and this is the page the reader is on** - the pager keeps the neighbouring
@@ -209,9 +224,11 @@ internal fun PageHeader(
     // laid over the header rather than inside the session row, and stay pinned at the right while
     // that row goes, coming to rest beside the collapsed tab names.
     val compact = LocalWindowWidth.current == WindowWidth.COMPACT
-    val actionCount = (if (search != null) 1 else 0) + (if (filters != null) 1 else 0)
-    val actionsWidth = SearchTarget * actionCount + ActionGap * (actionCount - 1).coerceAtLeast(0)
-    val overlaid = compact && actionCount > 0
+    // **Room for both buttons on every page, drawn or not** (2026-11-11). Sized by what each page
+    // had, the tab row was wider on a page with fewer buttons, and every name in it jumped
+    // sideways on the way between Settings and Results. See [HeaderActions].
+    val actionsWidth = SearchTarget * HeaderActionSlots + ActionGap * (HeaderActionSlots - 1)
+    val overlaid = compact
     val sessionRow = sessionRowHeight(compact)
 
     Box(
@@ -334,13 +351,21 @@ internal fun PageHeader(
     }
 }
 
-/** The search and filter buttons, in whichever row the width puts them. */
+/**
+ * The search and filter buttons, in whichever row the width puts them.
+ *
+ * **Always [HeaderActionSlots] wide.** A page without one of them keeps its place empty, at the
+ * start, so the buttons a page does have sit at the row's end and the tab names keep one width on
+ * every page.
+ */
 @Composable
 private fun HeaderActions(
     onSearch: (() -> Unit)?,
     onFilters: (() -> Unit)?,
     filtered: Boolean,
 ) {
+    val missing = HeaderActionSlots - listOfNotNull(onSearch, onFilters).size
+    repeat(missing) { Spacer(Modifier.size(SearchTarget)) }
     if (onSearch != null) {
         HeaderAction(glyph = HeaderGlyph.SEARCH, description = "Filter by stock", onClick = onSearch)
     }
@@ -688,6 +713,9 @@ private val ActionGap = 6.dp
 
 /** A header button, and the press target of the two X's in the search box. */
 private val SearchTarget = 44.dp
+
+/** How many buttons the header keeps room for on every page: search and filters. */
+private const val HeaderActionSlots = 2
 
 /**
  * The mark on the filter icon, and how far in from the corner of its target it sits.

@@ -10,6 +10,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
@@ -253,5 +255,70 @@ class PageHeaderTest {
         compose.setContent { Header(collapse = 0f, filtered = true) }
 
         compose.onNodeWithContentDescription("Filters, on").assertIsDisplayed()
+    }
+
+    /**
+     * Analyze has no list to narrow, so its search opens the sheet of the stock picked and the box
+     * goes away behind it, leaving nothing picked (2026-11-11).
+     */
+    @Test
+    fun `on Analyze a pick opens the stock's sheet and the box closes`() {
+        var opened by mutableStateOf<String?>(null)
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.DARK) {
+                CompositionLocalProvider(LocalOpenStock provides { opened = it }) {
+                    PageHeader(
+                        destination = AppDestination.ANALYZE,
+                        collapse = { 0f },
+                        search = box,
+                        pickOpensStock = true,
+                        current = true,
+                        filters = null,
+                        filtered = false,
+                        stocksOnPage = { emptySet() },
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithContentDescription("Filter by stock").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("COMI")
+        compose.onAllNodes(hasClickAction() and hasText("COMI ·", substring = true)).onFirst().performClick()
+        compose.waitForIdle()
+
+        assertEquals("COMI", opened)
+        assertEquals("", box.picked.value)
+        assertFalse(box.opened.value)
+        assertFalse(box.listing.value)
+    }
+
+    /**
+     * The header keeps room for both buttons on every page, so a page with fewer of them does not
+     * hand the tab row more width - which moved every name sideways on the way to or from Settings
+     * and Analyze. The same page drawn with and without its buttons puts its names in one place.
+     */
+    @Test
+    fun `the tab names stay put whether or not a page has buttons`() {
+        var buttons by mutableStateOf(true)
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.DARK) {
+                PageHeader(
+                    destination = AppDestination.SETTINGS,
+                    collapse = { 1f },
+                    search = if (buttons) box else null,
+                    current = true,
+                    filters = if (buttons) mutableStateOf(false) else null,
+                    filtered = false,
+                    stocksOnPage = { emptySet() },
+                )
+            }
+        }
+        fun left() = compose.onNodeWithText("Settings").fetchSemanticsNode().boundsInRoot.left
+
+        val withButtons = left()
+        buttons = false
+        compose.waitForIdle()
+
+        assertEquals(withButtons, left(), 0.5f)
     }
 }
