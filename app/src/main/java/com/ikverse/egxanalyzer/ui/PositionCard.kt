@@ -75,6 +75,10 @@ import com.ikverse.egxanalyzer.model.Sale
 import com.ikverse.egxanalyzer.model.recordedSale
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.NeedReason
+import com.ikverse.egxanalyzer.model.BriefTone
+import com.ikverse.egxanalyzer.model.DaySegments
+import com.ikverse.egxanalyzer.model.tradeBrief
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.ikverse.egxanalyzer.model.plainWord
 import com.ikverse.egxanalyzer.ui.kit.HoldMenu
 import com.ikverse.egxanalyzer.ui.kit.KitTag
@@ -183,44 +187,83 @@ internal fun PositionCard(
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
                             formatPercent(view.returnPct),
-                            style = MaterialTheme.typography.titleLarge.copy(fontFamily = TabularFigures),
+                            style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
                             color = PriceRole.forReturn(view.returnPct),
                         )
                         if (view.open) Text("so far", style = MaterialTheme.typography.labelSmall, color = palette.muted)
                     }
                 }
+                // The one thing most worth knowing about the trade, in place of the two prices the
+                // ladder under it now prints. See `tradeBrief`.
+                val brief = remember(view, near) { tradeBrief(view, near) }
                 Text(
-                    "You paid ${formatPrice(position.entryPrice)} · now ${formatPrice(view.currentPrice)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = palette.muted,
+                    brief.sentence,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = when (brief.tone) {
+                        BriefTone.BAD -> palette.loss
+                        BriefTone.GOOD -> palette.gain
+                        BriefTone.PLAIN -> palette.ink
+                    },
                 )
+                // The ladder is drawn, so the two prices it shows are said here for a screen reader.
+                val prices = "You paid ${formatPrice(position.entryPrice)}, now ${formatPrice(view.currentPrice)}"
+                TradeLadder(view, Modifier.semantics { contentDescription = prices })
+                brief.days?.let { days ->
+                    DaySegmentsBar(days)
+                    Text(
+                        listOfNotNull(brief.daysLine, brief.pace?.words).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.muted,
+                    )
+                }
+                // Only what the sentence and the days above do not already say: close to a level,
+                // overdue and kept open past the deadline are all up there now.
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(Space.xs),
                     verticalArrangement = Arrangement.spacedBy(Space.xs),
                 ) {
                     PositionStatusChip(view)
-                    if (view.open && view.sessionsRemaining > 0) {
-                        KitTag(
-                            "${view.sessionsRemaining} trading ${if (view.sessionsRemaining == 1) "day" else "days"} left",
-                            tone = palette.muted,
-                        )
-                    }
-                    when (near) {
-                        NeedReason.NEAR_STOP -> KitTag("Close to its stop", tone = palette.loss)
-                        NeedReason.NEAR_TARGET2 -> KitTag("Close to target 2", tone = palette.gain)
-                        else -> Unit
-                    }
-                    if (view.overdue) OverdueChip(view.overdueDays)
-                    // A trade can only be overdue by being kept open, so Overdue already says it.
-                    if (view.keptOpen && !view.overdue) KitTag("Kept open", tone = palette.muted)
+                    // Chosen ahead of the deadline, which nothing above says until it passes.
+                    if (view.keptOpen && brief.days?.late == false) KitTag("Kept open", tone = palette.muted)
                     if (position.isTPlusOne) TPlusOneChip(position)
                     if (view.priceScaleChanged) PriceScaleChip()
                 }
-                TradeLadder(view)
             }
         }
     }
 }
+
+/**
+ * The call's trading days, one segment each: ink for the ones used, the alert colour for all of
+ * them once the deadline has passed. A window too long to count by eye is one bar filled to the
+ * same share.
+ */
+@Composable
+private fun DaySegmentsBar(days: DaySegments) {
+    val filled = if (days.late) palette.alert else palette.ink
+    val shape = RoundedCornerShape(3.dp)
+    Row(Modifier.fillMaxWidth().height(5.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        if (days.total > MaxDaySegments) {
+            val used = days.used.toFloat() / days.total
+            Box(Modifier.fillMaxHeight().fillMaxWidth().clip(shape).background(palette.raised)) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(used).clip(shape).background(filled))
+            }
+        } else {
+            repeat(days.total) { index ->
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(shape)
+                        .background(if (index < days.used) filled else palette.raised),
+                )
+            }
+        }
+    }
+}
+
+/** Past this many trading days the segments are too thin to count, so the bar is drawn whole. */
+private const val MaxDaySegments = 20
 
 /**
  * The trade's ladder: the price paid as the entry, named "You paid", the dot where it stands -
