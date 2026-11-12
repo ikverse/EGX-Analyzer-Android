@@ -279,11 +279,13 @@ class KitTest {
     fun `a tag on a bright tile in the dark takes the tile's ink`() {
         var onTile = androidx.compose.ui.graphics.Color.Unspecified
         var tileInk = androidx.compose.ui.graphics.Color.Unspecified
+        var tileFill = androidx.compose.ui.graphics.Color.Unspecified
         var pageInk = androidx.compose.ui.graphics.Color.Unspecified
         compose.setContent {
             EgxAnalyzerTheme(themeMode = ThemeMode.DARK) {
                 pageInk = com.ikverse.egxanalyzer.ui.theme.palette.ink
                 tileInk = tileColors(TileTone.TILE2).second
+                tileFill = tileColors(TileTone.TILE2).first
                 Tile(tone = TileTone.TILE2) {
                     // What KitTag's `ink` defaults to, read where the tag would be drawn.
                     onTile = androidx.compose.material3.LocalContentColor.current
@@ -294,7 +296,8 @@ class KitTest {
         compose.waitForIdle()
         assertEquals(tileInk, onTile)
         assertTrue("the tile's ink should differ from the page's at night", tileInk != pageInk)
-        assertTrue("navy on lilac", tileInk.luminance() < 0.5f)
+        // Since 2026-11-12 a dark tile is a deep fill with a pale text of its own hue.
+        assertTrue("pale text on the deep lilac", tileInk.luminance() > tileFill.luminance())
         compose.onNodeWithText("Target 1 reached").assertIsDisplayed()
     }
 }
