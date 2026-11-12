@@ -70,6 +70,7 @@ import com.ikverse.egxanalyzer.ui.kit.SegmentedControl
 import com.ikverse.egxanalyzer.ui.kit.Tile
 import com.ikverse.egxanalyzer.ui.theme.palette
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.DayBar
 import java.time.LocalDate
 import java.time.ZoneOffset
 import kotlinx.coroutines.delay
@@ -112,6 +113,10 @@ internal fun ExpandedChart(
     onClose: () -> Unit,
     /** The newest call's session, which is where the Call range starts. Null with no call. */
     newestCall: LocalDate? = null,
+    /** The ranges on offer, as the sheet worked them out: no Call without a call, no 1D without bars. */
+    ranges: List<ChartRange> = ChartRange.entries.filter { it != ChartRange.DAY && (newestCall != null || it != ChartRange.CALL) },
+    /** The newest session's five-minute bars, drawn on 1D. Null while they are being fetched. */
+    dayBars: List<DayBar>? = null,
 ) {
     var style by remember { mutableStateOf(ChartStyle.CANDLES) }
     var on by remember { mutableStateOf(ChartIndicator.known(indicators)) }
@@ -126,8 +131,9 @@ internal fun ExpandedChart(
     var indicatorsOpen by remember { mutableStateOf(false) }
     var styleMenu by remember { mutableStateOf(false) }
     val bridge = remember { ChartBridge() }
-    // A stored Call range on a stock nobody has called is a month, never an empty box.
-    val effective = if (range == ChartRange.CALL && newestCall == null) ChartRange.MONTH else range
+    // A stored range this stock cannot offer is a month, never an empty box.
+    val effective = if (range in ranges) range else ChartRange.MONTH
+    val day = effective == ChartRange.DAY
     val visible = remember(history, effective, newestCall) { history.within(effective, newestCall) }
     val move = remember(history) { history.lastMove() }
     val posture = LocalFoldPosture.current
@@ -221,7 +227,7 @@ internal fun ExpandedChart(
                     )
                 }
             }
-            if (withRange) RangeRow(effective, newestCall != null, onRange, compact = true)
+            if (withRange) RangeRow(effective, ranges, onRange, compact = true)
         }
     }
 
@@ -275,8 +281,10 @@ internal fun ExpandedChart(
     @Composable
     fun chart(modifier: Modifier) {
         val theme = chartTheme()
-        val payload = remember(visible, levels, calls, style, showLevels, theme, ticker, effective, on) {
+        val payload = remember(visible, levels, calls, style, showLevels, theme, ticker, effective, on, dayBars) {
             ExpandedChartJson.build(
+                // On 1D the candles are the session's five-minute bars; empty while they are fetched.
+                bars = if (day) dayBars.orEmpty() else null,
                 sessions = visible,
                 levels = levels,
                 calls = calls,
@@ -313,7 +321,7 @@ internal fun ExpandedChart(
                                 Modifier.fillMaxWidth().weight(1f - crease).scrollableColumn().padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                RangeGrid(effective, newestCall != null, onRange, levels != null, showLevels, onLevels)
+                                RangeGrid(effective, ranges, onRange, levels != null, showLevels, onLevels)
                                 SegmentedControl(
                                     options = ChartStyle.entries,
                                     selected = style,
@@ -368,7 +376,7 @@ internal fun ExpandedChart(
                             if (drawOpen) Box(Modifier.padding(horizontal = 14.dp).padding(bottom = 10.dp)) { ToolGrid(armed, ::arm, undo, clearAll) }
                             chart(Modifier.fillMaxWidth().weight(1f))
                             Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                                RangeRow(effective, newestCall != null, onRange, compact = false)
+                                RangeRow(effective, ranges, onRange, compact = false)
                             }
                         }
                     }
@@ -438,10 +446,10 @@ private fun ToolChip(label: String, fill: Color, ink: Color, bold: Boolean = fal
 
 /** The ranges as one row of capsules, the chosen one in ink. [compact] sizes them for a header. */
 @Composable
-private fun RangeRow(range: ChartRange, hasCall: Boolean, onRange: (ChartRange) -> Unit, compact: Boolean) {
+private fun RangeRow(range: ChartRange, ranges: List<ChartRange>, onRange: (ChartRange) -> Unit, compact: Boolean) {
     val p = palette
     Row(horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp)) {
-        ChartRange.entries.filter { hasCall || it != ChartRange.CALL }.forEach { option ->
+        ranges.forEach { option ->
             val chosen = option == range
             val press = remember { MutableInteractionSource() }
             Box(
@@ -472,14 +480,13 @@ private fun RangeRow(range: ChartRange, hasCall: Boolean, onRange: (ChartRange) 
 @Composable
 private fun RangeGrid(
     range: ChartRange,
-    hasCall: Boolean,
+    cells: List<ChartRange>,
     onRange: (ChartRange) -> Unit,
     hasLevels: Boolean,
     showLevels: Boolean,
     onLevels: (Boolean) -> Unit,
 ) {
     val p = palette
-    val cells = ChartRange.entries.filter { hasCall || it != ChartRange.CALL }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         cells.forEach { option ->
             val chosen = option == range
@@ -839,30 +846,44 @@ internal object ExpandedChartJson {
         key: String,
         indicators: Set<String> = setOf(ChartIndicator.VOL.id),
         drawings: String? = null,
+        /**
+         * The 1D range: one session's five-minute bars, sent in [sessions]' place at the moments
+         * they really traded. Null on every other range. The page is told so (`intraday`), because
+         * a day's axis is read in hours on the exchange's clock and a session's in days.
+         */
+        bars: List<DayBar>? = null,
     ): String {
         val priced = sessions.filter { it.close != null }.sortedBy { it.date }
         val candles = JSONArray()
-        priced.forEach { session ->
-            val close = session.close!!
-            val open = session.open ?: close
+        fun candle(at: Long, opened: Double?, highest: Double?, lowest: Double?, close: Double, volume: Double?) {
+            val open = opened ?: close
             // A feed row missing its extremes, or carrying ones that do not enclose its own open
             // and close, is drawn as the body alone rather than as a wick that contradicts it. A
             // zero is the feed's way of saying a session was still in progress, not a price.
-            val high = maxOf(session.high?.takeIf { it > 0.0 } ?: close, open, close)
-            val low = minOf(session.low?.takeIf { it > 0.0 } ?: close, open, close)
-            if (!(open.isFinite() && high.isFinite() && low.isFinite() && close.isFinite())) return@forEach
+            val high = maxOf(highest?.takeIf { it > 0.0 } ?: close, open, close)
+            val low = minOf(lowest?.takeIf { it > 0.0 } ?: close, open, close)
+            if (!(open.isFinite() && high.isFinite() && low.isFinite() && close.isFinite())) return
             candles.put(
-                JSONArray()
-                    .put(timestamp(session.date)).put(open).put(high).put(low).put(close)
-                    .put(session.volume?.takeIf { it.isFinite() } ?: 0.0),
+                JSONArray().put(at).put(open).put(high).put(low).put(close).put(volume?.takeIf { it.isFinite() } ?: 0.0),
             )
+        }
+        if (bars != null) {
+            bars.filter { it.close != null }.sortedBy { it.at }.forEach { bar ->
+                candle(bar.at.toEpochMilli(), bar.open, bar.high, bar.low, bar.close!!, bar.volume)
+            }
+        } else {
+            priced.forEach { session ->
+                candle(timestamp(session.date), session.open, session.high, session.low, session.close!!, session.volume)
+            }
         }
         val rows = JSONArray()
         if (levels != null) levelRows(levels).forEach { rows.put(it) }
         return JSONObject()
             .put("key", key)
             .put("candles", candles)
-            .put("calls", JSONArray(priced.filter { it.date in calls }.map { timestamp(it.date) }))
+            .put("intraday", bars != null)
+            // A call is made on a day, and every bar of a day's chart is the same day: no marks.
+            .put("calls", JSONArray(if (bars != null) emptyList() else priced.filter { it.date in calls }.map { timestamp(it.date) }))
             .put("levels", rows)
             .put("style", style.id)
             .put("showLevels", showLevels)

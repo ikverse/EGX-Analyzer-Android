@@ -67,6 +67,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.DayBar
+import com.ikverse.egxanalyzer.model.dayMove
 import com.ikverse.egxanalyzer.model.FULL_SPLIT_PCT
 import com.ikverse.egxanalyzer.model.Position
 import com.ikverse.egxanalyzer.model.PositionStatus
@@ -443,7 +445,7 @@ internal fun ColumnScope.TradeDetail(
     // The chart where a running trade has more than one close to draw.
     val history = if (view.open) rememberPriceHistory(appState, position.ticker) else emptyList()
     if (history.count { it.close != null } > 1) {
-        Tile(Modifier.fillMaxWidth()) { TradeChart(position, palette.card, history, decimals) }
+        Tile(Modifier.fillMaxWidth()) { TradeChart(position, palette.card, history, decimals, appState) }
     }
 
     Tile(Modifier.fillMaxWidth()) {
@@ -700,7 +702,7 @@ internal fun PositionView.timeline(decimals: Int = priceDecimals(position.entryP
  * state is written for the one stock sheet the app has open at a time.
  */
 @Composable
-private fun TradeChart(position: Position, on: Color, history: List<DailySession>, decimals: Int) {
+private fun TradeChart(position: Position, on: Color, history: List<DailySession>, decimals: Int, appState: AppState) {
     // Null is "since you bought", which is not one of the stock sheet's ranges.
     var picked by remember(position.id) { mutableStateOf<ChartRange?>(null) }
     val sinceBought = remember(history, position.entryDate) {
@@ -719,8 +721,15 @@ private fun TradeChart(position: Position, on: Color, history: List<DailySession
             history.filter { !it.date.isBefore(range.since(anchor)) }
         }
     }
-    val closes = remember(visible) { visible.mapNotNull { it.close } }
-    val move = remember(visible) { visible.rangeMove() }
+    // 1D is the newest session's five-minute bars, fetched when it is pressed and not before.
+    val day = range == ChartRange.DAY
+    val bars = rememberDayBars(appState, position.ticker, wanted = day)
+    val offered = remember(position.ticker) { TradeChartRanges.offeredFor(appState, position.ticker) }
+    val closes = remember(visible, bars, day) {
+        if (day) bars.orEmpty().mapNotNull { it.close } else visible.mapNotNull { it.close }
+    }
+    val move = remember(visible, bars, day) { if (day) bars?.dayMove() else visible.rangeMove() }
+    var touchedBar by remember(bars) { mutableStateOf<DayBar?>(null) }
     val levels = remember(closes, position) {
         val low = closes.minOrNull()
         val high = closes.maxOrNull()
@@ -748,19 +757,33 @@ private fun TradeChart(position: Position, on: Color, history: List<DailySession
     Column {
         // The reading takes the headline's two places rather than a line of its own: a caption
         // that arrived on touch would push the chart about under the finger that asked for it.
-        val reading = chartReading(visible, touched) { formatPrice(it, decimals) }
+        val reading = if (day) {
+            dayReading(bars.orEmpty(), touchedBar) { formatPrice(it, decimals) }
+        } else {
+            chartReading(visible, touched) { formatPrice(it, decimals) }
+        }
         ChartHeadline(
-            title = reading?.first ?: if (range == null) {
-                "Since you bought · ${closes.size} sessions"
-            } else {
-                range.title
+            title = reading?.first ?: when {
+                range == null -> "Since you bought · ${closes.size} sessions"
+                day -> dayTitle(bars)
+                else -> range.title
             },
             // What the visible line adds up to, which is the one thing its shape cannot say.
             figure = reading?.second ?: move?.let { formatPercent(it) }.orEmpty(),
             colors = colors,
             figureColor = if (reading == null && move != null) PriceRole.forReturn(move) else colors.text,
         )
-        if (closes.size > 1) {
+        if (day) {
+            DayChartOrNote(
+                bars,
+                levels,
+                colors,
+                touchedBar,
+                { touchedBar = it },
+                Modifier.padding(top = Space.s),
+                PositionChartHeight,
+            )
+        } else if (closes.size > 1) {
             PriceChart(
                 sessions = visible,
                 levels = levels,
@@ -798,7 +821,7 @@ private fun TradeChart(position: Position, on: Color, history: List<DailySession
         ChartRanges(
             options = buildList<ChartRange?> {
                 if (canShowSinceBought) add(null)
-                addAll(TradeChartRanges)
+                addAll(offered)
             },
             selected = range,
             onSelect = { picked = it },
@@ -809,8 +832,12 @@ private fun TradeChart(position: Position, on: Color, history: List<DailySession
     }
 }
 
-/** The ranges offered beside "Since you bought": four, so the row fits the cover screen whole. */
-private val TradeChartRanges = listOf(ChartRange.WEEK, ChartRange.MONTH, ChartRange.THREE_MONTHS, ChartRange.SIX_MONTHS)
+/**
+ * The ranges offered beside "Since you bought": five, which the track divides across the cover
+ * screen whole. 1D is dropped for a stock with no intraday feed - see [offeredFor].
+ */
+private val TradeChartRanges =
+    listOf(ChartRange.DAY, ChartRange.WEEK, ChartRange.MONTH, ChartRange.THREE_MONTHS, ChartRange.SIX_MONTHS)
 
 /**
  * How long the recommendation has left, counted in the sessions it is judged in.

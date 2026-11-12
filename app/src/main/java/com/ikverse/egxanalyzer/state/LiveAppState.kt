@@ -113,6 +113,7 @@ import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.DownloadedApk
 import com.ikverse.egxanalyzer.model.FULL_SPLIT_PCT
 import com.ikverse.egxanalyzer.model.LatestPrice
+import com.ikverse.egxanalyzer.model.LivePrices
 import com.ikverse.egxanalyzer.model.MarketRefresh
 import com.ikverse.egxanalyzer.model.ModelUsageRecord
 import com.ikverse.egxanalyzer.model.Outcome
@@ -212,6 +213,9 @@ private const val SETTINGS_PUBLISH_DELAY_MILLISECONDS = 3_000L
  * on a stock that has been suspended for a stretch. Read once per press and never held.
  */
 private const val OPINION_HISTORY_DAYS = 400L
+
+/** How long a day's five-minute bars are reused before a chart's 1D range asks the feed again. */
+private const val DAY_BARS_FRESH_MS = 60_000L
 
 /** How many stocks the feed-quiet notification names before falling back to "and N more". */
 private const val FEED_QUIET_NAMED_TICKERS = 3
@@ -2374,6 +2378,25 @@ class LiveAppState(
         }
     }
 
+    override fun hasDayBars(ticker: String): Boolean = intradayRepository.hasDayBars(ticker)
+
+    /**
+     * What [dayBars] last fetched for each ticker, and when. Memory only: a day's bars are a closer
+     * look at a session, not part of the record, and a minute is long enough that the sheet, the
+     * full-screen chart and a card of the same stock share one request.
+     */
+    private val dayBarsCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<com.ikverse.egxanalyzer.model.DayBar>>>()
+
+    override suspend fun dayBars(ticker: String): List<com.ikverse.egxanalyzer.model.DayBar> {
+        val key = if (ticker == com.ikverse.egxanalyzer.model.DayBar.INDEX) ticker else Scoring.normalizeTicker(ticker)
+        val now = System.currentTimeMillis()
+        dayBarsCache[key]?.let { (at, bars) -> if (now - at < DAY_BARS_FRESH_MS) return bars }
+        val bars = runCatching { intradayRepository.dayBars(key) }.getOrDefault(emptyList())
+        // A failed request is not remembered, so the next press asks again.
+        if (bars.isNotEmpty()) dayBarsCache[key] = now to bars
+        return bars
+    }
+
     /**
      * Whether [enterForeground] has already run, so that it runs once however it is reached.
      *
@@ -3576,6 +3599,80 @@ class LiveAppState(
         return runCatching {
             intradayRepository.fetchMissing(unordered, LocalDate.now(ScheduleClock.ZONE))
         }.getOrDefault(0) > 0
+    }
+
+    /** The one-minute loop, alive only between [enterLivePrices] and [leaveLivePrices]. */
+    private var livePricesJob: Job? = null
+
+    /**
+     * Starts following the session a minute at a time, for as long as the app is on screen.
+     *
+     * The background cannot do this - an alarm on a dozing phone is held to about one in ten
+     * minutes, which is why `MarketRefresh` is a quarter of an hour - but nothing limits an app
+     * somebody is looking at. See [LivePrices] for what it covers and why it is narrow.
+     *
+     * It records nothing as a refresh. `lastPriceRefreshAt` and the refresh day stay as they were,
+     * so the first-open fetch, the quarter-hour slots and the close sweep all still owe what they
+     * owed: this reads forty stocks' newest session, and they read every stock's history.
+     */
+    override fun enterLivePrices() {
+        if (livePricesJob?.isActive == true) return
+        livePricesJob = appScope.launch {
+            try {
+                // Yesterday's live bars, which no later minute will replace. Once per arrival is
+                // enough: the loop only ever writes today's.
+                withContext(Dispatchers.IO) {
+                    localDataStore.pruneLiveBars(LocalDate.now(java.time.ZoneOffset.UTC))
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // A prune that failed leaves rows the next arrival removes.
+            }
+            while (true) {
+                try {
+                    pollLivePrices()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    // A minute that failed is a minute skipped. The next one is the retry, and a
+                    // status line raised over a poll nobody asked for would be noise.
+                }
+                delay(LivePrices.EVERY_SECONDS * 1_000L)
+            }
+        }
+    }
+
+    override fun leaveLivePrices() {
+        livePricesJob?.cancel()
+        livePricesJob = null
+    }
+
+    /**
+     * One minute of the live loop: ask, store, and re-score only if something moved.
+     *
+     * Stands down while an ordinary refresh is running, which is fetching the same stocks and
+     * may be replacing a whole series underneath. The rebuild is requested rather than awaited,
+     * so leaving the app mid-minute cancels the wait for the next poll and never a recompute.
+     */
+    private suspend fun pollLivePrices() {
+        if (!LivePrices.inSession(Instant.now())) return
+        if (pricesRefreshing) return
+        val tickers = LivePrices.watched(
+            openTrades = portfolio.positions.filter { it.open }.map { it.ticker },
+            openCalls = performance.sessions
+                .asSequence()
+                .flatMap { it.calls.asSequence() }
+                .filter { LivePrices.stillMoving(it.outcome) }
+                .map { it.ticker }
+                .toList(),
+            watchlist = watchlist,
+        )
+        if (tickers.isEmpty()) return
+        val changed = intradayRepository.pollLive(tickers, ScheduleClock.lastFinalSession())
+        if (changed > 0) {
+            requestRebuild(performance = true, portfolio = true, announceChanges = true)
+        }
     }
 
     private suspend fun recomputePerformance(): Unit = recomputeMutex.withLock {

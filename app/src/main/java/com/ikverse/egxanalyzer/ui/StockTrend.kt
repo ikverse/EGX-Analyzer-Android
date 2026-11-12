@@ -64,7 +64,9 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.DayBar
 import com.ikverse.egxanalyzer.model.Scoring
+import com.ikverse.egxanalyzer.model.dayMoveTo
 import java.time.LocalDate
 import java.time.Period
 import kotlin.math.roundToInt
@@ -82,6 +84,14 @@ import kotlin.math.roundToInt
  * queries, and the disk is read exactly as often as before this existed.
  */
 internal enum class ChartRange(val label: String, val title: String, private val period: Period) {
+    /**
+     * The newest session alone, as five-minute bars.
+     *
+     * The one range that is not a slice of the stored history: a day of daily closes is one point,
+     * so its line is fetched when it is pressed - see [rememberDayBars] - and drawn by [DayChart].
+     * Offered only for a stock the feed carries intraday bars for.
+     */
+    DAY("1D", "Newest session", Period.ofDays(1)),
     WEEK("1W", "Past week", Period.ofWeeks(1)),
     /**
      * Since the newest call on the stock, with a few sessions before it so the line arrives at the
@@ -194,6 +204,49 @@ internal fun rememberPriceHistory(appState: AppState, ticker: String): List<Dail
     }
     return history
 }
+
+/**
+ * The newest session's five-minute bars for [ticker], asked for only while [wanted].
+ *
+ * [wanted] is "the reader has 1D selected", so a card nobody has pressed 1D on makes no request.
+ * Null while the answer is on its way, which is what lets a chart say "Fetching" instead of
+ * "nothing in this range"; empty where the feed did not answer. Asked again on every
+ * [AppState.performance], as [rememberPriceHistory] is, so a price refresh moves the day's line too
+ * - the app holds the answer for a minute, so that costs a request only when one is due.
+ */
+@Composable
+internal fun rememberDayBars(appState: AppState, ticker: String, wanted: Boolean): List<DayBar>? {
+    var bars by remember(ticker) { mutableStateOf<List<DayBar>?>(null) }
+    LaunchedEffect(ticker, wanted, appState.performance) {
+        if (wanted) bars = appState.dayBars(ticker)
+    }
+    return bars
+}
+
+/** The ranges a chart of [ticker] may offer: 1D only where the feed has a day's bars for it. */
+internal fun List<ChartRange>.offeredFor(appState: AppState, ticker: String): List<ChartRange> =
+    if (appState.hasDayBars(ticker)) this else filter { it != ChartRange.DAY }
+
+/** The headline over a day's line at rest: which session it is. */
+internal fun dayTitle(bars: List<DayBar>?): String = when {
+    bars == null -> "Fetching the session…"
+    bars.isEmpty() -> ChartRange.DAY.title
+    else -> AppDates.DayMonth.format(bars.last().session()) + " · five-minute bars"
+}
+
+/** The headline for a touched bar: its time and what the session had done by then, over its close. */
+internal fun dayReading(
+    bars: List<DayBar>,
+    touched: DayBar?,
+    price: (Double) -> String = { formatPrice(it) },
+): Pair<String, String>? {
+    val close = touched?.close ?: return null
+    val since = bars.dayMoveTo(touched)?.let { formatPercent(it) + " since the open" }
+    return listOfNotNull(DayTime.format(touched.time()), since).joinToString(" · ") to price(close)
+}
+
+/** The exchange's clock, as the axis under a day's line and its reading print it. */
+internal val DayTime: java.time.format.DateTimeFormatter = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
 
 /**
  * Every colour one chart is drawn in, so the same drawing sits on the stock sheet's dark tile and
@@ -328,8 +381,96 @@ internal fun PriceChart(
 ) {
     val points = remember(sessions) { sessions.filter { it.close != null } }
     if (points.size < 2) return
-    val closes = points.map { it.close!! }
+    val closes = remember(points) { points.map { it.close!! } }
+    val axis = remember(points) {
+        listOf(points.first(), points[points.size / 2], points.last()).map { AppDates.DayMonth.format(it.date) }
+    }
+    val marks = remember(points, calls) { points.indices.filter { points[it].date in calls }.toSet() }
+    val chosen = remember(points, selected) {
+        selected?.let { session -> points.indexOfFirst { it.date == session.date } }
+            ?.takeIf { it >= 0 }
+    }
+    LineChart(closes, axis, marks, levels, colors, chosen, { onSelect(points[it]) }, "sessions", modifier, height)
+}
 
+/**
+ * One session as a line of five-minute closes: [PriceChart]'s drawing, with times under it.
+ *
+ * The same levels, tags, crosshair and scale rules, because it is the same chart looked at more
+ * closely. No call dots: a call is made on a day, and every bar here is the same day.
+ */
+@Composable
+internal fun DayChart(
+    bars: List<DayBar>,
+    levels: ChartLevels?,
+    colors: ChartColors,
+    selected: DayBar?,
+    onSelect: (DayBar) -> Unit,
+    modifier: Modifier = Modifier,
+    height: Dp = ChartHeight,
+) {
+    val points = remember(bars) { bars.filter { it.close != null } }
+    if (points.size < 2) return
+    val closes = remember(points) { points.map { it.close!! } }
+    val axis = remember(points) {
+        listOf(points.first(), points[points.size / 2], points.last()).map { DayTime.format(it.time()) }
+    }
+    val chosen = remember(points, selected) {
+        selected?.let { bar -> points.indexOfFirst { it.at == bar.at } }?.takeIf { it >= 0 }
+    }
+    LineChart(closes, axis, emptySet(), levels, colors, chosen, { onSelect(points[it]) }, "five-minute bars", modifier, height)
+}
+
+/**
+ * A day's line, or what stands in its place: the box a chart keeps while its bars are on their way,
+ * so pressing 1D does not move everything under the chart twice.
+ *
+ * @param bars null while the request is out, empty where the feed had nothing.
+ */
+@Composable
+internal fun DayChartOrNote(
+    bars: List<DayBar>?,
+    levels: ChartLevels?,
+    colors: ChartColors,
+    selected: DayBar?,
+    onSelect: (DayBar) -> Unit,
+    modifier: Modifier = Modifier,
+    height: Dp = ChartHeight,
+) {
+    if (bars != null && bars.count { it.close != null } > 1) {
+        DayChart(bars, levels, colors, selected, onSelect, modifier, height)
+    } else {
+        Box(modifier.fillMaxWidth().height(height + AxisHeight), contentAlignment = Alignment.Center) {
+            Text(
+                if (bars == null) "Fetching the newest session…" else "The feed has no five-minute bars for the newest session.",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.soft,
+            )
+        }
+    }
+}
+
+/**
+ * The drawing under [PriceChart] and [DayChart]: closes left to right, with what goes across them.
+ *
+ * @param axis the three labels under the plot: its left end, its middle and its right end.
+ * @param marks which closes carry a dot, by position.
+ * @param chosen the close under the reader's thumb, by position.
+ * @param unit what one close is, for the description read aloud.
+ */
+@Composable
+private fun LineChart(
+    closes: List<Double>,
+    axis: List<String>,
+    marks: Set<Int>,
+    levels: ChartLevels?,
+    colors: ChartColors,
+    chosen: Int?,
+    onPick: (Int) -> Unit,
+    unit: String,
+    modifier: Modifier,
+    height: Dp,
+) {
     val priceLow = closes.min()
     val priceHigh = closes.max()
     // A stock whose every close is identical is a real state - a suspended one - and dividing by
@@ -379,10 +520,7 @@ internal fun PriceChart(
             }
     }
     val dateStyle = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium)
-    val dates = remember(points, dateStyle, measurer) {
-        listOf(points.first(), points[points.size / 2], points.last())
-            .map { measurer.measure(AppDates.DayMonth.format(it.date), dateStyle) }
-    }
+    val dates = remember(axis, dateStyle, measurer) { axis.map { measurer.measure(it, dateStyle) } }
 
     val density = LocalDensity.current
     // The column's width is the widest tag's, so the plot keeps every pixel the words do not need.
@@ -402,16 +540,12 @@ internal fun PriceChart(
     // Keyed on the points, so picking 3M after 1M draws the new line in; read only in the draw
     // lambda, so the half second costs repaints and no recomposition.
     val still = LocalReduceMotion.current
-    val drawn = remember(points) { Animatable(if (still) 1f else 0f) }
+    val drawn = remember(closes) { Animatable(if (still) 1f else 0f) }
     LaunchedEffect(drawn) {
         if (drawn.value < 1f) drawn.animateTo(1f, tween(LineDrawMillis, easing = UiEase))
     }
 
     val haptics = LocalHapticFeedback.current
-    val chosen = remember(points, selected) {
-        selected?.let { session -> points.indexOfFirst { it.date == session.date } }
-            ?.takeIf { it >= 0 }
-    }
     // Snapped to whole sessions rather than slid between them: a close is one figure a day, and a
     // price read off the gap between two of them is a price nobody quoted.
     // Read through the composition rather than captured by the gesture blocks. `pointerInput` is
@@ -419,13 +553,13 @@ internal fun PriceChart(
     // when the chart was first drawn would go on comparing against the index chosen *then*, which
     // is a haptic tick and a state write on every pixel of a drag rather than on every session.
     val pick by rememberUpdatedState<(Float, Float) -> Unit> { x, width ->
-        val step = plotWidth(width, gutter) / (points.size - 1)
-        val index = (x / step).roundToInt().coerceIn(points.indices)
+        val step = plotWidth(width, gutter) / (closes.size - 1)
+        val index = (x / step).roundToInt().coerceIn(closes.indices)
         if (index != chosen) {
             // The tick the platform uses for dragging a text handle, which is what this is: a
             // marker being moved along a track, one stop at a time.
             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            onSelect(points[index])
+            onPick(index)
         }
     }
     Canvas(
@@ -436,16 +570,16 @@ internal fun PriceChart(
             // scrollable. A tap reads without claiming anything; a drag is claimed only once the
             // finger has moved **horizontally** past touch slop, so a straight-down swipe over the
             // chart still scrolls the sheet behind it instead of scrubbing the line.
-            .pointerInput(points) {
+            .pointerInput(closes) {
                 detectTapGestures { offset -> pick(offset.x, size.width.toFloat()) }
             }
-            .pointerInput(points) {
+            .pointerInput(closes) {
                 detectHorizontalDragGestures(
                     onDragStart = { offset -> pick(offset.x, size.width.toFloat()) },
                 ) { change, _ -> pick(change.position.x, size.width.toFloat()) }
             }
             .semantics {
-                contentDescription = "${points.size} sessions, " +
+                contentDescription = "${closes.size} $unit, " +
                     formatPrice(closes.first()) + " to " + formatPrice(closes.last()) +
                     (levels?.let { ", with levels from " + it.source } ?: "")
             },
@@ -458,7 +592,7 @@ internal fun PriceChart(
         fun y(value: Double) =
             top + ((1.0 - ((value.coerceIn(low, high) - low) / span)) * usable).toFloat()
 
-        val step = plotW / (points.size - 1)
+        val step = plotW / (closes.size - 1)
         val hair = GuideStroke.toPx()
         fun level(value: Double, color: Color) = drawLine(
             color = color.copy(alpha = LevelAlpha),
@@ -489,8 +623,8 @@ internal fun PriceChart(
         }
 
         val path = Path()
-        points.forEachIndexed { index, session ->
-            val at = Offset(index * step, y(session.close!!))
+        closes.forEachIndexed { index, close ->
+            val at = Offset(index * step, y(close))
             if (index == 0) path.moveTo(at.x, at.y) else path.lineTo(at.x, at.y)
         }
         // The ground under the line, faint: it is what makes a fall read as a fall at a glance.
@@ -510,9 +644,9 @@ internal fun PriceChart(
         }
 
         val ring = RingStroke.toPx()
-        points.forEachIndexed { index, session ->
-            if (session.date in calls) {
-                val at = Offset(index * step, y(session.close!!))
+        marks.forEach { index ->
+            if (index in closes.indices) {
+                val at = Offset(index * step, y(closes[index]))
                 drawCircle(color = colors.surface, radius = CallDot.toPx() + ring, center = at)
                 drawCircle(color = colors.mark, radius = CallDot.toPx(), center = at)
             }
@@ -588,7 +722,7 @@ internal fun PriceChart(
         drawText(first, color = colors.soft, topLeft = Offset(0f, axisTop))
         val lastLeft = plotW - last.size.width
         drawText(last, color = colors.soft, topLeft = Offset(lastLeft, axisTop))
-        val midLeft = (points.size / 2) * step - mid.size.width / 2
+        val midLeft = (closes.size / 2) * step - mid.size.width / 2
         val clearance = pad * 2
         if (midLeft > first.size.width + clearance && midLeft + mid.size.width < lastLeft - clearance) {
             drawText(mid, color = colors.soft, topLeft = Offset(midLeft, axisTop))

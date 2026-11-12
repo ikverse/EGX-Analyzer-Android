@@ -88,6 +88,8 @@ class FakeAppState(
     override val opinionPending: String? = null,
     override val opinionSettingsRevision: Int = 0,
     override val updateState: UpdateState = UpdateState.Idle,
+    /** What [dayBars] answers, by ticker. A ticker absent from it has no 1D range. */
+    val dayBarsByTicker: Map<String, List<com.ikverse.egxanalyzer.model.DayBar>> = emptyMap(),
     override val homeIndices: List<com.ikverse.egxanalyzer.model.IndexQuote> = emptyList(),
     override val homeOutside: List<com.ikverse.egxanalyzer.model.OutsideQuote> = emptyList(),
     override val homeMovers: com.ikverse.egxanalyzer.model.MarketMovers? = null,
@@ -308,7 +310,14 @@ class FakeAppState(
     override suspend fun priceHistory(ticker: String, from: LocalDate): List<DailySession> =
         emptyList()
 
+    override fun hasDayBars(ticker: String): Boolean = ticker in dayBarsByTicker
+
+    override suspend fun dayBars(ticker: String): List<com.ikverse.egxanalyzer.model.DayBar> =
+        dayBarsByTicker[ticker].orEmpty()
+
     override fun enterForeground() = Unit
+    override fun enterLivePrices() = Unit
+    override fun leaveLivePrices() = Unit
 
     override fun checkForUpdate() = Unit
     override fun refreshHomeMarket(force: Boolean) = Unit

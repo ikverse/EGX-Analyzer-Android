@@ -99,6 +99,8 @@ import com.ikverse.egxanalyzer.model.CallTally
 import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.DayBar
+import com.ikverse.egxanalyzer.model.dayMove
 import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.Outcome
 import com.ikverse.egxanalyzer.model.PerformanceReport
@@ -1048,7 +1050,7 @@ private fun CallSheet(
         // The chart where there is more than one close to draw a line through, else the ladder.
         val history = rememberPriceHistory(appState, call.ticker)
         Box(Modifier.fillMaxWidth().kitPanel()) {
-            if (history.count { it.close != null } > 1) CallChartSection(call, history) else CallLadder(call)
+            if (history.count { it.close != null } > 1) CallChartSection(call, history, appState) else CallLadder(call)
         }
         Timeline(call.timeline().map { it.asStep() })
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
@@ -1865,7 +1867,7 @@ internal fun AppState.occurrenceFor(call: ScoredCall): CallOccurrence? {
  * position: every level here is the call's own, drawn or not at all.
  */
 @Composable
-private fun CallChartSection(call: ScoredCall, history: List<DailySession>) {
+private fun CallChartSection(call: ScoredCall, history: List<DailySession>, appState: AppState) {
     // Local to this card, exactly as the position card's own chart range is: every call card on
     // the page needs its own range and its own toggle, not one shared by all of them at once.
     var range by remember(call.ticker, call.openedOn) { mutableStateOf(ChartRange.Default) }
@@ -1875,7 +1877,14 @@ private fun CallChartSection(call: ScoredCall, history: List<DailySession>) {
         val anchor = history.lastOrNull()?.date ?: return@remember history
         history.filter { !it.date.isBefore(range.since(anchor)) }
     }
-    val move = remember(visible) { visible.rangeMove() }
+    // 1D is the newest session's five-minute bars, fetched when it is pressed and not before.
+    val day = range == ChartRange.DAY
+    val bars = rememberDayBars(appState, call.ticker, wanted = day)
+    val offered = remember(call.ticker) {
+        ChartRange.entries.filter { it != ChartRange.CALL }.offeredFor(appState, call.ticker)
+    }
+    var touchedBar by remember(bars) { mutableStateOf<DayBar?>(null) }
+    val move = remember(visible, bars, day) { if (day) bars?.dayMove() else visible.rangeMove() }
     val levels = remember(call) {
         ChartLevels(
             source = call.channel,
@@ -1896,15 +1905,26 @@ private fun CallChartSection(call: ScoredCall, history: List<DailySession>) {
     Column {
         // The reading takes the headline's two places rather than a line of its own: a caption
         // that arrived on touch would push the chart about under the finger that asked for it.
-        val reading = chartReading(visible, touched)
+        val reading = if (day) dayReading(bars.orEmpty(), touchedBar) else chartReading(visible, touched)
         ChartHeadline(
-            title = reading?.first ?: range.title,
+            title = reading?.first ?: if (day) dayTitle(bars) else range.title,
             // What the visible line adds up to, which is the one thing its shape cannot say.
             figure = reading?.second ?: move?.let { formatPercent(it) }.orEmpty(),
             colors = colors,
             figureColor = if (reading == null && move != null) PriceRole.forReturn(move) else colors.text,
         )
-        if (visible.count { it.close != null } > 1) {
+        if (day) {
+            DayChartOrNote(
+                bars,
+                levels,
+                colors,
+                touchedBar,
+                { touchedBar = it },
+                Modifier.padding(top = Space.s),
+                CallChartHeight,
+            )
+            ChartLegend("Levels from " + call.channel, colors, Modifier.padding(top = Space.s), dot = false)
+        } else if (visible.count { it.close != null } > 1) {
             PriceChart(
                 sessions = visible,
                 levels = levels,
@@ -1925,7 +1945,7 @@ private fun CallChartSection(call: ScoredCall, history: List<DailySession>) {
         // No Levels button: unlike the stock sheet, there is nothing to turn off - the call's own
         // levels are the reason this chart exists. No Call range either: the call is the subject.
         ChartRanges(
-            options = ChartRange.entries.filter { it != ChartRange.CALL },
+            options = offered,
             selected = range,
             onSelect = { range = it },
             label = { it.label },

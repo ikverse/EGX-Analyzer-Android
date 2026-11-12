@@ -1,7 +1,9 @@
 package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.DayBar
 import com.ikverse.egxanalyzer.model.IntradayBar
+import com.ikverse.egxanalyzer.model.newestSession
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.SeriesHarvest
 import kotlinx.coroutines.Dispatchers
@@ -94,7 +96,7 @@ class IntradayRepository(
 
         val limit = Semaphore(CONCURRENCY)
         outstanding
-            .map { session -> async { limit.withPermit { fetchOne(session) } } }
+            .map { session -> async { limit.withPermit { fetchOne(session, today) } } }
             .map { it.await() }
             .count { it }
     }
@@ -148,6 +150,36 @@ class IntradayRepository(
         val start = from.coerceAtLeast(today.minusDays(HOURLY_RANGE_DAYS))
         val bars = fetchBars(INDEX_SYMBOL, start, today, HOURLY) ?: return emptyList()
         return DailyFromIntraday.aggregate(INDEX_TICKER, bars)
+    }
+
+    /**
+     * Whether [ticker] can be asked for a day's bars at all.
+     *
+     * The ISIN feed only, as everywhere else in this class: a stock still on its legacy `SYMBOL.CA`
+     * symbol answers an intraday request with daily rows, so a chart offers it no 1D range.
+     */
+    fun hasDayBars(ticker: String): Boolean = daySymbol(ticker) != null
+
+    private fun daySymbol(ticker: String): String? {
+        if (ticker == DayBar.INDEX) return INDEX_SYMBOL
+        val key = Scoring.normalizeTicker(ticker)
+        return symbolMap[key]?.yahooSymbol?.takeIf { it != legacyFormOf(key) }
+    }
+
+    /**
+     * The five-minute bars of [ticker]'s newest session, for a chart's 1D range.
+     *
+     * Asked across [DAY_LOOKBACK] days and cut down to the newest session in the answer, so a
+     * weekend or a holiday shows the last session held and not an empty box. Nothing is stored.
+     * Empty where the stock has no intraday feed, the request failed, or the feed had no bars.
+     */
+    suspend fun dayBars(
+        ticker: String,
+        today: LocalDate = LocalDate.now(ZoneId.of(UTC)),
+    ): List<DayBar> {
+        val symbol = daySymbol(ticker) ?: return emptyList()
+        val bars = fetchBars(symbol, today.minusDays(DAY_LOOKBACK), today, INTERVAL) ?: return emptyList()
+        return bars.map { DayBar(it.at, it.open, it.high, it.low, it.close, it.volume) }.newestSession()
     }
 
     /**
@@ -234,13 +266,13 @@ class IntradayRepository(
     }
 
     /** True when the session gained bars; false when it was refused, empty, or unreachable. */
-    private suspend fun fetchOne(session: UnorderedSession): Boolean {
+    private suspend fun fetchOne(session: UnorderedSession, today: LocalDate): Boolean {
         // The ISIN feed only. The legacy `SYMBOL.CA` symbol answers an intraday request with daily
         // bars rather than an error - see [parseBars] - and a stock still on the legacy feed has no
         // intraday history to offer at all.
         val symbol = symbolMap[session.ticker]?.yahooSymbol ?: return false
         if (symbol == legacyFormOf(session.ticker)) return false
-        val bars = fetch(symbol, session) ?: return false
+        val bars = fetch(symbol, session, today) ?: return false
         withContext(Dispatchers.IO) {
             localDataStore.saveIntradayBars(session.ticker, session.date, bars)
         }
@@ -253,10 +285,103 @@ class IntradayRepository(
      * Null and empty are deliberately different: empty is the feed saying it has nothing for that
      * session, which is worth recording so it is never asked again, while null is a connection that
      * failed and must be retried.
+     *
+     * Asked at one minute where the feed still holds the session that finely ([intervalFor]), and
+     * at five where it does not - or where the one-minute request got no usable answer, which is
+     * what a session on the very edge of that wall looks like: refused outright, not trimmed.
      */
-    private suspend fun fetch(symbol: String, session: UnorderedSession): List<IntradayBar>? =
-        request(symbol, session.date, session.date, INTERVAL)
-            ?.let { payload -> parseIntradayBars(session.ticker, payload, INTERVAL) }
+    private suspend fun fetch(
+        symbol: String,
+        session: UnorderedSession,
+        today: LocalDate,
+    ): List<IntradayBar>? {
+        val interval = intervalFor(session.date, today)
+        val fine = barsAt(symbol, session, interval)
+        return if (fine == null && interval != INTERVAL) barsAt(symbol, session, INTERVAL) else fine
+    }
+
+    private suspend fun barsAt(
+        symbol: String,
+        session: UnorderedSession,
+        interval: String,
+    ): List<IntradayBar>? = request(symbol, session.date, session.date, interval)
+        ?.let { payload -> parseIntradayBars(session.ticker, payload, interval) }
+
+    /**
+     * Today's session for each of [tickers], read off one-minute bars and stored while it trades.
+     *
+     * What `LiveAppState`'s live loop calls once a minute. Two things are written for a stock
+     * that answered, both replaced whole each time. Its row in the daily prices, built from the
+     * bars the way [DailyFromIntraday] builds any session, under [LIVE_SOURCE] - so the scorer
+     * and every card see a target or a stop within a minute of the feed showing it. And the
+     * bars' highs and lows, so a session that touches both the entry and a target is ordered as
+     * it happens and not the day after.
+     *
+     * The bars go in **without** the mark that says the session was asked for: they are part of
+     * a day, and [fetchMissing] has to stay free to fetch the whole of it once it has closed.
+     *
+     * [finalThrough] is `ScheduleClock.lastFinalSession`. Nothing is written for a session the
+     * exchange has finished with - past that line the stored row is a reported close, and one
+     * built from bars must never replace it.
+     *
+     * Returns how many stocks' stored session actually changed, so the caller re-scores only when
+     * there is something new to score. A stock on the legacy feed, one that did not answer, and
+     * one whose bars carry no price yet all count as unchanged.
+     */
+    suspend fun pollLive(
+        tickers: Collection<String>,
+        finalThrough: LocalDate,
+        today: LocalDate = LocalDate.now(ZoneId.of(UTC)),
+    ): Int = coroutineScope {
+        if (today <= finalThrough) return@coroutineScope 0
+        val limit = Semaphore(CONCURRENCY)
+        tickers
+            .map(Scoring::normalizeTicker)
+            .filter(String::isNotBlank)
+            .distinct()
+            .map { ticker -> async { limit.withPermit { pollOne(ticker, today) } } }
+            .map { it.await() }
+            .count { it }
+    }
+
+    /** True when [ticker]'s stored session for [today] is different from what it was. */
+    private suspend fun pollOne(ticker: String, today: LocalDate): Boolean {
+        // The ISIN feed only, as everywhere else in this class.
+        val symbol = symbolMap[ticker]?.yahooSymbol ?: return false
+        if (symbol == legacyFormOf(ticker)) return false
+        val zone = ZoneId.of(UTC)
+        val bars = fetchBars(symbol, today, today, ONE_MINUTE)
+            ?.filter { it.at.atZone(zone).toLocalDate() == today }
+            ?: return false
+        // Not derived in the sense that flag means - a rebuilt history for a stock no daily feed
+        // carries. This is a provisional reading of a session the daily feed will report itself.
+        val session = DailyFromIntraday.aggregate(ticker, bars).lastOrNull()?.copy(derived = false)
+            ?: return false
+        return withContext(Dispatchers.IO) {
+            val stored = localDataStore.latestSession(ticker)
+            // A newer session on disk than the one being polled is a clock disagreeing with the
+            // feed, and the stored row wins.
+            if (stored != null && stored.date > today) return@withContext false
+            if (stored != null && stored.date == today && stored.sameFiguresAs(session)) {
+                return@withContext false
+            }
+            localDataStore.saveSessions(listOf(session), LIVE_SOURCE)
+            localDataStore.saveLiveBars(
+                ticker,
+                today,
+                bars.mapNotNull { bar ->
+                    val high = bar.high ?: return@mapNotNull null
+                    val low = bar.low ?: return@mapNotNull null
+                    IntradayBar(ticker = ticker, at = bar.at, high = high, low = low)
+                },
+            )
+            true
+        }
+    }
+
+    private fun DailySession.sameFiguresAs(other: DailySession): Boolean =
+        open == other.open && high == other.high && low == other.low &&
+            close == other.close && volume == other.volume
 
     /** The same request, kept whole rather than reduced to the touch record the ordering needs. */
     private suspend fun fetchBars(
@@ -308,6 +433,37 @@ class IntradayRepository(
         internal const val INTERVAL = "5m"
 
         /**
+         * The finest bar the feed serves, for the sessions it still holds that finely.
+         *
+         * Measured 2026-11-12 on the ISIN symbol: `interval=1m` answers with true one-minute bars,
+         * 270 of them for a whole session.
+         */
+        internal const val ONE_MINUTE = "1m"
+
+        /**
+         * How far back the feed still serves one-minute bars, asked a session at a time.
+         *
+         * Measured 2026-11-12: a single session 29 days back answers with all 270 bars, and one 30
+         * days back is refused outright. A range is a different limit - at most eight days of
+         * one-minute bars per request - which never applies here, a request being one session.
+         */
+        internal const val ONE_MINUTE_DAYS = 29L
+
+        /**
+         * What a live session's row in the daily prices is written under.
+         *
+         * A third value in a column that has carried provenance since the table was made, so no
+         * migration. Not `PriceRepository.DERIVED_SOURCE`: that marks a history rebuilt for a
+         * stock no daily feed carries, and stays for good, where this is replaced by the reported
+         * row at the next ordinary refresh.
+         */
+        internal const val LIVE_SOURCE = "Yahoo Finance (1m live)"
+
+        /** The granularity a session is ordered at: one minute where the feed still has it. */
+        internal fun intervalFor(session: LocalDate, today: LocalDate): String =
+            if (session >= today.minusDays(ONE_MINUTE_DAYS)) ONE_MINUTE else INTERVAL
+
+        /**
          * How far back the feed still serves five-minute bars.
          *
          * Measured, not documented: a 59-day window answers, a 90-day one is refused with HTTP 422.
@@ -341,6 +497,9 @@ class IntradayRepository(
          * costs the whole history rather than its oldest end.
          */
         internal const val HOURLY_RANGE_DAYS = 700L
+
+        /** How far back a day's bars are asked for: clears a weekend and a week of holiday. */
+        internal const val DAY_LOOKBACK = 10L
 
         private const val USER_AGENT = "Mozilla/5.0 (compatible; EGX-Analyzer)"
         private const val CONCURRENCY = 4

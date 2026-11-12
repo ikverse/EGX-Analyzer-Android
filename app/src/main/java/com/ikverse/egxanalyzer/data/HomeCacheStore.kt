@@ -1,6 +1,7 @@
 package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.DatedClose
+import com.ikverse.egxanalyzer.model.DayBar
 import com.ikverse.egxanalyzer.model.Headline
 import com.ikverse.egxanalyzer.model.IndexQuote
 import com.ikverse.egxanalyzer.model.MarketBrief
@@ -64,6 +65,12 @@ internal fun encodeHomeCache(cache: HomeCache): String = JSONObject().apply {
                 put("closes", JSONArray().apply {
                     quote.closes.forEach { put(JSONArray().put(it.date.toString()).put(it.close)) }
                 })
+                // The 1D line: each bar's moment and its close, which is all the tile draws.
+                if (quote.day.isNotEmpty()) {
+                    put("day", JSONArray().apply {
+                        quote.day.forEach { bar -> bar.close?.let { put(JSONArray().put(bar.at.epochSecond).put(it)) } }
+                    })
+                }
             })
         }
     })
@@ -113,6 +120,15 @@ internal fun decodeHomeCache(text: String): HomeCache {
                     val date = runCatching { LocalDate.parse(pair.optString(0)) }.getOrNull()
                     val close = pair.optDouble(1).takeUnless(Double::isNaN)
                     if (date == null || close == null) null else DatedClose(date, close)
+                },
+                day = quote.optJSONArray("day").arrays().mapNotNull { pair ->
+                    val at = pair.optLong(0).takeIf { it > 0L }
+                    val close = pair.optDouble(1).takeUnless(Double::isNaN)
+                    if (at == null || close == null) {
+                        null
+                    } else {
+                        DayBar(java.time.Instant.ofEpochSecond(at), open = null, high = null, low = null, close = close)
+                    }
                 },
             )
         },

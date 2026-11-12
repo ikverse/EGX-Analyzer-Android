@@ -46,6 +46,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.LaunchedEffect
+import com.ikverse.egxanalyzer.model.DayBar
+import com.ikverse.egxanalyzer.model.DayPoint
+import com.ikverse.egxanalyzer.model.bookDayLine
+import com.ikverse.egxanalyzer.model.dayLine
+import com.ikverse.egxanalyzer.model.marketAlongDay
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import com.ikverse.egxanalyzer.model.DayEventKind
 import com.ikverse.egxanalyzer.model.EventTone
 import com.ikverse.egxanalyzer.model.NeedReason
@@ -103,7 +112,13 @@ internal fun ColumnScope.PortfolioRecord(
 ) {
     val today = remember { LocalDate.now(ScheduleClock.ZONE) }
     val positions = portfolio.positions
-    HeroTile(appState.returnByDay, appState.indexByDay, portfolio, today, heroHeight, appState.pages.portfolioReturnRange, compact, Modifier.popIn(0))
+    val openTickers = remember(positions) { positions.filter { it.open }.map { it.ticker }.distinct() }
+    val day = rememberBookDay(
+        appState,
+        openTickers,
+        wanted = !compact && appState.pages.portfolioReturnRange.value == ReturnRange.DAY,
+    )
+    HeroTile(appState.returnByDay, appState.indexByDay, portfolio, today, heroHeight, appState.pages.portfolioReturnRange, compact, Modifier.popIn(0), day)
     if (compact) return
     NeedsYouTile(
         late = remember(positions) { overdueRoster(positions) },
@@ -140,12 +155,25 @@ private fun HeroTile(
     rangeState: androidx.compose.runtime.MutableState<ReturnRange>,
     compact: Boolean,
     modifier: Modifier = Modifier,
+    /** The 1D range's two lines. Null while they are being fetched, and on every other range. */
+    day: BookDay? = null,
 ) {
     val p = palette
     val stats = portfolio.stats
     var range by rangeState
-    val shown = remember(points, range, today) { points.within(range, today) }
-    val market = remember(shown, index) { marketAlong(shown, index) }
+    val isDay = range == ReturnRange.DAY
+    // On 1D the line is the open trades' move through the newest session, in the same shape the
+    // daily line has so one drawing serves both.
+    val shown = remember(points, range, today, day) {
+        if (isDay) {
+            day?.book.orEmpty().map { ReturnPoint(it.at.atZone(ScheduleClock.ZONE).toLocalDate(), it.changePct, 0) }
+        } else {
+            points.within(range, today)
+        }
+    }
+    val market = remember(shown, index, day) {
+        if (isDay) day?.let { marketAlongDay(it.book, it.index) }.orEmpty() else marketAlong(shown, index)
+    }
     val (won, lost) = remember(portfolio) { wonLost(portfolio.positions) }
     Tile(
         modifier = modifier.fillMaxWidth().then(if (height != null && !compact) Modifier.height(height) else Modifier),
@@ -163,7 +191,11 @@ private fun HeroTile(
                 .copy(fontFamily = TabularFigures),
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
         )
-        val move = if (market.isEmpty()) null else indexMove(shown, index)
+        val move = when {
+            market.isEmpty() -> null
+            isDay -> market.last().second
+            else -> indexMove(shown, index)
+        }
         Text(
             "average per trade" + (move?.let { " · EGX30 did ${formatPercent(it)} over ${range.label}" } ?: ""),
             style = MaterialTheme.typography.bodyMedium,
@@ -185,8 +217,18 @@ private fun HeroTile(
                 .then(if (height != null) Modifier.weight(1f) else Modifier.height(96.dp))
                 .padding(top = 12.dp),
             key = range,
+            unit = if (isDay) "five-minute bars" else "days",
         )
         if (market.isNotEmpty()) ChartLegend()
+        // 1D is a different measure from the other ranges, so the tile says which.
+        if (isDay && shown.size >= 2) {
+            Text(
+                "Open trades through the newest session: ${formatPercent(shown.last().averageReturnPct)} since the open",
+                style = MaterialTheme.typography.bodySmall,
+                color = p.onHero.copy(alpha = 0.85f),
+                modifier = Modifier.padding(horizontal = 20.dp).padding(top = 6.dp),
+            )
+        }
         SegmentedControl(
             options = ReturnRange.entries,
             selected = range,
@@ -196,7 +238,11 @@ private fun HeroTile(
         )
         if (shown.isEmpty()) {
             Text(
-                "The line starts once a held stock has a stored close.",
+                when {
+                    !isDay -> "The line starts once a held stock has a stored close."
+                    day == null -> "Fetching the newest session…"
+                    else -> "No open trade has five-minute bars for the newest session."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = p.onHero.copy(alpha = 0.85f),
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
@@ -208,6 +254,30 @@ private fun HeroTile(
             HeroCount(lost, "lost", Modifier.weight(1f))
         }
     }
+}
+
+/** The Portfolio chart's 1D range: the open trades' average move through a session, and the index's. */
+internal class BookDay(val book: List<DayPoint>, val index: List<DayPoint>)
+
+/**
+ * The two lines of the 1D range, asked for only while [wanted] - which is "1D is selected".
+ *
+ * One request per open trade the feed has intraday bars for, plus one for the EGX30, side by side.
+ * Null until they have all answered. Asked again when the prices are refreshed, as the daily line
+ * is rebuilt then; the app reuses a stock's bars for a minute, so that is not a request each time.
+ */
+@Composable
+private fun rememberBookDay(appState: AppState, tickers: List<String>, wanted: Boolean): BookDay? {
+    var value by remember(tickers) { mutableStateOf<BookDay?>(null) }
+    LaunchedEffect(tickers, wanted, appState.performance) {
+        if (!wanted) return@LaunchedEffect
+        value = coroutineScope {
+            val stocks = tickers.filter(appState::hasDayBars).map { async { appState.dayBars(it) } }
+            val index = async { appState.dayBars(DayBar.INDEX) }
+            BookDay(bookDayLine(stocks.awaitAll()), index.await().dayLine())
+        }
+    }
+    return value
 }
 
 @Composable
@@ -236,14 +306,21 @@ internal fun indexMove(shown: List<ReturnPoint>, index: List<IndexPoint>): Doubl
  * first show and again when the range changes - a market event's motion, not an arrival's.
  */
 @Composable
-private fun ReturnLine(points: List<ReturnPoint>, market: List<Pair<Int, Double>>, modifier: Modifier, key: Any) {
+private fun ReturnLine(
+    points: List<ReturnPoint>,
+    market: List<Pair<Int, Double>>,
+    modifier: Modifier,
+    key: Any,
+    /** What one point is: a day on every range but 1D, where it is a five-minute bar. */
+    unit: String = "days",
+) {
     val p = palette
     val drawn = rememberDrawIn(key = key to points.size)
     val last = points.lastOrNull()
     Canvas(
         modifier.semantics {
             contentDescription = if (last == null) "No return line yet" else
-                "Average return by day, ${points.size} days, latest ${formatPercent(last.averageReturnPct)}"
+                "Average return, ${points.size} $unit, latest ${formatPercent(last.averageReturnPct)}"
         },
     ) {
         if (points.size < 2) return@Canvas

@@ -85,9 +85,14 @@ import com.ikverse.egxanalyzer.ui.kit.tileSignals
 import com.ikverse.egxanalyzer.ui.theme.palette
 import java.util.Locale
 
-/** How far back the EGX30 tile's line reaches. The feed's hourly bars hold about three months. */
+/**
+ * How far back the EGX30 tile's line reaches. The feed's hourly bars hold about three months.
+ *
+ * [DAY] is the newest session in five-minute bars - `IndexQuote.day` - and is offered only where
+ * the feed answered with them; the other three are slices of the daily closes.
+ */
 enum class HomeRange(val label: String, val days: Long) {
-    WEEK("1W", 7), MONTH("1M", 31), QUARTER("3M", 92),
+    DAY("1D", 1), WEEK("1W", 7), MONTH("1M", 31), QUARTER("3M", 92),
 }
 
 /** An index level or an outside number as Home prints it: grouped, one decimal. */
@@ -115,7 +120,12 @@ internal fun IndexHeroTile(
     val c = remember(p) { chartTileColors(p) }
     // The same money colours the kit gives a dark tile and a card, whichever this is tonight.
     val signals = tileSignals(if (p.ink.luminance() < 0.5f) TileTone.INK else TileTone.CARD)
-    var range by rangeState
+    var picked by rangeState
+    // 1D needs the session's five-minute bars. A quote kept from before they were asked for, or
+    // one the feed did not answer, has none: the option is absent and a stored 1D is a month.
+    val dayCloses = remember(quote) { quote?.day.orEmpty().mapNotNull { it.close } }
+    val options = remember(dayCloses) { HomeRange.entries.filter { it != HomeRange.DAY || dayCloses.size >= 2 } }
+    val range = if (picked in options) picked else HomeRange.MONTH
     CompositionLocalProvider(LocalContentColor provides c.text) {
         Column(modifier.fillMaxWidth().clip(Kit.TileShape).background(c.surface).padding(vertical = 18.dp)) {
             Text(
@@ -155,9 +165,12 @@ internal fun IndexHeroTile(
                 )
             }
             val last = quote.closes.lastOrNull()?.date
-            val shown = remember(quote, range) {
-                if (last == null) emptyList() else
-                    quote.closes.filter { it.date > last.minusDays(range.days) }.map { it.close }
+            val shown = remember(quote, range, dayCloses) {
+                when {
+                    range == HomeRange.DAY -> dayCloses
+                    last == null -> emptyList()
+                    else -> quote.closes.filter { it.date > last.minusDays(range.days) }.map { it.close }
+                }
             }
             if (shown.size >= 2) {
                 Sparkline(
@@ -166,7 +179,8 @@ internal fun IndexHeroTile(
                     Modifier.fillMaxWidth().height(if (compact) 64.dp else 104.dp).padding(top = 14.dp),
                     key = range,
                     width = 2.5.dp,
-                    description = "EGX30 over ${range.label}, ${shown.size} sessions",
+                    description = "EGX30 over ${range.label}, ${shown.size} " +
+                        if (range == HomeRange.DAY) "five-minute bars" else "sessions",
                 )
             }
             if (!compact && quote.closes.size >= 2) {
@@ -181,7 +195,7 @@ internal fun IndexHeroTile(
                         .background(c.track)
                         .padding(3.dp),
                 ) {
-                    HomeRange.entries.forEach { option ->
+                    options.forEach { option ->
                         val chosen = option == range
                         Box(
                             Modifier
@@ -189,7 +203,7 @@ internal fun IndexHeroTile(
                                 .heightIn(min = 36.dp)
                                 .clip(Kit.Capsule)
                                 .background(if (chosen) c.chosen else Color.Transparent)
-                                .clickable(role = Role.Tab, onClickLabel = "Show ${option.label}") { range = option },
+                                .clickable(role = Role.Tab, onClickLabel = "Show ${option.label}") { picked = option },
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(

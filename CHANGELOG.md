@@ -8,6 +8,9 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 - **A new app icon and launch screen.** A sunflower pyramid whose inner edge is a price line, over the letters EGX, on a dark ground. It replaces the lime arrow on blue, and themed icons get the same mark in one colour.
 - **Notifications carry the pyramid** in the status bar in place of the arrow.
+- **A 1D range on every chart.** The EGX30 tile on Home, the Portfolio chart, the stock sheet, the full-screen chart, a trade's chart and a call's chart each gain 1D as their first range. It draws the newest session in five-minute bars, with times under the line in place of dates, and is fetched when you press it. Nothing about it is stored.
+- **On Portfolio, 1D is the day and not the trade.** It shows how your open trades moved through the newest session, on average, beside the EGX30 over the same minutes; every other range still shows what the trades have made since they were bought.
+- **1D is absent for a stock the price feed has no intraday bars for,** so it never opens an empty chart.
 
 ---
 

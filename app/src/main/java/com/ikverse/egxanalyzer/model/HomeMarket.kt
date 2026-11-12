@@ -28,6 +28,11 @@ data class IndexQuote(
     val level: Double,
     val previous: Double?,
     val closes: List<DatedClose> = emptyList(),
+    /**
+     * The newest session's five-minute bars, for the tile's 1D range. Asked for the index that
+     * leads the page and no other; empty where the feed did not answer, and 1D is then not offered.
+     */
+    val day: List<DayBar> = emptyList(),
 ) {
     val change: Double? get() = previous?.let { level - it }
     val changePercent: Double? get() = previous?.takeIf { it > 0.0 }?.let { (level - it) / it * 100.0 }
