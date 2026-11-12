@@ -114,6 +114,36 @@ class SymbolMapTest {
     }
 
     @Test
+    fun `no mapping key carries a feed suffix`() {
+        // ACTF was written as "ACTF.CA", which no source ever writes, so it never matched and the
+        // stock went unpriced.
+        each().forEach { row ->
+            val code = row.getString("egx")
+            assertTrue("key $code carries a suffix", !code.contains('.'))
+        }
+    }
+
+    @Test
+    fun `Arabia Investments Holding and Arabia for Investment and Development stay apart`() {
+        // AIHC was missing and AIDC held AIHC's symbol, matched on a name, so AIHC had no price
+        // and AIDC showed another company's. Yahoo names EGS21351C019.CA "Arabia Investments
+        // Holding" and EGS65R01C015.CA "Arabia for Investment and Development".
+        val actual = each().associate { it.getString("egx") to it.getString("yahoo") }
+        assertEquals("EGS21351C019.CA", actual["AIHC"])
+        assertEquals("EGS65R01C015.CA", actual["AIDC"])
+        assertEquals("EGS7D5P1C019.CA", actual["ACTF"])
+    }
+
+    @Test
+    fun `a stock whose legacy feed is another series is read from its ISIN symbol alone`() {
+        val oras = each().first { it.getString("egx") == "ORAS" }
+        assertEquals(false, oras.optBoolean("legacy", true))
+        each().filter { it.has("legacy") }.forEach { row ->
+            assertTrue("legacy flag on ${row.getString("egx")} must be false or absent", !row.getBoolean("legacy"))
+        }
+    }
+
+    @Test
     fun `the two Valmore listings stay apart`() {
         // One issuer, two instruments, one name - and the catalog gives both the same one, which is
         // precisely the shape that put three stocks on a single symbol the last time names were

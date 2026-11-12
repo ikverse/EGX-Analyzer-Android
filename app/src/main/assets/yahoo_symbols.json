@@ -35,7 +35,7 @@
   "verified": "price"
  },
  {
-  "egx": "ACTF.CA",
+  "egx": "ACTF",
   "yahoo": "EGS7D5P1C019.CA",
   "isin": "EGS7D5P1C019",
   "company": "Act Financial",
@@ -85,6 +85,13 @@
  },
  {
   "egx": "AIDC",
+  "yahoo": "EGS65R01C015.CA",
+  "isin": "EGS65R01C015",
+  "company": "Arabia for Investment and Devel",
+  "verified": "name"
+ },
+ {
+  "egx": "AIHC",
   "yahoo": "EGS21351C019.CA",
   "isin": "EGS21351C019",
   "company": "Arabia Investments Holding",
@@ -1168,7 +1175,8 @@
   "yahoo": "EGS95001C011.CA",
   "isin": "EGS95001C011",
   "company": "Orascom Construction PLC",
-  "verified": "name"
+  "verified": "name",
+  "legacy": false
  },
  {
   "egx": "ORHD",
