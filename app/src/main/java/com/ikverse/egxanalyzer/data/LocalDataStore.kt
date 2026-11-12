@@ -1058,6 +1058,37 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
     }
 
     /**
+     * The newest session stored for a stock before [date], or null where there is none.
+     *
+     * What the live poll measures a session still trading against: the last close before it is
+     * the one price a change of scale can be read off. One indexed row, because the poll asks
+     * this for every stock it follows, every minute.
+     */
+    fun sessionBefore(ticker: String, date: LocalDate): DailySession? = readableDatabase.query(
+        "daily_prices",
+        arrayOf("ticker", "session_date", "high", "low", "close", "volume", "open", "source"),
+        "ticker = ? AND session_date < ?",
+        arrayOf(ticker, date.toString()),
+        null,
+        null,
+        "session_date DESC",
+        "1",
+    ).use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+        DailySession(
+            ticker = cursor.getString(0),
+            date = runCatching { LocalDate.parse(cursor.getString(1)) }.getOrNull()
+                ?: return@use null,
+            high = cursor.nullableDouble(2),
+            low = cursor.nullableDouble(3),
+            close = cursor.nullableDouble(4),
+            volume = cursor.nullableDouble(5),
+            open = cursor.nullableDouble(6),
+            derived = cursor.isDerived(7),
+        )
+    }
+
+    /**
      * The newest two priced sessions of every stock, for the Portfolio page's market breadth: how
      * many listings rose, held and fell against their previous close.
      *

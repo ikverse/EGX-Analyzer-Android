@@ -34,6 +34,19 @@ data class SeriesHarvestOutcome(
 )
 
 /**
+ * What one minute of the live poll did.
+ *
+ * [changed] is how many stocks' stored session is different from what it was, which is what
+ * decides whether anything is re-scored. [heldBack] names the stocks whose live session was
+ * **not** written because it sits on a different scale from the session before it - see
+ * [IntradayRepository.pollLive].
+ */
+data class LivePoll(
+    val changed: Int = 0,
+    val heldBack: List<String> = emptyList(),
+)
+
+/**
  * The intraday feed, which this app asks three quite different questions of.
  *
  * **Ordering a session** ([fetchMissing]): a daily bar gives a high and a low with no sequence, so
@@ -324,46 +337,68 @@ class IntradayRepository(
      * exchange has finished with - past that line the stored row is a reported close, and one
      * built from bars must never replace it.
      *
-     * Returns how many stocks' stored session actually changed, so the caller re-scores only when
-     * there is something new to score. A stock on the legacy feed, one that did not answer, and
-     * one whose bars carry no price yet all count as unchanged.
+     * **A session on a different scale from the one before it is held back, not written.** This
+     * poll bypasses `PriceRepository.refresh`, which is where a split is noticed and the series
+     * refetched, so on the morning of one the live row would arrive in the new money beside a
+     * history in the old - and the scorer would read a halved price as every stop on the stock
+     * being broken. The same [PriceSanity.breaks] the refresh uses is asked about the last stored
+     * close and this session, and where it fires nothing is stored: no row and no bars. The
+     * stock is named in [LivePoll.heldBack] so the caller can send it through the ordinary
+     * refresh, which is the thing that knows how to heal a series. Nothing is rescaled here.
+     *
+     * [LivePoll.changed] counts the stocks whose stored session actually changed, so the caller
+     * re-scores only when there is something new to score. A stock on the legacy feed, one that
+     * did not answer, one whose bars carry no price yet and one held back all count as unchanged.
      */
     suspend fun pollLive(
         tickers: Collection<String>,
         finalThrough: LocalDate,
         today: LocalDate = LocalDate.now(ZoneId.of(UTC)),
-    ): Int = coroutineScope {
-        if (today <= finalThrough) return@coroutineScope 0
+    ): LivePoll = coroutineScope {
+        if (today <= finalThrough) return@coroutineScope LivePoll()
         val limit = Semaphore(CONCURRENCY)
-        tickers
+        val polled = tickers
             .map(Scoring::normalizeTicker)
             .filter(String::isNotBlank)
             .distinct()
-            .map { ticker -> async { limit.withPermit { pollOne(ticker, today) } } }
+            .map { ticker -> async { limit.withPermit { ticker to pollOne(ticker, today) } } }
             .map { it.await() }
-            .count { it }
+        LivePoll(
+            changed = polled.count { it.second == Polled.CHANGED },
+            heldBack = polled.filter { it.second == Polled.HELD_BACK }.map { it.first },
+        )
     }
 
-    /** True when [ticker]'s stored session for [today] is different from what it was. */
-    private suspend fun pollOne(ticker: String, today: LocalDate): Boolean {
+    private enum class Polled { UNCHANGED, CHANGED, HELD_BACK }
+
+    /** What became of [ticker]'s session for [today] this minute. */
+    private suspend fun pollOne(ticker: String, today: LocalDate): Polled {
         // The ISIN feed only, as everywhere else in this class.
-        val symbol = symbolMap[ticker]?.yahooSymbol ?: return false
-        if (symbol == legacyFormOf(ticker)) return false
+        val symbol = symbolMap[ticker]?.yahooSymbol ?: return Polled.UNCHANGED
+        if (symbol == legacyFormOf(ticker)) return Polled.UNCHANGED
         val zone = ZoneId.of(UTC)
         val bars = fetchBars(symbol, today, today, ONE_MINUTE)
             ?.filter { it.at.atZone(zone).toLocalDate() == today }
-            ?: return false
+            ?: return Polled.UNCHANGED
         // Not derived in the sense that flag means - a rebuilt history for a stock no daily feed
         // carries. This is a provisional reading of a session the daily feed will report itself.
         val session = DailyFromIntraday.aggregate(ticker, bars).lastOrNull()?.copy(derived = false)
-            ?: return false
+            ?: return Polled.UNCHANGED
         return withContext(Dispatchers.IO) {
             val stored = localDataStore.latestSession(ticker)
             // A newer session on disk than the one being polled is a clock disagreeing with the
             // feed, and the stored row wins.
-            if (stored != null && stored.date > today) return@withContext false
+            if (stored != null && stored.date > today) return@withContext Polled.UNCHANGED
+            // Against the last close before today, never against today's own stored row: that
+            // one may be an earlier minute of this same session. With no earlier session, or one
+            // more than a week back, there is nothing a scale can be read off and the check says
+            // nothing - which is PriceSanity's own rule, not one made here.
+            val before = localDataStore.sessionBefore(ticker, today)
+            if (before != null && PriceSanity.breaks(ticker, listOf(before, session)).isNotEmpty()) {
+                return@withContext Polled.HELD_BACK
+            }
             if (stored != null && stored.date == today && stored.sameFiguresAs(session)) {
-                return@withContext false
+                return@withContext Polled.UNCHANGED
             }
             localDataStore.saveSessions(listOf(session), LIVE_SOURCE)
             localDataStore.saveLiveBars(
@@ -375,7 +410,7 @@ class IntradayRepository(
                     IntradayBar(ticker = ticker, at = bar.at, high = high, low = low)
                 },
             )
-            true
+            Polled.CHANGED
         }
     }
 
