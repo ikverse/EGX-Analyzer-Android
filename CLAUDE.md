@@ -360,6 +360,11 @@ asked for the market, its indices, the news and their own book in one place.
 - **The feeds were checked, and three that look obvious do not answer**: Mubasher, Arab Finance and
   Ahram Online publish no working RSS (404 / 410). The Arabic feed is a Google News search for the
   exchange by its Arabic name; its titles arrive as `Headline - Publisher`, which `parseRss` splits.
+- **A headline opens in a Custom Tab** (`androidx.browser`), not a web view of the app's: the
+  article stays in the browser's process, and the chart remains the only web view here. Where no
+  browser offers tabs it falls back to `ACTION_VIEW`. The toolbar is paper / graphite by the
+  *system's* dark setting, which a Custom Tab follows rather than the app's own theme choice. The
+  news tile's refresh button is `refreshHomeNews(force = true)` alone; `HomePageTest` holds that.
 - **`parseRss` is patterns, not an XML parser, deliberately.** A feed is somebody else's document:
   nothing is resolved, followed or rendered, markup inside a field is removed, and only an
   `http(s)` link ever reaches `openHeadline` or the system.

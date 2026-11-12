@@ -5,6 +5,7 @@ composeBom = "2026.02.01"
 coreKtx = "1.16.0"
 lifecycle = "2.9.4"
 window = "1.5.0"
+browser = "1.8.0"
 junit = "4.13.2"
 json = "20250517"
 robolectric = "4.16"
@@ -35,6 +36,7 @@ androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx"
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-window = { module = "androidx.window:window", version.ref = "window" }
+androidx-browser = { module = "androidx.browser:browser", version.ref = "browser" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 androidx-glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "glance" }
 androidx-glance-material3 = { module = "androidx.glance:glance-material3", version.ref = "glance" }

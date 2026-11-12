@@ -85,6 +85,7 @@ internal fun HomeScreen(appState: AppState) {
                 fetchedAt = appState.homeNewsAt,
                 expanded = newsOpen,
                 onOpen = appState::openHeadline,
+                onRefresh = { appState.refreshHomeNews(force = true) },
                 limit = limit,
             )
         }
@@ -154,7 +155,14 @@ internal fun HomeScreen(appState: AppState) {
 private fun ColumnScope.Brief(appState: AppState) {
     var confirming by remember { mutableStateOf(false) }
     val brief = appState.homeBrief
-    brief?.let { BriefTile(it) }
+    val briefOpen = appState.pages.homeBriefOpen
+    // A brief the reader has just asked for arrives open; one kept from an earlier launch, shut.
+    var wasPending by remember { mutableStateOf(appState.homeBriefPending) }
+    LaunchedEffect(appState.homeBriefPending) {
+        if (wasPending && !appState.homeBriefPending && appState.homeBrief != null) briefOpen.value = true
+        wasPending = appState.homeBriefPending
+    }
+    brief?.let { BriefTile(it, briefOpen) }
     AskAiButton(
         label = when {
             appState.homeBriefPending -> "Writing the brief…"

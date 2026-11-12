@@ -192,6 +192,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.window)
+    implementation(libs.androidx.browser)
     // The daily overdue check. Nothing else in the app runs while it is closed.
     implementation(libs.androidx.work.runtime.ktx)
     // The home-screen widget. The one place in this app that draws outside its own window, and the

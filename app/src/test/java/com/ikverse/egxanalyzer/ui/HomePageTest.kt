@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -220,8 +221,44 @@ class HomePageTest {
     fun `a brief already kept is drawn above the button that asks for a new one`() {
         show(FoldPosture.Cover, state(brief = MarketBrief("The market rose.", listOf("Banks led."), listOf("The dollar."), "model-x", 0L)))
         compose.onNodeWithText("The market rose.").assertExists()
-        compose.onNodeWithText("• Banks led.").assertExists()
         compose.onNodeWithText("Ask AI for a new brief").assertExists()
+    }
+
+    @Test
+    fun `the brief opens and closes on a press, shut to its summary`() {
+        show(FoldPosture.Cover, state(brief = MarketBrief("The market rose.", listOf("Banks led."), listOf("The dollar."), "model-x", 0L)))
+        compose.onNodeWithText("The market rose.").assertExists()
+        compose.onNodeWithText("• Banks led.").assertDoesNotExist()
+        compose.onNodeWithText("AI market brief").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("• Banks led.").assertExists()
+        compose.onNodeWithText("• The dollar.").assertExists()
+        compose.onNodeWithText("AI market brief").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("• Banks led.").assertDoesNotExist()
+    }
+
+    @Test
+    fun `the news refresh fetches the headlines and nothing else`() {
+        val news = mutableListOf<Boolean>()
+        var market = 0
+        var briefs = 0
+        val base = state()
+        val state = object : AppState by base {
+            override fun refreshHomeNews(force: Boolean) { news += force }
+            override fun refreshHomeMarket(force: Boolean) { market++ }
+            override fun askMarketBrief() { briefs++ }
+        }
+        show(FoldPosture.Cover, state)
+        compose.waitForIdle()
+        // Arriving on the page asks once, unforced; only the button's press forces.
+        news.clear()
+        market = 0
+        compose.onNodeWithContentDescription("Refresh news").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(listOf(true), news)
+        assertEquals(0, market)
+        assertEquals(0, briefs)
     }
 
     @Test

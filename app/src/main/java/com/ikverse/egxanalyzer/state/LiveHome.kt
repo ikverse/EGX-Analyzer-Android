@@ -3,6 +3,8 @@ package com.ikverse.egxanalyzer.state
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.browser.customtabs.CustomTabColorSchemeParams
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -207,10 +209,23 @@ class LiveHome(
         val link = headline.link
         // A feed is somebody else's document: only a web address is ever handed to the system.
         if (!link.startsWith("https://") && !link.startsWith("http://")) return
+        val uri = Uri.parse(link)
+        // A Custom Tab: the browser's own page drawn over the app, with a close button back to Home.
+        // The article stays in the browser's process, never in a web view of this app's. Where no
+        // installed browser offers tabs, `launchUrl` opens the ordinary browser instead.
         runCatching {
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(link)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
+            val toolbar = { color: Int -> CustomTabColorSchemeParams.Builder().setToolbarColor(color).build() }
+            val tab = CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .setShareState(CustomTabsIntent.SHARE_STATE_ON)
+                .setDefaultColorSchemeParams(toolbar(TabPaper))
+                .setColorSchemeParams(CustomTabsIntent.COLOR_SCHEME_DARK, toolbar(TabGraphite))
+                .build()
+            // Launched from the application's context, so it needs a task of its own.
+            tab.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            tab.launchUrl(context, uri)
+        }.recoverCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }.onFailure {
             status.message = StatusMessage("No browser could open that article", succeeded = false)
         }
@@ -226,5 +241,9 @@ class LiveHome(
         const val MARKET_FRESH_MILLIS = 10L * 60 * 1000
 
         const val NEWS_FRESH_MILLIS = 30L * 60 * 1000
+
+        /** The article tab's toolbar: the page's paper by day, its graphite at night. */
+        const val TabPaper = 0xFFEFEDE6.toInt()
+        const val TabGraphite = 0xFF141518.toInt()
     }
 }
