@@ -77,31 +77,45 @@ data class AppPalette(
     val zoneFar: Color,
 
     /*
-     * What a kit Tile is filled with. The light theme fills a tile with the palette colour itself,
-     * so each of these defaults to the field it shadows and the light palette names none of them.
-     * The dark theme does not: lime, sunflower and lilac at full strength glared on graphite, and
-     * the ink tile turned near-white. The owner chose the "Dusk, clearer" set on 2026-11-12 - the
-     * same hues at mid-tone, keeping navy ink on them. These are fills for tiles only; the accents
-     * of the same name (chart lines, chips, logos, selection) keep the fields above.
+     * What a kit Tile is filled with, and the text on it. Each defaults to the field it shadows, so
+     * a palette that names none of them fills a tile with the accent itself under navy ink.
+     *
+     * The owner picked every tile on its own on 2026-11-12, from a picker page, after the 5.4.1
+     * dark set (mid-tone fills under navy) was still too bright. Light keeps sunflower, coral and
+     * lilac, softens lime to pale teal and sky to powder, and calms the hero and the ink tile. Dark
+     * takes deep fills with a pale text of each tile's own hue. These are for tiles only: the
+     * accents of the same name (chart lines, chips, logos, selection) keep the fields above.
      */
-    /** The ink tile's fill: navy in light, a soft slate at night. */
+    /** The ink tile's fill. */
     val tileInk: Color = ink,
     /** Text on [tileInk]. */
     val onTileInk: Color = ground,
-    /** The hero tile's fill. */
+    /** The hero tile's fill. Its text is [onHero]. */
     val tileHero: Color = hero,
     /** The highlight tile's fill. */
     val tileHighlight: Color = highlight,
+    /** Text on [tileHighlight]. */
+    val onTileHighlight: Color = onTile,
     /** The alert tile's fill. */
     val tileAlert: Color = alert,
+    /** Text on [tileAlert]. */
+    val onTileAlert: Color = onTile,
     /** Tile 1's fill. */
     val tileOne: Color = tile1,
+    /** Text on [tileOne]. */
+    val onTileOne: Color = onTile,
     /** Tile 2's fill. */
     val tileTwo: Color = tile2,
+    /** Text on [tileTwo]. */
+    val onTileTwo: Color = onTile,
     /** Tile 3's fill. */
     val tileThree: Color = tile3,
+    /** Text on [tileThree]. */
+    val onTileThree: Color = onTile,
     /** The flat book tile's fill. */
     val tileBookFlat: Color = bookFlat,
+    /** Text on [tileBookFlat]. */
+    val onTileBookFlat: Color = onTile,
 )
 
 /** Navy ink, the one text colour on every tile fill in both themes. */
@@ -137,6 +151,12 @@ internal val LightPalette = AppPalette(
     zoneLoss = Color(0xFFF6C9C2),
     zoneNear = Color(0xFFCFEBDB),
     zoneFar = Color(0xFF9ED9B8),
+    // Indigo hero, soft navy ink tile, pale teal in lime's place, powder sky. Sunflower, coral,
+    // lilac and the book's three stay the accents themselves.
+    tileInk = Color(0xFF1F2A44),
+    tileHero = Color(0xFF3B3F8F),
+    tileHighlight = Color(0xFFBFE0DA),
+    tileThree = Color(0xFFC9E0F0),
 )
 
 internal val DarkPalette = AppPalette(
@@ -171,17 +191,23 @@ internal val DarkPalette = AppPalette(
     zoneLoss = Color(0xFF6B2A26),
     zoneNear = Color(0xFF245C3E),
     zoneFar = Color(0xFF3A8F63),
-    // Dusk, clearer: each tile's hue at mid-tone, navy ink kept on it. The book's teal and maroon
-    // are already deep and stay as they are.
-    tileInk = Color(0xFFB4BBC8),
-    onTileInk = NavyInk,
-    tileHero = Color(0xFF3440D9),
-    tileHighlight = Color(0xFFA8D13A),
-    tileAlert = Color(0xFFE08A72),
-    tileOne = Color(0xFFDDB02A),
-    tileTwo = Color(0xFFA893DB),
-    tileThree = Color(0xFF7FB4DE),
-    tileBookFlat = Color(0xFFA9B89C),
+    // Deep fills, each with a pale text of its own hue. The book's teal and maroon are already
+    // deep and stay as they are.
+    tileInk = Color(0xFF2A2E36),
+    onTileInk = Color(0xFFE6EAF2),
+    tileHero = Color(0xFF232B8F),
+    tileHighlight = Color(0xFF1E4A45),
+    onTileHighlight = Color(0xFFCDEFE9),
+    tileAlert = Color(0xFF5E2E24),
+    onTileAlert = Color(0xFFFFD8CC),
+    tileOne = Color(0xFF6B5410),
+    onTileOne = Color(0xFFFFEFB8),
+    tileTwo = Color(0xFF4A3D78),
+    onTileTwo = Color(0xFFECE4FF),
+    tileThree = Color(0xFF26394A),
+    onTileThree = Color(0xFFD6E4F0),
+    tileBookFlat = Color(0xFF36433A),
+    onTileBookFlat = Color(0xFFE3EEDA),
 )
 
 /** [DarkPalette] on true black. Only the grounds move; every signal and tile fill is copied verbatim. */
