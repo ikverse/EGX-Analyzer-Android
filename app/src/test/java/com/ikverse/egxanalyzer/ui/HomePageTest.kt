@@ -7,12 +7,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
 import com.ikverse.egxanalyzer.model.DatedClose
 import com.ikverse.egxanalyzer.model.FoldPosture
 import com.ikverse.egxanalyzer.model.Headline
@@ -20,6 +22,8 @@ import com.ikverse.egxanalyzer.model.IndexQuote
 import com.ikverse.egxanalyzer.model.MarketBreadth
 import com.ikverse.egxanalyzer.model.MarketBrief
 import com.ikverse.egxanalyzer.model.MarketMovers
+import com.ikverse.egxanalyzer.model.NeedReason
+import com.ikverse.egxanalyzer.model.NeedsYouItem
 import com.ikverse.egxanalyzer.model.Mover
 import com.ikverse.egxanalyzer.model.OutsideQuote
 import com.ikverse.egxanalyzer.model.Portfolio
@@ -123,6 +127,32 @@ class HomePageTest {
             "128↑  31·  64↓", "Top gainers", "Top losers", "USD / EGP", "Brent", "News",
             "EGX30 closes higher", "Ask AI for a market brief",
         ).forEach { compose.onNodeWithText(it, substring = true).assertExists() }
+    }
+
+    /**
+     * The 2026-11-12 report: on the cover screen the tile is half the width, "1.2% above stop" took
+     * nearly all of the row and NIPH was drawn one letter per line. Each trade is two lines now;
+     * this holds the ticker to one, at a width narrower than the tile ever is.
+     */
+    @Test
+    fun `a ticker on the needs a look tile stays on one line at half the cover screen`() {
+        val needs = listOf(
+            NeedsYouItem(open("PRCL", 10.0, 9.0, 8.0, 14.0), NeedReason.OVERDUE),
+            NeedsYouItem(open("NIPH", 30.0, 28.0, 27.67, 40.0), NeedReason.NEAR_STOP, 1.2),
+        )
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.LIGHT) {
+                Box(Modifier.width(160.dp)) { NeedsLookTile(needs, onOpen = {}) }
+            }
+        }
+        compose.onNodeWithText("1.2% above stop", substring = true, useUnmergedTree = true).assertExists()
+        // Measured against the tile's own title, the same style on one line, so the bar is whatever
+        // one line is under this font rather than a number guessed for it.
+        val oneLine = compose.onNodeWithText("Needs a look", useUnmergedTree = true).getUnclippedBoundsInRoot().height
+        listOf("PRCL", "NIPH").forEach { ticker ->
+            val height = compose.onNodeWithText(ticker, useUnmergedTree = true).getUnclippedBoundsInRoot().height
+            assertTrue("$ticker is $height tall against $oneLine for one line", height < oneLine * 1.5f)
+        }
     }
 
     @Test
