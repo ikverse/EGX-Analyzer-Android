@@ -32,6 +32,7 @@
   var PANE = 'candle_pane';
   var FONT = '"EGX Mono", monospace';
   var theme = null, style = 'candles', scaleType = 'normal', manual = false, lastRows = [], lastLevels = [], showLevels = true, lastCalls = [], lastKey = null;
+  var intraday = false; // 1D: the candles are five-minute bars at the moments they traded, read on the exchange's clock
   var chart = klinecharts.init('chart', { locale: 'en-US' });
   // The canvas draws with the face only once it has loaded, so the chart is redrawn when it lands.
   if (document.fonts && document.fonts.load) {
@@ -45,7 +46,8 @@
       var p = {};
       dtf.formatToParts(new Date(timestamp)).forEach(function (x) { p[x.type] = x.value; });
       var tokens = { YYYY: p.year, MM: p.month, DD: p.day, HH: p.hour, mm: p.minute };
-      if (type !== klinecharts.FormatDateType.XAxis) format = format.replace(' HH:mm', '');
+      // On 1D a candle is five minutes, so there the hour is the point and it stays.
+      if (type !== klinecharts.FormatDateType.XAxis && !intraday) format = format.replace(' HH:mm', '');
       return format.replace(/YYYY|MM|DD|HH|mm/g, function (t) { return tokens[t]; });
     }
   });
@@ -325,6 +327,11 @@
 
   function setData(d) {
     style = d.style || 'candles';
+    // A session is sent at noon UTC and read in UTC; a five-minute bar is a real moment, read where the exchange is.
+    if (!!d.intraday !== intraday) {
+      intraday = !!d.intraday;
+      try { chart.setTimezone(intraday ? 'Africa/Cairo' : 'UTC'); } catch (e) {}
+    }
     applyTheme(d.theme);
     var rows = (d.candles || []).map(function (c) { return { timestamp: c[0], open: c[1], high: c[2], low: c[3], close: c[4], volume: c[5] }; });
     document.getElementById('empty').style.display = rows.length ? 'none' : 'block';

@@ -337,7 +337,8 @@ fallen into the buy zone after the target was hit. Three answers are tried, chea
 
 - **The open**, where it already sits inside the band. It precedes every other price of the day, so
   it settles the order for free. Unchanged, and still the first thing asked.
-- **Five-minute bars for that one session**, fetched by `IntradayRepository` and stored in
+- **Bars for that one session** - one-minute where the feed still holds the session that finely
+  (29 days, since 2026-11-12), five-minute beyond that - fetched by `IntradayRepository` and stored in
   `intraday_bars`. The first bar covering the buy zone against the first bar reaching the target.
   Bars are kept **only for sessions a call could not order**, and only their high and low: a year of
   five-minute bars for two hundred stocks is millions of rows to answer a question that arises a
@@ -359,6 +360,44 @@ nothing to give — are re-requested on every refresh forever.
 
 `Ambiguity` now has two values, because they ask for different things: `ENTRY_AND_TARGET` may still
 be answerable by fetching, `SAME_INTRADAY_BAR` never will be.
+
+A session's bars are **replaced whole** on every write (`replaceSessionBars`), so one-minute and
+five-minute bars never share a session: a five-minute bar beside the one-minute bars it spans would
+let the ordering find an entry and a target in "different" bars that are the same five minutes. A
+one-minute request that gets no usable answer falls back to five, which is what a session on the
+edge of the 29-day wall looks like - refused, not trimmed.
+
+### Following a session a minute at a time
+
+Built 2026-11-12. While the app is on screen and the exchange is trading, `LiveAppState` runs a
+loop (`enterLivePrices` / `leaveLivePrices`, called from the activity's resume and pause) that asks
+the feed once a minute. `model/LivePrices.kt` holds the rules; `IntradayRepository.pollLive` does
+the work.
+
+- **A loop, not an alarm, and only in the foreground.** Android holds a dozing phone's alarms to
+  about one in ten minutes, which is why `MarketRefresh` is a quarter of an hour. Nothing limits an
+  app somebody is looking at. The background schedule is unchanged.
+- **Forty stocks at most, one request each.** Open trades first, then calls whose outcome is `OPEN`
+  or `AMBIGUOUS`, then the watchlist (`LivePrices.watched`). Stocks still on the legacy symbol are
+  skipped: that feed has no intraday bars.
+- **It writes two things for a stock that moved**, both replaced whole. Today's row in
+  `daily_prices`, aggregated from the one-minute bars by `DailyFromIntraday` and written under the
+  source `Yahoo Finance (1m live)`; and the bars' highs and lows in `intraday_bars`, so a session
+  that touches the entry and a target is ordered as it happens. A stock whose figures did not
+  change writes nothing and causes no recompute.
+- **It never writes a session the exchange has finished with.** The loop runs from the bell to
+  `ScheduleClock.sessionEnd`, and `pollLive` refuses again on `lastFinalSession`. Past that line the
+  row is a reported close and the ordinary refresh owns it; the live row is replaced by the reported
+  one at the next refresh, the close sweep or the next day's first-open fetch.
+- **It is not a refresh.** `lastPriceRefreshAt` and the refresh day are untouched, so the
+  first-open fetch, the quarter-hour slots and the close sweep still owe what they owed.
+- **It does not run the scale check.** `PriceSanity` runs inside `PriceRepository.refresh`, which
+  this bypasses. On the morning of a split the live row arrives in the new money beside a history
+  in the old, until an ordinary refresh heals the series. Known, not yet guarded.
+- **A minute is the bar, not the delay.** The feed's newest bar is about fifteen minutes old
+  (measured, see `CLAUDE.md`), so the best case is roughly sixteen minutes behind the exchange.
+- **Not seen on a device.** Built and unit-tested only (`LivePricesTest`, `LivePollTest`); what a
+  recompute a minute costs on the owner's full record has not been measured.
 
 ### Where the stock is now
 

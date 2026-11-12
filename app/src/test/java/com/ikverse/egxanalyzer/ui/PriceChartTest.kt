@@ -15,7 +15,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.DayBar
+import com.ikverse.egxanalyzer.model.ScheduleClock
 import com.ikverse.egxanalyzer.model.ThemeMode
+import com.ikverse.egxanalyzer.ui.preview.FakeAppState
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import com.ikverse.egxanalyzer.ui.theme.EgxAnalyzerTheme
 import com.ikverse.egxanalyzer.ui.theme.LightPalette
 import java.time.LocalDate
@@ -123,6 +128,65 @@ class PriceChartTest {
         compose.onNodeWithText("6M").performClick()
         assertEquals(ChartRange.SIX_MONTHS, range)
         compose.onNodeWithText("6M").assertIsSelected()
+    }
+
+    /** A session of five-minute bars from 10:00 on the exchange's clock. */
+    private fun session(count: Int): List<DayBar> {
+        val open = LocalDate.of(2026, 11, 12).atTime(10, 0).atZone(ScheduleClock.ZONE).toInstant()
+        return List(count) { i -> DayBar(open.plusSeconds(i * 300L), open = 50.0 + i, high = null, low = null, close = 50.5 + i) }
+    }
+
+    @Test
+    fun `1D leads the ranges, and is not offered for a stock with no day's bars`() {
+        assertEquals(ChartRange.DAY, ChartRange.entries.first())
+        assertEquals("1D", ChartRange.DAY.label)
+        // The default is still a month: 1D is one press away, never where a chart opens.
+        assertEquals(ChartRange.MONTH, ChartRange.Default)
+        val state = FakeAppState(dayBarsByTicker = mapOf("COMI" to session(3)))
+        assertTrue(ChartRange.DAY in ChartRange.entries.offeredFor(state, "COMI"))
+        assertFalse(ChartRange.DAY in ChartRange.entries.offeredFor(state, "VLMRA"))
+        // Nothing else is taken with it.
+        assertEquals(ChartRange.entries.size - 1, ChartRange.entries.offeredFor(state, "VLMRA").size)
+    }
+
+    @Test
+    fun `a touched bar reads as its time and what the session had done by then`() {
+        val bars = session(4)
+        val reading = dayReading(bars, bars[2])!!
+        // 10:10, and (52.5 - 50) / 50 from the first bar's open.
+        assertEquals("10:10 · ${formatPercent(5.0)} since the open", reading.first)
+        assertEquals(formatPrice(52.5), reading.second)
+        assertNull(dayReading(bars, null))
+    }
+
+    @Test
+    fun `the day's headline says it is fetching, then which session it is`() {
+        assertEquals("Fetching the session…", dayTitle(null))
+        assertTrue(dayTitle(session(2)).endsWith("five-minute bars"))
+    }
+
+    @Test
+    fun `a day's line draws at the cover width with its levels`() {
+        val bars = session(41)
+        val levels = ChartLevels("a channel", stopLoss = 48.0, entryLow = null, entryHigh = null, target1 = 95.0, target2 = null, paid = 51.0)
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.LIGHT) {
+                Box(Modifier.width(coverWidth)) {
+                    DayChartOrNote(bars, levels, colors, selected = bars[5], onSelect = {})
+                }
+            }
+        }
+        compose.onNodeWithContentDescription("41 five-minute bars", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun `a day still on its way keeps the chart's place and says so`() {
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.LIGHT) {
+                Box(Modifier.width(coverWidth)) { DayChartOrNote(null, null, colors, selected = null, onSelect = {}) }
+            }
+        }
+        compose.onNodeWithText("Fetching the newest session…").assertIsDisplayed()
     }
 
     @Test

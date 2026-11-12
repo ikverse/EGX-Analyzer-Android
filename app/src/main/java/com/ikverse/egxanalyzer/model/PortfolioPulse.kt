@@ -56,9 +56,15 @@ fun returnByDay(positions: List<PositionView>, sessions: Map<String, List<DailyS
     }
 }
 
-/** The ranges the chart offers. */
+/**
+ * The ranges the chart offers.
+ *
+ * [DAY] is not a slice of the return line: a day of it is one point. It is the open trades' average
+ * move through the newest session in five-minute bars - [bookDayLine] - fetched when it is pressed,
+ * so it says how the day went and not what the trades have made since they were bought.
+ */
 enum class ReturnRange(val label: String, val days: Long?) {
-    WEEK("1W", 7), MONTH("1M", 31), QUARTER("3M", 92), ALL("All", null),
+    DAY("1D", 1), WEEK("1W", 7), MONTH("1M", 31), QUARTER("3M", 92), ALL("All", null),
 }
 
 /** [points] from [range] back from [today]. */

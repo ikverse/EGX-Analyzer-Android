@@ -2,6 +2,7 @@ package com.ikverse.egxanalyzer.ui
 
 import androidx.compose.ui.graphics.Color
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.DayBar
 import java.time.LocalDate
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -85,6 +86,45 @@ class ExpandedChartJsonTest {
         val stamp = ExpandedChartJson.timestamp(LocalDate.parse("2026-10-01"))
 
         assertEquals(java.time.Instant.parse("2026-10-01T12:00:00Z").toEpochMilli(), stamp)
+    }
+
+    @Test
+    fun `on 1D the candles are the day's bars at the moments they traded, with no call marks`() {
+        val first = java.time.Instant.parse("2026-10-02T08:00:00Z")
+        val bars = listOf(
+            // Given out of order, and one of them empty.
+            DayBar(first.plusSeconds(300), open = 101.0, high = 103.0, low = 100.5, close = 102.0, volume = 40.0),
+            DayBar(first, open = null, high = 101.5, low = 99.0, close = 101.0, volume = 10.0),
+            DayBar(first.plusSeconds(600), open = null, high = null, low = null, close = null),
+        )
+        val json = JSONObject(
+            ExpandedChartJson.build(
+                // The stored sessions are passed as they always are and must not be drawn.
+                sessions = listOf(day("2026-10-01", 90.0), day("2026-10-02", 102.0)),
+                levels = null,
+                calls = setOf(LocalDate.parse("2026-10-02")),
+                style = ChartStyle.CANDLES,
+                showLevels = false,
+                theme = theme,
+                key = "k",
+                bars = bars,
+            ),
+        )
+        val candles = json.getJSONArray("candles")
+
+        assertTrue(json.getBoolean("intraday"))
+        assertEquals(2, candles.length())
+        assertEquals(first.toEpochMilli(), candles.getJSONArray(0).getLong(0))
+        // No open on the first bar: drawn from its close, like a session with none.
+        assertEquals(101.0, candles.getJSONArray(0).getDouble(1), 0.0)
+        assertEquals(first.plusSeconds(300).toEpochMilli(), candles.getJSONArray(1).getLong(0))
+        assertEquals(40.0, candles.getJSONArray(1).getDouble(5), 0.0)
+        assertEquals(0, json.getJSONArray("calls").length())
+    }
+
+    @Test
+    fun `every other range says it is not intraday`() {
+        assertFalse(build(listOf(day("2026-10-01", 101.0))).getBoolean("intraday"))
     }
 
     @Test

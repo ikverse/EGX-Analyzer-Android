@@ -545,7 +545,34 @@ interface AppState : AppUpdates, HomeFeed {
      */
     suspend fun priceHistory(ticker: String, from: LocalDate): List<DailySession>
 
+    /**
+     * Whether a chart may offer [ticker] its 1D range. False for a stock the feed carries no
+     * intraday bars for, so the range is absent there and never an empty box.
+     */
+    fun hasDayBars(ticker: String): Boolean
+
+    /**
+     * The five-minute bars of [ticker]'s newest session, oldest first, for a chart's 1D range.
+     *
+     * A network read, made when a reader presses 1D and held in memory for a minute, so a second
+     * chart of the same stock does not ask twice. Nothing is stored. `DayBar.INDEX` asks for the
+     * EGX30. Empty where the feed did not answer.
+     */
+    suspend fun dayBars(ticker: String): List<com.ikverse.egxanalyzer.model.DayBar>
+
     fun enterForeground()
+
+    /**
+     * The app is on screen: follow the session a minute at a time until [leaveLivePrices].
+     *
+     * Only inside a trading session, and only for the stocks where a minute matters - an open
+     * trade, a call the market has not finished with, the watchlist. Free, like every price
+     * fetch. Safe to call twice.
+     */
+    fun enterLivePrices()
+
+    /** The app has left the screen. The background keeps its own, slower schedule. */
+    fun leaveLivePrices()
 
     fun updateAutomaticUpdateChecks(enabled: Boolean)
 

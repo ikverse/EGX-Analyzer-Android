@@ -42,7 +42,11 @@ class MainActivity : ComponentActivity() {
                 // that day's copy. The write itself runs on the app's scope - see
                 // AppState.backUpIfDue - so a fold mid-write is not recorded as a failure.
                 appState.backUpIfDue()
+                // While the app is on screen and the exchange is trading, prices are followed a
+                // minute at a time. See AppState.enterLivePrices.
+                appState.enterLivePrices()
                 onPauseOrDispose {
+                    appState.leaveLivePrices()
                     // The other way a look at Insights ends. The shell takes the same mark when the
                     // reader changes tab; this covers the reader who was still on it when the phone
                     // went in their pocket. See AppState.markInsightsSeen.

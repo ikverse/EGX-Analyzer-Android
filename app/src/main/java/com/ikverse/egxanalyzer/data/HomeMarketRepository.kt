@@ -1,8 +1,10 @@
 package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.DatedClose
+import com.ikverse.egxanalyzer.model.DayBar
 import com.ikverse.egxanalyzer.model.IndexQuote
 import com.ikverse.egxanalyzer.model.OutsideQuote
+import com.ikverse.egxanalyzer.model.newestSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -34,7 +36,18 @@ class HomeMarketRepository(
     suspend fun indices(): List<IndexQuote> = coroutineScope {
         Indices.map { spec ->
             async {
-                request(spec.symbol, HOURLY, INDEX_RANGE)?.let { runCatching { parseIndexQuote(spec, it) }.getOrNull() }
+                val quote = request(spec.symbol, HOURLY, INDEX_RANGE)?.let { runCatching { parseIndexQuote(spec, it) }.getOrNull() }
+                // One more question, for the index that leads the page: its newest session in
+                // five-minute bars, which is the tile's 1D range. Unanswered, the quote stands
+                // without it and the tile offers no 1D.
+                if (quote == null || spec.key != EGX30) {
+                    quote
+                } else {
+                    val day = request(spec.symbol, FIVE_MINUTES, DAY_RANGE)
+                        ?.let { runCatching { parseDayBars(it) }.getOrNull() }
+                        .orEmpty()
+                    quote.copy(day = day)
+                }
             }
         }.awaitAll().filterNotNull()
     }
@@ -76,6 +89,10 @@ class HomeMarketRepository(
         internal const val HOURLY = "1h"
         internal const val DAILY = "1d"
         private const val INDEX_RANGE = "3mo"
+        internal const val FIVE_MINUTES = "5m"
+
+        /** Five days of five-minute bars, cut down to the newest session: clears a weekend. */
+        private const val DAY_RANGE = "5d"
         private const val OUTSIDE_RANGE = "1mo"
 
         /** The key of the index that leads the page. */
@@ -122,6 +139,18 @@ internal fun parseIndexQuote(spec: HomeMarketRepository.Spec, payload: String): 
     val level = headerPrice(payload) ?: return null
     return IndexQuote(spec.key, spec.name, level, previous = null)
 }
+
+/**
+ * The newest session's bars out of a five-minute chart response, oldest first.
+ *
+ * Empty where the feed answered at another granularity - [parseSessionBars] refuses that - or with
+ * no bars at all.
+ */
+internal fun parseDayBars(payload: String): List<DayBar> =
+    parseSessionBars(payload, HomeMarketRepository.FIVE_MINUTES)
+        .orEmpty()
+        .map { DayBar(it.at, it.open, it.high, it.low, it.close, it.volume) }
+        .newestSession()
 
 /** An outside number out of a daily chart response: its newest close and the one before it. */
 internal fun parseOutsideQuote(spec: HomeMarketRepository.Spec, payload: String): OutsideQuote? {

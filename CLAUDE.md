@@ -219,6 +219,10 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   `model/SeriesHarvest.kt` — when the three things this phone does on its own fire.
   `ScheduleClock.lastFinalSession` is also the one answer to "has that session closed", which the
   scorer and the still-trading flag both read. See below.
+- `model/LivePrices.kt` — the fourth clock, and the only one that is a loop: a minute at a time
+  while the app is on screen and the exchange is trading, for open trades, open calls and the
+  watchlist. `IntradayRepository.pollLive` is what it calls. See **Following a session a minute at
+  a time** in `docs/engine.md`.
 - `model/AnalysisPlan.kt` — what a run covers, said explicitly, so the screen and the manual Analyze
   path build the same request.
 - `data/JobScheduler.kt` + `data/ScheduleReceiver.kt` + `data/ScheduledJobWorker.kt` +
@@ -237,6 +241,8 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 - `ui/StockTrend.kt` — `PriceChart` and `DayRange`, the two drawings on that sheet: where a stock
   has been over the chosen range with the levels it is judged against drawn across it, and where its
   close sits inside its own day. `ChartRange` is the 1W/1M/2M/3M/6M row under the chart.
+- `model/DayBar.kt` — the 1D range every chart has since 2026-11-12: one session's five-minute
+  bars, the arithmetic over them, and the Portfolio chart's day line. See **The 1D range** below.
 - `ui/ExpandedChart.kt` + `assets/chart/` — the stock sheet's chart on the whole screen, opened by
   Expand beside the move% in "Where it stands": KLineChart in one web view, built to behave like
   TradingView — five chart types, eight indicators, eight drawing tools, A/L/% scales, the sheet's
@@ -385,6 +391,45 @@ asked for the market, its indices, the news and their own book in one place.
   keeps them.
 - **Shipped in 5.2.0 untested on a device.** Built and unit-tested only; no emulator and no
   screenshot was taken before the release.
+
+## The 1D range
+
+Every chart with a range control has 1D as its first option since 2026-11-12: the EGX30 tile on
+Home (`HomeRange.DAY`), the Portfolio chart (`ReturnRange.DAY`), and the four stock charts that
+share `ChartRange` — the stock sheet, the full-screen chart, the position card's and the Insights
+call card's (`ChartRange.DAY`). The default on each is unchanged.
+
+- **It is the one range that is not a slice of what is stored.** The record is one close a day, so a
+  day of it is one point. 1D is the newest session's five-minute bars, asked of the same public
+  chart feed when the range is pressed: `IntradayRepository.dayBars`, behind `AppState.dayBars`.
+  **Free, and never stored** — not in either database, not in the series archive, not synced.
+  `LiveAppState` reuses a ticker's answer for a minute so the sheet, the full-screen chart and a
+  card of one stock share a request.
+- **"Newest session", not "today".** The request spans ten days and `newestSession()` cuts it down,
+  so a Friday or a holiday shows the last session held and not an empty box. Sessions and the axis
+  are read on `ScheduleClock.ZONE`.
+- **Absent, not empty, where there is no intraday feed.** `AppState.hasDayBars` is false for a stock
+  still on its legacy `SYMBOL.CA` symbol (which answers an intraday request with daily rows), and
+  `offeredFor` drops 1D from that chart's track. The stock sheet's range is one `PageState` value
+  for every stock, so a 1D left on from one stock is a month on a stock that cannot offer it —
+  the rule Call already followed.
+- **`PriceChart` and `DayChart` are one drawing.** `LineChart` in `StockTrend.kt` takes closes, three
+  axis labels and which closes carry a dot; the two wrappers feed it sessions with dates or bars
+  with times. A day's chart carries the levels and no call dots: a call is made on a day, and every
+  bar is the same day. `DayChartOrNote` keeps the chart's height while the bars are on their way.
+- **Home asks with its ordinary refresh**, one extra request for the EGX30 alone
+  (`interval=5m&range=5d`, measured 2026-11-12: 41 bars part-way through a session), kept on
+  `IndexQuote.day` and in `home_cache.json` as moments and closes. A cache from before has none,
+  and the tile then offers no 1D.
+- **On Portfolio, 1D is a different measure and the tile says so.** The other ranges are the return
+  since each trade was bought; 1D is the open trades' average move through the session from each
+  stock's first open (`bookDayLine`), beside the EGX30 on the same clock (`marketAlongDay`). A stock
+  that has not traded yet counts as unmoved, so the average is over the same stocks all the way
+  across. It costs one request per open trade with an intraday feed, plus one for the index.
+- **The full-screen chart is told `intraday`.** The candles are then the bars at their real moments,
+  the page reads them in `Africa/Cairo` instead of UTC, and the crosshair keeps the hour it strips
+  from a session. **Not seen in a web view or on a device**: built and unit-tested only. Drawings
+  made on a daily range are kept by their timestamps and have not been looked at on a 1D chart.
 
 ## Feature documentation
 
@@ -602,6 +647,19 @@ floating bar, this section is what is true now.
   mismatch, and intraday is only ever requested against the ISIN symbol. Also measured: a 5m window
   reaching back **59 days answers, 90 days is refused outright with HTTP 422** rather than trimmed,
   so the window has to be clamped by the caller or the whole request fails.
+- **The feed serves one-minute bars, and it runs a quarter of an hour behind the exchange.** Both
+  measured on 2026-11-12, mid-session, on COMI's ISIN symbol. `interval=1m` answers with true
+  one-minute bars, 270 a session. Asked **one session at a time** they reach **29 days back**; 30
+  is refused outright, and a range is a separate limit of eight days per request. The newest bar
+  was 905 and 975 seconds old on two readings a minute apart, so no polling rate gets closer to
+  the exchange than about fifteen minutes - a faster loop asks for the same bar twice. The batched
+  `v8/finance/spark` endpoint takes at most 20 symbols and answers with **closes only, no high or
+  low**, which is why the live poll does not use it: a level touched between two closes is the
+  thing being looked for.
+- **Live bars sit in `intraday_bars` with no row in `intraday_fetches`, on purpose.** They are part
+  of a day, and a fetch row would tell `fetchMissing` the session was done. That absence is also
+  how `pruneLiveBars` finds yesterday's leftovers, so anything that starts writing bars without a
+  fetch row for another reason will have them deleted on the next arrival.
 - **A frozen feed is not the same as an unpriced stock, and is harder to see.** `unpriced` means no
   history at all; `stale` means the series answers every request while its newest session stays put.
   That has happened here — the ISIN migration — and nothing noticed at the time. Seven days, which

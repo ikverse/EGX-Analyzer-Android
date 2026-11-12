@@ -940,24 +940,16 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
      *
      * The two have to land together: bars with no fetch row would be re-fetched forever, and a
      * fetch row with no bars where bars did arrive would read as a session the feed had nothing for.
+     *
+     * The session's bars are replaced whole rather than merged. Since 2026-11-12 a session can be
+     * held at one minute or at five, and the two must never share a session: a five-minute bar
+     * beside the one-minute bars it spans would let the ordering find an entry and a target in
+     * "different" bars that are the same five minutes.
      */
     fun saveIntradayBars(ticker: String, date: LocalDate, bars: List<IntradayBar>) {
         writableDatabase.beginTransaction()
         try {
-            bars.forEach { bar ->
-                writableDatabase.insertWithOnConflict(
-                    "intraday_bars",
-                    null,
-                    ContentValues().apply {
-                        put("ticker", ticker)
-                        put("session_date", date.toString())
-                        put("bar_at", bar.at.epochSecond)
-                        put("high", bar.high)
-                        put("low", bar.low)
-                    },
-                    SQLiteDatabase.CONFLICT_REPLACE,
-                )
-            }
+            replaceSessionBars(ticker, date, bars)
             writableDatabase.insertWithOnConflict(
                 "intraday_fetches",
                 null,
@@ -972,6 +964,66 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
             writableDatabase.setTransactionSuccessful()
         } finally {
             writableDatabase.endTransaction()
+        }
+    }
+
+    /**
+     * Stores the bars of a session that is still trading, and deliberately not that it was asked for.
+     *
+     * The live poll writes these a minute at a time so that a session touching both the entry and
+     * a target is ordered while it is happening. They are half a day, so the session must stay
+     * unasked: a fetch row here would tell `IntradayRepository.fetchMissing` the session was done,
+     * and the afternoon would never be fetched. Replaced whole on every write, for the reason
+     * [saveIntradayBars] is.
+     */
+    fun saveLiveBars(ticker: String, date: LocalDate, bars: List<IntradayBar>) {
+        writableDatabase.beginTransaction()
+        try {
+            replaceSessionBars(ticker, date, bars)
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    /**
+     * Drops live bars left over from sessions before [today], and returns how many rows went.
+     *
+     * [intradayBars] is read whole on every recompute on the understanding that the table is
+     * short, and forty stocks at a bar a minute would end that within a week. A leftover is told
+     * apart by having no fetch row: every session the ordering asked for has one, written in the
+     * same transaction as its bars. Nothing is lost by this - a past session that still needs
+     * ordering is unasked, so the next refresh fetches it whole.
+     */
+    fun pruneLiveBars(today: LocalDate): Int = writableDatabase.delete(
+        "intraday_bars",
+        "session_date < ? AND NOT EXISTS (" +
+            "SELECT 1 FROM intraday_fetches f " +
+            "WHERE f.ticker = intraday_bars.ticker " +
+            "AND f.session_date = intraday_bars.session_date)",
+        arrayOf(today.toString()),
+    )
+
+    /** Inside the caller's transaction: the session's old bars out, the new ones in. */
+    private fun replaceSessionBars(ticker: String, date: LocalDate, bars: List<IntradayBar>) {
+        writableDatabase.delete(
+            "intraday_bars",
+            "ticker = ? AND session_date = ?",
+            arrayOf(ticker, date.toString()),
+        )
+        bars.forEach { bar ->
+            writableDatabase.insertWithOnConflict(
+                "intraday_bars",
+                null,
+                ContentValues().apply {
+                    put("ticker", ticker)
+                    put("session_date", date.toString())
+                    put("bar_at", bar.at.epochSecond)
+                    put("high", bar.high)
+                    put("low", bar.low)
+                },
+                SQLiteDatabase.CONFLICT_REPLACE,
+            )
         }
     }
 

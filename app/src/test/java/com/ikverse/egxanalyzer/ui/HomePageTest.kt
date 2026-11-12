@@ -129,6 +129,36 @@ class HomePageTest {
         ).forEach { compose.onNodeWithText(it, substring = true).assertExists() }
     }
 
+    @Test
+    fun `the EGX30 tile offers 1D where the feed gave the day's bars, and a press draws them`() {
+        val open = day.atTime(10, 0).atZone(com.ikverse.egxanalyzer.model.ScheduleClock.ZONE).toInstant()
+        val bars = List(12) { i ->
+            com.ikverse.egxanalyzer.model.DayBar(open.plusSeconds(i * 300L), null, null, null, 52_400.0 + i)
+        }
+        val range = androidx.compose.runtime.mutableStateOf(HomeRange.MONTH)
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.LIGHT) {
+                Box(Modifier.width(347.dp)) { IndexHeroTile(indices.first().copy(day = bars), range) }
+            }
+        }
+        compose.onNodeWithText("1D").performClick()
+        assertEquals(HomeRange.DAY, range.value)
+        compose.onNodeWithContentDescription("EGX30 over 1D, 12 five-minute bars").assertExists()
+    }
+
+    @Test
+    fun `the EGX30 tile has no 1D without the day's bars, and a stored 1D is a month`() {
+        // What a quote kept from before this existed looks like, with 1D left selected.
+        val range = androidx.compose.runtime.mutableStateOf(HomeRange.DAY)
+        compose.setContent {
+            EgxAnalyzerTheme(themeMode = ThemeMode.LIGHT) {
+                Box(Modifier.width(347.dp)) { IndexHeroTile(indices.first(), range) }
+            }
+        }
+        compose.onNodeWithText("1D").assertDoesNotExist()
+        compose.onNodeWithContentDescription("EGX30 over 1M", substring = true).assertExists()
+    }
+
     /**
      * The 2026-11-12 report: on the cover screen the tile is half the width, "1.2% above stop" took
      * nearly all of the row and NIPH was drawn one letter per line. Each trade is two lines now;

@@ -1,7 +1,9 @@
 package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.DatedClose
+import com.ikverse.egxanalyzer.model.DayBar
 import com.ikverse.egxanalyzer.model.Headline
+import java.time.Instant
 import com.ikverse.egxanalyzer.model.IndexQuote
 import com.ikverse.egxanalyzer.model.MarketBreadth
 import com.ikverse.egxanalyzer.model.MarketBrief
@@ -119,6 +121,41 @@ class HomeFeedsTest {
             brief = MarketBrief("Summary.", listOf("One"), listOf("Watch"), "model-x", 13L),
         )
         assertEquals(cache, decodeHomeCache(encodeHomeCache(cache)))
+    }
+
+    @Test
+    fun `a day's bars are the newest session's five-minute bars alone`() {
+        // 08:00 and 08:05 UTC on two days running: 10:00 and 10:05 on the exchange's clock.
+        val payload = chart(
+            "5m",
+            listOf(day1 + 8 * 3600, day1 + 8 * 3600 + 300, day1 + 86_400 + 8 * 3600, day1 + 86_400 + 8 * 3600 + 300),
+            listOf(100.0, 101.0, 102.0, null),
+        )
+        val bars = parseDayBars(payload)
+        // The second day only, and without the bar the feed left empty.
+        assertEquals(listOf(102.0), bars.map { it.close })
+        assertEquals(day1 + 86_400 + 8 * 3600, bars.single().at.epochSecond)
+    }
+
+    @Test
+    fun `hourly rows where five-minute was asked are no day at all`() {
+        assertTrue(parseDayBars(chart("1h", listOf(day1 + 8 * 3600), listOf(100.0))).isEmpty())
+    }
+
+    @Test
+    fun `the cache keeps the lead index's day, as moments and closes`() {
+        val day = listOf(
+            DayBar(Instant.ofEpochSecond(day1 + 8 * 3600), null, null, null, 52_400.0),
+            DayBar(Instant.ofEpochSecond(day1 + 8 * 3600 + 300), null, null, null, 52_500.5),
+        )
+        val cache = HomeCache(indices = listOf(IndexQuote("EGX30", "EGX30", 52_500.5, 52_483.5, day = day)))
+        assertEquals(cache, decodeHomeCache(encodeHomeCache(cache)))
+    }
+
+    @Test
+    fun `a cache written before the day was kept reads back with none`() {
+        val old = """{"indices":[{"key":"EGX30","name":"EGX30","level":52500.5,"closes":[]}]}"""
+        assertTrue(decodeHomeCache(old).indices.single().day.isEmpty())
     }
 
     @Test

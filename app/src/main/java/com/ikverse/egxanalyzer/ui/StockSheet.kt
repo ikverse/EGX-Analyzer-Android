@@ -57,6 +57,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.model.CallTally
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.DayBar
+import com.ikverse.egxanalyzer.model.dayMove
 import com.ikverse.egxanalyzer.model.FeedFault
 import com.ikverse.egxanalyzer.model.LatestPrice
 import com.ikverse.egxanalyzer.model.Outcome
@@ -397,21 +399,33 @@ private fun StockSheetPrice(
     var range by pages.stockChartRange
     var showLevels by pages.stockChartLevels
     // A stored Call range on a stock nobody has called is a month, never an empty box.
-    val effective = if (range == ChartRange.CALL && newestCall == null) ChartRange.MONTH else range
+    // The range is one choice for every stock the sheet opens on, so 1D left on from a stock that
+    // has a day's bars is a month on one that has none - as Call is on a stock nobody has called.
+    val offered = remember(ticker, newestCall) {
+        ChartRange.entries.filter { newestCall != null || it != ChartRange.CALL }.offeredFor(appState, ticker)
+    }
+    val effective = if (range in offered) range else ChartRange.MONTH
+    val day = effective == ChartRange.DAY
+    val bars = rememberDayBars(appState, ticker, wanted = day)
     val visible = remember(history, effective, newestCall) { history.within(effective, newestCall) }
-    val move = remember(visible) { visible.rangeMove() }
+    val move = remember(visible, bars, day) { if (day) bars?.dayMove() else visible.rangeMove() }
     val shown = if (showLevels) levels else null
     var touched by remember(visible) { mutableStateOf<DailySession?>(null) }
+    var touchedBar by remember(bars) { mutableStateOf<DayBar?>(null) }
     var expanded by remember { mutableStateOf(false) }
     CompositionLocalProvider(LocalContentColor provides colors.text) {
         Column(modifier.fillMaxWidth().clip(Kit.TileShape).background(colors.surface).padding(16.dp)) {
             // Who made the call on the touched session, where there was one, in the move's place.
-            val reading = chartReading(visible, touched, note = touched?.let { calls[it.date] })
+            val reading = if (day) {
+                dayReading(bars.orEmpty(), touchedBar)
+            } else {
+                chartReading(visible, touched, note = touched?.let { calls[it.date] })
+            }
             ChartHeadline(
-                title = reading?.first ?: if (effective == ChartRange.CALL) {
-                    "Since the call · ${visible.size} sessions"
-                } else {
-                    effective.title
+                title = reading?.first ?: when (effective) {
+                    ChartRange.DAY -> dayTitle(bars)
+                    ChartRange.CALL -> "Since the call · ${visible.size} sessions"
+                    else -> effective.title
                 },
                 figure = reading?.second ?: move?.let { formatPercent(it) }.orEmpty(),
                 colors = colors,
@@ -446,7 +460,9 @@ private fun StockSheetPrice(
                     history = history,
                     levels = levels,
                     calls = calls.keys,
-                    range = range,
+                    range = effective,
+                    ranges = offered,
+                    dayBars = bars,
                     onRange = { range = it },
                     showLevels = showLevels,
                     onLevels = { showLevels = it },
@@ -458,7 +474,12 @@ private fun StockSheetPrice(
                     newestCall = newestCall,
                 )
             }
-            if (visible.count { it.close != null } > 1) {
+            if (day) {
+                DayChartOrNote(bars, shown, colors, touchedBar, { touchedBar = it }, Modifier.padding(top = Space.m))
+                if (shown != null && bars != null && bars.size > 1) {
+                    ChartLegend("levels from " + shown.source, colors, Modifier.padding(top = Space.s), dot = false)
+                }
+            } else if (visible.count { it.close != null } > 1) {
                 PriceChart(
                     visible,
                     shown,
@@ -480,7 +501,7 @@ private fun StockSheetPrice(
                 ChartLegend("No sessions stored in this range.", colors, Modifier.padding(top = Space.m), dot = false)
             }
             ChartRanges(
-                options = ChartRange.entries.filter { newestCall != null || it != ChartRange.CALL },
+                options = offered,
                 selected = effective,
                 onSelect = { range = it },
                 label = { it.label },
