@@ -153,7 +153,9 @@ internal val LightPalette = AppPalette(
     zoneFar = Color(0xFF9ED9B8),
     // Indigo hero, soft navy ink tile, pale teal in lime's place, powder sky. Sunflower, coral,
     // lilac and the book's three stay the accents themselves.
-    tileInk = Color(0xFF1F2A44),
+    // A step darker than the soft navy #1F2A44 the owner picked, where the bright red loss figure
+    // was 4.36:1; the owner chose the darker tile over paler figures.
+    tileInk = Color(0xFF1A2238),
     tileHero = Color(0xFF3B3F8F),
     tileHighlight = Color(0xFFBFE0DA),
     tileThree = Color(0xFFC9E0F0),
