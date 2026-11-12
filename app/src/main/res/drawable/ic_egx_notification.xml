@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 5.0 mark: a line rising through two steps to an arrowhead. Status-bar icons are drawn as
-  alpha masks, so this is white and the colour comes from each notification's own tone.
+  The Night mark without its letters, which cannot be read at this size: the pyramid, its two faces
+  split by the price line. Status-bar icons are drawn as alpha masks, so this is white, the shaded
+  face is told apart by half strength, and the colour comes from each notification's own tone.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -9,15 +10,17 @@
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:pathData="M3,17L9,11L13,15L21,7"
+        android:pathData="M2.1,19L12,5L13.1,10.9L10.9,13.6L14.3,19Z"
+        android:fillColor="#FFFFFFFF"
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2.6"
-        android:strokeLineCap="round"
+        android:strokeWidth="0.8"
         android:strokeLineJoin="round" />
     <path
-        android:pathData="M15,7H21V13"
+        android:pathData="M12,5L21.9,19L14.3,19L10.9,13.6L13.1,10.9Z"
+        android:fillColor="#FFFFFFFF"
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2.6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
+        android:strokeWidth="0.8"
+        android:strokeLineJoin="round"
+        android:fillAlpha="0.5"
+        android:strokeAlpha="0.5" />
 </vector>

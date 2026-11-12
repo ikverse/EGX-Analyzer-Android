@@ -448,6 +448,13 @@ floating bar, this section is what is true now.
   `res/values/colors.xml` (launcher, splash, shortcut icons), `NotificationTone` and `StockBadge` in
   `data/NotificationAccent.kt`, and the companion of `TodayWidget`. `OutsideSurfacesTest` checks
   them against `LightPalette`.
+- **The brand mark is "Night", chosen by the owner on 2026-11-12**: a sunflower pyramid with a
+  cobalt shaded face, the edge between them a price line, over `EGX` in paper, on ink. It replaced
+  the lime arrow on cobalt, and the owner asked for no lime in it. The letters are JetBrains Mono
+  800 written out as outlines (a vector drawable cannot hold text), so a change to them means
+  extracting the glyphs again, not editing a string. The status-bar glyph is the pyramid alone,
+  because the letters cannot be read at 24dp. The three shortcut icons were left as they were and
+  still use lime. **Not seen on a device**: built and unit-tested only.
 
 ## Gotchas
 

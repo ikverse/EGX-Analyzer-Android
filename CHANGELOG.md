@@ -4,6 +4,13 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [Unreleased]
+
+- **A new app icon and launch screen.** A sunflower pyramid whose inner edge is a price line, over the letters EGX, on a dark ground. It replaces the lime arrow on blue, and themed icons get the same mark in one colour.
+- **Notifications carry the pyramid** in the status bar in place of the arrow.
+
+---
+
 ## [5.5.0] — 2026-11-12
 
 - **Home's AI brief opens and closes on a press.** Shut, it shows its summary; open, the points, what to watch and who wrote it. A brief you have just asked for arrives open.
