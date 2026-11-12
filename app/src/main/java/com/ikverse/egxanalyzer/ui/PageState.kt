@@ -338,6 +338,9 @@ class PageState {
     /** Whether Home's news tile is showing every headline rather than its lead few. */
     val homeNewsOpen: MutableState<Boolean> = mutableStateOf(false)
 
+    /** Whether Home's AI brief shows its points and watch list, or the summary alone. */
+    val homeBriefOpen: MutableState<Boolean> = mutableStateOf(false)
+
     fun scrollOffset(destination: AppDestination): MutableState<Int> = when (destination) {
         AppDestination.RESULTS -> resultsScroll
         AppDestination.INSIGHTS -> insightsScroll

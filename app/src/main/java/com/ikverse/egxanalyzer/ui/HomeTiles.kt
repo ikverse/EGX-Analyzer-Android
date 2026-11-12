@@ -1,6 +1,18 @@
 package com.ikverse.egxanalyzer.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.ui.graphics.graphicsLayer
+import com.ikverse.egxanalyzer.ui.kit.KitIconButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -489,6 +501,7 @@ internal fun NewsTile(
     fetchedAt: Long,
     expanded: MutableState<Boolean>,
     onOpen: (Headline) -> Unit,
+    onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
     limit: Pair<Int, Int> = 5 to 3,
 ) {
@@ -499,7 +512,7 @@ internal fun NewsTile(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("News", style = MaterialTheme.typography.titleSmall, color = p.muted, modifier = Modifier.weight(1f))
             if (loading) {
-                KitSpinner(color = p.muted)
+                Text("refreshing…", style = MaterialTheme.typography.labelMedium, color = p.muted)
             } else if (fetchedAt > 0L) {
                 Text(
                     "updated ${headlineAge(fetchedAt, now).let { if (it == "now") "just now" else "$it ago" }}",
@@ -507,6 +520,7 @@ internal fun NewsTile(
                     color = p.muted,
                 )
             }
+            NewsRefreshButton(loading, onRefresh, Modifier.padding(start = Space.xs))
         }
         if (headlines.isEmpty()) {
             Text(
@@ -531,6 +545,28 @@ internal fun NewsTile(
             )
         }
     }
+}
+
+/**
+ * Fetches the four feeds again, and nothing else: no market figures and never the paid brief.
+ * While a fetch is out the glyph turns and a press does nothing; reduce motion holds it still.
+ */
+@Composable
+private fun NewsRefreshButton(loading: Boolean, onRefresh: () -> Unit, modifier: Modifier = Modifier) {
+    val still = LocalReduceMotion.current
+    val turn = if (loading && !still) {
+        val spin = rememberInfiniteTransition(label = "news-refresh")
+        spin.animateFloat(0f, 360f, infiniteRepeatable(tween(1000, easing = LinearEasing)), label = "news-refresh").value
+    } else {
+        0f
+    }
+    KitIconButton(
+        Icons.Rounded.Refresh,
+        label = if (loading) "Refreshing news" else "Refresh news",
+        onClick = { if (!loading) onRefresh() },
+        modifier = modifier.graphicsLayer { rotationZ = turn },
+        size = 36.dp,
+    )
 }
 
 @Composable
@@ -562,28 +598,61 @@ private fun HeadlineRow(headline: Headline, now: Long, onOpen: () -> Unit) {
     }
 }
 
-/** The model's read of the day, on the lilac that means a model speaking. */
+/**
+ * The model's read of the day, on the lilac that means a model speaking.
+ *
+ * Pressed anywhere, it opens and closes: shut it is the title, the summary and a chevron; open it
+ * adds the points, what to watch and who wrote it when. [expanded] lives in `PageState` so a fold
+ * keeps it.
+ */
 @Composable
-internal fun BriefTile(brief: MarketBrief, modifier: Modifier = Modifier) {
+internal fun BriefTile(brief: MarketBrief, expanded: MutableState<Boolean>, modifier: Modifier = Modifier) {
     val now = remember(brief) { System.currentTimeMillis() }
-    Tile(modifier.fillMaxWidth(), tone = TileTone.TILE2) {
-        Text("AI market brief", style = MaterialTheme.typography.titleSmall)
-        Text(brief.summary, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = Space.xs))
-        brief.points.forEach {
-            Text("• $it", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = Space.xs))
-        }
-        if (brief.watch.isNotEmpty()) {
-            Text("Watch next", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = Space.s))
-            brief.watch.forEach {
-                Text("• $it", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = Space.xs))
+    var open by expanded
+    val turn by animateFloatAsState(if (open) 1f else 0f, label = "brief")
+    Tile(
+        modifier.fillMaxWidth(),
+        tone = TileTone.TILE2,
+        onClick = { open = !open },
+        onClickLabel = if (open) "Close the brief" else "Open the brief",
+    ) {
+        val ink = LocalContentColor.current
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("AI market brief", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            // The same chevron `KitExpandable` draws: down when shut, turned up when open.
+            Canvas(Modifier.size(14.dp).graphicsLayer { rotationZ = 180f * turn }) {
+                val w = size.width
+                drawPath(
+                    Path().apply {
+                        moveTo(w * 0.14f, w * 0.34f)
+                        lineTo(w * 0.5f, w * 0.68f)
+                        lineTo(w * 0.86f, w * 0.34f)
+                    },
+                    ink,
+                    style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                )
             }
         }
-        val age = headlineAge(brief.askedAt, now)
-        Text(
-            listOf(brief.model, if (age.isEmpty()) "" else if (age == "now") "just now" else "$age ago")
-                .filter(String::isNotBlank).joinToString(" · "),
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(top = Space.s),
-        )
+        Text(brief.summary, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = Space.xs))
+        AnimatedVisibility(open, enter = ExpandIn, exit = CollapseOut) {
+            Column {
+                brief.points.forEach {
+                    Text("• $it", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = Space.xs))
+                }
+                if (brief.watch.isNotEmpty()) {
+                    Text("Watch next", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = Space.s))
+                    brief.watch.forEach {
+                        Text("• $it", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = Space.xs))
+                    }
+                }
+                val age = headlineAge(brief.askedAt, now)
+                Text(
+                    listOf(brief.model, if (age.isEmpty()) "" else if (age == "now") "just now" else "$age ago")
+                        .filter(String::isNotBlank).joinToString(" · "),
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = Space.s),
+                )
+            }
+        }
     }
 }

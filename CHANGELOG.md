@@ -4,6 +4,14 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [Unreleased]
+
+- **Home's AI brief opens and closes on a press.** Shut, it shows its summary; open, the points, what to watch and who wrote it. A brief you have just asked for arrives open.
+- **News opens inside the app.** A headline opens in a browser tab drawn over the app, with a close button back to Home, instead of leaving for the browser.
+- **A refresh button on the news tile** fetches the headlines again, and only them: not the market figures, and never the paid brief.
+
+---
+
 ## [5.4.1] — 2026-11-12
 
 - **Dark mode is easier on the eyes.** The coloured tiles (lime, sunflower, lilac, sky, coral, cobalt) are mid-tone at night instead of full strength, and the light-grey lead tiles ("0 of 4", the session tile, Needs you) are a soft slate. Light mode is unchanged.
