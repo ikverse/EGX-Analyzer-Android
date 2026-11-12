@@ -71,6 +71,23 @@ class PaletteContrastTest {
         f.assertNone()
     }
 
+    /**
+     * The EGX 33 star, which is `Egx33Ink` - the page's ink, bare on whatever the ticker beside it
+     * sits on: a call card, the Insights card, a sheet. A graphic, so 3:1 is the bar, but it is
+     * held here by name because the 5.0 badge failed exactly this way: lime on the ink square,
+     * which at night is light, and nobody had written the pair down to measure.
+     */
+    @Test
+    fun `the EGX 33 star holds on every surface it sits on`() {
+        val f = Failures()
+        palettes.forEach { (name, p) ->
+            listOf("ground" to p.ground, "card" to p.card, "raised" to p.raised).forEach { (s, bg) ->
+                f.check("$name EGX 33 star on $s (${hex(p.ink)} on ${hex(bg)})", p.ink, bg, 3.0, contrast(p.ink, bg))
+            }
+        }
+        f.assertNone()
+    }
+
     /** The fill each tone draws, as `tileColors` gives it. */
     /**
      * The stock sheet's chart tile is not one of the kit's tones: navy in the light theme and the

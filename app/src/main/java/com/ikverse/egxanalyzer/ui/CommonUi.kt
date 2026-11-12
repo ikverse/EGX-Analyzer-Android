@@ -938,19 +938,23 @@ private val PillOutline = 1.dp
  * **Tappable since 2026-09-24**, like every other pill in the app that used to draw a fact and
  * nothing else: a glyph with no wording is the one on this whole app most in need of a press that
  * explains it.
+ *
+ * **A bare solid star in the ticker's own ink since 2026-11-12, and the square is gone.** 5.0 put
+ * a lime outline glyph on an ink square, and the owner reported it invisible in both themes: the
+ * outline's stroke came to about 0.6dp at 13dp, and at night the ink square is light, so lime sat
+ * on near-white. The glyph is now filled with one bold crescent cut out, drawn at 20dp straight on
+ * the card in [Egx33Ink]. The cog the square was guarding against came from a *ring* around the
+ * star; with nothing around it at all there is no second outline to read as one. The owner chose
+ * ink over cobalt and muted from a mockup, and declined lime and any square outright.
  */
 @Composable
 internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
     if (!isEgx33(ticker)) return
     var explaining by remember { mutableStateOf(false) }
-    // A small ink square with the lime star since 5.0. Square, never round: round, the star inside
-    // a ring reads as a settings cog.
-    val p = palette
+    // The bare star in the ticker's own ink since 2026-11-12: no box, no lime. See the KDoc.
     Box(
         modifier
             .size(Egx33BadgeSize)
-            .clip(RoundedCornerShape(5.dp))
-            .background(p.ink)
             .clickable { explaining = true },
         contentAlignment = Alignment.Center,
     ) {
@@ -958,7 +962,7 @@ internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
             painterResource(R.drawable.ic_egx33),
             // Said in full, because nothing on screen says it.
             contentDescription = "EGX 33 Shariah index",
-            tint = p.highlight,
+            tint = Egx33Ink(),
             modifier = Modifier.size(Egx33GlyphSize),
         )
     }
@@ -990,8 +994,12 @@ internal fun Egx33Badge(ticker: String, modifier: Modifier = Modifier) {
  */
 private val Egx33BadgeSize: Dp = LabelPillHeight
 
-/** 16dp of glyph in the 20dp box, the size the recommendation card grew it to. */
-private val Egx33GlyphSize: Dp = 13.dp
+/** 20dp of solid glyph in the 24dp press box, which is what a filled star needs to show its cut. */
+private val Egx33GlyphSize: Dp = 20.dp
+
+/** The star's colour: the page's ink, the same as the ticker beside it. `PaletteContrastTest` holds it. */
+@Composable
+internal fun Egx33Ink(): Color = palette.ink
 
 
 /** Placeholder for a screen with nothing to show yet, so empty states explain themselves. */

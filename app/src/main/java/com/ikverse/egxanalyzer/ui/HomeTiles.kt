@@ -330,25 +330,41 @@ internal fun needWords(item: NeedsYouItem): String = when (item.reason) {
     NeedReason.NEAR_TARGET2 -> item.distancePercent?.let { "${formatPercent(it, signed = false)} to target 2" } ?: "near target 2"
 }
 
-/** The trades that want a decision, up to three, each pressed through to the trade. Absent with none. */
+/**
+ * The trades that want a decision, up to three, each pressed through to the trade. Absent with none.
+ *
+ * **Each trade is two lines, the ticker over what is wrong with it**, since 2026-11-12. They were
+ * one row, the words at their full width and the ticker weighted into what was left - and on the
+ * cover screen the tile is half of 411dp, so "1.2% above stop" took nearly all of it and NIPH was
+ * drawn one letter per line. Reported from the Fold. Stacked, neither can squeeze the other.
+ */
 @Composable
 internal fun NeedsLookTile(needs: List<NeedsYouItem>, onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
     if (needs.isEmpty()) return
     Tile(modifier, tone = TileTone.ALERT, contentPadding = PaddingValues(14.dp)) {
         Text("Needs a look", style = MaterialTheme.typography.titleSmall)
-        needs.take(3).forEach { item ->
-            Row(
+        val shown = needs.take(3)
+        shown.forEachIndexed { i, item ->
+            if (i > 0) KitRule(color = LocalContentColor.current.copy(alpha = 0.14f))
+            Column(
                 Modifier
                     .fillMaxWidth()
                     .heightIn(min = 40.dp)
-                    .clickable(role = Role.Button, onClickLabel = "Open ${item.view.ticker}") { onOpen(item.view.position.id) },
-                verticalAlignment = Alignment.CenterVertically,
+                    .clickable(role = Role.Button, onClickLabel = "Open ${item.view.ticker}") { onOpen(item.view.position.id) }
+                    .padding(vertical = Space.xs),
+                verticalArrangement = Arrangement.Center,
             ) {
-                Text(item.view.ticker, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Text(
+                    item.view.ticker,
+                    style = MaterialTheme.typography.titleSmall.copy(fontFamily = TabularFigures),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Text(
                     needWords(item),
-                    style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = TabularFigures),
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
