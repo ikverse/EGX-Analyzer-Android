@@ -10,6 +10,12 @@ data class SymbolMapping(
     val yahooSymbol: String,
     val isin: String?,
     val company: String?,
+    /**
+     * False where the legacy `SYMBOL.CA` feed carries a different series from the ISIN one. ORAS
+     * is the case: `ORAS.CA` answers with 71.05 on every session of the past year while the
+     * listing trades near 805, and merging the two puts a false eleven-fold jump at the join.
+     */
+    val legacyFeed: Boolean = true,
 )
 
 /**
@@ -45,6 +51,7 @@ class SymbolMap(private val assets: AssetManager) {
                             yahooSymbol = yahoo,
                             isin = item.optString("isin").takeIf(String::isNotBlank),
                             company = item.optString("company").takeIf(String::isNotBlank),
+                            legacyFeed = item.optBoolean("legacy", true),
                         ),
                     )
                 }
@@ -67,7 +74,9 @@ class SymbolMap(private val assets: AssetManager) {
         val egx = Scoring.normalizeTicker(egxSymbol)
         if (egx.isBlank()) return emptyList()
         val legacy = "$egx$LEGACY_SUFFIX"
-        val live = byEgxSymbol[egx]?.yahooSymbol
+        val mapping = byEgxSymbol[egx]
+        val live = mapping?.yahooSymbol
+        if (live != null && live != legacy && mapping?.legacyFeed == false) return listOf(live)
         return if (live == null || live == legacy) listOf(legacy) else listOf(live, legacy)
     }
 
