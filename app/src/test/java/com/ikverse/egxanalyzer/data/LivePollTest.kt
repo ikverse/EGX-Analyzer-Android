@@ -98,7 +98,8 @@ class LivePollTest {
             repository(store).pollLive(listOf(TICKER), TODAY.minusDays(1), TODAY)
         }
 
-        assertEquals(1, changed)
+        // Nothing stored before today, so there is no close to read a change of scale off.
+        assertEquals(LivePoll(changed = 1), changed)
         val session = store.latestSession(TICKER)!!
         assertEquals(TODAY, session.date)
         assertEquals(131.0, session.high!!, 0.0)
@@ -120,10 +121,10 @@ class LivePollTest {
         val repository = repository(store)
 
         runBlocking {
-            assertEquals(1, repository.pollLive(listOf(TICKER), TODAY.minusDays(1), TODAY))
-            assertEquals(0, repository.pollLive(listOf(TICKER), TODAY.minusDays(1), TODAY))
+            assertEquals(1, repository.pollLive(listOf(TICKER), TODAY.minusDays(1), TODAY).changed)
+            assertEquals(0, repository.pollLive(listOf(TICKER), TODAY.minusDays(1), TODAY).changed)
             feed = feed + Bar(1, 130.8, 130.3, 130.8)
-            assertEquals(1, repository.pollLive(listOf(TICKER), TODAY.minusDays(1), TODAY))
+            assertEquals(1, repository.pollLive(listOf(TICKER), TODAY.minusDays(1), TODAY).changed)
         }
         assertEquals(2, store.intradayBars().getValue(TICKER to TODAY).size)
     }
@@ -136,7 +137,7 @@ class LivePollTest {
 
         val changed = runBlocking { repository(store).pollLive(listOf(TICKER), TODAY, TODAY) }
 
-        assertEquals(0, changed)
+        assertEquals(LivePoll(), changed)
         assertEquals(129.0, store.latestSession(TICKER)!!.close!!, 0.0)
         assertEquals(PriceRepository.SOURCE, sourceOf(store, TODAY))
         assertTrue(asked.isEmpty())
@@ -151,8 +152,71 @@ class LivePollTest {
             repository(store).pollLive(listOf(TICKER), TODAY.minusDays(1), TODAY)
         }
 
-        assertEquals(0, changed)
+        assertEquals(LivePoll(), changed)
         assertEquals(TODAY.minusDays(1), store.latestSession(TICKER)!!.date)
+    }
+
+    @Test
+    fun `a live session on a different scale from the last close is held back, not written`() {
+        val store = LocalDataStore(context)
+        store.saveSessions(listOf(reported(TODAY.minusDays(1), 129.0)), PriceRepository.SOURCE)
+        // A two-for-one split, as the feed shows it the morning after: half the price.
+        feed = listOf(Bar(0, 65.0, 64.0, 64.5))
+
+        val poll = runBlocking {
+            repository(store).pollLive(listOf(TICKER), TODAY.minusDays(1), TODAY)
+        }
+
+        assertEquals(LivePoll(changed = 0, heldBack = listOf(TICKER)), poll)
+        // Neither half of the write happened: the history is still all in one money, and there
+        // are no bars for the scorer to order a session against.
+        assertEquals(TODAY.minusDays(1), store.latestSession(TICKER)!!.date)
+        assertTrue(store.intradayBars().isEmpty())
+    }
+
+    @Test
+    fun `a hard but legal session is written`() {
+        val store = LocalDataStore(context)
+        store.saveSessions(listOf(reported(TODAY.minusDays(1), 129.0)), PriceRepository.SOURCE)
+        feed = listOf(Bar(0, 142.0, 140.0, 141.0))
+
+        val poll = runBlocking {
+            repository(store).pollLive(listOf(TICKER), TODAY.minusDays(1), TODAY)
+        }
+
+        assertEquals(LivePoll(changed = 1), poll)
+        assertEquals(TODAY, store.latestSession(TICKER)!!.date)
+    }
+
+    @Test
+    fun `a last close more than a week old says nothing about scale`() {
+        val store = LocalDataStore(context)
+        store.saveSessions(listOf(reported(TODAY.minusDays(10), 129.0)), PriceRepository.SOURCE)
+        feed = listOf(Bar(0, 65.0, 64.0, 64.5))
+
+        val poll = runBlocking {
+            repository(store).pollLive(listOf(TICKER), TODAY.minusDays(1), TODAY)
+        }
+
+        assertEquals(LivePoll(changed = 1), poll)
+    }
+
+    @Test
+    fun `the check is against the last close, not an earlier minute of today`() {
+        val store = LocalDataStore(context)
+        store.saveSessions(listOf(reported(TODAY.minusDays(1), 129.0)), PriceRepository.SOURCE)
+        feed = listOf(Bar(0, 65.0, 64.0, 64.5))
+        val repository = repository(store)
+
+        runBlocking {
+            // Held back every minute it is asked, not only the first.
+            repeat(2) {
+                assertEquals(
+                    listOf(TICKER),
+                    repository.pollLive(listOf(TICKER), TODAY.minusDays(1), TODAY).heldBack,
+                )
+            }
+        }
     }
 
     @Test

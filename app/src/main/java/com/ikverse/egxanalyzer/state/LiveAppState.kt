@@ -3605,6 +3605,17 @@ class LiveAppState(
     private var livePricesJob: Job? = null
 
     /**
+     * The stocks the live loop has already sent for repair, and the day it did.
+     *
+     * Memory only, and once a stock a day: a break that survives the refetch is a real one, the
+     * stock stays held back, and asking for a year of its history again every minute would be
+     * forty requests an hour to be told the same thing. Touched only from the loop, which runs
+     * on the main thread.
+     */
+    private var liveRepairDay: LocalDate? = null
+    private val liveRepaired = mutableSetOf<String>()
+
+    /**
      * Starts following the session a minute at a time, for as long as the app is on screen.
      *
      * The background cannot do this - an alarm on a dozing phone is held to about one in ten
@@ -3669,10 +3680,40 @@ class LiveAppState(
             watchlist = watchlist,
         )
         if (tickers.isEmpty()) return
-        val changed = intradayRepository.pollLive(tickers, ScheduleClock.lastFinalSession())
-        if (changed > 0) {
+        val poll = intradayRepository.pollLive(tickers, ScheduleClock.lastFinalSession())
+        val repaired = repairHeldBack(poll.heldBack)
+        if (poll.changed > 0 || repaired) {
             requestRebuild(performance = true, portfolio = true, announceChanges = true)
         }
+    }
+
+    /**
+     * Sends stocks the live poll held back through the ordinary refresh, once each a day.
+     *
+     * A held-back stock is one whose live session is on a different scale from its last close,
+     * which is what a split looks like from here. The refresh is the thing that knows what to do
+     * about that - refetch the year, replace the series, drop the frozen verdicts, record a break
+     * that survives - so this hands the stock over rather than doing any of it a second way.
+     *
+     * `priceRepository.refresh` directly, as `priceStocksWithNoHistory` does and for its reason:
+     * `performPriceRefresh` would record the day's refresh as done on the strength of one stock.
+     *
+     * Returns whether anything was sent, so the caller re-scores: a heal replaces a year of rows.
+     */
+    private suspend fun repairHeldBack(heldBack: List<String>): Boolean {
+        if (heldBack.isEmpty()) return false
+        val today = LocalDate.now(ScheduleClock.ZONE)
+        if (liveRepairDay != today) {
+            liveRepairDay = today
+            liveRepaired.clear()
+        }
+        val owed = heldBack.filterNot(liveRepaired::contains)
+        if (owed.isEmpty()) return false
+        // Counted as sent only where the feed answered: a minute with no signal has repaired
+        // nothing, and the next minute should try again.
+        if (!priceRepository.refresh(owed, ::oldestOpenCall).reachedFeed) return false
+        liveRepaired += owed
+        return true
     }
 
     private suspend fun recomputePerformance(): Unit = recomputeMutex.withLock {

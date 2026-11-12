@@ -391,9 +391,16 @@ the work.
   one at the next refresh, the close sweep or the next day's first-open fetch.
 - **It is not a refresh.** `lastPriceRefreshAt` and the refresh day are untouched, so the
   first-open fetch, the quarter-hour slots and the close sweep still owe what they owed.
-- **It does not run the scale check.** `PriceSanity` runs inside `PriceRepository.refresh`, which
-  this bypasses. On the morning of a split the live row arrives in the new money beside a history
-  in the old, until an ordinary refresh heals the series. Known, not yet guarded.
+- **A session on a different scale from the last close is held back.** The poll bypasses
+  `PriceRepository.refresh`, which is where a split is noticed, so it asks the same
+  `PriceSanity.breaks` about the last stored close before today and the live session. Where that
+  fires nothing is written - no row, no bars - and the stock is named in `LivePoll.heldBack`.
+  `LiveAppState.repairHeldBack` then sends it through `priceRepository.refresh`, once a stock a
+  day and only counted where the feed answered: that refetches the year, replaces the series, drops
+  the frozen verdicts and records a break that survives. Healed, the next minute passes the check;
+  not healed, the stock stays on the ordinary schedule for the day. Nothing is rescaled. A legal
+  move past 30% in one session - a new listing, a return from suspension - is held back the same
+  way, which costs that stock its live updates for a day and nothing else.
 - **A minute is the bar, not the delay.** The feed's newest bar is about fifteen minutes old
   (measured, see `CLAUDE.md`), so the best case is roughly sixteen minutes behind the exchange.
 - **Not seen on a device.** Built and unit-tested only (`LivePricesTest`, `LivePollTest`); what a
