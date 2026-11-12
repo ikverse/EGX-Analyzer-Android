@@ -1,29 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The 5.0 mark on a 108dp adaptive-icon layer. Scaled to 48dp and centred, which keeps it well inside
-  the 66dp circle every launcher mask is guaranteed to show.
+  The Night mark on a 108dp adaptive-icon layer: a pyramid whose edge between the lit face and the
+  shaded one is a price line, over the letters EGX. The letters are JetBrains Mono at weight 800,
+  written out as outlines so they draw the same on every phone. Everything sits inside the 66dp
+  circle every launcher mask is guaranteed to show.
+  One colour for themed icons; the shaded face is the same colour at half strength.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <group
-        android:scaleX="2"
-        android:scaleY="2"
-        android:translateX="30"
-        android:translateY="30">
-        <path
-            android:pathData="M3,17L9,11L13,15L21,7"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="2.6"
-            android:strokeLineCap="round"
-            android:strokeLineJoin="round" />
-        <path
-            android:pathData="M15,7H21V13"
-            android:strokeColor="#FFFFFFFF"
-            android:strokeWidth="2.6"
-            android:strokeLineCap="round"
-            android:strokeLineJoin="round" />
-    </group>
+    <path
+        android:pathData="M32,56L54,25L56.5,38L51.5,44L59,56Z"
+        android:fillColor="#FFFFFFFF"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M54,25L76,56L59,56L51.5,44L56.5,38Z"
+        android:fillColor="#FFFFFFFF"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineJoin="round"
+        android:fillAlpha="0.5"
+        android:strokeAlpha="0.5" />
+    <path
+        android:pathData="M36.6 79V64.4H45.6V66.96H39.54V70.24H44.9V72.8H39.54V76.44H45.6V79ZM54.09 79.2Q52.62 79.2 51.52 78.65Q50.42 78.1 49.81 77.11Q49.2 76.12 49.2 74.8V68.6Q49.2 67.26 49.81 66.28Q50.42 65.3 51.52 64.75Q52.62 64.2 54.09 64.2Q55.56 64.2 56.65 64.75Q57.74 65.3 58.35 66.28Q58.96 67.25 58.96 68.6H55.96Q55.96 67.72 55.47 67.26Q54.97 66.8 54.08 66.8Q53.18 66.8 52.69 67.26Q52.2 67.73 52.2 68.6V74.8Q52.2 75.66 52.69 76.13Q53.18 76.6 54.08 76.6Q54.97 76.6 55.47 76.13Q55.96 75.65 55.96 74.79V73.54H53.8V71H58.96V74.8Q58.96 76.13 58.35 77.11Q57.74 78.1 56.65 78.65Q55.56 79.2 54.09 79.2ZM61.4 79 65.32 71.46 61.66 64.4H64.96L66.48 67.6Q66.7 68.04 66.85 68.4Q67 68.76 67.04 68.92Q67.08 68.76 67.22 68.4Q67.36 68.04 67.56 67.6L69.12 64.4H72.34L68.68 71.46L72.6 79H69.3L67.54 75.4Q67.34 74.96 67.18 74.58Q67.02 74.2 66.94 74Q66.88 74.2 66.74 74.58Q66.6 74.96 66.38 75.4L64.62 79Z"
+        android:fillColor="#FFFFFFFF" />
 </vector>

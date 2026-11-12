@@ -9,9 +9,11 @@
     <color name="egx_lime">#C8FF4D</color>
     <color name="egx_coral">#FFB8A3</color>
     <color name="egx_ink">#101828</color>
+    <color name="egx_sunflower">#FFD12E</color>
+    <color name="egx_paper">#EFEDE6</color>
 
-    <!-- The launcher icon's ground: cobalt, under the lime mark. -->
-    <color name="ic_launcher_background">#1E2BFF</color>
+    <!-- The launcher icon's ground: ink, under the sunflower pyramid and the paper letters. -->
+    <color name="ic_launcher_background">#101828</color>
     <!--
       The launch screen's ground since 5.0: the app's paper here and its graphite in values-night,
       so a cold start opens on the same ground the first page is drawn on.

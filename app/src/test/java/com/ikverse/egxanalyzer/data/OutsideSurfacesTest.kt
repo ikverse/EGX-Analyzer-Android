@@ -82,6 +82,20 @@ class OutsideSurfacesTest {
     }
 
     @Test
+    fun `the brand mark is sunflower on ink with no lime, and its sunflower is the palette's`() {
+        val colors = File(res, "values/colors.xml").readText()
+        fun color(name: String) =
+            Regex("""<color name="$name">#([0-9A-Fa-f]{6})</color>""").find(colors)!!.groupValues[1].uppercase()
+        assertEquals(LightPalette.tile1.toArgb(), ("FF" + color("egx_sunflower")).toLong(16).toInt())
+        assertEquals("the icon's ground is ink", color("egx_ink"), color("ic_launcher_background"))
+        for (name in listOf("ic_launcher_foreground", "ic_splash_icon")) {
+            val mark = File(res, "drawable/$name.xml").readText()
+            assertTrue("$name should draw the sunflower pyramid", "@color/egx_sunflower" in mark)
+            assertTrue("$name still draws lime", "egx_lime" !in mark)
+        }
+    }
+
+    @Test
     fun `every shortcut names its own icon`() {
         val shortcuts = File(res, "xml/shortcuts.xml").readText()
         assertTrue("@drawable/ic_shortcut_portfolio" in shortcuts)
