@@ -59,11 +59,12 @@ class PaletteContrastTest {
                 "tile1" to p.tile1, "tile2" to p.tile2, "tile3" to p.tile3,
             ).forEach { (s, bg) -> need("onTile", p.onTile, s, bg) }
             // What a kit Tile is actually filled with, which at night is not the accent above.
-            listOf(
-                "tileHighlight" to p.tileHighlight, "tileAlert" to p.tileAlert,
-                "tileOne" to p.tileOne, "tileTwo" to p.tileTwo, "tileThree" to p.tileThree,
-                "tileBookFlat" to p.tileBookFlat,
-            ).forEach { (s, bg) -> need("onTile", p.onTile, s, bg) }
+            need("onTileHighlight", p.onTileHighlight, "tileHighlight", p.tileHighlight)
+            need("onTileAlert", p.onTileAlert, "tileAlert", p.tileAlert)
+            need("onTileOne", p.onTileOne, "tileOne", p.tileOne)
+            need("onTileTwo", p.onTileTwo, "tileTwo", p.tileTwo)
+            need("onTileThree", p.onTileThree, "tileThree", p.tileThree)
+            need("onTileBookFlat", p.onTileBookFlat, "tileBookFlat", p.tileBookFlat)
             need("onTileInk", p.onTileInk, "tileInk", p.tileInk)
             need("onHero", p.onHero, "tileHero", p.tileHero)
         }

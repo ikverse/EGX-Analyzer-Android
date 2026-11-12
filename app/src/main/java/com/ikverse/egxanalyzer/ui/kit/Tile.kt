@@ -33,13 +33,13 @@ fun tileColors(tone: TileTone): Pair<Color, Color> {
         TileTone.CARD -> p.card to p.ink
         TileTone.INK -> p.tileInk to p.onTileInk
         TileTone.HERO -> p.tileHero to p.onHero
-        TileTone.HIGHLIGHT -> p.tileHighlight to p.onTile
-        TileTone.ALERT -> p.tileAlert to p.onTile
-        TileTone.TILE1 -> p.tileOne to p.onTile
-        TileTone.TILE2 -> p.tileTwo to p.onTile
-        TileTone.TILE3 -> p.tileThree to p.onTile
+        TileTone.HIGHLIGHT -> p.tileHighlight to p.onTileHighlight
+        TileTone.ALERT -> p.tileAlert to p.onTileAlert
+        TileTone.TILE1 -> p.tileOne to p.onTileOne
+        TileTone.TILE2 -> p.tileTwo to p.onTileTwo
+        TileTone.TILE3 -> p.tileThree to p.onTileThree
         TileTone.BOOK_UP -> p.bookUp to Color.White
-        TileTone.BOOK_FLAT -> p.tileBookFlat to p.onTile
+        TileTone.BOOK_FLAT -> p.tileBookFlat to p.onTileBookFlat
         TileTone.BOOK_DOWN -> p.bookDown to Color.White
     }
 }
@@ -63,10 +63,9 @@ internal fun tileFill(p: AppPalette, tone: TileTone): Color = when (tone) {
  * The money colours that read on one tile: profit, loss, and an accent for a figure or a mark.
  *
  * The palette's own [AppPalette.gain] and [AppPalette.loss] are tuned for the page, and a tile is
- * not the page. [TileTone.INK] swaps lightness with the theme - a dark tile in light, a light one
- * in dark - so the dark theme's bright green on it was 1.03:1. Every coloured fill is pale in both
- * themes and takes the light theme's deep colours. On coral neither red nor green holds, so both
- * are navy and the sign carries the meaning.
+ * not the page. Coloured fills are pale in the light theme and take deep colours; they are deep in
+ * the dark theme and take pale ones. On coral neither red nor green holds, so both are its text
+ * colour and the sign carries the meaning.
  */
 data class TileSignals(val gain: Color, val loss: Color, val accent: Color)
 
@@ -77,34 +76,26 @@ fun tileSignals(tone: TileTone): TileSignals = tileSignalsFor(palette, tone)
 /** [tileSignals] for a given palette, outside composition, so the contrast test can sweep it. */
 internal fun tileSignalsFor(p: AppPalette, tone: TileTone): TileSignals {
     // Read the fill rather than a flag, so the pure-black palette and any later one follow without
-    // being named. A dark fill is the light theme's navy ink tile; a mid-tone one is the dark
-    // theme's dusk set, where the pale fills' green and red fall under 4.5:1.
+    // being named. A dark fill takes pale signals: the bright ones on the light theme's navy ink
+    // tile, the book tile's paler ones on every deep fill of the dark theme, where the bright red
+    // falls under 4.5:1. A pale fill takes deep ones, a step deeper unless it is as light as lime.
     val fill = tileFill(p, tone).luminance()
-    val dusk = fill < DuskBelow
+    val deep = fill < 0.2f
+    val darkTheme = p.ink.luminance() > 0.5f
+    val onPale = when {
+        deep -> if (darkTheme) OnDeepFill else OnDarkFill
+        fill > 0.8f -> OnPaleFill
+        else -> OnPastelFill
+    }
     return when (tone) {
         TileTone.CARD -> TileSignals(p.gain, p.loss, p.heroInk)
-        TileTone.INK -> when {
-            fill < 0.2f -> OnDarkFill
-            dusk -> OnDuskFill
-            else -> OnPaleFill
-        }
-        TileTone.HIGHLIGHT -> if (dusk) OnDuskFill else OnPaleFill
-        TileTone.TILE1, TileTone.TILE2, TileTone.TILE3 -> if (dusk) OnDuskFill else OnPastelFill
-        TileTone.ALERT -> TileSignals(p.onTile, p.onTile, p.onTile)
+        TileTone.INK, TileTone.HIGHLIGHT, TileTone.TILE1, TileTone.TILE2, TileTone.TILE3, TileTone.BOOK_FLAT -> onPale
+        // On coral neither red nor green holds in either theme, so all three are its own text.
+        TileTone.ALERT -> TileSignals(p.onTileAlert, p.onTileAlert, p.onTileAlert)
         TileTone.HERO -> TileSignals(p.highlight, p.tile1, Color.White)
         TileTone.BOOK_UP, TileTone.BOOK_DOWN -> OnDeepFill
-        TileTone.BOOK_FLAT -> if (dusk) OnDuskFill else OnPastelFill
     }
 }
-
-/** Under this luminance a pale-looking tile is the dark theme's mid-tone fill. Every pale fill is over 0.6. */
-private const val DuskBelow = 0.6f
-
-/**
- * For the dark theme's mid-tone tiles: green, red and cobalt deep enough to hold 4.5:1 on lilac,
- * the darkest of them.
- */
-private val OnDuskFill = TileSignals(Color(0xFF013A1A), Color(0xFF5E0A0A), Color(0xFF1A2299))
 
 /** The light theme's deep green, red and cobalt: 4.5:1 or better on every pale fill. */
 private val OnPaleFill = TileSignals(Color(0xFF087A40), Color(0xFFC62020), Color(0xFF1E2BFF))
@@ -117,7 +108,8 @@ private val OnPastelFill = TileSignals(Color(0xFF05642F), Color(0xFFA81B1B), Col
 
 /**
  * Pale green and pale red for the deep teal and the maroon of the Home page's book tile: 4.8:1 or
- * better on both, where the page's own green and red disappear into either.
+ * better on both, where the page's own green and red disappear into either. The dark theme's deep
+ * tile fills take the same three.
  */
 private val OnDeepFill = TileSignals(Color(0xFFB9F5C8), Color(0xFFFFC2B8), Color.White)
 
