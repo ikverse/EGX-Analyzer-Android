@@ -108,6 +108,13 @@ class FakeAppState(
     override val seriesHarvestNote: String? = null,
     override val seriesHarvestNoteAt: Long = 0L,
     override val backupFolder: String? = null,
+    override val driveAvailable: Boolean = true,
+    override val driveAccount: String? = null,
+    private val driveBackupList: List<com.ikverse.egxanalyzer.model.DriveBackup> = emptyList(),
+    /** Called on every [requestDriveAccess], so a test can see a press asked for access and nothing more. */
+    private val onDriveAccess: () -> Unit = {},
+    /** Called on every [backUpToDrive]. */
+    private val onDriveBackup: () -> Unit = {},
     override val chatsRefreshing: Boolean = false,
 ) : AppState {
 
@@ -156,6 +163,25 @@ class FakeAppState(
     override suspend fun writeBackup(): String = ""
 
     override suspend fun restoreFromBackup(source: String): RestoreOutcome =
+        RestoreOutcome(0, 0, 0, 0, settingsAdopted = false)
+
+    override suspend fun requestDriveAccess(): android.content.IntentSender? {
+        onDriveAccess()
+        return null
+    }
+
+    override suspend fun finishDriveAccess(data: android.content.Intent?) = Unit
+
+    override fun disconnectDrive() = Unit
+
+    override suspend fun backUpToDrive(): String {
+        onDriveBackup()
+        return ""
+    }
+
+    override suspend fun driveBackups(): List<com.ikverse.egxanalyzer.model.DriveBackup> = driveBackupList
+
+    override suspend fun restoreFromDrive(id: String): RestoreOutcome =
         RestoreOutcome(0, 0, 0, 0, settingsAdopted = false)
 
     override fun markInsightsSeen() = Unit

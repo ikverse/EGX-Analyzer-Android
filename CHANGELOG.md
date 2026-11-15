@@ -4,6 +4,15 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.7.0] — 2026-11-15
+
+- **Back up to Google Drive.** Settings → Backup and sync → Backup has a Connect Google Drive button. Once you sign in, a copy goes to a folder called EGX Analyzer in your Drive once a day, and whenever you press Back up to Drive. Seven are kept. The app can see only the files it put there.
+- **Restore from Google Drive** lists the backups in that folder, newest first. Like a restore from a file, it only adds what this phone is missing.
+- **Disconnect** removes the app's access. Backups already in Drive stay there.
+- Not available on devices without Google Play services; the folder backup is unchanged.
+
+---
+
 ## [5.6.0] — 2026-11-12
 
 - **A new app icon and launch screen.** A sunflower pyramid whose inner edge is a price line, over the letters EGX, on a dark ground. It replaces the lime arrow on blue, and themed icons get the same mark in one colour.

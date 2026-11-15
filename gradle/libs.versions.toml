@@ -10,6 +10,7 @@ junit = "4.13.2"
 json = "20250517"
 robolectric = "4.16"
 work = "2.10.5"
+playServicesAuth = "21.4.0"
 glance = "1.1.1"
 tdlCoroutines = "14.0.0"
 # Shared by the macrobenchmark library and the Gradle plugin that consumes what it records - the
@@ -20,6 +21,7 @@ testRunner = "1.7.0"
 uiautomator = "2.4.0"
 
 [libraries]
+play-services-auth = { module = "com.google.android.gms:play-services-auth", version.ref = "playServicesAuth" }
 zxing-core = { module = "com.google.zxing:core", version = "3.5.3" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }

@@ -472,6 +472,28 @@ class SettingsRepository(
     }
 
     /**
+     * The Google account Drive backups go to, or null when Drive is not connected on this phone.
+     *
+     * Device-local and never published, like [backupFolder]: a grant belongs to one install, and a
+     * tablet with no Play services handed this address would claim a Drive it cannot reach. Only the
+     * address is kept - Play services holds the grant and the tokens.
+     */
+    fun driveAccount(): String? = preferences.getString(KEY_DRIVE_ACCOUNT, null)
+
+    fun saveDriveAccount(email: String?) {
+        preferences.edit().apply {
+            if (email == null) remove(KEY_DRIVE_ACCOUNT) else putString(KEY_DRIVE_ACCOUNT, email)
+        }.apply()
+    }
+
+    /** The day this device last finished a Drive backup. Apart from [lastBackupDay], so both run. */
+    fun lastDriveBackupDay(): String? = preferences.getString(KEY_LAST_DRIVE_BACKUP_DAY, null)
+
+    fun recordDriveBackupDay(day: String) {
+        preferences.edit().putString(KEY_LAST_DRIVE_BACKUP_DAY, day).apply()
+    }
+
+    /**
      * Whether this phone keeps prices fresh while the market is trading.
      *
      * The whole of the configuration: the window and the interval are constants in
@@ -697,6 +719,8 @@ class SettingsRepository(
         const val KEY_WATCH_ALERTS = "watch_alerts"
         const val KEY_LAST_BACKUP_DAY = "last_backup_day"
         const val KEY_BACKUP_FAILING_REPORTED = "backup_failing_reported"
+        const val KEY_DRIVE_ACCOUNT = "drive_account"
+        const val KEY_LAST_DRIVE_BACKUP_DAY = "last_drive_backup_day"
         const val KEY_MARKET_REFRESH = "market_refresh_enabled"
         const val KEY_PRICE_SERIES = "price_series_enabled"
         const val KEY_LAST_SERIES_HARVEST_AT = "last_series_harvest_at"

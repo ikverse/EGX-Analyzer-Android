@@ -16,11 +16,13 @@ import com.ikverse.egxanalyzer.data.holdsBackupFolder
 import com.ikverse.egxanalyzer.data.backupsInFolder
 import com.ikverse.egxanalyzer.data.backupFolderLabel
 import com.ikverse.egxanalyzer.data.writeBackupTo
+import com.ikverse.egxanalyzer.data.writeBackup as writeBackupZip
 import com.ikverse.egxanalyzer.data.readBackup
 import com.ikverse.egxanalyzer.ui.AnalysisStatus
 import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppState
 import com.ikverse.egxanalyzer.ui.AppUpdates
+import com.ikverse.egxanalyzer.ui.DriveBackups
 import com.ikverse.egxanalyzer.ui.HomeFeed
 import com.ikverse.egxanalyzer.ui.CallText
 import com.ikverse.egxanalyzer.ui.NavStack
@@ -385,7 +387,13 @@ class LiveAppState(
      * through `bind`, in the `init` beside [destination].
      */
     private val home: LiveHome = LiveHome(context, localDataStore, analysisRepository, status),
-) : AppState, AppUpdates by updates, HomeFeed by home {
+    /**
+     * The Google Drive backup, outside this class by the same pattern - see [LiveDriveBackup].
+     * Writing the zip and adopting a restored one arrive through `bind`, in the `init` beside
+     * [home]'s.
+     */
+    private val drive: LiveDriveBackup = LiveDriveBackup(context, settingsRepository, status),
+) : AppState, AppUpdates by updates, HomeFeed by home, DriveBackups by drive {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /**
@@ -438,6 +446,14 @@ class LiveAppState(
                 if (appPreferences.analysisLanguage == AnalysisLanguage.ENGLISH) "English" else "Arabic"
             },
             spent = { refreshModelUsage() },
+        )
+        drive.bind(
+            write = { out ->
+                writeBackupZip(out, databaseFile(), settingsDocument(), backupDevice(), ::checkpointDatabase)
+            },
+            restore = { source ->
+                restoreFrom(withContext(Dispatchers.IO) { readBackup(context, source) })
+            },
         )
     }
 
@@ -782,6 +798,8 @@ class LiveAppState(
      * resume rather than counted as done. Nothing is announced on success.
      */
     override fun backUpIfDue() {
+        // Drive first and on its own day: it queues a job and returns, whatever the folder does.
+        drive.backUpIfDue()
         val folder = backupFolderUri ?: return
         if (!backupDue()) return
         if (!holdsBackupFolder(context, folder)) {

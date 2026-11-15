@@ -24,6 +24,16 @@ import com.ikverse.egxanalyzer.ui.kit.KitDialog
 import com.ikverse.egxanalyzer.ui.kit.KitButton
 import com.ikverse.egxanalyzer.ui.kit.ButtonSize
 import com.ikverse.egxanalyzer.ui.kit.ButtonKind
+import com.ikverse.egxanalyzer.ui.kit.KitRule
+import com.ikverse.egxanalyzer.ui.kit.KitSheet
+import com.ikverse.egxanalyzer.model.DriveBackup
+import android.app.Activity
+import androidx.activity.result.IntentSenderRequest
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 /**
  * Backing the record up, and getting it back.
@@ -157,6 +167,9 @@ fun BackupControls(appState: AppState) {
             style = MaterialTheme.typography.bodySmall,
             color = palette.muted,
         )
+
+        KitRule()
+        DriveBackupControls(appState)
     }
 
     pendingRestore?.let { source ->
@@ -188,3 +201,205 @@ fun BackupControls(appState: AppState) {
     }
 }
 
+
+/**
+ * The Google Drive half of the Backup card: connect, back up, restore, disconnect.
+ *
+ * Beside the folder rather than instead of it, because Drive does not appear in Android's folder
+ * picker and the tablet has no Play services to sign in with. Signing in shows Google's own consent
+ * screen, asking for `drive.file` alone - the app sees the files it made and nothing else in Drive.
+ *
+ * Connecting runs on the composition's own scope rather than `startAction`, because what it may end
+ * in is launching the consent screen from this composition's launcher.
+ */
+@Composable
+internal fun DriveBackupControls(appState: AppState) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var written by remember { mutableStateOf(0) }
+    var listOpen by remember { mutableStateOf(false) }
+    var pending by remember { mutableStateOf<DriveBackup?>(null) }
+    val account = appState.driveAccount
+
+    fun fail(error: Throwable, fallback: String) {
+        appState.statusMessage = StatusMessage(
+            error.message?.takeIf(String::isNotBlank) ?: fallback,
+            succeeded = false,
+        )
+    }
+
+    val consent = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) {
+            busy = false
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            try {
+                appState.finishDriveAccess(result.data)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                fail(error, "Google Drive was not connected")
+            }
+            busy = false
+        }
+    }
+
+    // A request to Drive, made when the card appears or a backup lands. Null while it is out or if
+    // it failed, and the line below then names the account without a count.
+    val held by produceState<List<DriveBackup>?>(initialValue = null, account, written) {
+        value = if (account == null) null else runCatching { appState.driveBackups() }.getOrNull()
+    }
+
+    SettingRow(
+        about = infoNote(
+            "Google Drive",
+            "Backups go to a folder called EGX Analyzer in your Google Drive, once a day and " +
+                "whenever you press Back up to Drive. Seven are kept.",
+            "The app can see only the files it put there, nothing else in your Drive. Your " +
+                "provider API key is not in a backup.",
+        ),
+    ) {
+        FlowRow(
+            Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
+            verticalArrangement = Arrangement.spacedBy(Space.s),
+        ) {
+            if (account == null) {
+                KitButton(
+                    if (busy) "Connecting…" else "Connect Google Drive",
+                    size = ButtonSize.SMALL,
+                    enabled = !busy && appState.driveAvailable,
+                    onClick = {
+                        busy = true
+                        scope.launch {
+                            try {
+                                val sender = appState.requestDriveAccess()
+                                if (sender != null) {
+                                    consent.launch(IntentSenderRequest.Builder(sender).build())
+                                    return@launch
+                                }
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Throwable) {
+                                fail(error, "Google Drive was not connected")
+                            }
+                            busy = false
+                        }
+                    },
+                )
+            } else {
+                KitButton(
+                    if (busy) "Working…" else "Back up to Drive",
+                    size = ButtonSize.SMALL,
+                    enabled = !busy,
+                    onClick = {
+                        appState.startAction {
+                            busy = true
+                            runCatching { appState.backUpToDrive() }
+                                .onSuccess {
+                                    written++
+                                    appState.statusMessage = StatusMessage("Saved to $it", succeeded = true)
+                                }
+                                .onFailure { fail(it, "Could not back up to Google Drive") }
+                            busy = false
+                        }
+                    },
+                )
+                KitButton(
+                    "Restore from Drive…",
+                    onClick = { listOpen = true },
+                    kind = ButtonKind.SECONDARY,
+                    size = ButtonSize.SMALL,
+                    enabled = !busy,
+                )
+                KitButton(
+                    "Disconnect",
+                    onClick = { appState.disconnectDrive() },
+                    kind = ButtonKind.SECONDARY,
+                    size = ButtonSize.SMALL,
+                    enabled = !busy,
+                )
+            }
+        }
+    }
+
+    Text(
+        driveLine(appState.driveAvailable, account, held),
+        style = MaterialTheme.typography.bodySmall,
+        color = palette.muted,
+    )
+
+    if (listOpen) {
+        KitSheet(
+            onDismiss = { listOpen = false },
+            posture = LocalFoldPosture.current,
+            title = "Restore from Google Drive",
+        ) {
+            val backups = held
+            when {
+                backups == null -> Text("Reading the folder…", color = palette.muted)
+                backups.isEmpty() -> Text("No backups in Google Drive yet.", color = palette.muted)
+                else -> backups.forEach { backup ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            backup.name + (backup.bytes?.let { " · ${megabytes(it)}" } ?: ""),
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        KitButton(
+                            "Restore",
+                            onClick = {
+                                listOpen = false
+                                pending = backup
+                            },
+                            kind = ButtonKind.SECONDARY,
+                            size = ButtonSize.SMALL,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    pending?.let { backup ->
+        KitDialog(
+            title = "Restore ${backup.name}?",
+            text = "Anything in the backup that this phone is missing is added back. Nothing " +
+                "already here is deleted or overwritten with an older version.",
+            confirmLabel = "Restore",
+            dismissLabel = "Cancel",
+            onDismiss = { pending = null },
+            posture = LocalFoldPosture.current,
+            tone = TileTone.TILE3,
+            onConfirm = {
+                pending = null
+                appState.startAction {
+                    busy = true
+                    appState.runAction(
+                        label = "Restoring from Google Drive",
+                        success = { outcome -> outcome.summary },
+                    ) {
+                        appState.restoreFromDrive(backup.id)
+                    }
+                    busy = false
+                }
+            },
+        )
+    }
+}
+
+/** The line under the Drive buttons. Never blank: an empty line reads like one that stopped. */
+internal fun driveLine(available: Boolean, account: String?, held: List<DriveBackup>?): String = when {
+    !available -> "Google Drive needs Google Play services, which this device does not have."
+    account == null ->
+        "Not connected. Connect a Google account and a copy goes to its Drive once a day."
+    held == null -> "Backing up daily to Google Drive as $account."
+    held.isEmpty() -> "Backing up daily to Google Drive as $account. Nothing written yet - " +
+        "the first copy goes there today."
+    else -> "Backing up daily to Google Drive as $account. ${held.size} kept, newest ${held.first().name}."
+}
+
+private fun megabytes(bytes: Long): String = "%.1f MB".format(bytes / 1_048_576.0)

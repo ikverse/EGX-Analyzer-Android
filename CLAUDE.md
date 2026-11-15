@@ -193,6 +193,11 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   sent onward from the ⋮ menu on its card. See below.
 - `data/Backup.kt` + `data/BackupRestore.kt` + `ui/BackupSection.kt` — the whole record as one file,
   the way back in from one, and the three buttons in Settings. See below.
+- `data/DriveBackup.kt` + `data/DriveBackupWorker.kt` + `state/LiveDriveBackup.kt` +
+  `ui/DriveBackups.kt` — the same backup in a folder of the owner's Google Drive, behind a Google
+  sign-in asking for `drive.file` alone. The third region outside `LiveAppState` (`DriveBackups by
+  drive`). Needs the owner's Google Cloud OAuth client; see **Google Drive, beside the folder** in
+  `docs/features.md`.
 - `ui/PortfolioScreen.kt` + `ui/PositionCard.kt` + `ui/TradeControls.kt` — the Portfolio tab, one
   trade's card, and the Bought button and closing controls that sit on a recommendation card.
 - `ui/CommonUi.kt` holds `Figure` and `FigureGroup`, `Screen`, `SectionCard` and the other shared

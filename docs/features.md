@@ -600,6 +600,46 @@ app's storage was holding a file nothing on earth could do anything with.
   was ever lost there, and the next sync's own diff carries it up — one place for the rule about
   what gets published rather than two.
 
+### Google Drive, beside the folder
+
+**Settings → Backup and sync → Backup** has a second row since 2026-11-15: *Connect Google Drive*,
+then *Back up to Drive*, *Restore from Drive…* and *Disconnect*. Google Drive does not offer itself
+to `ACTION_OPEN_DOCUMENT_TREE`, so the one cloud nearly every Android phone already has could never
+be picked as the folder above. This is the way to it, and it gives up the folder's "no account"
+property on purpose, for this one provider.
+
+- **`drive.file` and nothing wider.** The app sees only what it created: a top-level folder called
+  `EGX Analyzer` and the zips in it. The same OAuth client on another phone sees the same files,
+  which is how a new phone restores. It is also the scope Google does not review.
+- **Signing in is `Identity.getAuthorizationClient` from `play-services-auth`**, the current Google
+  authorization API. `requestDriveAccess` answers null when access is already granted, or the consent
+  screen's `IntentSender`; `DriveBackupControls` launches it with `StartIntentSenderForResult` and
+  hands the answer to `finishDriveAccess`. No activity crosses `AppState`. Only the account's address
+  is kept (`SettingsRepository.driveAccount`, device-local, never synced); Play services holds the
+  grant and hands out a short-lived token on every request. A 401 clears the token and asks once
+  more.
+- **Five REST calls over `HttpURLConnection`** (`data/DriveBackup.kt`), not Google's Drive client,
+  which is megabytes for a find, a create, a list, an upload and a delete. The folder is looked up on
+  every call rather than remembered, so one deleted in Drive is made again; two made at once by two
+  phones resolve to the older.
+- **The same zip, the same name, seven kept.** Upload is resumable and streamed from a cache file;
+  Drive shows the file only once the last byte lands, so there is no half-written zip under a
+  finished name. Today's earlier copy and anything past the seventh are deleted only after the new
+  one is whole (`driveFilesToRemove`). A restore downloads to the cache and goes through the same
+  `readBackup` and `restoreFrom` as a file, so it only ever adds.
+- **Daily, on its own day, through WorkManager.** `backUpIfDue` queues `DriveBackupWorker` (unique,
+  KEEP, needs a network, exponential backoff, four tries) and records `last_drive_backup_day` only
+  when an upload finished. A phone with both a folder and Drive writes both.
+- **No Play services, no Drive.** `driveAvailable` is false on the Huawei tablet; the button is
+  disabled and the line says why. The folder backup and the Telegram channel are unchanged.
+- **Backup, not sync.** The Telegram channel is still what keeps two phones in step.
+- **It needs a Google Cloud project the owner sets up**: an OAuth consent screen with the
+  `drive.file` scope, and Android OAuth clients for `com.ikverse.egxanalyzer` with the SHA-1 of the
+  release key and of the debug key. Without them the consent screen answers with an error. While the
+  project is in Testing, only its listed test users can connect.
+- **Not seen on a device.** Built and unit-tested only (`DriveBackupTest`,
+  `DriveBackupControlsTest`); the sign-in and the five requests have not been run against Google.
+
 ## What a stock is called
 
 Every name on every screen comes from `EgxSeedStocks`, a compiled-in table of all 232 listings with

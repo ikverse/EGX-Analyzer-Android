@@ -7,7 +7,7 @@
 // One place decides the version. It stayed at 0.1.0 through every build, so a device could not be
 // asked which one it was running - a question that cost real time while diagnosing a black screen.
 // Bump the name here; the code is derived from it so the two can never disagree.
-val appVersionName = "5.6.0"
+val appVersionName = "5.7.0"
 val appVersionCode = appVersionName.split(".").let { (major, minor, patch) ->
     major.toInt() * 10_000 + minor.toInt() * 100 + patch.toInt()
 }
@@ -203,6 +203,10 @@ dependencies {
     implementation(libs.tdl.coroutines.android)
     // Encodes the tg://login link TDLib hands back; scanning it beats typing a phone and a code.
     implementation(libs.zxing.core)
+    // Google sign-in for the Drive backup: the Identity AuthorizationClient, asking for drive.file
+    // alone. Drive itself is spoken to over HttpURLConnection - see data/DriveBackup.kt - rather
+    // than through Google's Drive client, which is several megabytes for five requests.
+    implementation(libs.play.services.auth)
     // Where `./gradlew :app:generateReleaseBaselineProfile` reads its instrumented test from.
     baselineProfile(project(":baselineprofile"))
 
