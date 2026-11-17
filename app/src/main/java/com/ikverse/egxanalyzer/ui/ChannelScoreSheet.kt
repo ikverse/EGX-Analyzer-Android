@@ -42,6 +42,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ikverse.egxanalyzer.model.PerformanceCalculator
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.ikverse.egxanalyzer.model.FollowPoint
+import com.ikverse.egxanalyzer.model.ChannelForm
 import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.Scoring
 import com.ikverse.egxanalyzer.model.reachedTarget1
@@ -82,9 +92,12 @@ internal fun ChannelScoreSheet(
     onOpenCall: (ScoredCall) -> Unit = {},
     rowState: (String) -> MutableState<Boolean>,
     onDismiss: () -> Unit,
+    form: ChannelForm? = null,
+    follow: List<FollowPoint> = emptyList(),
+    market: List<FollowPoint> = emptyList(),
 ) {
     KitSheet(onDismiss = onDismiss, posture = LocalFoldPosture.current, title = channel.channel) {
-        ChannelRecord(channel, photoPath, latestCalls, onOpenCall, rowState)
+        ChannelRecord(channel, photoPath, latestCalls, onOpenCall, rowState, form, follow, market)
     }
 }
 
@@ -96,6 +109,9 @@ internal fun ColumnScope.ChannelRecord(
     latestCalls: List<ScoredCall>,
     onOpenCall: (ScoredCall) -> Unit,
     rowState: (String) -> MutableState<Boolean>,
+    form: ChannelForm? = null,
+    follow: List<FollowPoint> = emptyList(),
+    market: List<FollowPoint> = emptyList(),
 ) {
     val thin = channel.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK
     val p = palette
@@ -145,10 +161,43 @@ internal fun ColumnScope.ChannelRecord(
         }
     }
 
+    // Recent form: the same rate over the last 30 and 60 days, so a source going cold shows
+    // before its lifetime figure moves.
+    form?.let { f ->
+        Tile(Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("RECENT FORM", style = MaterialTheme.typography.labelSmall, color = p.muted, modifier = Modifier.weight(1f))
+                f.trend?.let { KitTag(it.label, tone = p.muted) }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = Space.s), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                listOf("Last 30 days" to f.last30, "Last 60 days" to f.last60, "All time" to f.lifetime).forEach { (name, w) ->
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            formatPercent(w.rate, signed = false),
+                            style = MaterialTheme.typography.titleLarge.copy(fontFamily = TabularFigures),
+                        )
+                        Text(
+                            "$name · ${w.reachedTarget} of ${w.judged}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = p.muted,
+                        )
+                    }
+                }
+            }
+            Text(
+                "Calls that reached a target, out of those settled in each window.",
+                style = MaterialTheme.typography.bodySmall,
+                color = p.muted,
+                modifier = Modifier.padding(top = Space.s),
+            )
+        }
+    }
+
     // What following every call would have made, under the two rules a reader could actually have
     // kept to. The better of the two is the lime one.
     Tile(Modifier.fillMaxWidth()) {
         Text("IF YOU HAD FOLLOWED EVERY CALL", style = MaterialTheme.typography.labelSmall, color = p.muted)
+        if (follow.size >= 2) FollowLine(follow, market, Modifier.padding(top = Space.s))
         if (channel.policyCalls > 0) {
             val sellAll = channel.sellAtTarget1Return
             val split = channel.splitReturn
@@ -570,3 +619,69 @@ private val RevealLift = 10.dp
 private const val RevealMs = 220
 private const val StaggerMs = 45
 private const val MaxStaggerMs = 600
+
+/**
+ * Every call followed in turn, from 100, beside the EGX30 started at the same spot. The ink line is
+ * the channel; the thin one is the market, over the days Home holds it for. In percent, never money.
+ */
+@Composable
+private fun FollowLine(follow: List<FollowPoint>, market: List<FollowPoint>, modifier: Modifier = Modifier) {
+    val p = palette
+    val last = follow.last()
+    Column(modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                String.format(java.util.Locale.US, "%.0f", last.value),
+                style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures),
+                color = if (last.value >= 100) PriceRole.forReturn(1.0) else PriceRole.forReturn(-1.0),
+            )
+            Text(
+                "  from 100 · ${follow.size - 1} days with a settled call",
+                style = MaterialTheme.typography.bodySmall,
+                color = p.muted,
+            )
+        }
+        val dates = follow.map(FollowPoint::date)
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .height(96.dp)
+                .padding(vertical = Space.xs)
+                .semantics {
+                    contentDescription = "Following every call: 100 became " +
+                        String.format(java.util.Locale.US, "%.0f", last.value) +
+                        (market.lastOrNull()?.let { ", the EGX30 " + String.format(java.util.Locale.US, "%.0f", it.value) } ?: "")
+                },
+        ) {
+            val values = follow.map(FollowPoint::value) + market.map(FollowPoint::value) + 100.0
+            val lo = values.min()
+            val hi = values.max()
+            val span = (hi - lo).takeIf { it > 0 } ?: 1.0
+            val step = size.width / (follow.size - 1)
+            fun y(v: Double) = (size.height - (v - lo) / span * size.height).toFloat()
+            drawLine(
+                p.muted.copy(alpha = 0.5f), Offset(0f, y(100.0)), Offset(size.width, y(100.0)),
+                strokeWidth = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 8f)),
+            )
+            if (market.size >= 2) {
+                val path = Path()
+                market.forEachIndexed { i, point ->
+                    val x = dates.indexOf(point.date).coerceAtLeast(0) * step
+                    if (i == 0) path.moveTo(x, y(point.value)) else path.lineTo(x, y(point.value))
+                }
+                drawPath(path, p.muted, style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round))
+            }
+            val path = Path()
+            follow.forEachIndexed { i, point ->
+                if (i == 0) path.moveTo(0f, y(point.value)) else path.lineTo(i * step, y(point.value))
+            }
+            drawPath(path, p.ink, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+        }
+        Text(
+            if (market.size >= 2) "Thin line: the EGX30 from the same spot, over the months Home holds it." else
+                "Each settled call taken in turn, at its entry and out at its result.",
+            style = MaterialTheme.typography.bodySmall,
+            color = p.muted,
+        )
+    }
+}

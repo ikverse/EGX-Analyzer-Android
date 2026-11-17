@@ -360,10 +360,19 @@ class SettingsRepository(
      * in the settings snapshot, switching it off on one phone could never be switched back on from
      * the other, because the other would no longer be listening.
      */
-    fun telegramSyncEnabled(): Boolean = preferences.getBoolean(KEY_TELEGRAM_SYNC, true)
+    fun syncMode(): com.ikverse.egxanalyzer.model.SyncMode {
+        val stored = preferences.getString(KEY_SYNC_MODE, null)
+        com.ikverse.egxanalyzer.model.SyncMode.entries.firstOrNull { it.name == stored }?.let { return it }
+        // Before the choice existed there was only the Telegram switch, on unless turned off.
+        return if (preferences.getBoolean(KEY_TELEGRAM_SYNC, true)) {
+            com.ikverse.egxanalyzer.model.SyncMode.TELEGRAM
+        } else {
+            com.ikverse.egxanalyzer.model.SyncMode.OFF
+        }
+    }
 
-    fun recordTelegramSyncEnabled(enabled: Boolean) {
-        preferences.edit().putBoolean(KEY_TELEGRAM_SYNC, enabled).apply()
+    fun recordSyncMode(mode: com.ikverse.egxanalyzer.model.SyncMode) {
+        preferences.edit().putString(KEY_SYNC_MODE, mode.name).apply()
     }
 
     fun insightsSeenAt(): Long = preferences.getLong(KEY_INSIGHTS_SEEN, 0L)
@@ -720,6 +729,7 @@ class SettingsRepository(
         const val KEY_LAST_BACKUP_DAY = "last_backup_day"
         const val KEY_BACKUP_FAILING_REPORTED = "backup_failing_reported"
         const val KEY_DRIVE_ACCOUNT = "drive_account"
+        const val KEY_SYNC_MODE = "sync_mode"
         const val KEY_LAST_DRIVE_BACKUP_DAY = "last_drive_backup_day"
         const val KEY_MARKET_REFRESH = "market_refresh_enabled"
         const val KEY_PRICE_SERIES = "price_series_enabled"

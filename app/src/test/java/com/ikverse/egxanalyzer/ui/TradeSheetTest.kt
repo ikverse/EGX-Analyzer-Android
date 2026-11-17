@@ -63,7 +63,7 @@ class TradeSheetTest {
 
     private val nothing = TradeActions(
         sell = {}, edit = {}, openCall = {}, chart = {}, keepOpen = {}, stopKeepingOpen = {},
-        undoSale = {}, showOnly = {}, remove = {},
+        undoSale = {}, showOnly = {}, remove = {}, note = {},
     )
 
     private fun show(view: PositionView, brief: Boolean = false) {

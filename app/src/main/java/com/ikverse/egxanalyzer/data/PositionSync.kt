@@ -79,6 +79,7 @@ data class SyncedPosition(
             .put("isTPlusOne", position.isTPlusOne)
             .put("keepOpen", position.keepOpen)
             .putOrNull("keepOpenNote", position.keepOpenNote)
+            .putOrNull("note", position.note)
             .put("openedAt", position.openedAt.toString())
             .put("updatedAt", position.updatedAt)
             .put("updatedBy", position.updatedBy)
@@ -92,7 +93,7 @@ data class SyncedPosition(
             "entryPrice", "entryDate", "exitPrice", "exitDate", "exitPrice1", "exitDate1",
             "exitPrice2", "exitSplitPct", "closedManually", "entryLow",
             "entryHigh", "target1", "target2", "stopLoss", "windowSessions", "windowCustom",
-            "isTPlusOne", "keepOpen", "keepOpenNote", "openedAt", "updatedAt", "updatedBy",
+            "isTPlusOne", "keepOpen", "keepOpenNote", "note", "openedAt", "updatedAt", "updatedBy",
             "deleted",
         )
 
@@ -139,6 +140,7 @@ data class SyncedPosition(
                     isTPlusOne = json.optBoolean("isTPlusOne", false),
                     keepOpen = json.optBoolean("keepOpen", false),
                     keepOpenNote = json.optionalString("keepOpenNote"),
+                    note = json.optionalString("note"),
                     openedAt = json.optionalString("openedAt")
                         ?.let { runCatching { Instant.parse(it) }.getOrNull() }
                         ?: Instant.EPOCH,

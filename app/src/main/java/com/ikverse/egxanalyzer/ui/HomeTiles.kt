@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,6 +56,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.BookMood
+import com.ikverse.egxanalyzer.model.Dividend
 import com.ikverse.egxanalyzer.model.Headline
 import com.ikverse.egxanalyzer.model.IndexQuote
 import com.ikverse.egxanalyzer.model.MarketBreadth
@@ -486,6 +488,76 @@ private fun MoversTile(title: String, list: List<Mover>, modifier: Modifier = Mo
                     maxLines = 1,
                 )
             }
+        }
+    }
+}
+
+/**
+ * Upcoming cash dividends, soonest first, with the stocks the reader holds or has an open call on
+ * at the top. Each row: logo, ticker, pounds per share, the last day to buy and the payment day.
+ * "~" marks a day counted back from the payment day rather than confirmed by the price feed.
+ * Absent when nothing is coming, like the movers.
+ */
+@Composable
+internal fun DividendsTile(
+    upcoming: List<Dividend>,
+    mine: Set<String>,
+    modifier: Modifier = Modifier,
+    limit: Int = 5,
+) {
+    if (upcoming.isEmpty()) return
+    val p = palette
+    val openStock = LocalOpenStock.current
+    var open by remember { mutableStateOf(false) }
+    val ordered = remember(upcoming, mine) { upcoming.sortedBy { if (it.code in mine) 0 else 1 } }
+    Tile(modifier.fillMaxWidth()) {
+        Text("Dividends", style = MaterialTheme.typography.titleSmall, color = p.muted)
+        (if (open) ordered else ordered.take(limit)).forEachIndexed { i, d ->
+            if (i > 0) KitRule()
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clickable(role = Role.Button, onClickLabel = "Open ${d.code}") { openStock(d.code) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StockLogo(d.code, 22.dp)
+                Spacer(Modifier.width(Space.s))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(d.code, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                        if (d.code in mine) {
+                            Spacer(Modifier.width(Space.xs))
+                            KitTag("yours", tone = p.muted)
+                        }
+                    }
+                    val about = if (d.lastCumEstimated) "~" else ""
+                    Text(
+                        listOfNotNull(
+                            d.lastCumDay?.let { "buy by $about${AppDates.DayMonth.format(it)}" },
+                            d.paymentDay?.let { "paid ${AppDates.DayMonth.format(it)}" },
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = p.muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    d.amount?.let { String.format(Locale.US, "%.2f", it) } ?: "—",
+                    style = MaterialTheme.typography.labelLarge.copy(fontFamily = TabularFigures),
+                    maxLines = 1,
+                )
+            }
+        }
+        if (ordered.size > limit) {
+            KitButton(
+                if (open) "Show fewer" else "Show all ${ordered.size}",
+                onClick = { open = !open },
+                kind = ButtonKind.SECONDARY,
+                size = ButtonSize.SMALL,
+                modifier = Modifier.padding(top = Space.s),
+            )
         }
     }
 }

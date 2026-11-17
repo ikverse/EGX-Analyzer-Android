@@ -1,6 +1,7 @@
 package com.ikverse.egxanalyzer.data
 
 import com.ikverse.egxanalyzer.model.DailySession
+import com.ikverse.egxanalyzer.model.PaidDividend
 import com.ikverse.egxanalyzer.model.Scoring
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -87,6 +88,14 @@ class PriceRepository(
         today: LocalDate,
     ) -> List<DailySession> = { _, _, _ -> emptyList() },
 ) {
+    /**
+     * Told the cash dividends each daily answer carried, by the exchange's code. Set by
+     * `LiveAppState` after both are built, the way `LiveHome.bind` is: the repository is made
+     * before the thing that keeps dividends exists. Never reads prices or changes what is stored.
+     */
+    @Volatile
+    var dividendsSeen: (ticker: String, dividends: List<PaidDividend>) -> Unit = { _, _ -> }
+
     /**
      * Brings stored prices up to date.
      *
@@ -353,7 +362,8 @@ class PriceRepository(
     private suspend fun fetch(symbol: String, ticker: String, query: String): List<DailySession>? =
         withContext(Dispatchers.IO) {
             runCatching {
-                val url = URL("${endpointTemplate.format(symbol)}?interval=1d&$query")
+                // `events=div` adds the feed's dividend table to the same answer: no extra request.
+                val url = URL("${endpointTemplate.format(symbol)}?interval=1d&events=div&$query")
                 val connection = url.openConnection() as HttpURLConnection
                 try {
                     connection.requestMethod = "GET"
@@ -363,6 +373,9 @@ class PriceRepository(
                     connection.setRequestProperty("User-Agent", USER_AGENT)
                     if (connection.responseCode !in 200..299) return@runCatching emptyList()
                     val payload = connection.inputStream.bufferedReader().use { it.readText() }
+                    runCatching { parseDividends(payload) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let {
+                        runCatching { dividendsSeen(ticker, it) }
+                    }
                     parseChart(ticker, payload)
                 } finally {
                     connection.disconnect()
@@ -513,6 +526,26 @@ class PriceRepository(
  * call on that stock was judged stopped by a session that had not happened. No EGX stock trades at
  * or below nothing, which makes this safe to read as "not known".
  */
+/**
+ * The cash dividends in a chart answer's `events.dividends`, each by the session it goes ex on.
+ * The feed keys them by a timestamp string and dates them in UTC, the way `parseChart` dates bars.
+ */
+internal fun parseDividends(payload: String): List<PaidDividend> {
+    val all = JSONObject(payload)
+        .optJSONObject("chart")
+        ?.optJSONArray("result")
+        ?.optJSONObject(0)
+        ?.optJSONObject("events")
+        ?.optJSONObject("dividends")
+        ?: return emptyList()
+    return all.keys().asSequence().mapNotNull { key ->
+        val entry = all.optJSONObject(key) ?: return@mapNotNull null
+        val amount = entry.optDouble("amount").takeIf { !it.isNaN() && it > 0 } ?: return@mapNotNull null
+        val stamp = entry.optLong("date", key.toLongOrNull() ?: return@mapNotNull null)
+        PaidDividend(Instant.ofEpochSecond(stamp).atZone(ZoneId.of("UTC")).toLocalDate(), amount)
+    }.distinctBy { it.exDay }.sortedBy { it.exDay }.toList()
+}
+
 internal fun JSONArray.price(index: Int): Double? =
     optDouble(index).takeUnless { it.isNaN() || it <= 0.0 }
 

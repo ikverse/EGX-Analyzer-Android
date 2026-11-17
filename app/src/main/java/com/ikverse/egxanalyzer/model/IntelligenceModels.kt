@@ -628,3 +628,31 @@ fun PerformanceReport.sessionFor(positionId: String): ScoredSession? =
  */
 val PerformanceReport.callIds: Set<String>
     get() = sessions.flatMapTo(mutableSetOf()) { session -> session.calls.map(ScoredCall::positionId) }
+
+/** Calls settled in one window, and how many of them reached a target. */
+data class FormWindow(val judged: Int, val reachedTarget: Int) {
+    /** Percent, or null with nothing settled. */
+    val rate: Double? get() = if (judged == 0) null else reachedTarget * 100.0 / judged
+}
+
+enum class FormTrend(val label: String) { COOLING("Cooling"), WARMING("Warming") }
+
+/** A source's last 30 and 60 days against its whole record. See `PerformanceCalculator.channelForm`. */
+data class ChannelForm(
+    val channel: String,
+    val last30: FormWindow,
+    val last60: FormWindow,
+    val lifetime: FormWindow,
+) {
+    /** Cooling or Warming when the 60-day rate stands far enough from the lifetime one, on enough calls. */
+    val trend: FormTrend? get() {
+        if (last60.judged < PerformanceCalculator.MINIMUM_JUDGED_TO_RANK) return null
+        val recent = last60.rate ?: return null
+        val whole = lifetime.rate ?: return null
+        return when {
+            recent <= whole - PerformanceCalculator.FORM_POINTS -> FormTrend.COOLING
+            recent >= whole + PerformanceCalculator.FORM_POINTS -> FormTrend.WARMING
+            else -> null
+        }
+    }
+}

@@ -860,6 +860,87 @@ class LocalDataStoreMigrationTest {
         put("payload", "{}")
     }
 
+    @Test
+    fun `a phone on schema 28 gains the note column and keeps the trade under it`() {
+        // 28 is where every phone holding trades is, so this is the upgrade that runs on a device.
+        Version28(context).writableDatabase.use { old ->
+            old.insert("positions", null, version28SoldPosition())
+        }
+
+        val restored = LocalDataStore(context).positions().single()
+
+        assertEquals("AMOC@2026-07-20", restored.id)
+        assertEquals(11.4, restored.exitPrice!!, 0.0001)
+        assertEquals(11.0, restored.exitPrice1!!, 0.0001)
+        assertEquals("Holding for T2", restored.keepOpenNote)
+        // Nobody had written a note before there was a place for one.
+        assertNull(restored.note)
+    }
+
+    @Test
+    fun `the upgraded table keeps a note written on a trade`() {
+        Version28(context).writableDatabase.use { old ->
+            old.insert("positions", null, version28SoldPosition())
+        }
+
+        val store = LocalDataStore(context)
+        store.savePosition(store.positions().single().copy(note = "Sold early: results week"))
+
+        assertEquals("Sold early: results week", LocalDataStore(context).positions().single().note)
+    }
+
+    private fun version28SoldPosition() = ContentValues().apply {
+        putAll(version25SoldPosition())
+        put("exit_price_1", 11.0)
+        put("exit_date_1", called.plusDays(2).toString())
+        put("exit_price_2", 11.8)
+        put("exit_split_pct", 50.0)
+    }
+
+    /** The positions table as version 28 shipped it: the split-exit columns, and no note. */
+    private class Version28(context: Context) :
+        SQLiteOpenHelper(context, LocalDataStore.DATABASE_NAME, null, 28) {
+
+        override fun onCreate(db: SQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS positions (
+                    id TEXT PRIMARY KEY,
+                    ticker TEXT NOT NULL,
+                    name_en TEXT,
+                    name_ar TEXT,
+                    channel TEXT,
+                    recommendation_date TEXT NOT NULL,
+                    entry_price REAL NOT NULL,
+                    entry_date TEXT NOT NULL,
+                    exit_price REAL,
+                    exit_date TEXT,
+                    exit_price_1 REAL,
+                    exit_date_1 TEXT,
+                    exit_price_2 REAL,
+                    exit_split_pct REAL,
+                    closed_manually INTEGER NOT NULL DEFAULT 0,
+                    entry_low REAL,
+                    entry_high REAL,
+                    target1 REAL,
+                    target2 REAL,
+                    stop_loss REAL,
+                    window_sessions INTEGER NOT NULL,
+                    window_custom INTEGER NOT NULL DEFAULT 0,
+                    is_t_plus_one INTEGER NOT NULL DEFAULT 0,
+                    keep_open INTEGER NOT NULL DEFAULT 0,
+                    keep_open_note TEXT,
+                    unknown TEXT NOT NULL DEFAULT '{}',
+                    opened_at INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL DEFAULT 0,
+                    updated_by TEXT NOT NULL DEFAULT '',
+                    deleted INTEGER NOT NULL DEFAULT 0
+                )""",
+            )
+        }
+
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    }
+
     private class Version27(context: Context) :
         SQLiteOpenHelper(context, LocalDataStore.DATABASE_NAME, null, 27) {
 

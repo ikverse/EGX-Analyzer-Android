@@ -13,7 +13,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.ikverse.egxanalyzer.model.DividendBook
 import com.ikverse.egxanalyzer.model.FoldPosture
+import com.ikverse.egxanalyzer.model.Outcome
+import com.ikverse.egxanalyzer.model.ScheduleClock
+import com.ikverse.egxanalyzer.model.Scoring
+import java.time.LocalDate
 import com.ikverse.egxanalyzer.model.needsYou
 import com.ikverse.egxanalyzer.ui.kit.Kit
 import com.ikverse.egxanalyzer.ui.kit.KitDialog
@@ -70,6 +75,18 @@ internal fun HomeScreen(appState: AppState) {
         val openTrade: (String) -> Unit = { appState.openPosition(it) }
         val range = appState.pages.homeRange
         val newsOpen = appState.pages.homeNewsOpen
+        val dividendRecord = appState.dividends
+        val upcomingDividends = remember(dividendRecord) {
+            DividendBook.upcoming(dividendRecord.dividends, LocalDate.now(ScheduleClock.ZONE))
+        }
+        // What the reader holds or has an open call on leads the dividends tile.
+        val mine = remember(portfolio, appState.performance) {
+            portfolio.positions.filter { it.open }.map { Scoring.normalizeTicker(it.position.ticker) }.toSet() +
+                appState.performance.sessions.flatMap { it.calls }
+                    .filter { it.outcome == Outcome.OPEN }
+                    .map { Scoring.normalizeTicker(it.ticker) }
+        }
+        val dividendsTile: @Composable () -> Unit = { DividendsTile(upcomingDividends, mine) }
 
         // The book's two small tiles: side by side, or the calls alone where nothing needs a look.
         val bookPair: @Composable () -> Unit = {
@@ -101,6 +118,7 @@ internal fun HomeScreen(appState: AppState) {
                     OutsideRow(appState.homeOutside)
                 }, end = {
                     MoversRow(appState.homeMovers, Modifier.popIn(1))
+                    dividendsTile()
                     news(5 to 3)
                     Brief(appState)
                 })
@@ -127,6 +145,7 @@ internal fun HomeScreen(appState: AppState) {
                     bookPair()
                     MarketTile(appState.marketBreadth)
                     MoversRow(appState.homeMovers)
+                    dividendsTile()
                 })
             }
             else -> {
@@ -137,6 +156,7 @@ internal fun HomeScreen(appState: AppState) {
                 MarketTile(appState.marketBreadth)
                 MoversRow(appState.homeMovers)
                 OutsideRow(appState.homeOutside)
+                dividendsTile()
                 news(5 to 3)
                 Brief(appState)
             }

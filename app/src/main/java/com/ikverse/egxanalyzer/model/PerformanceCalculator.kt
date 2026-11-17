@@ -647,6 +647,30 @@ object PerformanceCalculator {
     private fun List<Double>.averageOrNull(): Double? =
         takeIf(List<Double>::isNotEmpty)?.average()?.round(2)
 
+    /**
+     * Each channel's recent form beside its whole record: how many of its calls settled in the
+     * last 30 and 60 days reached a target, against the same rate over everything.
+     *
+     * A lifetime rate hides a source going cold for months, because every old call still counts.
+     * Windowed by the day a call was settled, which is when it joined the record. Repeats are left
+     * out, as everywhere else. [FORM_POINTS] and the floor of [MINIMUM_JUDGED_TO_RANK] in the
+     * 60-day window decide when the card says Cooling or Warming.
+     */
+    fun channelForm(calls: List<ScoredCall>, today: LocalDate): Map<String, ChannelForm> = calls
+        .filter { it.repeatOf == null && it.outcome.judged }
+        .groupBy(ScoredCall::channel)
+        .mapValues { (channel, judged) ->
+            fun window(days: Long): FormWindow {
+                val since = today.minusDays(days)
+                val inside = judged.filter { (it.settledOn ?: it.openedOn) > since }
+                return FormWindow(inside.size, inside.count { it.outcome.reachedATarget })
+            }
+            ChannelForm(channel, window(30), window(60), FormWindow(judged.size, judged.count { it.outcome.reachedATarget }))
+        }
+
+    /** Points between the 60-day rate and the lifetime one before a source is said to have moved. */
+    const val FORM_POINTS = 15.0
+
     internal fun channelScores(calls: List<ScoredCall>): List<ChannelScore> = calls
         .groupBy(ScoredCall::channel)
         .map { (channel, posted) ->

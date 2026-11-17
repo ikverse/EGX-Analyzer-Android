@@ -54,6 +54,9 @@ import com.ikverse.egxanalyzer.ui.kit.MoreRow
 import com.ikverse.egxanalyzer.ui.kit.Skeleton
 import com.ikverse.egxanalyzer.ui.kit.SplitColumns
 import com.ikverse.egxanalyzer.ui.kit.Tile
+import com.ikverse.egxanalyzer.model.believableReturn
+import com.ikverse.egxanalyzer.model.positionId
+import com.ikverse.egxanalyzer.model.tradeHabits
 import com.ikverse.egxanalyzer.ui.kit.TileTone
 import com.ikverse.egxanalyzer.ui.kit.popIn
 import com.ikverse.egxanalyzer.ui.theme.palette
@@ -79,7 +82,7 @@ import com.ikverse.egxanalyzer.ui.kit.KitRule
 internal enum class TradeScope { OPEN, FINISHED, ALL }
 
 /** Which trade dialog is open. */
-internal enum class TradeDialogKind { SELL, EDIT, EDIT_SALE, KEEP_OPEN }
+internal enum class TradeDialogKind { SELL, EDIT, EDIT_SALE, KEEP_OPEN, NOTE }
 
 /** The trade dialog that is open, and on which trade. Held on PageState so a fold keeps it. */
 internal data class TradeDialogRequest(val positionId: String, val kind: TradeDialogKind)
@@ -325,6 +328,7 @@ internal fun rememberTradeActions(view: PositionView, appState: AppState): Trade
         chart = { openStock(view.ticker) },
         keepOpen = { pages.portfolioDialog.value = TradeDialogRequest(id, TradeDialogKind.KEEP_OPEN) },
         stopKeepingOpen = { appState.setKeepOpen(view.position, keepOpen = false) },
+        note = { pages.portfolioDialog.value = TradeDialogRequest(id, TradeDialogKind.NOTE) },
         undoSale = { appState.clearSale(view.position) },
         showOnly = { pages.portfolioStock.value = view.ticker },
         remove = {
@@ -384,6 +388,14 @@ private fun TradeDialogHost(appState: AppState) {
             onConfirm = { price, date, window ->
                 request = null
                 appState.reprice(position, price, date, window ?: position.windowSessions)
+            },
+        )
+        TradeDialogKind.NOTE -> TradeNoteDialog(
+            existing = position.note,
+            onDismiss = { request = null },
+            onConfirm = { note ->
+                request = null
+                appState.setPositionNote(position, note)
             },
         )
         TradeDialogKind.KEEP_OPEN -> KeepOpenDialog(
@@ -526,6 +538,58 @@ private fun ColumnScope.TradeLists(portfolio: Portfolio, appState: AppState, lay
             }
         }
     }
+    HabitsTile(portfolio, appState)
+}
+
+/**
+ * Your habits, over every finished trade rather than the filtered list: how often you sold before
+ * target 1, held past the stop, or closed by hand, and what those trades made beside what the call
+ * itself delivered. Absent until a trade has been sold. In percent, like the rest of the page.
+ */
+@Composable
+internal fun HabitsTile(portfolio: Portfolio, appState: AppState, modifier: Modifier = Modifier) {
+    val report = appState.performance
+    val habits = remember(portfolio.positions, report) {
+        val callReturns = report.sessions.asSequence()
+            .flatMap { it.calls.asSequence() }
+            .filter { it.repeatOf == null }
+            .associate { it.positionId to it.believableReturn }
+        tradeHabits(portfolio.positions) { callReturns[it.id] }
+    }
+    if (habits.isEmpty) return
+    val p = palette
+    Tile(modifier.fillMaxWidth()) {
+        Text("YOUR HABITS", style = MaterialTheme.typography.labelSmall, color = p.muted)
+        Text(
+            "Across ${habits.finished} finished ${if (habits.finished == 1) "trade" else "trades"}",
+            style = MaterialTheme.typography.bodySmall,
+            color = p.muted,
+        )
+        listOf(
+            "Sold before target 1" to habits.soldEarly,
+            "Held past the stop" to habits.heldPastStop,
+            "Closed by hand" to habits.closedByHand,
+        ).forEach { (name, group) ->
+            Row(Modifier.fillMaxWidth().padding(top = Space.s), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(name, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        if (group.trades == 0) "never" else
+                            "${group.trades} of ${habits.finished} · the calls made ${formatPercent(group.callReturn)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = p.muted,
+                    )
+                }
+                if (group.trades > 0) {
+                    Text(
+                        formatPercent(group.yourReturn),
+                        style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
+                        color = PriceRole.forReturn(group.yourReturn),
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -588,6 +652,7 @@ private fun ColumnScope.TradesTable(portfolio: Portfolio, appState: AppState) {
             }
         }
     }
+    HabitsTile(portfolio, appState)
 }
 
 @Composable

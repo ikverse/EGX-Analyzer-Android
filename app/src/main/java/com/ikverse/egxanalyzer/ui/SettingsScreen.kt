@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import com.ikverse.egxanalyzer.model.SyncMode
 import com.ikverse.egxanalyzer.ui.kit.MoreRow
 import com.ikverse.egxanalyzer.ui.kit.KitChip
 import com.ikverse.egxanalyzer.ui.kit.tileSignals
@@ -296,7 +297,7 @@ private fun settingsBriefs(appState: AppState): Map<SettingsSection, String> {
             appState.marketRefreshEnabled -> "all session"
             else -> "once a day"
         },
-        SettingsSection.DATA to if (appState.telegramSyncEnabled) "sync on" else "sync off",
+        SettingsSection.DATA to syncSummary(appState.syncMode),
         SettingsSection.ABOUT to when (val state = appState.updateState) {
             is UpdateState.Available -> "${state.update.versionName} available"
             is UpdateState.Ready -> "${state.update.versionName} ready"
@@ -330,7 +331,7 @@ private fun settingsSummaries(appState: AppState): Map<SettingsSection, String> 
             (if (appState.marketRefreshEnabled) "Fresh all session" else "Fetched once a day") +
             " · ${prefs.defaultTradeWindowSessions}-session trades",
         SettingsSection.DATA to "${appState.savedResults.size} reports · " +
-            (if (appState.telegramSyncEnabled) "sync on" else "sync off") + " · " +
+            (syncSummary(appState.syncMode)) + " · " +
             (if (appState.backupFolder == null) "no backup folder" else "backing up to a folder"),
         SettingsSection.ABOUT to when (val state = appState.updateState) {
             is UpdateState.Available -> "Version ${state.update.versionName} available"
@@ -1545,41 +1546,55 @@ private fun ColumnScope.DataPage(appState: AppState) {
         )
     }
     val signedIn = appState.telegramAuthState.step == TelegramAuthStep.READY
+    val mode = appState.syncMode
+    // What the chosen carrier still needs before Sync now can do anything.
+    val missing = when (mode) {
+        SyncMode.OFF -> null
+        SyncMode.TELEGRAM -> if (signedIn) null else "Sign in to Telegram to sync."
+        SyncMode.DRIVE -> if (appState.driveAccount != null) null else "Connect Google Drive under Backup to sync."
+    }
 
     Group(
         "Sync",
-        summary = if (appState.telegramSyncEnabled) "${appState.savedResults.size} reports on this device" else "Sync off",
+        summary = if (mode == SyncMode.OFF) "Sync off" else "${appState.savedResults.size} reports on this device",
         about = infoNote(
             "Sync",
-            "Reports are kept in a private Telegram channel of your own, so every device " +
-                "signed in to your account sees the same history.",
+            "Reports, trades, rules and settings are kept in a place of your own - a private " +
+                "Telegram channel, or a folder in your Google Drive - so every device that syncs " +
+                "through the same one sees the same history.",
             "Correcting a call updates the report everywhere it has synced, and deleting a " +
                 "report removes it from every device too. Nothing else changes on its " +
                 "own: a report neither of those has touched simply travels once.",
         ),
     ) {
-        SettingToggle(
-            label = "Sync with Telegram",
-            checked = appState.telegramSyncEnabled,
-            onCheckedChange = appState::updateTelegramSync,
+        SettingLabel(
+            "Sync through",
             about = infoNote(
-                "Sync with Telegram",
-                "Off, this phone sends nothing to your sync channel and reads nothing " +
-                    "from it. Reading your source channels for an analysis is not affected.",
-                "Nothing is lost while it is off: reports, trades, settings and deletions " +
-                    "wait on this phone, and switching it back on catches up straight away. " +
-                    "The switch is this phone's alone and does not travel to your others.",
+                "Sync through",
+                "Telegram keeps the files in a private channel; Google Drive keeps them in " +
+                    "EGX Analyzer/sync in your Drive. Devices only see each other when they " +
+                    "sync through the same one. Reading your source channels for an analysis " +
+                    "always uses Telegram, whichever you pick.",
+                "Moving to Google Drive: sync each device once with Telegram first, then switch " +
+                    "each one. Deletions made only in the Telegram channel do not carry over.",
+                "Off, this device sends nothing and reads nothing. Nothing is lost: reports, " +
+                    "trades, settings and deletions wait here, and choosing again catches up " +
+                    "straight away. The choice is this device's alone.",
             ),
+        )
+        SegmentedControl(
+            options = SyncMode.entries,
+            selected = mode,
+            onSelect = appState::updateSyncMode,
+            label = SyncMode::label,
         )
         KitButton(
             "Sync now",
             onClick = { appState.startAction { appState.syncReports() } },
             size = ButtonSize.SMALL,
-            enabled = appState.telegramSyncEnabled && signedIn && appState.busyLabel == null,
+            enabled = mode != SyncMode.OFF && missing == null && appState.busyLabel == null,
         )
-        if (!signedIn) {
-            Text("Sign in to Telegram to sync.", style = MaterialTheme.typography.bodySmall)
-        }
+        missing?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 
     // Backup here rather than beside Save diagnostics below, which is the other thing that writes
@@ -2032,3 +2047,10 @@ private fun groupedTokens(value: Long): String = String.format(java.util.Locale.
 
 /** How many steps the Telegram sign-in has, as the progress bar counts them. */
 internal const val SignInSteps = 4
+
+/** The two words on the Backup and sync tile: what this device syncs through, or that it does not. */
+internal fun syncSummary(mode: SyncMode): String = when (mode) {
+    SyncMode.OFF -> "sync off"
+    SyncMode.TELEGRAM -> "sync on"
+    SyncMode.DRIVE -> "sync on Drive"
+}

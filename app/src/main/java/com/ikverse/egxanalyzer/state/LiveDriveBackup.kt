@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
 import android.net.Uri
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -17,11 +18,20 @@ import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.common.api.Scope
 import com.google.android.gms.tasks.Task
+import com.ikverse.egxanalyzer.BuildConfig
+import com.ikverse.egxanalyzer.data.AndroidKeystoreCredentialStore
 import com.ikverse.egxanalyzer.data.DRIVE_FOLDER_NAME
 import com.ikverse.egxanalyzer.data.DRIVE_SCOPE
 import com.ikverse.egxanalyzer.data.DriveBackupWorker
 import com.ikverse.egxanalyzer.data.DriveClient
+import com.ikverse.egxanalyzer.data.DriveSyncTransport
+import com.ikverse.egxanalyzer.data.DeviceCode
+import com.ikverse.egxanalyzer.data.GoogleDeviceAuth
+import com.ikverse.egxanalyzer.model.DriveSignInCode
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import com.ikverse.egxanalyzer.data.SettingsRepository
+import com.ikverse.egxanalyzer.data.SyncTransport
 import com.ikverse.egxanalyzer.data.backupFileName
 import com.ikverse.egxanalyzer.data.driveBackupsNewestFirst
 import com.ikverse.egxanalyzer.data.driveFilesToRemove
@@ -44,15 +54,18 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * The Google Drive backup, the third region to live outside [LiveAppState] - see [LiveUpdates] for
- * the pattern and `data/DriveBackup.kt` for why Drive needs its own path beside the folder backup.
+ * The Google Drive connection - backup, restore, and the sync transport - the third region to live
+ * outside [LiveAppState]; see [LiveUpdates] for the pattern and `data/DriveBackup.kt` for why Drive
+ * needs its own path beside the folder backup.
  *
  * What it needs back from the host - writing the zip, and adopting a backup that has been read -
  * arrives through [bind], as [LiveHome]'s does, because a constructor default cannot read `this`.
  *
- * **The token is never stored.** Google Play services holds the grant and hands out a short-lived
- * access token on every [authorize]; this class keeps only the account's address, so it can ask for
- * that same account silently and name it in Settings.
+ * **Two ways to sign in, one Drive.** With Google Play services the phones ask
+ * `play-services-auth`, which holds the grant and hands out a short-lived token each time; this
+ * class keeps only the account's address. Without it - the Huawei tablet - [GoogleDeviceAuth]
+ * signs in with a code typed at google.com/device and keeps a refresh token in the Keystore.
+ * Everything after the token is the same [DriveClient].
  */
 class LiveDriveBackup(
     private val context: Context,
@@ -70,16 +83,35 @@ class LiveDriveBackup(
         this.restore = restore
     }
 
-    override val driveAvailable: Boolean by lazy {
+    /** Whether Play services can sign in here. False on the tablet, which uses a code. */
+    private val playServices: Boolean by lazy {
         runCatching {
             GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) == ConnectionResult.SUCCESS
         }.getOrDefault(false)
     }
 
+    private val deviceAuth: GoogleDeviceAuth by lazy {
+        GoogleDeviceAuth(
+            AndroidKeystoreCredentialStore(context),
+            BuildConfig.GOOGLE_DEVICE_CLIENT_ID,
+            BuildConfig.GOOGLE_DEVICE_CLIENT_SECRET,
+        )
+    }
+
+    override val driveAvailable: Boolean by lazy { playServices || deviceAuth.configured }
+
+    override var driveSignInCode by mutableStateOf<DriveSignInCode?>(null)
+        private set
+
+    private var signInJob: Job? = null
+
     override var driveAccount by mutableStateOf(settingsRepository.driveAccount())
         private set
 
     private val client = DriveClient { fresh -> token(fresh) }
+
+    /** The sync files in `EGX Analyzer/sync`, for a device whose sync goes through Drive. */
+    val syncTransport: SyncTransport by lazy { DriveSyncTransport(client, context.cacheDir) }
 
     private val scopes = listOf(Scope(DRIVE_SCOPE))
 
@@ -95,11 +127,12 @@ class LiveDriveBackup(
     /**
      * A token for the connected account, without showing anything.
      *
-     * [fresh] after Drive refused the last one: the cached token is cleared first so Play services
-     * mints a new one rather than handing the expired one back.
+     * [fresh] after Drive refused the last one: the cached token is replaced rather than handed
+     * back expired.
      */
     private suspend fun token(fresh: Boolean): String {
         val account = driveAccount ?: throw IOException("Google Drive is not connected")
+        if (!playServices) return withContext(Dispatchers.IO) { deviceAuth.token(fresh) }
         var result = authorize(account)
         if (fresh) {
             result.accessToken?.let { stale ->
@@ -116,30 +149,89 @@ class LiveDriveBackup(
         return result.accessToken ?: throw IOException("Google Drive gave no access")
     }
 
+    /**
+     * Starts connecting. With Play services this is Google's consent screen, handed back to the
+     * page to launch; without it a code is put in [driveSignInCode], its page is opened, and null
+     * comes back - [waitForApproval] finishes the connection once the code has been typed.
+     */
     override suspend fun requestDriveAccess(): IntentSender? {
+        if (!playServices) {
+            val code = withContext(Dispatchers.IO) { deviceAuth.start() }
+            driveSignInCode = DriveSignInCode(code.userCode, code.verificationUrl)
+            signInJob?.cancel()
+            signInJob = scope.launch { waitForApproval(code) }
+            openDriveSignInPage()
+            return null
+        }
         val result = authorize(null)
         if (result.hasResolution()) {
             return result.pendingIntent?.intentSender
                 ?: throw IOException("Google would not show its sign-in")
         }
-        connect(result)
+        connect(result.accessToken ?: throw IOException("Google Drive gave no access"))
         return null
     }
 
     override suspend fun finishDriveAccess(data: Intent?) {
         val result = runCatching { Identity.getAuthorizationClient(context).getAuthorizationResultFromIntent(data) }
             .getOrElse { throw IOException("Google Drive was not connected") }
-        connect(result)
+        connect(result.accessToken ?: throw IOException("Google Drive gave no access"))
+    }
+
+    /**
+     * Asks Google every few seconds whether the code has been approved, until it has, it is
+     * refused, or it expires. Its own job, so Cancel and a second Connect can stop it.
+     */
+    private suspend fun waitForApproval(code: DeviceCode) {
+        val deadline = System.currentTimeMillis() + code.expiresInSeconds * 1000
+        try {
+            while (System.currentTimeMillis() < deadline) {
+                delay(code.intervalSeconds * 1000)
+                val granted = withContext(Dispatchers.IO) { deviceAuth.poll(code) } ?: continue
+                driveSignInCode = null
+                connect(granted)
+                return
+            }
+            throw IOException("The code expired - press Connect again")
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            driveSignInCode = null
+            status.message = StatusMessage(
+                error.message?.takeIf(String::isNotBlank) ?: "Google Drive was not connected",
+                succeeded = false,
+            )
+        }
+    }
+
+    override fun cancelDriveSignIn() {
+        signInJob?.cancel()
+        signInJob = null
+        driveSignInCode = null
+    }
+
+    override fun openDriveSignInPage() {
+        val address = driveSignInCode?.verificationUrl ?: return
+        val uri = Uri.parse(address)
+        runCatching {
+            val tab = CustomTabsIntent.Builder().setShowTitle(true).build()
+            // Launched from the application's context, so it needs a task of its own.
+            tab.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            tab.launchUrl(context, uri)
+        }.recoverCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure {
+            status.message = StatusMessage("Open ${address} in a browser and type the code", succeeded = false)
+        }
     }
 
     /**
      * Learns which account was granted, and makes the folder, before calling Drive connected.
      *
-     * The account is read from Drive itself rather than from the grant: `AuthorizationResult` names
-     * it only through a deprecated sign-in type, and asking Drive also proves the token works.
+     * The account is read from Drive itself, which works the same for both sign-ins and proves the
+     * token works.
      */
-    private suspend fun connect(result: AuthorizationResult) {
-        val granted = result.accessToken ?: throw IOException("Google Drive gave no access")
+    private suspend fun connect(granted: String) {
         val first = DriveClient { granted }
         val email = withContext(Dispatchers.IO) {
             val email = first.accountEmail() ?: throw IOException("Google Drive did not say which account it is")
@@ -148,7 +240,7 @@ class LiveDriveBackup(
         }
         settingsRepository.saveDriveAccount(email)
         driveAccount = email
-        status.message = StatusMessage("Backing up to Google Drive as $email", succeeded = true)
+        status.message = StatusMessage("Google Drive connected as $email", succeeded = true)
     }
 
     override fun disconnectDrive() {
@@ -156,18 +248,22 @@ class LiveDriveBackup(
         settingsRepository.saveDriveAccount(null)
         driveAccount = null
         scope.launch {
-            // Revoked so the grant does not outlive the owner's decision; the backups themselves are
-            // the owner's files and stay in their Drive.
+            // Revoked so the grant does not outlive the owner's decision; the backups and sync
+            // files themselves are the owner's and stay in their Drive.
             runCatching {
-                Identity.getAuthorizationClient(context).revokeAccess(
-                    RevokeAccessRequest.builder()
-                        .setAccount(Account(account, "com.google"))
-                        .setScopes(scopes)
-                        .build(),
-                ).await()
+                if (!playServices) {
+                    withContext(Dispatchers.IO) { deviceAuth.signOut() }
+                } else {
+                    Identity.getAuthorizationClient(context).revokeAccess(
+                        RevokeAccessRequest.builder()
+                            .setAccount(Account(account, "com.google"))
+                            .setScopes(scopes)
+                            .build(),
+                    ).await()
+                }
             }
         }
-        status.message = StatusMessage("Google Drive disconnected. Backups already there stay", succeeded = true)
+        status.message = StatusMessage("Google Drive disconnected. Files already there stay", succeeded = true)
     }
 
     override suspend fun backUpToDrive(): String = withContext(Dispatchers.IO) {

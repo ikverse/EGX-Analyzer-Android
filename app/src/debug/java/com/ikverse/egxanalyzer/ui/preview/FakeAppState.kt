@@ -98,6 +98,7 @@ class FakeAppState(
     override val homeNewsAt: Long = 0L,
     override val homeBrief: com.ikverse.egxanalyzer.model.MarketBrief? = null,
     override val homeBriefPending: Boolean = false,
+    override val dividends: com.ikverse.egxanalyzer.model.DividendRecord = com.ikverse.egxanalyzer.model.DividendRecord(),
     override val canGoBack: Boolean = false,
     override val scrollToTopRequest: Pair<AppDestination, Int>? = null,
     override val tradeWatchWanted: Boolean = false,
@@ -110,6 +111,7 @@ class FakeAppState(
     override val backupFolder: String? = null,
     override val driveAvailable: Boolean = true,
     override val driveAccount: String? = null,
+    override val driveSignInCode: com.ikverse.egxanalyzer.model.DriveSignInCode? = null,
     private val driveBackupList: List<com.ikverse.egxanalyzer.model.DriveBackup> = emptyList(),
     /** Called on every [requestDriveAccess], so a test can see a press asked for access and nothing more. */
     private val onDriveAccess: () -> Unit = {},
@@ -171,6 +173,10 @@ class FakeAppState(
     }
 
     override suspend fun finishDriveAccess(data: android.content.Intent?) = Unit
+
+    override fun openDriveSignInPage() = Unit
+
+    override fun cancelDriveSignIn() = Unit
 
     override fun disconnectDrive() = Unit
 
@@ -327,11 +333,15 @@ class FakeAppState(
 
     override fun setKeepOpen(position: Position, keepOpen: Boolean, note: String?) = Unit
 
+    override fun setPositionNote(position: Position, note: String?) = Unit
+
     override fun deletePosition(position: Position) = Unit
 
     override fun refreshOverdue() = Unit
 
     override fun peakSince(ticker: String, openedOn: LocalDate?): Double? = null
+
+    override suspend fun companyFacts(ticker: String): com.ikverse.egxanalyzer.model.CompanyFacts? = null
 
     override suspend fun priceHistory(ticker: String, from: LocalDate): List<DailySession> =
         emptyList()
@@ -480,8 +490,8 @@ class FakeAppState(
     override suspend fun resetTelegramApiConfiguration() = Unit
 
     override suspend fun syncReports() = Unit
-    override val telegramSyncEnabled: Boolean = true
-    override fun updateTelegramSync(enabled: Boolean) = Unit
+    override val syncMode: com.ikverse.egxanalyzer.model.SyncMode = com.ikverse.egxanalyzer.model.SyncMode.TELEGRAM
+    override fun updateSyncMode(mode: com.ikverse.egxanalyzer.model.SyncMode) = Unit
 
     override suspend fun startTelegramQrSignIn() = Unit
 

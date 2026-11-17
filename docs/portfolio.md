@@ -514,3 +514,16 @@ no higher. **The two tabs share the arithmetic and not the scope** — see the f
 - **The tags that left the card** (close to its stop, close to target 2, overdue, the days-left pill, kept open past the deadline) are said by the sentence and the segments. "Kept open" stays while the deadline is still ahead, because nothing else says it then.
 - **The two prices are a content description on the ladder**, since the ladder is drawn and the line that used to say them is gone. `PortfolioPageTest` finds a card by it.
 - `TradeBriefTest` holds the sentences, their order and the pace thresholds. Not checked on a device.
+
+## Notes and habits (2026-11-17)
+
+- **`Position.note`** is the reader's own text, saved from "Add a note" in a trade's menu
+  (`TradeNoteDialog`, `setPositionNote`) and drawn under the pills by `NoteLine`. No rule reads it.
+  Column `note` on `positions`, database version 29, one guarded `ALTER`; it syncs as `note` in the
+  position document and rides the backup inside the database file. An older build keeps it in
+  `unknown` and hands it back. A note box on Bought was in the plan and left out: it would have
+  changed the Bought flow in Insights, Results and the stock sheet.
+- **`tradeHabits`** reads finished, sold trades for three habits: sold under target 1 and above the
+  stop while the call had not reached target 1; got out under the stop; closed by hand. Each sits
+  beside what the calls behind them returned, matched by the trade id. `HabitsTile` draws it under
+  the trade lists and the unfolded table, over the whole portfolio rather than the filtered list.

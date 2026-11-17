@@ -97,6 +97,8 @@ import com.ikverse.egxanalyzer.model.CallOrder
 import com.ikverse.egxanalyzer.model.CallSignal
 import com.ikverse.egxanalyzer.model.CallTally
 import com.ikverse.egxanalyzer.model.ChannelScore
+import java.time.LocalDate
+import com.ikverse.egxanalyzer.model.Consensus
 import com.ikverse.egxanalyzer.model.ConsolidatedRecommendation
 import com.ikverse.egxanalyzer.model.DailySession
 import com.ikverse.egxanalyzer.model.DayBar
@@ -234,6 +236,10 @@ internal fun InsightsScreen(appState: AppState) {
             }
         }
 
+        // Stocks several channels called lately, off the whole record like the in-play row.
+        val shared = remember(full) {
+            Consensus.shared(full.sessions.flatMap { it.calls }, LocalDate.now(ScheduleClock.ZONE))
+        }
         val play = remember(full, appState.portfolio) {
             callsInPlay(full, held = { call -> appState.heldFor(call.ticker, call.openedOn) != null })
         }
@@ -353,6 +359,21 @@ internal fun InsightsScreen(appState: AppState) {
 
         // Built once for the page rather than searched per card. Keyed on the filtered report, so a
         // channel filter narrows the record a card quotes to the same calls the page is counting.
+        // Each source's last 30 and 60 days beside its whole record, off the same filtered calls.
+        val channelForm = remember(report) {
+            PerformanceCalculator.channelForm(
+                report.sessions.flatMap { it.calls },
+                java.time.LocalDate.now(com.ikverse.egxanalyzer.model.ScheduleClock.ZONE),
+            )
+        }
+        // The EGX30 Home holds, for the line beside a source's "had you followed it" curve.
+        val egx30 = appState.homeIndices.firstOrNull { it.key == "EGX30" }?.closes.orEmpty()
+        fun followOf(channel: String): Pair<List<com.ikverse.egxanalyzer.model.FollowPoint>, List<com.ikverse.egxanalyzer.model.FollowPoint>> {
+            val curve = com.ikverse.egxanalyzer.model.followCurve(
+                report.sessions.flatMap { it.calls }.filter { it.channel == channel },
+            )
+            return curve to com.ikverse.egxanalyzer.model.marketAlongCurve(curve, egx30)
+        }
         val scoreByChannel = remember(report.channels) {
             report.channels.associateBy(ChannelScore::channel)
         }
@@ -414,8 +435,10 @@ internal fun InsightsScreen(appState: AppState) {
                 onExport = { appState.startAction { appState.saveRankingToDownloads() } },
                 showAll = appState.pages.insightsRankingShowAll,
                 modifier = Modifier.popIn(0),
+                form = channelForm,
             )
             InPlayRow(play, Modifier.popIn(1))
+            SharedCallsTile(shared, Modifier.popIn(1))
             FeedNote(appState.priceHealth)
             WatchlistCard(appState)
         }
@@ -423,6 +446,9 @@ internal fun InsightsScreen(appState: AppState) {
             recordChannel?.let { channel ->
                 ChannelScoreSheet(
                     channel,
+                    form = channelForm[channel.channel],
+                    follow = remember(report, channel.channel, egx30) { followOf(channel.channel) }.first,
+                    market = remember(report, channel.channel, egx30) { followOf(channel.channel) }.second,
                     photoPath = channelPhotos[channel.channel],
                     latestCalls = latestCallsOf(channel.channel),
                     onOpenCall = onOpenCall,
@@ -559,6 +585,9 @@ internal fun InsightsScreen(appState: AppState) {
                             latestCalls = latestCallsOf(channel.channel),
                             onOpenCall = onOpenCall,
                             rowState = { appState.pages.insightsRow(it) },
+                            form = channelForm[channel.channel],
+                            follow = remember(report, channel.channel, egx30) { followOf(channel.channel) }.first,
+                            market = remember(report, channel.channel, egx30) { followOf(channel.channel) }.second,
                         )
                     }
                 })
@@ -981,6 +1010,8 @@ private fun FinishedCallCard(
                 KitTag(call.outcome.plainWord(), tone = call.outcome.tone())
                 KitTag(call.channel, tone = palette.muted)
                 TimingLabel(call)
+            DividendPill(LocalDividends.current, call.ticker, call.openedOn, call.settledOn)
+                DividendPill(LocalDividends.current, call.ticker, call.openedOn, call.settledOn)
             }
             ExtractionWarning(call, appState)
             held?.let { HeldLine(it) }
@@ -1045,6 +1076,7 @@ private fun CallSheet(
             KitTag(call.outcome.plainWord(), tone = call.outcome.tone())
             KitTag(call.channel, tone = palette.muted)
             TimingLabel(call)
+            DividendPill(LocalDividends.current, call.ticker, call.openedOn, call.settledOn)
         }
         held?.let { HeldLine(it) }
         // The chart where there is more than one close to draw a line through, else the ladder.

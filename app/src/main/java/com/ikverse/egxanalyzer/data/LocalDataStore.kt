@@ -153,6 +153,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
         db.addPositionWindowColumns()
         db.addPositionTimingColumn()
         db.addPositionSplitExitColumns()
+        db.addPositionNoteColumn()
         db.addOpenColumn()
         db.createStockOpinions()
         db.addOpinionDetailColumns()
@@ -329,6 +330,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
             is_t_plus_one INTEGER NOT NULL DEFAULT 0,
             keep_open INTEGER NOT NULL DEFAULT 0,
             keep_open_note TEXT,
+            note TEXT,
             unknown TEXT NOT NULL DEFAULT '{}',
             opened_at INTEGER NOT NULL DEFAULT 0,
             updated_at INTEGER NOT NULL DEFAULT 0,
@@ -371,6 +373,19 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
      * the window it was offered, closed when that ran out, and had nothing written against it by a
      * newer app.
      */
+    /**
+     * Brings a positions table written before a trade could carry the reader's own note up to date.
+     *
+     * Null on every trade already on the phone, which is what it was: nobody had written one. One
+     * guard on the one column, like every other `ALTER` here, so a phone from any build gets it.
+     */
+    private fun SQLiteDatabase.addPositionNoteColumn() {
+        val columns = rawQuery("PRAGMA table_info(positions)", null).use { cursor ->
+            generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }.toSet()
+        }
+        if ("note" !in columns) execSQL("ALTER TABLE positions ADD COLUMN note TEXT")
+    }
+
     private fun SQLiteDatabase.addPositionWindowColumns() {
         val columns = rawQuery("PRAGMA table_info(positions)", null).use { cursor ->
             generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }.toSet()
@@ -554,6 +569,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
                 put("is_t_plus_one", if (position.isTPlusOne) 1 else 0)
                 put("keep_open", if (position.keepOpen) 1 else 0)
                 put("keep_open_note", position.keepOpenNote)
+                put("note", position.note)
                 put("unknown", unknown)
                 put("opened_at", position.openedAt.toEpochMilli())
                 put("updated_at", position.updatedAt)
@@ -596,6 +612,7 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
             isTPlusOne = getInt(getColumnIndexOrThrow("is_t_plus_one")) == 1,
             keepOpen = getInt(getColumnIndexOrThrow("keep_open")) == 1,
             keepOpenNote = nullableString("keep_open_note"),
+            note = nullableString("note"),
             openedAt = Instant.ofEpochMilli(getLong(getColumnIndexOrThrow("opened_at"))),
             updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
             updatedBy = getString(getColumnIndexOrThrow("updated_by")),
@@ -3316,6 +3333,6 @@ class LocalDataStore(context: Context, name: String = DATABASE_NAME) :
          * `onUpgrade` fires only when the stored number is lower than this one, so adding a table
          * to a version that has already shipped anywhere reaches no device that has it.
          */
-        const val DATABASE_VERSION = 28
+        const val DATABASE_VERSION = 29
     }
 }

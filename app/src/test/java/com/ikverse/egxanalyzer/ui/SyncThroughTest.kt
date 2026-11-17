@@ -5,12 +5,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertIsOff
-import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import com.ikverse.egxanalyzer.model.SyncMode
 import com.ikverse.egxanalyzer.model.TelegramAuthState
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import com.ikverse.egxanalyzer.model.ThemeMode
@@ -22,45 +21,56 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * The switch that stops this phone talking to the sync channel.
+ * The choice of what carries this device's sync, which replaced the Telegram switch in 5.8.
  *
- * What it must hold on screen is that the switch and Sync now agree: a Sync now that stayed
- * pressable with sync off would be a button that answers "Telegram sync is off" to the one person
- * who has just been told it is a way to sync.
+ * What it must hold on screen is that the choice and Sync now agree: a Sync now that stayed
+ * pressable with sync off, or with Drive chosen and not connected, is a button that answers with a
+ * refusal to the one person who has just been told it is a way to sync.
  */
 @RunWith(RobolectricTestRunner::class)
-class TelegramSyncToggleTest {
+class SyncThroughTest {
 
     @get:Rule
     val compose = createComposeRule()
 
-    private class Switchable(
+    private class Choosable(
+        drive: String?,
         base: AppState = FakeAppState(
             telegramAuthState = TelegramAuthState(step = TelegramAuthStep.READY),
+            driveAccount = drive,
         ),
     ) : AppState by base {
-        override var telegramSyncEnabled by mutableStateOf(false)
-        override fun updateTelegramSync(enabled: Boolean) {
-            telegramSyncEnabled = enabled
+        override var syncMode by mutableStateOf(SyncMode.OFF)
+        override fun updateSyncMode(mode: SyncMode) {
+            syncMode = mode
         }
     }
 
-    @Test
-    fun `sync now is held back while the switch is off and offered once it is on`() {
-        val state = Switchable()
+    private fun open(state: AppState) {
         compose.setContent {
             EgxAnalyzerTheme(themeMode = ThemeMode.LIGHT) { SettingsScreen(state) }
         }
-
         // Since 5.0 the part is its own page, opened from its tile on the hub.
         compose.onNodeWithText("Backup and sync").performScrollTo().performClick()
+    }
 
-        compose.onNodeWithText("Sync with Telegram").performScrollTo().assertIsOff()
+    @Test
+    fun `sync now is held back while off and offered once a carrier is chosen`() {
+        open(Choosable(drive = "owner@example.com"))
         compose.onNodeWithText("Sync now").performScrollTo().assertIsNotEnabled()
 
-        compose.onNodeWithText("Sync with Telegram").performClick()
-
-        compose.onNodeWithText("Sync with Telegram").assertIsOn()
+        compose.onNodeWithText("Telegram").performScrollTo().performClick()
         compose.onNodeWithText("Sync now").assertIsEnabled()
+
+        compose.onNodeWithText("Google Drive").performClick()
+        compose.onNodeWithText("Sync now").assertIsEnabled()
+    }
+
+    @Test
+    fun `drive chosen without a connected account says what is missing`() {
+        open(Choosable(drive = null))
+        compose.onNodeWithText("Google Drive").performScrollTo().performClick()
+        compose.onNodeWithText("Sync now").assertIsNotEnabled()
+        compose.onNodeWithText("Connect Google Drive under Backup to sync.").assertExists()
     }
 }

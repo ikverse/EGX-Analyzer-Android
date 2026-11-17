@@ -71,7 +71,7 @@ import java.util.concurrent.ConcurrentHashMap
 class TelegramRepository(
     private val context: Context,
     private val secretStore: NamedSecretStore,
-) {
+) : SyncTransport {
     private val preferences =
         context.getSharedPreferences("egx_telegram_settings", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -458,7 +458,7 @@ class TelegramRepository(
      * Read across every duplicate: a report is worth having whichever channel it landed in, and a
      * device that once uploaded to a channel of its own should not lose those reports now.
      */
-    suspend fun listSyncedReports(): Map<String, RemoteReport> {
+    override suspend fun listSyncedReports(): Map<String, RemoteReport> {
         val target = syncChatId()
         val chats = (findSyncChats() + target).distinct()
         return chats.fold(linkedMapOf()) { all, chat ->
@@ -476,11 +476,8 @@ class TelegramRepository(
     private suspend fun reportsIn(chatId: Long): Map<String, RemoteReport> =
         contentsOf(chatId).reports.mapValues { (_, files) ->
             val newest = files.maxBy { it.editRevision }
-            RemoteReport(newest.file.fileId, newest.editRevision)
+            RemoteReport(newest.file.fileId.toString(), newest.editRevision)
         }
-
-    /** Which copy of a report the channel holds, and how to fetch it. */
-    data class RemoteReport(val fileId: Int, val editRevision: Long)
 
     /** One file in the channel: enough to download it, and enough to delete it. */
     private data class ChannelFile(val fileId: Int, val messageId: Long)
@@ -510,12 +507,10 @@ class TelegramRepository(
     )
 
     private suspend fun contentsOf(chatId: Long): ChannelContents {
-        val reports = linkedMapOf<String, MutableList<ReportFile>>()
-        val tombstones = linkedMapOf<String, ChannelFile>()
-        val ruleRevisions = mutableListOf<ChannelFile>()
-        val positionRevisions = mutableListOf<ChannelFile>()
-        val settingsRevisions = linkedMapOf<String, ChannelFile>()
-        val promptVersions = linkedMapOf<String, ChannelFile>()
+        // Newest first, as Telegram returns history: where two files claim one slot, the first
+        // seen is kept. What each name is - and the order that reads it right - is
+        // `classifySyncFiles`, shared with the Drive transport.
+        val named = mutableListOf<Pair<String, ChannelFile>>()
         var fromMessageId = 0L
         while (true) {
             val page = client.getChatHistory(chatId, fromMessageId, 0, HISTORY_PAGE_SIZE, false)
@@ -525,59 +520,25 @@ class TelegramRepository(
             messages.forEach { message ->
                 val document = (message.content as? dev.g000sha256.tdl.dto.MessageDocument)?.document
                 val name = document?.fileName ?: return@forEach
-                val file = ChannelFile(document.document.id, message.id)
-                // A tombstone is named for the report it buries, so it must be recognised first:
-                // "deleted-<id>.json" would otherwise read as a report called "deleted-<id>".
-                val buried = Tombstone.requestIdOf(name)
-                if (buried != null) {
-                    tombstones.putIfAbsent(buried, file)
-                    return@forEach
-                }
-                // Every revision is kept: which one wins is the merge's decision, not the order
-                // Telegram happened to return them in.
-                if (SyncedRule.ruleIdOf(name) != null) {
-                    ruleRevisions += file
-                    return@forEach
-                }
-                // Before the report branch, like a rule: every name ends in .json, so a position
-                // left to fall through would be read as a report called "position-AMOC_2026-...".
-                if (SyncedPosition.positionIdOf(name) != null) {
-                    positionRevisions += file
-                    return@forEach
-                }
-                // Settings and prompts before the report branch for the same reason as the two
-                // above: every one of these names ends in .json, so anything left to fall through
-                // is read as a report called "settings-..." and downloaded as one.
-                if (SettingsSnapshot.stampOf(name) != null) {
-                    settingsRevisions.putIfAbsent(name, file)
-                    return@forEach
-                }
-                SyncedPromptVersion.promptIdOf(name)?.let {
-                    promptVersions.putIfAbsent(it, file)
-                    return@forEach
-                }
-                // Every revision is kept, as a rule's and a trade's are: which copy of a
-                // corrected report wins is decided by the revision in its name, not by the order
-                // Telegram returned the messages in.
-                SyncedRun.requestIdOf(name)?.let {
-                    reports.getOrPut(it, ::mutableListOf) +=
-                        ReportFile(file, SyncedRun.revisionOf(name))
-                }
+                named += name to ChannelFile(document.document.id, message.id)
             }
             fromMessageId = messages.last().id
         }
+        val listing = classifySyncFiles(named)
         return ChannelContents(
-            reports,
-            tombstones,
-            ruleRevisions,
-            positionRevisions,
-            settingsRevisions,
-            promptVersions,
+            listing.reports.mapValues { (_, copies) ->
+                copies.map { (file, revision) -> ReportFile(file, revision) }
+            },
+            listing.tombstones,
+            listing.ruleRevisions,
+            listing.positionRevisions,
+            listing.settingsRevisions,
+            listing.promptVersions,
         )
     }
 
     /** Every report the channel says was deleted, so no device brings one back. */
-    suspend fun listTombstones(): Set<String> {
+    override suspend fun listTombstones(): Set<String> {
         val chats = (findSyncChats() + syncChatId()).distinct()
         return chats.flatMap { contentsOf(it).tombstones.keys }.toSet()
     }
@@ -588,7 +549,7 @@ class TelegramRepository(
      * Both halves matter: deleting the file stops a device that has not seen it from fetching it,
      * and the marker stops a device that already holds it from uploading it back.
      */
-    suspend fun buryReport(requestId: String) {
+    override suspend fun buryReport(requestId: String) {
         // The most destructive thing this class can do, and the one that does not look like an
         // upload: it deletes the report from the channel and publishes a marker that keeps it
         // deleted, so a report removed here is gone from every device permanently.
@@ -636,7 +597,7 @@ class TelegramRepository(
     }
 
     /** Every rule revision the channel holds, merged so each rule appears once. */
-    suspend fun syncedRules(): List<SyncedRule> {
+    override suspend fun syncedRules(): List<SyncedRule> {
         val chats = (findSyncChats() + syncChatId()).distinct()
         val revisions = chats.flatMap { chat ->
             contentsOf(chat).ruleRevisions.mapNotNull { file ->
@@ -647,7 +608,7 @@ class TelegramRepository(
     }
 
     /** Puts one rule revision in the channel. Revisions accumulate; the merge picks the winner. */
-    suspend fun uploadRule(revision: SyncedRule) {
+    override suspend fun uploadRule(revision: SyncedRule) {
         val chatId = syncChatId()
         val staged = File(context.cacheDir, revision.fileName).apply { writeText(revision.toDocument()) }
         try {
@@ -677,7 +638,7 @@ class TelegramRepository(
     }
 
     /** Every position revision the channel holds, merged so each position appears once. */
-    suspend fun syncedPositions(): List<SyncedPosition> {
+    override suspend fun syncedPositions(): List<SyncedPosition> {
         val chats = (findSyncChats() + syncChatId()).distinct()
         val revisions = chats.flatMap { chat ->
             contentsOf(chat).positionRevisions.mapNotNull { file ->
@@ -689,7 +650,7 @@ class TelegramRepository(
     }
 
     /** Puts one position revision in the channel. Revisions accumulate; the merge picks the winner. */
-    suspend fun uploadPosition(revision: SyncedPosition) {
+    override suspend fun uploadPosition(revision: SyncedPosition) {
         val chatId = syncChatId()
         val staged = File(context.cacheDir, revision.fileName).apply {
             writeText(revision.toDocument())
@@ -725,7 +686,7 @@ class TelegramRepository(
     }
 
     /** Puts one report in the channel. The file name is the identity; nothing else is read back. */
-    suspend fun uploadReport(run: SyncedRun) {
+    override suspend fun uploadReport(run: SyncedRun) {
         val chatId = syncChatId()
         val staged = File(context.cacheDir, run.fileName).apply { writeText(run.toDocument()) }
         try {
@@ -752,8 +713,8 @@ class TelegramRepository(
     }
 
     /** Reads one report back out of the channel. */
-    suspend fun downloadReport(fileId: Int): SyncedRun? =
-        SyncedRun.fromDocument(download(fileId).readText())
+    override suspend fun downloadReport(handle: String): SyncedRun? =
+        SyncedRun.fromDocument(download(handle.toInt()).readText())
 
     /**
      * The settings the channel holds, or null when nobody has published any.
@@ -764,7 +725,7 @@ class TelegramRepository(
      * reports are, and merged rather than picked, so a newest file that will not parse loses one
      * channel's answer instead of all of them.
      */
-    suspend fun syncedSettings(): SettingsSnapshot? {
+    override suspend fun syncedSettings(): SettingsSnapshot? {
         val chats = (findSyncChats() + syncChatId()).distinct()
         val newestInEach = chats.mapNotNull { chat ->
             contentsOf(chat).settingsRevisions.entries
@@ -781,7 +742,7 @@ class TelegramRepository(
     }
 
     /** Puts one settings revision in the channel. Revisions accumulate; the newest one wins. */
-    suspend fun uploadSettings(snapshot: SettingsSnapshot) {
+    override suspend fun uploadSettings(snapshot: SettingsSnapshot) {
         val chatId = syncChatId()
         val staged = File(context.cacheDir, snapshot.fileName).apply {
             writeText(snapshot.toDocument())
@@ -813,21 +774,21 @@ class TelegramRepository(
     }
 
     /** Every generated prompt anywhere under this name, by the id its file name carries. */
-    suspend fun listSyncedPromptVersions(): Map<String, Int> {
+    override suspend fun listSyncedPromptVersions(): Map<String, String> {
         val chats = (findSyncChats() + syncChatId()).distinct()
         return chats.fold(linkedMapOf()) { all, chat ->
             contentsOf(chat).promptVersions.forEach { (id, file) ->
-                all.putIfAbsent(id, file.fileId)
+                all.putIfAbsent(id, file.fileId.toString())
             }
             all
         }
     }
 
-    suspend fun downloadPromptVersion(fileId: Int): SyncedPromptVersion? =
-        SyncedPromptVersion.fromDocument(download(fileId).readText())
+    override suspend fun downloadPromptVersion(handle: String): SyncedPromptVersion? =
+        SyncedPromptVersion.fromDocument(download(handle.toInt()).readText())
 
     /** Puts one generated prompt in the channel. The id is the identity; it is never rewritten. */
-    suspend fun uploadPromptVersion(version: SyncedPromptVersion) {
+    override suspend fun uploadPromptVersion(version: SyncedPromptVersion) {
         val chatId = syncChatId()
         val staged = File(context.cacheDir, version.fileName).apply {
             writeText(version.toDocument())

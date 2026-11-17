@@ -630,9 +630,16 @@ property on purpose, for this one provider.
 - **Daily, on its own day, through WorkManager.** `backUpIfDue` queues `DriveBackupWorker` (unique,
   KEEP, needs a network, exponential backoff, four tries) and records `last_drive_backup_day` only
   when an upload finished. A phone with both a folder and Drive writes both.
-- **No Play services, no Drive.** `driveAvailable` is false on the Huawei tablet; the button is
-  disabled and the line says why. The folder backup and the Telegram channel are unchanged.
-- **Backup, not sync.** The Telegram channel is still what keeps two phones in step.
+- **No Play services: the browser.** Since 5.8 a device without Play services - the Huawei tablet -
+  signs in through Google's page in a Custom Tab (`GoogleBrowserAuth`): an authorization code with
+  PKCE, sent back to `<applicationId>:/oauth2redirect`, which `OAuthRedirectActivity` hands to
+  `completeBrowserSignIn`. It uses the release client's id (`BuildConfig.GOOGLE_OAUTH_CLIENT_ID`) and
+  needs **Enable custom URI scheme** ticked on that client in Google Cloud. Unlike the Play services
+  path, the app holds a **refresh token** here, in the Keystore through `NamedSecretStore`, never in
+  the database, a backup, the sync or diagnostics; Disconnect revokes it. In Testing, Google expires
+  it after seven days. The verifier and state wait in preferences, so a process killed while the
+  browser was in front can still finish.
+- **Sync, too, since 5.8** - see **Two carriers, one set of rules** under Sync.
 - **It needs a Google Cloud project the owner sets up**: an OAuth consent screen with the
   `drive.file` scope, and Android OAuth clients for `com.ikverse.egxanalyzer` with the SHA-1 of the
   release key and of the debug key. Without them the consent screen answers with an error. While the
@@ -709,13 +716,47 @@ are rows now — shipped, visible, switchable, not deletable — and users add t
 
 ## Sync
 
-Everything travels through a private Telegram channel titled `EGX Analyzer sync`.
+Everything travels as small JSON files, either through a private Telegram channel titled
+`EGX Analyzer sync` or, since 5.8, through `EGX Analyzer/sync` in the owner's Google Drive. Which one
+is chosen per device; everything below about what moves applies to both.
 
-- **One switch stops all of it, per phone.** `Backup and sync → Sync → Sync with Telegram`
-  (`AppState.telegramSyncEnabled`, stored in `SettingsRepository` and deliberately not part of the
-  settings snapshot: synced, a phone switched off could never be switched back on from another,
-  because it would no longer be listening). Off holds back every path to the channel — the launch
-  catch-up, `publish`, the settings upload, the burial of a deleted report — and Sync now greys out.
+### Two carriers, one set of rules
+
+- **`SyncTransport` is the whole of what a carrier does**: list names, fetch one, add one, and bury a
+  report. `TelegramRepository` implements it as it always worked; `DriveSyncTransport` implements it
+  over `DriveClient`. `LiveAppState.syncStore` picks one from `syncMode` at every call, so a change of
+  choice redirects the next publish. Every decision - `syncActions`, the `(updatedAt, device)` merges,
+  tombstones, the settings stamp - is unchanged and knows nothing about which carrier ran.
+- **`classifySyncFiles` is the one place a file name becomes a record**, shared by both carriers. Its
+  branch order is the point: every name ends in `.json`, so anything not claimed before the report
+  branch is read as a report. It was inside `contentsOf` in `TelegramRepository` until Drive needed
+  the same answer.
+- **Drive files are never rewritten**, as channel messages never were: a revision is a new file. So a
+  rule, trade or settings revision fetched once is cached in `cacheDir/drive-sync/<file id>` and read
+  from the phone after that; a sync downloads only what is new. Reports and prompts are fetched
+  directly, since each is adopted once. One listing serves the six reads of a sync for ten seconds
+  and any write drops it.
+- **Every folder called `sync` under `EGX Analyzer` is read, and new files go to the oldest**, for the
+  reason every duplicate channel is read: two devices that each made one first would otherwise never
+  meet. A mutex keeps two publishes on one device from making two. A failed call forgets the folder
+  ids, so one deleted in Drive is made again on the next call.
+- **Drive needs no session to wait for.** With Drive chosen, the launch catch-up runs from
+  `enterForeground` instead of waiting for Telegram to reach `READY`, and Telegram is never started
+  for sync - only for reading source channels.
+- **Moving over is the existing diff.** The first Drive sync uploads whatever this device holds that
+  the folder lacks. Tombstones that exist only in the Telegram channel do not carry over, so the safe
+  order is one Telegram sync on every device, then switch each. The channel is left untouched.
+- **Disconnecting Drive drops Drive sync to Off** (`LiveAppState.disconnectDrive` overrides the
+  delegated one), rather than leaving every publish to fail against an account that is gone. Choosing
+  Drive while it is not connected is refused with a line saying where to connect it.
+
+- **One choice stops all of it, per device.** `Backup and sync → Sync → Sync through`: Off, Telegram
+  or Google Drive (`AppState.syncMode`, stored in `SettingsRepository` and deliberately not part of
+  the settings snapshot: synced, a device switched off could never be switched back on from another,
+  because it would no longer be listening). It replaced the `Sync with Telegram` switch in 5.8, and
+  `SettingsRepository.syncMode` reads that old switch when no choice is stored, so a device that had
+  turned sync off stays off. Off holds back every path - the launch
+  catch-up, `publish`, the settings upload, the burial of a deleted report - and Sync now greys out.
   It costs nothing to keep: every change is already on disk in the shape the next sync's diff looks
   for, and a deletion stays in `pendingDeletions`, which is how an offline phone has always caught
   up. Switching back on runs that catch-up at once, quietly, if Telegram is `READY`. Reading the
@@ -1040,3 +1081,43 @@ overwritten by their own initialisers. It carries the one intent worth carrying:
 - Then `scheduled_jobs` is dropped. A table nothing reads is one the next reader of the file has to
   work out the status of.
 
+## Dividends
+
+Added 2026-11-17, ported from Signal Lab (`signal-lab-egx`, `EgxDividends.kt` and `ArabFinance.kt`).
+Free, and nothing the user holds is sent anywhere.
+
+- **Two sources, because neither answers both questions.** Arab Finance's dividend news page
+  (`arabfinance.com/ar/home/tagresult?slug=724`) is the only one that knows a dividend before it
+  happens: about two months of items, read by pattern from the Arabic wording. The price feed's
+  `events=div` table, now asked for on the daily request the app already makes, knows the exact
+  ex-day and amount once it has happened, sometimes days late. `DividendBook.merge` joins the two:
+  news makes the dividend, the feed confirms it (`CONFIRMED`), questions the amount
+  (`AMOUNT_DIFFERS`) or, five sessions past the expected day, says it never saw it (`NOT_ON_FEED`).
+- **The last day to buy is three sessions before the payment day.** Measured in Signal Lab on nine
+  real 2025-26 dividends. Sessions are Sunday to Thursday with no holiday calendar, because nobody
+  publishes the exchange's holidays ahead; that is why such a day is drawn with "~" until the feed
+  confirms the ex-day, after which the last day is the session before it.
+- **Where it shows.** Home's Dividends tile (`DividendsTile`, upcoming only, yours first); the stock
+  sheet's Dividend block (`DividendBook.forStock`: the next one, or one gone ex in the last 30
+  days); and `DividendPill` on position and call cards, reached through `LocalDividends`, when an
+  ex-day falls after the entry and on or before the exit (an open one reaches the next announced).
+- **Scoring is untouched, on purpose.** A stock drops by its dividend on the ex-day and that can
+  touch a stop. The pill explains the verdict; it never changes it.
+- **Stored in `dividends.json`** in `filesDir`, like `home_cache.json`: device-local, replaced whole,
+  outside the database, every backup, the sync channel and Save diagnostics. News older than 400
+  days is dropped. `LiveHome.recordPaid` takes the feed's table from
+  `PriceRepository.dividendsSeen`, set by `LiveAppState` after both are built, and writes the file
+  once a refresh's burst has passed.
+- **The page is read at most every six hours**, riding `refreshHomeMarket`. Only an `https` link to
+  Arab Finance itself is ever kept for the browser.
+- **Not built:** hand entry and corrections (Signal Lab has them), a notification before the last
+  day to buy, and a back-fill of older paid dividends - the feed's table arrives with the windows
+  the app already fetches.
+
+## Company facts on the stock sheet
+
+`CompanyFactsRepository` reads stockanalysis.com's statistics page for one stock (P/E, EPS, net
+income over twelve months, total debt, debt to equity) when its sheet opens and the stored copy is
+over a week old, and keeps the answer in `company_facts.json` beside `dividends.json`, outside every
+backup and sync. A page that does not answer keeps the old copy. Parser ported from Signal Lab's
+`StockAnalysisParser`; it reads table rows only, because the page's prose repeats the labels.

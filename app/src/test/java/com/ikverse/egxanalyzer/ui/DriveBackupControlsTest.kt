@@ -47,10 +47,10 @@ class DriveBackupControlsTest {
     }
 
     @Test
-    fun `a phone without Play services cannot connect and says why`() {
+    fun `a build that cannot reach Drive cannot connect and says why`() {
         show(FakeAppState(driveAvailable = false))
         compose.onNodeWithText("Connect Google Drive").assertIsNotEnabled()
-        compose.onNodeWithText("Google Drive needs Google Play services", substring = true).assertExists()
+        compose.onNodeWithText("Google Drive cannot be reached from this build", substring = true).assertExists()
     }
 
     @Test

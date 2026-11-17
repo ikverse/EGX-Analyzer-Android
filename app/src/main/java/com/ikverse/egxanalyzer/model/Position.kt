@@ -105,6 +105,11 @@ data class Position(
     val keepOpen: Boolean = false,
     /** Why, in the user's own words, so a decision made in July still explains itself in November. */
     val keepOpenNote: String? = null,
+    /**
+     * The reader's own note on the trade: why they bought, why they sold. Free text, never read by
+     * any rule here. Travels with the trade through sync and the backup like every other field.
+     */
+    val note: String? = null,
     val openedAt: Instant = Instant.now(),
     /**
      * When this revision was written, and by which device.

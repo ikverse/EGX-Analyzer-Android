@@ -23,6 +23,8 @@ import com.ikverse.egxanalyzer.ui.AppDestination
 import com.ikverse.egxanalyzer.ui.AppState
 import com.ikverse.egxanalyzer.ui.AppUpdates
 import com.ikverse.egxanalyzer.ui.DriveBackups
+import com.ikverse.egxanalyzer.data.SyncTransport
+import com.ikverse.egxanalyzer.model.SyncMode
 import com.ikverse.egxanalyzer.ui.HomeFeed
 import com.ikverse.egxanalyzer.ui.CallText
 import com.ikverse.egxanalyzer.ui.NavStack
@@ -435,6 +437,15 @@ class LiveAppState(
 
     /** Started by whichever path first needs Telegram, and never by merely existing. */
     private val telegramRepository: TelegramRepository by lazy { telegramProvider() }
+
+    /**
+     * What carries the sync on this device: the Telegram channel or the Google Drive folder.
+     *
+     * Read at each call rather than held, so changing the choice redirects the next publish. With
+     * Drive chosen, Telegram is never started for sync - only for reading source channels.
+     */
+    private val syncStore: SyncTransport
+        get() = if (syncMode == SyncMode.DRIVE) drive.syncTransport else telegramRepository
     override var destination by mutableStateOf(AppDestination.HOME)
         private set
 
@@ -447,6 +458,8 @@ class LiveAppState(
             },
             spent = { refreshModelUsage() },
         )
+        // The daily price answers carry each stock's dividend table; Home keeps it.
+        priceRepository.dividendsSeen = home::recordPaid
         drive.bind(
             write = { out ->
                 writeBackupZip(out, databaseFile(), settingsDocument(), backupDevice(), ::checkpointDatabase)
@@ -1003,7 +1016,7 @@ class LiveAppState(
         val mine = localDataStore.wordingRuleRevisions().map { (rule, deleted) ->
             SyncedRule(rule, deleted)
         }
-        val theirs = runCatching { telegramRepository.syncedRules() }.getOrNull() ?: return false
+        val theirs = runCatching { syncStore.syncedRules() }.getOrNull() ?: return false
 
         var changed = false
         val byId = mine.associateBy { it.rule.id }
@@ -1024,7 +1037,7 @@ class LiveAppState(
         // Only what this device knows better. Re-uploading a revision the channel already holds
         // would grow the log without telling anyone anything.
         rulesToUpload(mine, theirs).forEach { revision ->
-            runCatching { telegramRepository.uploadRule(revision) }
+            runCatching { syncStore.uploadRule(revision) }
         }
 
         if (changed) wordingRules = localDataStore.wordingRules()
@@ -2006,6 +2019,19 @@ class LiveAppState(
         }
     }
 
+    /** The reader's note on a trade: why they bought, why they sold. See [Position.note]. */
+    override fun setPositionNote(position: Position, note: String?) {
+        val cleaned = note?.trim()?.takeIf(String::isNotBlank)
+        if (position.note == cleaned) return
+        val updated = position.copy(note = cleaned, updatedAt = System.currentTimeMillis(), updatedBy = deviceName)
+        writePositions(write = { localDataStore.savePosition(updated) }) { refreshed ->
+            positions = refreshed
+            statusMessage = StatusMessage(if (cleaned == null) "Note removed" else "Note saved", true)
+            publishPosition(updated, deleted = false)
+            requestRebuild(portfolio = true)
+        }
+    }
+
     /**
      * Removes a trade recorded by mistake, here and on every device.
      *
@@ -2056,7 +2082,7 @@ class LiveAppState(
             // the price. Read here, inside the block `publish` already runs on `Dispatchers.IO`,
             // rather than on whatever thread called this - see `writePositions` beside it.
             val unknown = localDataStore.unknownFor(position.id)
-            telegramRepository.uploadPosition(SyncedPosition(position, deleted, unknown))
+            syncStore.uploadPosition(SyncedPosition(position, deleted, unknown))
         }
     }
 
@@ -2082,7 +2108,7 @@ class LiveAppState(
      * sends, and that is a disk write on whatever thread asked for it.
      */
     private fun publish(block: suspend () -> Unit) {
-        if (!telegramSyncEnabled) return
+        if (syncMode == SyncMode.OFF) return
         appScope.launch(Dispatchers.IO) { runCatching { block() } }
     }
 
@@ -2096,7 +2122,7 @@ class LiveAppState(
         val mine = localDataStore.positionRevisions().map { revision ->
             SyncedPosition(revision.position, revision.deleted, revision.unknown)
         }
-        val theirs = runCatching { telegramRepository.syncedPositions() }.getOrNull() ?: return false
+        val theirs = runCatching { syncStore.syncedPositions() }.getOrNull() ?: return false
 
         var changed = false
         val byId = mine.associateBy { it.position.id }
@@ -2121,7 +2147,7 @@ class LiveAppState(
         // Only what this device knows better. Re-uploading a revision the channel already holds
         // would grow the log without telling anyone anything.
         positionsToUpload(mine, theirs).forEach { revision ->
-            runCatching { telegramRepository.uploadPosition(revision) }
+            runCatching { syncStore.uploadPosition(revision) }
         }
 
         if (changed) {
@@ -2389,6 +2415,16 @@ class LiveAppState(
      * COMI.CA are one stock, and asking for the raw string would draw an empty chart for half the
      * tickers in the app.
      */
+    /** Company facts, device-local and outside every backup. See `CompanyFactsRepository`. */
+    private val companyFactsSource by lazy {
+        com.ikverse.egxanalyzer.data.CompanyFactsRepository(
+            java.io.File(context.filesDir, com.ikverse.egxanalyzer.data.CompanyFactsRepository.FILE_NAME),
+        )
+    }
+
+    override suspend fun companyFacts(ticker: String): com.ikverse.egxanalyzer.model.CompanyFacts? =
+        runCatching { companyFactsSource.facts(com.ikverse.egxanalyzer.model.Scoring.normalizeTicker(ticker)) }.getOrNull()
+
     override suspend fun priceHistory(ticker: String, from: LocalDate): List<DailySession> {
         val wanted = Scoring.normalizeTicker(ticker)
         return withContext(Dispatchers.IO) {
@@ -2517,6 +2553,8 @@ class LiveAppState(
     override fun enterForeground() {
         if (foregroundStarted) return
         foregroundStarted = true
+        // Drive needs no session to wait for, unlike Telegram below.
+        if (syncMode == SyncMode.DRIVE) catchUpOnce()
         appScope.launch {
             // The chat list is the first thing a run depends on, and it used to load in silence:
             // an empty list looked identical whether it was still fetching or had failed.
@@ -2538,7 +2576,7 @@ class LiveAppState(
                         // announced by the collector below, when there is one.
                         TelegramAuthStep.READY -> {
                             statusMessage = StatusMessage("Telegram ready", succeeded = true)
-                            catchUpOnce()
+                            if (syncMode == SyncMode.TELEGRAM) catchUpOnce()
                         }
                         TelegramAuthStep.ERROR -> statusMessage = StatusMessage(
                             state.message?.takeIf(String::isNotBlank)
@@ -2598,7 +2636,7 @@ class LiveAppState(
      * for a week therefore catches up on what the others published without anyone pressing anything.
      */
     private fun catchUpOnce() {
-        if (caughtUp || !telegramSyncEnabled) return
+        if (caughtUp || syncMode == SyncMode.OFF) return
         caughtUp = true
         appScope.launch {
             val outcome = runCatching { performSync() }.getOrNull() ?: return@launch
@@ -3905,10 +3943,10 @@ class LiveAppState(
         settingsPublishJob?.cancel()
         settingsPublishJob = appScope.launch {
             delay(SETTINGS_PUBLISH_DELAY_MILLISECONDS)
-            if (!telegramSyncEnabled) return@launch
+            if (syncMode == SyncMode.OFF) return@launch
             val snapshot = settingsRepository.snapshot()
             withContext(Dispatchers.IO) {
-                runCatching { telegramRepository.uploadSettings(snapshot) }
+                runCatching { syncStore.uploadSettings(snapshot) }
             }
         }
     }
@@ -3925,10 +3963,10 @@ class LiveAppState(
      */
     private suspend fun syncSettings(): Boolean {
         val mine = settingsRepository.snapshot()
-        val theirs = runCatching { telegramRepository.syncedSettings() }.getOrNull()
+        val theirs = runCatching { syncStore.syncedSettings() }.getOrNull()
         if (theirs == null || theirs.stamp <= mine.stamp) {
             if (settingsWorthUploading(mine, theirs)) {
-                runCatching { telegramRepository.uploadSettings(mine) }
+                runCatching { syncStore.uploadSettings(mine) }
             }
             return false
         }
@@ -3968,20 +4006,20 @@ class LiveAppState(
      * version nothing on the device can show.
      */
     private suspend fun syncPromptVersions() {
-        val remote = runCatching { telegramRepository.listSyncedPromptVersions() }.getOrNull()
+        val remote = runCatching { syncStore.listSyncedPromptVersions() }.getOrNull()
             ?: return
         val mine = promptVersions.associateBy { SyncedPromptVersion.keyFor(it.id) }
         var adopted = false
         (remote.keys - mine.keys).forEach { key ->
-            val fileId = remote[key] ?: return@forEach
-            val version = runCatching { telegramRepository.downloadPromptVersion(fileId) }
+            val handle = remote[key] ?: return@forEach
+            val version = runCatching { syncStore.downloadPromptVersion(handle) }
                 .getOrNull() ?: return@forEach
             localDataStore.rememberPromptVersion(version.version)
             adopted = true
         }
         (mine.keys - remote.keys).forEach { key ->
             val version = mine[key] ?: return@forEach
-            runCatching { telegramRepository.uploadPromptVersion(SyncedPromptVersion(version)) }
+            runCatching { syncStore.uploadPromptVersion(SyncedPromptVersion(version)) }
         }
         if (adopted) promptVersions = localDataStore.promptVersions()
     }
@@ -4010,30 +4048,49 @@ class LiveAppState(
      * what to keep.
      */
     override suspend fun syncReports() {
-        if (!telegramSyncEnabled) {
-            statusMessage = StatusMessage("Telegram sync is off", succeeded = false)
+        if (syncMode == SyncMode.OFF) {
+            statusMessage = StatusMessage("Sync is off", succeeded = false)
             return
         }
         runAction(
-            label = "Syncing reports with Telegram",
+            label = if (syncMode == SyncMode.DRIVE) "Syncing with Google Drive" else "Syncing with Telegram",
             success = SyncOutcome::summary,
         ) { performSync() }
     }
 
-    override var telegramSyncEnabled by mutableStateOf(settingsRepository.telegramSyncEnabled())
+    override var syncMode by mutableStateOf(settingsRepository.syncMode())
         private set
 
     /**
-     * Off holds back every path to the sync channel - the launch catch-up, the instant publishes,
+     * Disconnecting Drive also stops syncing through it, rather than leaving every publish to fail
+     * quietly against an account that is gone. Changes wait on the device as they do with sync off.
+     */
+    override fun disconnectDrive() {
+        drive.disconnectDrive()
+        if (syncMode == SyncMode.DRIVE) {
+            syncMode = SyncMode.OFF
+            settingsRepository.recordSyncMode(SyncMode.OFF)
+        }
+    }
+
+    /**
+     * Off holds back every path to the sync store - the launch catch-up, the instant publishes,
      * the burial of a deleted report - and loses nothing: each change is already on disk in the
      * shape the next sync's diff looks for, which is how an offline phone has always caught up.
-     * On again is that next sync, run at once rather than left for the next launch.
+     * A new choice is that next sync, run at once rather than left for the next launch: on Drive
+     * straight away, on Telegram once it is signed in. Drive is refused until it is connected.
      */
-    override fun updateTelegramSync(enabled: Boolean) {
-        if (enabled == telegramSyncEnabled) return
-        telegramSyncEnabled = enabled
-        settingsRepository.recordTelegramSyncEnabled(enabled)
-        if (enabled && telegramAuthState.step == TelegramAuthStep.READY) {
+    override fun updateSyncMode(mode: SyncMode) {
+        if (mode == syncMode) return
+        if (mode == SyncMode.DRIVE && driveAccount == null) {
+            statusMessage = StatusMessage("Connect Google Drive first, under Backup", succeeded = false)
+            return
+        }
+        syncMode = mode
+        settingsRepository.recordSyncMode(mode)
+        if (mode == SyncMode.DRIVE ||
+            (mode == SyncMode.TELEGRAM && telegramAuthState.step == TelegramAuthStep.READY)
+        ) {
             caughtUp = false
             catchUpOnce()
         }
@@ -4050,7 +4107,7 @@ class LiveAppState(
         // Deletions this device made while offline are carried out first, so nothing it has
         // already discarded is uploaded back a moment later.
         localDataStore.pendingDeletions().forEach { requestId ->
-            runCatching { telegramRepository.buryReport(requestId) }
+            runCatching { syncStore.buryReport(requestId) }
                 .onSuccess { localDataStore.clearDeletion(requestId) }
         }
 
@@ -4069,9 +4126,9 @@ class LiveAppState(
         // After the rules, because a prompt version names the rules that composed it.
         syncPromptVersions()
 
-        val remote = telegramRepository.listSyncedReports()
+        val remote = syncStore.listSyncedReports()
         val local = localDataStore.savedReportRevisions()
-        val deleted = telegramRepository.listTombstones()
+        val deleted = syncStore.listTombstones()
         val actions = syncActions(
             local = local,
             remote = remote.mapValues { (_, report) -> report.editRevision },
@@ -4094,7 +4151,7 @@ class LiveAppState(
         var downloaded = 0
         toDownload.forEach { requestId ->
             val held = remote[requestId] ?: return@forEach
-            val run = telegramRepository.downloadReport(held.fileId) ?: return@forEach
+            val run = syncStore.downloadReport(held.handle) ?: return@forEach
             if (localDataStore.adoptResult(
                     run.requestId, run.provider, run.model, run.completedAt, run.payload,
                     run.editRevision,
@@ -4106,7 +4163,7 @@ class LiveAppState(
 
         var uploaded = 0
         savedResults.filter { it.result.requestId in toUpload }.forEach { saved ->
-            telegramRepository.uploadReport(saved.toSyncedRun())
+            syncStore.uploadReport(saved.toSyncedRun())
             uploaded++
         }
 
@@ -4600,7 +4657,7 @@ class LiveAppState(
             // "saved" while nothing moved. A failure here is not the run failing either - the
             // report is on disk, and the next sync's diff carries it.
             savedResults.firstOrNull { it.result.requestId == result.requestId }?.let { saved ->
-                publish { telegramRepository.uploadReport(saved.toSyncedRun()) }
+                publish { syncStore.uploadReport(saved.toSyncedRun()) }
             }
             if (onScreen) destination = AppDestination.RESULTS
             return RunOutcome.Saved(analysisMessage ?: "Saved.")
@@ -4959,7 +5016,7 @@ class LiveAppState(
      */
     private fun publishReport(id: Long) {
         val run = savedResults.firstOrNull { it.id == id }?.toSyncedRun() ?: return
-        publish { telegramRepository.uploadReport(run) }
+        publish { syncStore.uploadReport(run) }
     }
 
     /**
@@ -5047,9 +5104,9 @@ class LiveAppState(
         selectedResult = savedResults.firstOrNull()
         requestRebuild(performance = true)
         // Off, the deletion stays recorded and the next sync buries it.
-        if (!telegramSyncEnabled) return
+        if (syncMode == SyncMode.OFF) return
         appScope.launch {
-            runCatching { telegramRepository.buryReport(result.result.requestId) }
+            runCatching { syncStore.buryReport(result.result.requestId) }
                 .onSuccess { localDataStore.clearDeletion(result.result.requestId) }
         }
     }
@@ -5066,10 +5123,10 @@ class LiveAppState(
         selectedResult = null
         settingsMessage = "All saved analyses deleted."
         requestRebuild(performance = true)
-        if (!telegramSyncEnabled) return
+        if (syncMode == SyncMode.OFF) return
         appScope.launch {
             doomed.forEach { requestId ->
-                runCatching { telegramRepository.buryReport(requestId) }
+                runCatching { syncStore.buryReport(requestId) }
                     .onSuccess { localDataStore.clearDeletion(requestId) }
             }
         }

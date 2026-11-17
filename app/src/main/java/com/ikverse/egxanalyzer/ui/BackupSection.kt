@@ -267,7 +267,21 @@ internal fun DriveBackupControls(appState: AppState) {
             horizontalArrangement = Arrangement.spacedBy(Space.s),
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
-            if (account == null) {
+            val waiting = appState.driveSignInCode
+            if (account == null && waiting != null) {
+                // A device with no Play services: Google is waiting for this code to be typed.
+                KitButton(
+                    "Open ${waiting.verificationUrl.removePrefix("https://").removePrefix("www.")}",
+                    size = ButtonSize.SMALL,
+                    onClick = appState::openDriveSignInPage,
+                )
+                KitButton(
+                    "Cancel",
+                    onClick = appState::cancelDriveSignIn,
+                    kind = ButtonKind.SECONDARY,
+                    size = ButtonSize.SMALL,
+                )
+            } else if (account == null) {
                 KitButton(
                     if (busy) "Connecting…" else "Connect Google Drive",
                     size = ButtonSize.SMALL,
@@ -326,7 +340,14 @@ internal fun DriveBackupControls(appState: AppState) {
         }
     }
 
-    Text(
+    appState.driveSignInCode?.takeIf { account == null }?.let { waiting ->
+        Text(
+            "Type this code at ${waiting.verificationUrl.removePrefix("https://")}, on this device " +
+                "or any other, and press Allow. This connects by itself once you do.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(waiting.userCode, style = MaterialTheme.typography.headlineSmall.copy(fontFamily = TabularFigures))
+    } ?: Text(
         driveLine(appState.driveAvailable, account, held),
         style = MaterialTheme.typography.bodySmall,
         color = palette.muted,
@@ -393,7 +414,7 @@ internal fun DriveBackupControls(appState: AppState) {
 
 /** The line under the Drive buttons. Never blank: an empty line reads like one that stopped. */
 internal fun driveLine(available: Boolean, account: String?, held: List<DriveBackup>?): String = when {
-    !available -> "Google Drive needs Google Play services, which this device does not have."
+    !available -> "Google Drive cannot be reached from this build."
     account == null ->
         "Not connected. Connect a Google account and a copy goes to its Drive once a day."
     held == null -> "Backing up daily to Google Drive as $account."

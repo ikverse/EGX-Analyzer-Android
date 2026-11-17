@@ -117,6 +117,8 @@ internal class TradeActions(
     /** Opens the Keep open dialog. */
     val keepOpen: () -> Unit,
     val stopKeepingOpen: () -> Unit,
+    /** Opens the note dialog: why it was bought, why it was sold. */
+    val note: () -> Unit,
     val undoSale: () -> Unit,
     val showOnly: () -> Unit,
     val remove: () -> Unit,
@@ -133,6 +135,7 @@ internal fun TradeActions.menu(view: PositionView): List<MenuItem> = buildList {
     } else if (!view.finished && view.awaitingSale) {
         add(MenuItem("Keep it open") { keepOpen() })
     }
+    add(MenuItem(if (view.position.note == null) "Add a note" else "Edit the note") { note() })
     if (view.realized) add(MenuItem("Undo the sale") { undoSale() })
     add(MenuItem("Show only ${view.ticker}") { showOnly() })
     add(MenuItem("Remove", danger = true) { remove() })
@@ -229,7 +232,9 @@ internal fun PositionCard(
                     if (view.keptOpen && brief.days?.late == false) KitTag("Kept open", tone = palette.muted)
                     if (position.isTPlusOne) TPlusOneChip(position)
                     if (view.priceScaleChanged) PriceScaleChip()
+                    DividendPill(LocalDividends.current, position.ticker, position.entryDate, if (view.open) null else (position.exitDate ?: position.exitDate1))
                 }
+                position.note?.let { NoteLine(it) }
             }
         }
     }
@@ -355,9 +360,11 @@ internal fun ColumnScope.TradeDetail(
         if (view.keptOpen && !view.overdue) KitTag("Kept open", tone = palette.muted)
         if (position.isTPlusOne) TPlusOneChip(position)
         if (view.priceScaleChanged) PriceScaleChip()
+        DividendPill(LocalDividends.current, position.ticker, position.entryDate, if (view.open) null else (position.exitDate ?: position.exitDate1))
         // "from", so the channel reads as where the call came from rather than as a second status.
         position.channel?.takeIf(String::isNotBlank)?.let { KitTag("from $it", tone = palette.muted) }
     }
+    position.note?.let { NoteLine(it) }
 
     val signals = tileSignals(TileTone.INK)
     StandsTile(
@@ -1003,3 +1010,16 @@ private val PositionChartHeight = 180.dp
 
 
 /** The status edge down the left of a trade card. */
+
+/** The reader's own note on a trade, in their words, under the pills. */
+@Composable
+internal fun NoteLine(note: String, modifier: Modifier = Modifier) {
+    Text(
+        "“$note”",
+        style = MaterialTheme.typography.bodyMedium,
+        color = palette.muted,
+        maxLines = 3,
+        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
+}

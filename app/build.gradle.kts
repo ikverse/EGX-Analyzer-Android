@@ -7,7 +7,7 @@
 // One place decides the version. It stayed at 0.1.0 through every build, so a device could not be
 // asked which one it was running - a question that cost real time while diagnosing a black screen.
 // Bump the name here; the code is derived from it so the two can never disagree.
-val appVersionName = "5.7.0"
+val appVersionName = "5.8.0"
 val appVersionCode = appVersionName.split(".").let { (major, minor, patch) ->
     major.toInt() * 10_000 + minor.toInt() * 100 + patch.toInt()
 }
@@ -53,6 +53,10 @@ val telegramApiHash: String = buildSetting("telegramApiHash")
     ?: buildSetting("TELEGRAM_API_HASH")
     ?: ""
 
+/** The Google sign-in for a device with no Play services. See the buildConfigField below. */
+val googleDeviceClientId: String = buildSetting("GOOGLE_DEVICE_CLIENT_ID") ?: ""
+val googleDeviceClientSecret: String = buildSetting("GOOGLE_DEVICE_CLIENT_SECRET") ?: ""
+
 /**
  * The key release builds are signed with.
  *
@@ -84,6 +88,14 @@ android {
 
         buildConfigField("int", "TELEGRAM_API_ID", telegramApiId)
         buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
+        // The "TVs and Limited Input devices" OAuth client in the owner's Google Cloud project, used
+        // only by the code sign-in on a device with no Play services (the Huawei tablet). The phones'
+        // Play services sign-in finds its Android client by package name and signature and never
+        // reads these. Google treats this secret as not confidential, but this repository is public,
+        // so both come from local.properties or the CI secrets, like the Telegram credentials.
+        // Absent, the tablet simply cannot connect Drive; nothing else changes.
+        buildConfigField("String", "GOOGLE_DEVICE_CLIENT_ID", "\"${googleDeviceClientId}\"")
+        buildConfigField("String", "GOOGLE_DEVICE_CLIENT_SECRET", "\"${googleDeviceClientSecret}\"")
     }
 
     signingConfigs {

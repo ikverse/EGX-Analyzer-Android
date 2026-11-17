@@ -159,6 +159,18 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   See **Keeping the sessions the feed forgets** below.
 - `data/DailyFromIntraday.kt` — bars aggregated into daily sessions, for those stocks. See below.
 - `model/CallSanity.kt` — whether a call's levels can be believed. See below.
+- `model/Dividend.kt` + `data/DividendRepository.kt` + `data/DividendStore.kt` — cash dividends:
+  what is coming, off Arab Finance's dividend news page, and what happened, off `events=div` on the
+  daily price request. Kept by `LiveHome` in `dividends.json`. See **Dividends** in
+  `docs/features.md`.
+- `model/FollowCurve.kt` + `model/TradeHabits.kt` — the "had you followed it" line on a source's
+  sheet, and the reader's own habits across finished trades. `PerformanceCalculator.channelForm` is
+  the last 30 and 60 days on the ranking.
+- `model/Consensus.kt` — stocks two or more channels called in the last ten sessions, still open,
+  for the "Called by several channels" tile on Insights and a line on the stock sheet. Ordered by
+  the count, never by rank: crowding, not confirmation, as `CallContext` says.
+- `model/CompanyFacts.kt` + `data/CompanyFactsRepository.kt` — P/E, EPS, net income and debt off
+  stockanalysis.com, for the stock sheet, in `company_facts.json`.
 - `model/CallShortlist.kt` — which card is worth a paid question. See below.
 - `model/CallAlerts.kt` + `data/CallAlertNotifier.kt` — a stock reaching a buy zone nobody took.
 - `model/PerformanceCalculator.kt` — per-channel and per-session rollups, and the ranking.
@@ -197,7 +209,11 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
   `ui/DriveBackups.kt` — the same backup in a folder of the owner's Google Drive, behind a Google
   sign-in asking for `drive.file` alone. The third region outside `LiveAppState` (`DriveBackups by
   drive`). Needs the owner's Google Cloud OAuth client; see **Google Drive, beside the folder** in
-  `docs/features.md`.
+  `docs/features.md`. `data/GoogleBrowserAuth.kt` + `OAuthRedirectActivity` sign in through the
+  browser where Play services is missing (the tablet).
+- `data/SyncTransport.kt` + `data/DriveSyncTransport.kt` + `model/SyncMode.kt` — what carries the
+  sync: the Telegram channel or `EGX Analyzer/sync` in Drive, chosen per device. See **Two carriers,
+  one set of rules** in `docs/features.md`.
 - `ui/PortfolioScreen.kt` + `ui/PositionCard.kt` + `ui/TradeControls.kt` — the Portfolio tab, one
   trade's card, and the Bought button and closing controls that sit on a recommendation card.
 - `ui/CommonUi.kt` holds `Figure` and `FigureGroup`, `Screen`, `SectionCard` and the other shared
@@ -556,7 +572,8 @@ floating bar, this section is what is true now.
   sweeping up "the app's databases" would pull in a file sized in hundreds of megabytes. See
   **Keeping the sessions the feed forgets**.
 - `LocalDataStore.DATABASE_VERSION` — bump it and add the table to **both** `onCreate` and
-  `onUpgrade`. Currently 28. **Bumping the constant is half of it**: `session_events` was added to
+  `onUpgrade`. Currently 29 (the `note` column on `positions`, tested against the version-28
+  table in `LocalDataStoreMigrationTest`). **Bumping the constant is half of it**: `session_events` was added to
   both hooks and left at 20, so a fresh install had the table and every upgrade silently did not —
   which fails at the first write and nowhere earlier. `SessionEventStoreTest` caught it. Adding it to only one of the two is the mistake that gets made:
   `CallAlertStoreTest` caught exactly that on version 19 before it shipped.

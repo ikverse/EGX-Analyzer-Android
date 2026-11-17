@@ -1,5 +1,6 @@
 package com.ikverse.egxanalyzer.ui
 
+import com.ikverse.egxanalyzer.model.DividendRecord
 import com.ikverse.egxanalyzer.model.Headline
 import com.ikverse.egxanalyzer.model.IndexQuote
 import com.ikverse.egxanalyzer.model.MarketBrief
@@ -37,6 +38,13 @@ interface HomeFeed {
     val homeBrief: MarketBrief?
 
     val homeBriefPending: Boolean
+
+    /**
+     * Cash dividends: the upcoming ones from Arab Finance's news, and each stock's paid table off
+     * the daily price feed. Read by Home's tile, the stock sheet and the cards' pill, so it lives
+     * on this sub-interface and every page reaches it through [AppState]. Free, and device-local.
+     */
+    val dividends: DividendRecord
 
     /** Fetches the indices and the outside numbers, unless a fetch is recent. [force] skips that. */
     fun refreshHomeMarket(force: Boolean = false)

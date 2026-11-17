@@ -521,6 +521,9 @@ interface AppState : AppUpdates, HomeFeed, DriveBackups {
 
     fun setKeepOpen(position: Position, keepOpen: Boolean, note: String? = null)
 
+    /** Saves the reader's own note on a trade, or clears it when blank. Synced like the trade. */
+    fun setPositionNote(position: Position, note: String?)
+
     fun deletePosition(position: Position)
 
     fun refreshOverdue()
@@ -544,6 +547,12 @@ interface AppState : AppUpdates, HomeFeed, DriveBackups {
      * feed has never carried, which is the same thing the sheet already says in words.
      */
     suspend fun priceHistory(ticker: String, from: LocalDate): List<DailySession>
+
+    /**
+     * A company's facts (P/E, EPS, net income, debt) for its stock sheet: the stored copy while it
+     * is under a week old, else one free request to stockanalysis.com. Null where there are none.
+     */
+    suspend fun companyFacts(ticker: String): com.ikverse.egxanalyzer.model.CompanyFacts?
 
     /**
      * Whether a chart may offer [ticker] its 1D range. False for a stock the feed carries no
@@ -693,13 +702,13 @@ interface AppState : AppUpdates, HomeFeed, DriveBackups {
     suspend fun syncReports()
 
     /**
-     * Whether this phone keeps the sync channel current. Off, nothing is sent to it or read from
-     * it; every change waits on the device, already shaped for the next sync to carry.
+     * What carries this phone's sync: off, the Telegram channel, or the Google Drive folder. Off,
+     * nothing is sent or read; every change waits on the device, already shaped for the next sync.
      */
-    val telegramSyncEnabled: Boolean
+    val syncMode: com.ikverse.egxanalyzer.model.SyncMode
 
-    /** Switching back on catches up at once, quietly, when Telegram is signed in. */
-    fun updateTelegramSync(enabled: Boolean)
+    /** A new choice catches up at once, quietly. Google Drive is refused until it is connected. */
+    fun updateSyncMode(mode: com.ikverse.egxanalyzer.model.SyncMode)
 
 
     suspend fun startTelegramQrSignIn()

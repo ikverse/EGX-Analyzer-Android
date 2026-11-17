@@ -4,6 +4,23 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.8.0] — 2026-11-17
+
+- **Sync through Google Drive.** Settings → Backup and sync → Sync now asks what to sync through: Off, Telegram or Google Drive. With Google Drive, your reports, trades, rules and settings travel through a folder in your Drive (EGX Analyzer/sync) instead of the Telegram channel. Telegram is still used to read your source channels.
+- **Moving over:** sync each device once with Telegram, then choose Google Drive on each. The Telegram channel is left as it is.
+- **Google Drive on the tablet.** A device without Google Play services now connects Google Drive through Google's sign-in page in the browser, so it can back up and sync through Drive too.
+- The old Sync with Telegram switch is now the Sync through choice; a device that had sync switched off stays off.
+- **Dividends.** Home has a Dividends tile listing upcoming cash dividends, soonest first, with stocks you hold or have an open call on at the top: the amount per share, the last day to buy and the payment day. A stock's sheet shows its next dividend, or one that went ex in the last month, with a link to the announcement. They come from Arab Finance's dividend news, checked against the price feed's own record once the date passes; a day marked ~ is worked out from the payment day and not yet confirmed.
+- **A dividend pill on trades and calls.** "Dividend 26 Nov" shows on a trade's or a call's card when the stock went, or goes, ex-dividend during it: the day its price drops by the dividend. It explains a move and changes no result.
+- **Recent form in the ranking.** Each source's card shows how many of its calls settled in the last 30 and 60 days reached a target, beside its whole record, and says Cooling or Warming when the last 60 days stand 15 points or more away from the record over at least five calls. Its sheet has the same three figures.
+- **Had you followed it.** A source's sheet draws following every one of its calls in turn as a line from 100, with the EGX30 beside it over the months Home holds the index for.
+- **Notes on your trades.** Add a note from a trade's menu (why you bought, why you sold). It shows on the trade's card and travels with it to your other devices.
+- **Your habits.** Portfolio has a tile across your finished trades: how often you sold before target 1, held past the stop, or closed by hand, what those trades made, and what the calls behind them made.
+- **Called by several channels.** Insights lists stocks that two or more channels called in the last ten sessions and that are still open, most channels first, and a stock's sheet says which channels called it. It is a count, not a signal: several channels on one stock is often one idea going round.
+- **The company.** A stock's sheet shows its P/E, EPS, net income over twelve months (marked when it is a loss), total debt and debt to equity, read from stockanalysis.com at most once a week.
+
+---
+
 ## [5.7.0] — 2026-11-15
 
 - **Back up to Google Drive.** Settings → Backup and sync → Backup has a Connect Google Drive button. Once you sign in, a copy goes to a folder called EGX Analyzer in your Drive once a day, and whenever you press Back up to Drive. Seven are kept. The app can see only the files it put there.

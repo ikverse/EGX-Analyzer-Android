@@ -44,23 +44,29 @@ private const val FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 private const val API = "https://www.googleapis.com/drive/v3"
 private const val UPLOAD_API = "https://www.googleapis.com/upload/drive/v3"
 
-/** Drive's search for the app's folder. Only folders this app made can match, under `drive.file`. */
-internal fun driveFolderQuery(): String =
-    "name = '${DRIVE_FOLDER_NAME}' and mimeType = '$FOLDER_MIME_TYPE' and trashed = false"
+/**
+ * Drive's search for a folder called [name], inside [parentId] when one is given. Only folders this
+ * app made can match, under `drive.file`.
+ */
+internal fun driveFolderQuery(name: String = DRIVE_FOLDER_NAME, parentId: String? = null): String =
+    "name = '${name.replace("'", "\\'")}' and mimeType = '$FOLDER_MIME_TYPE' and trashed = false" +
+        (parentId?.let { " and '${it.replace("'", "\\'")}' in parents" } ?: "")
 
 /** Drive's search for everything directly in [folderId]. */
 internal fun driveChildrenQuery(folderId: String): String =
     "'${folderId.replace("'", "\\'")}' in parents and trashed = false"
 
-/** The body that creates the folder. */
-internal fun driveFolderMetadata(): String =
-    JSONObject().put("name", DRIVE_FOLDER_NAME).put("mimeType", FOLDER_MIME_TYPE).toString()
+/** The body that creates a folder called [name], inside [parentId] when one is given. */
+internal fun driveFolderMetadata(name: String = DRIVE_FOLDER_NAME, parentId: String? = null): String =
+    JSONObject().put("name", name).put("mimeType", FOLDER_MIME_TYPE)
+        .apply { parentId?.let { put("parents", JSONArray().put(it)) } }
+        .toString()
 
 /** The body that opens an upload of [name] into [folderId]. */
-internal fun driveUploadMetadata(name: String, folderId: String): String =
+internal fun driveUploadMetadata(name: String, folderId: String, mimeType: String = BACKUP_MIME_TYPE): String =
     JSONObject()
         .put("name", name)
-        .put("mimeType", BACKUP_MIME_TYPE)
+        .put("mimeType", mimeType)
         .put("parents", JSONArray().put(folderId))
         .toString()
 
@@ -123,15 +129,60 @@ internal class DriveClient(private val token: suspend (fresh: Boolean) -> String
      * is made again instead of every later backup failing against an id that has gone. If two phones
      * made one each at the same moment, the older is used by both from then on.
      */
-    suspend fun folder(): String = authorized { bearer ->
-        val found = request(
-            "GET",
-            "$API/files?q=${encode(driveFolderQuery())}&orderBy=createdTime&fields=files(id,name)&spaces=drive",
-            bearer,
-        )
-        parseDriveFiles(found).firstOrNull()?.id ?: JSONObject(
-            request("POST", "$API/files?fields=id", bearer, json = driveFolderMetadata()),
+    suspend fun folder(): String =
+        folders(DRIVE_FOLDER_NAME).firstOrNull() ?: createFolder(DRIVE_FOLDER_NAME)
+
+    /** Every folder called [name] (inside [parentId] if given), oldest first. */
+    suspend fun folders(name: String, parentId: String? = null): List<String> = authorized { bearer ->
+        parseDriveFiles(
+            request(
+                "GET",
+                "$API/files?q=${encode(driveFolderQuery(name, parentId))}" +
+                    "&orderBy=createdTime&fields=files(id,name)&spaces=drive",
+                bearer,
+            ),
+        ).map(DriveBackup::id)
+    }
+
+    /** Makes a folder called [name], inside [parentId] if given, and returns its id. */
+    suspend fun createFolder(name: String, parentId: String? = null): String = authorized { bearer ->
+        JSONObject(
+            request("POST", "$API/files?fields=id", bearer, json = driveFolderMetadata(name, parentId)),
         ).getString("id")
+    }
+
+    /**
+     * Every file in [folderId], newest first, across as many pages as Drive takes to say so.
+     *
+     * Newest first because that is the order the sync listing reads in - where two files claim one
+     * slot the first seen is kept, as Telegram's newest-first history always had it.
+     */
+    suspend fun listAll(folderId: String): List<DriveBackup> = authorized { bearer ->
+        val all = mutableListOf<DriveBackup>()
+        var pageToken: String? = null
+        do {
+            val body = request(
+                "GET",
+                "$API/files?q=${encode(driveChildrenQuery(folderId))}" +
+                    "&orderBy=createdTime%20desc&fields=nextPageToken,files(id,name,size)" +
+                    "&pageSize=1000&spaces=drive" + (pageToken?.let { "&pageToken=${encode(it)}" } ?: ""),
+                bearer,
+            )
+            all += parseDriveFiles(body)
+            pageToken = JSONObject(body).optString("nextPageToken").takeIf(String::isNotBlank)
+        } while (pageToken != null)
+        all
+    }
+
+    /** Adds a small text file - a sync document - to [folderId], and returns its id. */
+    suspend fun uploadText(text: String, name: String, folderId: String, mimeType: String): String {
+        val bytes = text.toByteArray()
+        return send(bytes.size.toLong(), name, folderId, mimeType) { it.write(bytes) }
+    }
+
+    /** Reads a small text file back. */
+    suspend fun downloadText(id: String): String = authorized { bearer ->
+        request("GET", "$API/files/${encode(id)}?alt=media", bearer)
     }
 
     /** Every file in the folder. */
@@ -147,14 +198,30 @@ internal class DriveClient(private val token: suspend (fresh: Boolean) -> String
     }
 
     /** Uploads [file] as [name] into [folderId], and returns the new file's id. */
-    suspend fun upload(file: File, name: String, folderId: String): String = authorized { bearer ->
+    suspend fun upload(file: File, name: String, folderId: String): String =
+        send(file.length(), name, folderId, BACKUP_MIME_TYPE) { out ->
+            file.inputStream().use { it.copyTo(out) }
+        }
+
+    /**
+     * A resumable upload, so Drive shows the file only once its last byte has arrived.
+     *
+     * [write] may be called twice, if the first token was refused, so it must be repeatable.
+     */
+    private suspend fun send(
+        length: Long,
+        name: String,
+        folderId: String,
+        mimeType: String,
+        write: (java.io.OutputStream) -> Unit,
+    ): String = authorized { bearer ->
         val start = open("POST", "$UPLOAD_API/files?uploadType=resumable&fields=id", bearer)
         val session = try {
             start.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            start.setRequestProperty("X-Upload-Content-Type", BACKUP_MIME_TYPE)
-            start.setRequestProperty("X-Upload-Content-Length", file.length().toString())
+            start.setRequestProperty("X-Upload-Content-Type", mimeType)
+            start.setRequestProperty("X-Upload-Content-Length", length.toString())
             start.doOutput = true
-            start.outputStream.use { it.write(driveUploadMetadata(name, folderId).toByteArray()) }
+            start.outputStream.use { it.write(driveUploadMetadata(name, folderId, mimeType).toByteArray()) }
             check(start)
             start.getHeaderField("Location") ?: throw IOException("Google Drive did not open an upload")
         } finally {
@@ -162,12 +229,12 @@ internal class DriveClient(private val token: suspend (fresh: Boolean) -> String
         }
         val put = open("PUT", session, bearer)
         try {
-            put.setRequestProperty("Content-Type", BACKUP_MIME_TYPE)
+            put.setRequestProperty("Content-Type", mimeType)
             put.doOutput = true
             // Streamed, not buffered: a record is tens of megabytes and HttpURLConnection would
             // otherwise hold all of it in memory to learn its length.
-            put.setFixedLengthStreamingMode(file.length())
-            put.outputStream.use { out -> file.inputStream().use { it.copyTo(out) } }
+            put.setFixedLengthStreamingMode(length)
+            put.outputStream.use(write)
             JSONObject(check(put)).getString("id")
         } finally {
             put.disconnect()

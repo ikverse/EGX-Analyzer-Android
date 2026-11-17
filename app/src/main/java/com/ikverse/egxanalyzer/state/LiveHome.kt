@@ -9,7 +9,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.ikverse.egxanalyzer.data.AnalysisRepository
+import com.ikverse.egxanalyzer.data.DividendRepository
+import com.ikverse.egxanalyzer.data.DividendStore
 import com.ikverse.egxanalyzer.data.EgxCatalog
+import com.ikverse.egxanalyzer.model.DividendBook
+import com.ikverse.egxanalyzer.model.DividendRecord
+import com.ikverse.egxanalyzer.model.PaidDividend
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import com.ikverse.egxanalyzer.data.HomeCache
 import com.ikverse.egxanalyzer.data.HomeCacheStore
 import com.ikverse.egxanalyzer.data.HomeMarketRepository
@@ -57,6 +64,8 @@ class LiveHome(
     private val market: HomeMarketRepository = HomeMarketRepository(),
     private val news: NewsRepository = NewsRepository(),
     private val cache: HomeCacheStore = HomeCacheStore(File(context.filesDir, HomeCacheStore.FILE_NAME)),
+    private val dividendNews: DividendRepository = DividendRepository(),
+    private val dividendStore: DividendStore = DividendStore(File(context.filesDir, DividendStore.FILE_NAME)),
 ) : HomeFeed {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -77,6 +86,12 @@ class LiveHome(
         private set
     override var homeBriefPending by mutableStateOf(false)
         private set
+    override var dividends by mutableStateOf(DividendRecord())
+        private set
+
+    private var dividendsLoading = false
+    private var dividendsLoaded = false
+    private var dividendSave: Job? = null
 
     private var marketAt = 0L
     private var marketLoading = false
@@ -98,6 +113,60 @@ class LiveHome(
                 homeNewsAt = kept.newsAt
             }
             if (homeBrief == null) homeBrief = kept.brief
+        }
+        scope.launch {
+            val kept = withContext(Dispatchers.IO) { dividendStore.load() }
+            // Anything the feed reported while the file was being read is folded over it.
+            val paid = dividends.paid.entries.fold(kept.paid) { all, (ticker, list) -> DividendBook.withPaid(all, ticker, list) }
+            dividends = kept.copy(paid = paid, newsAt = maxOf(kept.newsAt, dividends.newsAt))
+            dividendsLoaded = true
+            // A request that arrived before the file was read was refused; this is it, late.
+            refreshDividends(force = false)
+        }
+    }
+
+    /**
+     * The cash dividends one daily price answer carried, from `PriceRepository.dividendsSeen`.
+     * Called on the fetch's own thread, so it hops to the main one before touching state, and the
+     * file is written once the burst of a whole refresh has passed rather than once per stock.
+     */
+    fun recordPaid(ticker: String, paid: List<PaidDividend>) {
+        scope.launch {
+            val all = DividendBook.withPaid(dividends.paid, ticker, paid)
+            if (all == dividends.paid) return@launch
+            val today = LocalDate.now(ScheduleClock.ZONE)
+            dividends = dividends.copy(paid = all, dividends = DividendBook.merge(dividends.dividends, emptyList(), all, today))
+            saveDividendsSoon()
+        }
+    }
+
+    /** Reads Arab Finance's dividend page, unless it was read in the last six hours. */
+    private fun refreshDividends(force: Boolean) {
+        if (dividendsLoading || !dividendsLoaded) return
+        if (!force && System.currentTimeMillis() - dividends.newsAt < DIVIDENDS_FRESH_MILLIS) return
+        dividendsLoading = true
+        scope.launch {
+            try {
+                // Null is "did not answer": the list stays as it was rather than emptying.
+                val items = dividendNews.news() ?: return@launch
+                val today = LocalDate.now(ScheduleClock.ZONE)
+                val merged = DividendBook.merge(dividends.dividends, items, dividends.paid, today)
+                    // A year back is all any card asks about; older news only grows the file.
+                    .filter { d -> (d.anchor ?: today) >= today.minusDays(DIVIDENDS_KEPT_DAYS) }
+                dividends = dividends.copy(dividends = merged, newsAt = System.currentTimeMillis())
+                saveDividendsSoon(0)
+            } finally {
+                dividendsLoading = false
+            }
+        }
+    }
+
+    private fun saveDividendsSoon(wait: Long = 2_000) {
+        dividendSave?.cancel()
+        dividendSave = scope.launch {
+            delay(wait)
+            val snapshot = dividends
+            withContext(Dispatchers.IO) { dividendStore.save(snapshot) }
         }
     }
 
@@ -121,6 +190,8 @@ class LiveHome(
     }
 
     override fun refreshHomeMarket(force: Boolean) {
+        // Dividends ride the market's refresh, on their own six-hour clock.
+        refreshDividends(force)
         if (marketLoading) return
         if (!force && System.currentTimeMillis() - marketAt < MARKET_FRESH_MILLIS) return
         marketLoading = true
@@ -241,6 +312,11 @@ class LiveHome(
         const val MARKET_FRESH_MILLIS = 10L * 60 * 1000
 
         const val NEWS_FRESH_MILLIS = 30L * 60 * 1000
+
+        /** The page holds about two months and changes a few times a day. */
+        const val DIVIDENDS_FRESH_MILLIS = 6L * 60 * 60 * 1000
+
+        const val DIVIDENDS_KEPT_DAYS = 400L
 
         /** The article tab's toolbar: the page's paper by day, its graphite at night. */
         const val TabPaper = 0xFFEFEDE6.toInt()

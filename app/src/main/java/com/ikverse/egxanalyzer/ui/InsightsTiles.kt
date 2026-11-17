@@ -48,6 +48,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ikverse.egxanalyzer.model.CallsInPlay
+import com.ikverse.egxanalyzer.model.ChannelForm
+import com.ikverse.egxanalyzer.ui.kit.KitRule
+import com.ikverse.egxanalyzer.model.SharedCall
+import com.ikverse.egxanalyzer.model.Consensus
 import com.ikverse.egxanalyzer.model.ChannelScore
 import com.ikverse.egxanalyzer.model.PerformanceCalculator
 import com.ikverse.egxanalyzer.model.PerformanceReport
@@ -116,6 +120,7 @@ internal fun RankingTiles(
     onExport: () -> Unit,
     showAll: MutableState<Boolean>,
     modifier: Modifier = Modifier,
+    form: Map<String, ChannelForm> = emptyMap(),
 ) {
     if (channels.isEmpty()) return
     val places = remember(channels) {
@@ -135,7 +140,7 @@ internal fun RankingTiles(
         shown.take(LeaderTones.size).forEachIndexed { index, score ->
             val tone = LeaderTones[index]
             Tile(Modifier.fillMaxWidth(), tone = tone, contentPadding = PaddingValues(6.dp)) {
-                RankingRow(score, places[score.channel], photoFor(score.channel), tone, score.channel == selected) { onOpen(score) }
+                RankingRow(score, places[score.channel], photoFor(score.channel), tone, score.channel == selected, form[score.channel]) { onOpen(score) }
             }
         }
         val rest = shown.drop(LeaderTones.size)
@@ -143,7 +148,7 @@ internal fun RankingTiles(
             Tile(Modifier.fillMaxWidth(), contentPadding = PaddingValues(6.dp)) {
                 rest.forEachIndexed { index, score ->
                     if (index > 0) Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(1.dp).background(palette.ground))
-                    RankingRow(score, places[score.channel], photoFor(score.channel), TileTone.CARD, score.channel == selected) { onOpen(score) }
+                    RankingRow(score, places[score.channel], photoFor(score.channel), TileTone.CARD, score.channel == selected, form[score.channel]) { onOpen(score) }
                 }
             }
         }
@@ -182,6 +187,7 @@ private fun RankingRow(
     photoPath: String?,
     tone: TileTone,
     selected: Boolean,
+    form: ChannelForm?,
     onOpen: () -> Unit,
 ) {
     val thin = !score.ranked()
@@ -218,6 +224,7 @@ private fun RankingRow(
                     maxLines = 1,
                 )
                 if (thin) KitTag("Too new to rank", tone = soft)
+                form?.trend?.let { KitTag(it.label, tone = soft) }
             }
         }
         // The two figures on a line of their own, under the name, so the name keeps the whole width
@@ -250,6 +257,16 @@ private fun RankingRow(
                 Text("reached target", style = MaterialTheme.typography.bodySmall, color = soft, maxLines = 1)
             }
         }
+        form?.let { f ->
+            Text(
+                formLine(f),
+                style = MaterialTheme.typography.bodySmall,
+                color = soft,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = FigureIndent, top = 6.dp),
+            )
+        }
         val split = score.outcomes()
         if (split.total > 0) {
             OutcomeStrip(split, Modifier.padding(start = PlaceWidth + 12.dp, top = 10.dp))
@@ -258,6 +275,11 @@ private fun RankingRow(
 }
 
 private val PlaceWidth: Dp = 22.dp
+
+/** "30 days 2/4 · 60 days 5/9 · all 31/52": reached a target, over calls settled in each window. */
+internal fun formLine(f: ChannelForm): String = listOf(
+    "30 days" to f.last30, "60 days" to f.last60, "all" to f.lifetime,
+).joinToString(" · ") { (name, w) -> "$name ${w.reachedTarget}/${w.judged}" }
 
 /** Where the name starts: past the place, the 40dp picture and the two 12dp gaps. */
 private val FigureIndent: Dp = PlaceWidth + 12.dp + 40.dp + 12.dp
@@ -384,5 +406,63 @@ internal fun FigureCell(value: String, label: String, modifier: Modifier = Modif
             maxLines = 1,
         )
         Text(label, style = MaterialTheme.typography.labelSmall, color = p.muted, maxLines = 2)
+    }
+}
+
+/**
+ * Stocks two or more channels called in the last ten sessions, still open, most channels first.
+ * Crowding, not confirmation: the title says what happened and nothing more - see `Consensus`.
+ * Five rows, then Show all; a row opens the stock. Absent when no stock is shared.
+ */
+@Composable
+internal fun SharedCallsTile(shared: List<SharedCall>, modifier: Modifier = Modifier, limit: Int = 5) {
+    if (shared.isEmpty()) return
+    val p = palette
+    val openStock = LocalOpenStock.current
+    var open by remember { mutableStateOf(false) }
+    Tile(modifier.fillMaxWidth()) {
+        Text("Called by several channels", style = MaterialTheme.typography.titleSmall, color = p.muted)
+        Text(
+            "Open calls from the last ${Consensus.WINDOW_SESSIONS} sessions. Several channels on one stock " +
+                "is often one idea going round, not separate evidence.",
+            style = MaterialTheme.typography.bodySmall,
+            color = p.muted,
+        )
+        (if (open) shared else shared.take(limit)).forEachIndexed { i, call ->
+            if (i > 0) KitRule()
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clickable(role = Role.Button, onClickLabel = "Open ${call.ticker}") { openStock(call.ticker) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StockLogo(call.ticker, 22.dp)
+                Spacer(Modifier.width(Space.s))
+                Column(Modifier.weight(1f)) {
+                    Text(call.ticker, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                    Text(
+                        call.channels.joinToString(", ") { "⁨$it⁩" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = p.muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    "${call.channels.size}",
+                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
+                )
+            }
+        }
+        if (shared.size > limit) {
+            KitButton(
+                if (open) "Show fewer" else "Show all ${shared.size}",
+                onClick = { open = !open },
+                kind = ButtonKind.SECONDARY,
+                size = ButtonSize.SMALL,
+                modifier = Modifier.padding(top = Space.s),
+            )
+        }
     }
 }

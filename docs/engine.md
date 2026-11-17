@@ -706,3 +706,29 @@ the ones this phone has done, and goes away for good once there is a report on t
 - **Dismissed on `PageState`, not in the composition**, session-only — the rule the stock box was
   written in blood for. A card that came back on every fold could not be dismissed at all.
 
+### Recent form, and following a source
+
+Added 2026-11-17.
+
+- **`PerformanceCalculator.channelForm`** counts, per source, the calls settled in the last 30 and
+  60 days that reached a target, beside the same count over everything. Windowed by `settledOn`,
+  because that is when a call joined the record; repeats left out, as in every rate. The ranking
+  card says Cooling or Warming when the 60-day rate stands `FORM_POINTS` (15) or more from the
+  lifetime one over at least `MINIMUM_JUDGED_TO_RANK` calls. It reads the filtered report, like the
+  ranking.
+- **`followCurve`** is every settled call taken in turn from 100, compounding its scored return
+  (`believableReturn`), one point per settling day. A reading of the record, not a backtest: two
+  calls open at once compound as if made one after the other. **`marketAlongCurve`** starts the
+  EGX30 at the curve's own value on the first day both have.
+- **The EGX30 beside it is Home's three months** (`homeIndices`), because that is the only index
+  history the screens reach without a new `AppState` member. A source older than that has the
+  market line over its newest three months only.
+
+### Called by several channels
+
+`Consensus.shared` (2026-11-17) lists the stocks two or more channels called within the last ten
+sessions whose calls are still open, a channel counting once however often it posted. It is ordered
+by how many channels and then by how recent, **never by their place in the ranking**: the approved
+plan said rank, and `CallContext`'s rule - several channels reading one chart is one idea going
+round, not confirmation - was the reason to change it before it was built. The tile's title and
+its one line of explanation say that, and nothing here feeds a score.

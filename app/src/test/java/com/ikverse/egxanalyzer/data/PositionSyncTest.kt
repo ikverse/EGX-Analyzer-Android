@@ -68,6 +68,15 @@ class PositionSyncTest {
     }
 
     @Test
+    fun `the reader's note travels with the trade, and an older document has none`() {
+        val original = revision().let { it.copy(position = it.position.copy(note = "Bought on the breakout")) }
+        val returned = SyncedPosition.fromDocument(original.toDocument())!!
+        assertEquals("Bought on the breakout", returned.position.note)
+        val older = JSONObject(original.toDocument()).apply { remove("note") }.toString()
+        assertNull(SyncedPosition.fromDocument(older)!!.position.note)
+    }
+
+    @Test
     fun `a position written before trades could outlive their deadline reads as an ordinary one`() {
         // What an older device uploads: no keepOpen, no windowCustom. Both are false there, which
         // is what those trades were - the offered window, closing when it ran out.

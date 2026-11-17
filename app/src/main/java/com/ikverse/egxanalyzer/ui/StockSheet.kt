@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -90,6 +91,14 @@ import com.ikverse.egxanalyzer.ui.kit.Tile
 import com.ikverse.egxanalyzer.ui.kit.TileTone
 import com.ikverse.egxanalyzer.ui.kit.popIn
 import com.ikverse.egxanalyzer.ui.theme.palette
+import com.ikverse.egxanalyzer.model.CompanyFacts
+import com.ikverse.egxanalyzer.model.Consensus
+import com.ikverse.egxanalyzer.model.Dividend
+import com.ikverse.egxanalyzer.model.DividendBook
+import com.ikverse.egxanalyzer.model.DividendCheck
+import com.ikverse.egxanalyzer.model.DividendRecord
+import com.ikverse.egxanalyzer.model.Headline
+import com.ikverse.egxanalyzer.model.ScheduleClock
 import java.time.LocalDate
 import java.util.Locale
 
@@ -111,6 +120,13 @@ import java.util.Locale
  * than failing to compose.
  */
 internal val LocalOpenStock = staticCompositionLocalOf<(String) -> Unit> { {} }
+
+/**
+ * What the app knows about dividends, for the pill on every call and trade card. Published by the
+ * shell beside [LocalOpenStock] so a card several layers down needs no extra parameter. Dynamic
+ * rather than static: it changes when the news page or a price refresh answers.
+ */
+internal val LocalDividends = compositionLocalOf { DividendRecord() }
 
 /**
  * Everything the app knows about one stock, in one place.
@@ -212,6 +228,18 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
             onClose = onDismiss,
         )
         StockSheetChips(trades, score, faults)
+        // Several channels on this stock lately: said as a fact, not as a signal. See `Consensus`.
+        val sharedCall = remember(report, key) {
+            Consensus.forStock(report.sessions.flatMap { it.calls }, key, LocalDate.now(ScheduleClock.ZONE))
+        }
+        sharedCall?.let { s ->
+            Text(
+                "Called by ${s.channels.size} channels in the last ${Consensus.WINDOW_SESSIONS} sessions: " +
+                    s.channels.joinToString(", ") { "⁨$it⁩" },
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.muted,
+            )
+        }
         StockSheetPrice(
             key, latest, history, chartLevels, callDates,
             newestCall = calls.firstOrNull()?.openedOn,
@@ -230,6 +258,17 @@ internal fun StockSheet(ticker: String, appState: AppState, onDismiss: () -> Uni
         if (chartLevels != null && latest?.session?.close != null) {
             StockSheetLevels(chartLevels, latest.session.close!!, inPlay, Modifier.popIn(1))
         }
+        val dividend = remember(appState.dividends, key) {
+            DividendBook.forStock(appState.dividends.dividends, key, LocalDate.now(ScheduleClock.ZONE))
+        }
+        dividend?.let { d ->
+            StockSheetDividend(d, latest?.session?.close, Modifier.popIn(1)) {
+                appState.openHeadline(Headline(d.headline, "Arab Finance", d.url, 0L, arabic = true))
+            }
+        }
+        var facts by remember(key) { mutableStateOf<CompanyFacts?>(null) }
+        LaunchedEffect(key) { facts = appState.companyFacts(key) }
+        facts?.let { StockSheetFacts(it, Modifier.popIn(2)) }
         if (score != null) StockSheetRecord(score, Modifier.popIn(2))
         if (trades.isNotEmpty()) {
             StockSheetTrades(trades, Modifier.popIn(3)) { id ->
@@ -790,6 +829,112 @@ private fun StockSheetLevels(levels: ChartLevels, now: Double, call: ScoredCall?
  * result bar and its key, and the figures behind them. Below the ranking floor the rates lose their
  * colour and say "too few to rank".
  */
+/**
+ * The next cash dividend, or one gone ex in the last month: the amount, its size against the last
+ * close, the last day to buy and the payment day. "about" until the price feed confirms the day.
+ */
+@Composable
+private fun StockSheetDividend(dividend: Dividend, close: Double?, modifier: Modifier = Modifier, onOpenNews: () -> Unit) {
+    val p = palette
+    val about = if (dividend.lastCumEstimated) "about " else ""
+    Tile(modifier.fillMaxWidth()) {
+        Text("DIVIDEND", style = MaterialTheme.typography.labelSmall, color = p.muted)
+        val amount = dividend.amount
+        Text(
+            if (amount == null) "Amount not announced" else String.format(Locale.US, "%.2f per share", amount),
+            style = MaterialTheme.typography.titleMedium.copy(fontFamily = TabularFigures),
+        )
+        if (amount != null && close != null && close > 0) {
+            Text(
+                String.format(Locale.US, "%.1f%% of the last close", amount / close * 100),
+                style = MaterialTheme.typography.bodySmall,
+                color = p.muted,
+            )
+        }
+        val lines = listOfNotNull(
+            dividend.lastCumDay?.let { "Last day to buy: $about${AppDates.DayMonthYear.format(it)}" },
+            dividend.paymentDay?.let { "Paid from: ${AppDates.DayMonthYear.format(it)}" },
+            "The price feed recorded ${String.format(Locale.US, "%.2f", dividend.feedAmount ?: 0.0)}, not the amount announced."
+                .takeIf { dividend.check == DividendCheck.AMOUNT_DIFFERS },
+        )
+        lines.forEach { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = Space.xs)) }
+        if (dividend.url.isNotEmpty()) {
+            KitButton(
+                "Read the announcement",
+                onClick = onOpenNews,
+                kind = ButtonKind.SECONDARY,
+                size = ButtonSize.SMALL,
+                modifier = Modifier.padding(top = Space.s),
+            )
+        }
+    }
+}
+
+/**
+ * "Dividend 26 Nov" on a trade's or a call's card: an ex-day fell, or falls, inside its life,
+ * which is the day the price drops by the dividend and can touch a stop without the call being
+ * wrong. Neutral, like T+1. "~" while the day is counted rather than confirmed by the feed.
+ * Explains a verdict; never changes one.
+ */
+@Composable
+internal fun DividendPill(record: DividendRecord, ticker: String, from: LocalDate, to: LocalDate?) {
+    val key = Scoring.normalizeTicker(ticker)
+    val mark = remember(record, key, from, to) { DividendBook.inside(record, key, from, to) } ?: return
+    KitTag("Dividend ${if (mark.estimated) "~" else ""}${AppDates.DayMonth.format(mark.exDay)}", tone = palette.muted)
+}
+
+/**
+ * What the company earns and owes, off stockanalysis.com and read at most weekly: P/E, EPS, net
+ * income over twelve months (marked when it is a loss), total debt and debt to equity.
+ */
+@Composable
+private fun StockSheetFacts(facts: CompanyFacts, modifier: Modifier = Modifier) {
+    val p = palette
+    fun plain(v: Double?, digits: Int = 2) = v?.let { String.format(Locale.US, "%.${digits}f", it) } ?: Dash
+    fun big(v: Double?) = v?.let {
+        val a = kotlin.math.abs(it)
+        when {
+            a >= 1e9 -> String.format(Locale.US, "%.2fB", it / 1e9)
+            a >= 1e6 -> String.format(Locale.US, "%.1fM", it / 1e6)
+            else -> String.format(Locale.US, "%,.0f", it)
+        }
+    } ?: Dash
+    Tile(modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("THE COMPANY", style = MaterialTheme.typography.labelSmall, color = p.muted, modifier = Modifier.weight(1f))
+            if (facts.lossMaking == true) KitTag("Loss-making", tone = p.loss)
+        }
+        FigureGroup(
+            "Last twelve months",
+            listOf<@Composable RowScope.() -> Unit>(
+                { Figure("P/E", plain(facts.peRatio, 1), Modifier.weight(1f)) },
+                { Figure("EPS", plain(facts.eps), Modifier.weight(1f)) },
+                {
+                    Figure(
+                        "Net income",
+                        big(facts.netIncome),
+                        Modifier.weight(1f),
+                        tone = if (facts.lossMaking == true) p.loss else p.ink,
+                    )
+                },
+            ),
+        )
+        FigureGroup(
+            "Debt",
+            listOf<@Composable RowScope.() -> Unit>(
+                { Figure("Total debt", big(facts.totalDebt), Modifier.weight(1f)) },
+                { Figure("Debt to equity", plain(facts.debtToEquity), Modifier.weight(1f)) },
+            ),
+        )
+        Text(
+            "From stockanalysis.com, read ${AppDates.DayMonth.format(java.time.Instant.ofEpochMilli(facts.fetchedAt).atZone(ScheduleClock.ZONE))}.",
+            style = MaterialTheme.typography.bodySmall,
+            color = p.muted,
+            modifier = Modifier.padding(top = Space.s),
+        )
+    }
+}
+
 @Composable
 private fun StockSheetRecord(score: StockScore, modifier: Modifier = Modifier) {
     val p = palette

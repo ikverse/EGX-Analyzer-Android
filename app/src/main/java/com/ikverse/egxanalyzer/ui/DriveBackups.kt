@@ -17,17 +17,35 @@ import com.ikverse.egxanalyzer.model.RestoreOutcome
  */
 interface DriveBackups {
 
-    /** False where Google Play services is missing - the Huawei tablet - and Drive cannot be used. */
+    /**
+     * Whether this build can reach Drive at all: through Play services, or with a code where Play
+     * services is missing. False only for a build without that second sign-in on such a device.
+     */
     val driveAvailable: Boolean
 
     /** The connected Google account, or null when Drive is not set up on this phone. */
     val driveAccount: String?
 
-    /** Asks for Drive access. Null once granted; otherwise Google's consent screen to launch. */
+    /**
+     * Asks for Drive access. Google's consent screen to launch, or null: already granted, or (with
+     * no Play services) a code is now in [driveSignInCode] and connecting finishes once it is typed.
+     */
     suspend fun requestDriveAccess(): IntentSender?
 
     /** Takes the consent screen's answer, and connects if it granted access. */
     suspend fun finishDriveAccess(data: Intent?)
+
+    /**
+     * A sign-in waiting for the owner to type a code at Google, on a device with no Play services.
+     * Null otherwise. Connecting finishes on its own once Google says yes.
+     */
+    val driveSignInCode: com.ikverse.egxanalyzer.model.DriveSignInCode?
+
+    /** Opens the page the code is typed at. */
+    fun openDriveSignInPage()
+
+    /** Stops waiting for the code. */
+    fun cancelDriveSignIn()
 
     /** Forgets the account here and revokes this app's access to it. Backups stay in Drive. */
     fun disconnectDrive()

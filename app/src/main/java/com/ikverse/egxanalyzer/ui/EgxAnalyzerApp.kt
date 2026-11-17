@@ -234,6 +234,7 @@ fun EgxAnalyzerApp(appState: AppState) {
         // is a new value for a static local, which invalidates every reader of it - and the readers
         // here are every ticker on every card on the page.
         LocalOpenStock provides remember(appState) { appState::openStock },
+        LocalDividends provides appState.dividends,
     ) {
       // Inside the provider since 5.0: outside it the sheet read the default posture and always laid
       // out for the cover screen, and its full-screen chart with it.

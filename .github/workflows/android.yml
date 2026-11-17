@@ -125,6 +125,10 @@ jobs:
           # my.telegram.org before it will show a sign-in code.
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          # The Google sign-in for a device with no Play services (the tablet). Absent, the release
+          # still builds and the phones still reach Drive; only that device cannot connect it.
+          GOOGLE_DEVICE_CLIENT_ID: ${{ secrets.GOOGLE_DEVICE_CLIENT_ID }}
+          GOOGLE_DEVICE_CLIENT_SECRET: ${{ secrets.GOOGLE_DEVICE_CLIENT_SECRET }}
         run: |
           ./gradlew :app:assembleRelease -PabiSplits --no-daemon
 

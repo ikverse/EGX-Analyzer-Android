@@ -388,6 +388,28 @@ internal fun KeepOpenDialog(onDismiss: () -> Unit, onConfirm: (String?) -> Unit)
 }
 
 /**
+ * The reader's own note on a trade: why they bought, why they sold. Blank clears it. Nothing reads
+ * it but the reader - no rule, no request - and it travels with the trade like every other field.
+ */
+@Composable
+internal fun TradeNoteDialog(existing: String?, onDismiss: () -> Unit, onConfirm: (String?) -> Unit) {
+    var note by remember { mutableStateOf(existing.orEmpty()) }
+    KitDialog(
+        title = if (existing == null) "Add a note" else "Edit the note",
+        text = "Why you bought, why you sold, what you would do differently. Shown on the trade's card.",
+        confirmLabel = "Save",
+        onConfirm = { onConfirm(note.trim().takeIf(String::isNotBlank)) },
+        dismissLabel = "Cancel",
+        onDismiss = onDismiss,
+        posture = LocalFoldPosture.current,
+        tone = TileTone.TILE2,
+        glyph = "✎",
+    ) {
+        KitTextField(note, { note = it }, label = "Note", modifier = Modifier.padding(top = Space.m).fillMaxWidth())
+    }
+}
+
+/**
  * Closes a position at a price the user names.
  *
  * Offered for as long as no sale has been recorded, including after the recommendation's window has
