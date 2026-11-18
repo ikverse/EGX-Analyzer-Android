@@ -19,3 +19,9 @@ design/
 
 # Real device serials and display ids; this repository is public.
 CLAUDE.local.md
+
+# Local Claude Code tooling and review notes; not part of the app.
+.agents/
+.claude/
+skills-lock.json
+review/

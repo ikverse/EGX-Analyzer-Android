@@ -1,51 +1,62 @@
 # EGX Analyzer for Android
 
-Standalone Android application for collecting EGX sources and sending them to a selected cloud
-model for recommendation analysis.
+Reads Egyptian Exchange stock recommendations out of Telegram channels, extracts them with a cloud
+model, scores every call against real prices, and ranks the channels on what they actually
+delivered.
 
-## Baseline
+## What it does
 
-- Android 12 or newer (`minSdk 31`)
-- Jetpack Compose and Material 3
-- Adaptive bottom navigation, navigation rail, and companion pane
-- Folding-feature observation through Jetpack WindowManager
-- Qwen Cloud, OpenRouter, Hugging Face, and OpenAI cloud selectors
-- No Ollama or other local-model UI
-- Provider credentials encrypted with a non-exportable Android Keystore key
-- Authenticated cloud model discovery with a selectable provider model list and manual fallback
-- QwenCloud/Alibaba regional endpoint presets with QwenCloud International as the default
-- Persisted system/light/dark appearance preference
-- Persisted analysis language, response timeout, and default content types
-- Provider endpoint/model reset without altering the saved credential
-- Telegram session status and actions available from Settings
-- On-device saved-analysis count and confirmed bulk deletion
-- On-device Telegram user sign-in through TDLib with restored encrypted sessions
-- Telegram chat selection, dated history retrieval, and text/photo/voice download
-- Optional on-device source import through Android document pickers
-- Cancellable provider-neutral cloud requests for text, images, and voice messages
-- SQLite-backed saved recommendations with source traceability
-- Per-provider endpoint/model settings and encrypted credential removal/replacement
+- **Home** — the EGX indices, the day's movers and breadth, market headlines, and your own book.
+- **Portfolio** — the trades you actually took, tracked in percent, with stop and target alerts and
+  a session digest.
+- **Analyze** — signs in to Telegram on the device (TDLib), reads the chosen channels over a date
+  range, and sends the messages and screenshots to the cloud model you pick (Qwen Cloud,
+  OpenRouter, Hugging Face or OpenAI).
+- **Results** — each run as a report of calls, with corrections, spreadsheet export and sharing.
+- **Insights** — every call scored against Cairo prices, channels ranked on what they delivered,
+  consensus, alerts, and a per-stock sheet with a full-screen chart.
+- **Settings** — models, prices, schedules, backup to a file or Google Drive, and sync between
+  devices through a private Telegram channel or Drive.
 
-No `OPENAI_API_KEY`, provider environment variable, or environment file is created or read.
+Provider keys and the Telegram session are encrypted with the Android Keystore and never leave the
+device except to the provider you chose. Nothing is read from environment files.
 
-## Open and build
+## Requirements
 
-Open this directory in Android Studio. The bundled Gradle wrapper targets the locally available
-Android 36.1 SDK while retaining Android 12 as the minimum supported version.
+- Android 12 or newer (`minSdk 31`, `targetSdk 36`). Designed for phones, foldables and tablets.
+- To build: Android Studio with its bundled JBR (Java 21; Robolectric needs it for the tests).
+- A Telegram `api_id` and `api_hash` from [my.telegram.org](https://my.telegram.org). Put them in
+  `local.properties` as `telegramApiId` / `telegramApiHash`, or enter them in the app at runtime.
 
-```powershell
-.\gradlew.bat :app:assembleDebug
+## Build and test
+
+```bash
+export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
+./gradlew :app:assembleDebug :app:testDebugUnitTest
 ```
 
-## Architecture
+One task runs everything: plain JVM tests, Robolectric database tests, and Compose UI tests hosted
+by Robolectric. No device or emulator is needed.
 
-- `model`: cloud configuration and provider-neutral analysis contracts
-- `data`: secure credentials, persistent settings, and analysis repository boundary
-- `ui`: responsive Compose shell and feature screens
-- `ui/theme`: dark/light Material color schemes
+## Releases
 
-Telegram requires an application API ID and API hash from
-[my.telegram.org](https://my.telegram.org). They are entered at runtime; the API hash and TDLib
-database key are encrypted with Android Keystore and are never read from an environment file.
-TDLib stores its encrypted session and downloaded media only in app-private storage. The app does
-not depend on or communicate with the desktop Python service.
+Bump `appVersionName` in `app/build.gradle.kts`, add an entry to [`CHANGELOG.md`](CHANGELOG.md),
+commit, tag `vX.Y.Z` and push both. CI runs the tests, signs the per-ABI release APKs and publishes
+them as a GitHub release, which is where the app's updater looks.
+
+## Layout
+
+- `app/src/main/java/com/ikverse/egxanalyzer/model` — pure calculation: scoring, ranking, chunking.
+- `…/data` — repositories, the database, Telegram, prices, backup and sync.
+- `…/state` — `LiveAppState`, the one implementation of the `AppState` interface screens read.
+- `…/ui` — Compose screens, with the component kit in `ui/kit`. `ui` never imports `data`.
+
+## Documentation
+
+- [`docs/engine.md`](docs/engine.md) — what a run sends, scoring, ranking, a call's lifecycle.
+- [`docs/portfolio.md`](docs/portfolio.md) — positions, trade alerts, the session digest.
+- [`docs/features.md`](docs/features.md) — Ask AI, reports, export, backup, sync, updates, schedules.
+- [`docs/ui.md`](docs/ui.md) — navigation, the page header, filters, settings, colours.
+- [`docs/desktop-parity.md`](docs/desktop-parity.md) — the closed record of the retired desktop app.
+- [`CHANGELOG.md`](CHANGELOG.md) — release history.
+- [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) — licences of bundled libraries and fonts.
