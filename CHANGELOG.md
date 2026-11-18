@@ -4,7 +4,7 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
-## [Unreleased]
+## [5.9.0] — 2026-11-18
 
 - **Claude through ClaudeIn.** Settings → Analysis has a fifth provider, ClaudeIn. It runs analyses, Ask AI and the Home brief on Claude through ClaudeIn on your PC, on your own Claude plan, with no API key. When the PC isn't there the app says PC not available and runs nothing; it never falls back to another provider.
 - **Pairing.** Scan the QR code ClaudeIn shows under Pair a device, or type its address and code and check that six characters of the fingerprint match. Pick EGX Analyzer as the app name in ClaudeIn. The camera is asked for only when you press Scan.
