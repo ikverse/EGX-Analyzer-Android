@@ -2460,6 +2460,13 @@ class LiveAppState(
      */
     private var foregroundStarted = false
 
+    // Both read by enterForeground, which init calls: declared below it, syncMode was still null
+    // there and 5.8.0 crashed on every launch, and caughtUp would be reset after the launch sync.
+    override var syncMode by mutableStateOf(settingsRepository.syncMode())
+        private set
+
+    private var caughtUp = false
+
     init {
         syncCatalogEnrichment()
         // Before the first sync, or this device's own settings would look like an empty install's
@@ -2647,8 +2654,6 @@ class LiveAppState(
             }
         }
     }
-
-    private var caughtUp = false
 
 
     override fun updateAutomaticUpdateChecks(enabled: Boolean) {
@@ -4058,8 +4063,6 @@ class LiveAppState(
         ) { performSync() }
     }
 
-    override var syncMode by mutableStateOf(settingsRepository.syncMode())
-        private set
 
     /**
      * Disconnecting Drive also stops syncing through it, rather than leaving every publish to fail

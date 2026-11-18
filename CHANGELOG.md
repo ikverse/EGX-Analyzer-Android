@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.8.1] — 2026-11-18
+
+- **Fixed: 5.8.0 closed straight away on opening.** The app read the new Sync through setting before it had been loaded, so it stopped on every launch. Nothing on the phone was lost; updating brings everything back as it was.
+
+---
+
 ## [5.8.0] — 2026-11-17
 
 - **Sync through Google Drive.** Settings → Backup and sync → Sync now asks what to sync through: Off, Telegram or Google Drive. With Google Drive, your reports, trades, rules and settings travel through a folder in your Drive (EGX Analyzer/sync) instead of the Telegram channel. Telegram is still used to read your source channels.
