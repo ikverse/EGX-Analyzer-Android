@@ -51,6 +51,9 @@ Screenshots need the display id; plain `screencap -p` fails with "Multiple displ
 "$ADB" -s emulator-5554 shell "screencap -p -d <emulator-display-id> /sdcard/s.png"
 ```
 
+The real serials and display ids are in `CLAUDE.local.md`, which is gitignored: this repository is
+public, and they identify the owner's own devices.
+
 On the Fold 7 the numbering runs the opposite way to the guess: the **cover** panel is `displayId=0`,
 physical id `<fold-cover-display-id>`, and the **inner** panel is `displayId=1`, `<fold-inner-display-id>`.
 `dumpsys display | grep uniqueId` reads them back as `local:<id>`. Whichever panel is shut reports

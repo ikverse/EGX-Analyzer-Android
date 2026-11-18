@@ -17,3 +17,5 @@ app/build
 # in here would go stale and start being read as the spec.
 design/
 
+# Real device serials and display ids; this repository is public.
+CLAUDE.local.md
