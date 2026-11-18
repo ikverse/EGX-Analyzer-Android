@@ -17,8 +17,13 @@ import com.ikverse.egxanalyzer.model.TokenUsage
 import com.ikverse.egxanalyzer.model.RecommendationResult
 import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.UnaccountedImage
+import com.ikverse.egxanalyzer.model.ClaudeInModels
+import com.ikverse.egxanalyzer.model.ClaudeInOutcome
+import com.ikverse.egxanalyzer.model.ClaudeInPairing
+import com.ikverse.egxanalyzer.model.ClaudeInPlan
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -96,6 +101,8 @@ data class OpinionRequest(
     val searchPrompt: String? = null,
     /** Whether to ask Qwen to search repeatedly rather than take a single pass. */
     val deepSearch: Boolean = false,
+    /** The shape ClaudeIn is told the answer must take. Ignored by every other provider. */
+    val shape: AnswerShape = AnswerShape.OPINION,
 ) {
     companion object {
         /** The provider default, so a request that says nothing behaves as it always did. */
@@ -125,8 +132,17 @@ class CloudAnalysisRepository(
      * without it and simply leaves no tally behind.
      */
     private val usageStore: ModelUsageStore? = null,
+    /** The PC route. Null in tests that never pick ClaudeIn. */
+    private val claudeIn: ClaudeInConnection? = null,
+    /** What ClaudeIn says while a run waits or searches ("Waiting for the PC (1 ahead)…"); null when it ends. */
+    private val onClaudeInWorking: (String?) -> Unit = {},
+    /** How full the Claude plan is, whenever ClaudeIn reports it. */
+    private val onClaudeInPlan: (ClaudeInPlan) -> Unit = {},
 ) : AnalysisRepository {
     private val activeConnections = ConcurrentHashMap<String, HttpURLConnection>()
+
+    /** ClaudeIn runs in flight, by request id, so [cancel] can stop one on the PC. */
+    private val activeClaudeIn = ConcurrentHashMap<String, Job>()
 
     /**
      * Reads the sources in chunks, then consolidates what came back.
@@ -142,12 +158,14 @@ class CloudAnalysisRepository(
         val startedAt = System.nanoTime()
         val config = configuration()
         val appPreferences = preferences()
-        EndpointPolicy.validate(config.endpoint)?.let { error(it) }
+        validateEndpoint(config)
         require(config.model.isNotBlank()) { "Choose a cloud model." }
-        val credential = credentialStore.read(config.provider)
-            ?: error("No usable API key is saved for ${config.provider.displayName}. Save it again in Settings.")
+        val credential = readCredential(config)
         val trace = traceFor?.invoke(request.requestId)
         try {
+            if (config.provider.pairs) {
+                requireClaudeInFeatures(credential, needsImages = request.inputs.any { it is AnalysisInput.Image })
+            }
             val harvest = extract(request, config, appPreferences, credential, trace, onProgress)
             var attempt = 0
             var correctionInstructions: String? = null
@@ -229,6 +247,7 @@ class CloudAnalysisRepository(
         } finally {
             credential.fill('\u0000')
             activeConnections.remove(request.requestId)?.disconnect()
+            onClaudeInWorking(null)
         }
     }
 
@@ -276,6 +295,18 @@ class CloudAnalysisRepository(
 
     /** One answer from the provider, with what it cost. Null usage means it did not say. */
     private class CompletionResponse(val body: String, val usage: TokenUsage?)
+
+    /**
+     * What a ClaudeIn run is asked to be, beside the body: the answer's shape, whether it carries on
+     * when the phone's connection drops (an analysis does), whether it waits behind questions the
+     * owner is asking now (a scheduled one does), and whether Claude may search the web.
+     */
+    private class ClaudeInRoute(
+        val shape: AnswerShape? = null,
+        val detach: Boolean = false,
+        val background: Boolean = false,
+        val search: Boolean = false,
+    )
 
     private suspend fun extract(
         request: AnalysisRequest,
@@ -553,7 +584,10 @@ class CloudAnalysisRepository(
     ): ChunkAnswer {
         val body = request.extractionBody(chunk, config, appPreferences, correctionInstructions)
         val completion = try {
-            executeCompletion(request.requestId, body, config, appPreferences, credential)
+            executeCompletion(
+                request.requestId, body, config, appPreferences, credential,
+                ClaudeInRoute(AnswerShape.EXTRACTION, detach = true, background = request.background),
+            )
         } catch (failure: IOException) {
             trace?.recordFailure(label, failure)
             throw failure
@@ -664,7 +698,10 @@ class CloudAnalysisRepository(
                 harvest.extracted, config.model, appPreferences, instructions,
             )
             val completion = try {
-                executeCompletion(request.requestId, body, config, appPreferences, credential)
+                executeCompletion(
+                    request.requestId, body, config, appPreferences, credential,
+                    ClaudeInRoute(AnswerShape.CONSOLIDATION, detach = true, background = request.background),
+                )
             } catch (failure: IOException) {
                 trace?.recordFailure(label, failure)
                 throw failure
@@ -715,8 +752,10 @@ class CloudAnalysisRepository(
         config: CloudConfiguration,
         appPreferences: AppPreferences,
         credential: CharArray,
+        route: ClaudeInRoute = ClaudeInRoute(),
     ): CompletionResponse {
         coroutineContext.ensureActive()
+        if (config.provider.pairs) return claudeInCompletion(requestId, body, config, credential, route)
         val url = URL("${config.endpoint.trimEnd('/')}/chat/completions")
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -779,11 +818,11 @@ class CloudAnalysisRepository(
      */
     override suspend fun ask(request: OpinionRequest): String = withContext(Dispatchers.IO) {
         val config = configuration()
-        EndpointPolicy.validate(config.endpoint)?.let { error(it) }
+        validateEndpoint(config)
         require(request.model.isNotBlank()) { "Choose a model for Ask AI in Settings." }
-        val credential = credentialStore.read(config.provider)
-            ?: error("No usable API key is saved for ${config.provider.displayName}. Save it again in Settings.")
+        val credential = readCredential(config)
         try {
+            if (config.provider.pairs) requireClaudeInFeatures(credential, needsImages = false)
             val deep = request.deepSearch &&
                 request.search &&
                 config.provider == CloudProvider.QWEN
@@ -791,6 +830,7 @@ class CloudAnalysisRepository(
                 executeCompletion(
                     request.requestId, opinionBody(request, config, deep), config,
                     preferences(), credential,
+                    ClaudeInRoute(request.shape, search = request.search),
                 )
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -808,6 +848,7 @@ class CloudAnalysisRepository(
         } finally {
             credential.fill('\u0000')
             activeConnections.remove(request.requestId)?.disconnect()
+            onClaudeInWorking(null)
         }
     }
 
@@ -884,17 +925,119 @@ class CloudAnalysisRepository(
         else -> request.model.removeSuffix(ONLINE_SUFFIX)
     }
 
-    override suspend fun cancel(requestId: String): Boolean =
-        activeConnections.remove(requestId)?.let {
+    /** The endpoint rules, for the providers that have an endpoint. A paired PC has none. */
+    private fun validateEndpoint(config: CloudConfiguration) {
+        if (config.provider.pairs) return
+        EndpointPolicy.validate(config.endpoint)?.let { error(it) }
+    }
+
+    private fun readCredential(config: CloudConfiguration): CharArray =
+        credentialStore.read(config.provider) ?: error(
+            if (config.provider.pairs) {
+                "This phone isn't paired with ClaudeIn. Pair it in Settings, Analysis."
+            } else {
+                "No usable API key is saved for ${config.provider.displayName}. Save it again in Settings."
+            },
+        )
+
+    private fun pairingOf(credential: CharArray): ClaudeInPairing =
+        ClaudeInPairing.fromJson(String(credential))
+            ?: error("The ClaudeIn pairing on this phone can't be read. Pair again in Settings, Analysis.")
+
+    /**
+     * Refuses up front, in words, where the PC's ClaudeIn cannot do what this app needs: pictures in
+     * the question, and answers in a set shape. Also where a run would otherwise be sent to a PC
+     * that is not there, which is the commonest case and the one worth saying before any work.
+     */
+    private suspend fun requireClaudeInFeatures(credential: CharArray, needsImages: Boolean) {
+        val connection = claudeIn ?: error("ClaudeIn is not available in this build.")
+        val check = connection.check(pairingOf(credential))
+        ClaudeInPlan.from(check.optJSONObject("limits"), System.currentTimeMillis())?.let(onClaudeInPlan)
+        val features = check.featureSet()
+        val missing = buildList {
+            if (needsImages && "images" !in features) add("pictures in a question")
+            if ("output_schema" !in features) add("answers in a set shape")
+        }
+        if (missing.isNotEmpty()) {
+            throw ClaudeInException(
+                "ClaudeIn on the PC needs updating: it can't take ${missing.joinToString(" or ")} yet. " +
+                    "Update ClaudeIn and Claude Code on the PC.",
+            )
+        }
+    }
+
+    /**
+     * One request through ClaudeIn: the body translated into a run, the run's `done` translated
+     * back into the answer shape every caller already reads. A failure the PC reported becomes a
+     * [ClaudeInException] carrying its sentence, which is an [IOException], so the batch loop treats
+     * it like any refusal from a provider - it fails the run with that message and never retries.
+     */
+    private suspend fun claudeInCompletion(
+        requestId: String,
+        body: JSONObject,
+        config: CloudConfiguration,
+        credential: CharArray,
+        route: ClaudeInRoute,
+    ): CompletionResponse {
+        val connection = claudeIn ?: error("ClaudeIn is not available in this build.")
+        val pairing = pairingOf(credential)
+        val spec = try {
+            ClaudeInRequests.spec(body, route.shape, route.detach, route.background, route.search)
+        } catch (refused: IllegalArgumentException) {
+            throw ClaudeInException(refused.message ?: "The question could not be prepared for ClaudeIn.", refused)
+        }
+        coroutineContext[Job]?.let { activeClaudeIn[requestId] = it }
+        try {
+            val done = connection.run(pairing, spec) { event ->
+                if (event.optString("type") == "working") {
+                    onClaudeInWorking(event.optString("what").takeIf(String::isNotBlank))
+                }
+            }
+            onClaudeInWorking(null)
+            ClaudeInPlan.from(done.optJSONObject("limits"), System.currentTimeMillis())?.let(onClaudeInPlan)
+            ClaudeInOutcome.failure(done)?.let { throw ClaudeInException(it) }
+            val response = ClaudeInRequests.completion(done)
+            val usage = parseUsage(response)
+            usageStore?.record(config.provider, body.optString("model"), usage)
+            return CompletionResponse(response, usage)
+        } finally {
+            activeClaudeIn.remove(requestId)
+        }
+    }
+
+    /** ClaudeIn's own list where it has one, the three Claude models otherwise. Checks the PC either way. */
+    private suspend fun claudeInModels(credential: CharArray): List<CloudModelInfo> {
+        val connection = claudeIn ?: error("ClaudeIn is not available in this build.")
+        val pairing = pairingOf(credential)
+        val check = connection.check(pairing)
+        ClaudeInPlan.from(check.optJSONObject("limits"), System.currentTimeMillis())?.let(onClaudeInPlan)
+        val listed = if ("models" in check.featureSet()) connection.models(pairing) else null
+        return listed?.takeIf(List<CloudModelInfo>::isNotEmpty) ?: ClaudeInModels.BUILT_IN
+    }
+
+    override suspend fun cancel(requestId: String): Boolean {
+        // Cancelling the ClaudeIn call's coroutine is what stops the run on the PC; see HttpClaudeIn.run.
+        activeClaudeIn.remove(requestId)?.let {
+            it.cancel()
+            return true
+        }
+        return activeConnections.remove(requestId)?.let {
             it.disconnect()
             true
         } ?: false
+    }
 
     override suspend fun listModels(): List<CloudModelInfo> = withContext(Dispatchers.IO) {
         val config = configuration()
-        EndpointPolicy.validate(config.endpoint)?.let { error(it) }
-        val credential = credentialStore.read(config.provider)
-            ?: error("No usable API key is saved for ${config.provider.displayName}. Save it again in Settings.")
+        validateEndpoint(config)
+        val credential = readCredential(config)
+        if (config.provider.pairs) {
+            try {
+                return@withContext claudeInModels(credential)
+            } finally {
+                credential.fill('\u0000')
+            }
+        }
         var connection: HttpURLConnection? = null
         try {
             coroutineContext.ensureActive()

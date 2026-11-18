@@ -83,6 +83,37 @@ private fun SettingsPreview() {
     Previewed(state) { SettingsScreen(state) }
 }
 
+/** The ClaudeIn pairing card unpaired, and the plan tile Analyze shows while ClaudeIn is the provider. */
+@Preview(name = "ClaudeIn · not paired", showBackground = true, widthDp = 411)
+@Preview(name = "ClaudeIn · not paired · dark", showBackground = true, widthDp = 411, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun ClaudeInUnpairedPreview() {
+    val state = FakeAppState()
+    Previewed(state) {
+        androidx.compose.foundation.layout.Column {
+            com.ikverse.egxanalyzer.ui.ClaudeInPairingCard(state)
+            com.ikverse.egxanalyzer.ui.ClaudeInPlanTile(state)
+        }
+    }
+}
+
+@Preview(name = "ClaudeIn · paired, PC not available", showBackground = true, widthDp = 411)
+@Composable
+private fun ClaudeInNotAvailablePreview() {
+    val state = FakeAppState(
+        claudeInState = com.ikverse.egxanalyzer.ui.ClaudeInLinkState.NOT_AVAILABLE,
+        claudeInPaired = com.ikverse.egxanalyzer.ui.ClaudeInPaired("my-pc", "100.101.102.103", "C0FFEE"),
+        claudeInMessage = "PC not available.",
+        claudeInPlan = com.ikverse.egxanalyzer.model.ClaudeInPlan(fiveHour = 0.34, sevenDay = 0.12, at = 0L),
+    )
+    Previewed(state) {
+        androidx.compose.foundation.layout.Column {
+            com.ikverse.egxanalyzer.ui.ClaudeInPairingCard(state)
+            com.ikverse.egxanalyzer.ui.ClaudeInPlanTile(state)
+        }
+    }
+}
+
 /** The whole shell, navigation and all, which is the one that shows how a change reads in place. */
 @Preview(name = "App shell", showBackground = true, widthDp = 412, heightDp = 892)
 @Composable

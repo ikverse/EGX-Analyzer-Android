@@ -52,6 +52,23 @@ enum class CloudProvider(
         defaultModel = "",
         endpointPresets = emptyList(),
     ),
+
+    /**
+     * Claude, through ClaudeIn on the owner's PC, on the owner's Claude plan. No endpoint and no
+     * key: the phone is paired with the PC instead (see [ClaudeInPairing]), and the "credential"
+     * stored for this provider is that pairing. When the PC is not there the app says so and runs
+     * nothing - there is no fallback to another provider, which is ClaudeIn's own rule.
+     */
+    CLAUDEIN(
+        displayName = "ClaudeIn",
+        defaultEndpoint = "",
+        defaultModel = ClaudeInModels.DEFAULT,
+        endpointPresets = emptyList(),
+    ),
+    ;
+
+    /** Paired with a PC rather than given an endpoint and an API key. */
+    val pairs: Boolean get() = this == CLAUDEIN
 }
 
 data class CloudConfiguration(

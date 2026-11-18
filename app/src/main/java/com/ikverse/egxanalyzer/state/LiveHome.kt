@@ -257,6 +257,7 @@ class LiveHome(
                         model = model,
                         // The headlines are the news. A search on top would be paid for twice.
                         search = false,
+                        shape = com.ikverse.egxanalyzer.data.AnswerShape.BRIEF,
                     ),
                 )
                 homeBrief = MarketBriefPrompt.parse(answer, model, System.currentTimeMillis())

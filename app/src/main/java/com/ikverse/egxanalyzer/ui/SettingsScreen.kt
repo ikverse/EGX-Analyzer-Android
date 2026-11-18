@@ -867,6 +867,8 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
                 },
             )
         }
+        // A paired PC has no key: its card follows this group instead.
+        if (!appState.cloudConfiguration.provider.pairs) {
         KitTextField(
             value = credential,
             onValueChange = { credential = it },
@@ -896,7 +898,9 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
                 color = if (appState.credentialVerified == false) palette.loss else palette.muted,
             )
         }
+        }
     }
+    if (appState.cloudConfiguration.provider.pairs) ClaudeInPairingCard(appState)
 
     // What only a careful reader needs, closed until asked for, on PageState so a fold while
     // editing the endpoint does not shut it.
@@ -908,15 +912,18 @@ private fun ColumnScope.AnalysisPage(appState: AppState) {
         // Wrapped rather than held to one line: an address is longer than the field, and on one
         // line it was sliced mid-word with nothing to say there was more. An address holds no
         // spaces or line breaks, so none typed into a field that now takes them is kept.
-        KitTextField(
-            value = appState.cloudConfiguration.endpoint,
-            onValueChange = { appState.updateEndpoint(it.filterNot(Char::isWhitespace)) },
-            label = "HTTPS API endpoint",
-            modifier = Modifier.fillMaxWidth(),
-            keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
-            singleLine = false,
-            imeAction = androidx.compose.ui.text.input.ImeAction.Done,
-        )
+        // ClaudeIn is reached at the addresses its pairing carries; it has no endpoint to type.
+        if (!appState.cloudConfiguration.provider.pairs) {
+            KitTextField(
+                value = appState.cloudConfiguration.endpoint,
+                onValueChange = { appState.updateEndpoint(it.filterNot(Char::isWhitespace)) },
+                label = "HTTPS API endpoint",
+                modifier = Modifier.fillMaxWidth(),
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                singleLine = false,
+                imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+            )
+        }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             if (appState.cloudConfiguration.provider.endpointPresets.isNotEmpty()) {
                 Box {
@@ -1102,6 +1109,13 @@ private fun ColumnScope.ReadingRulesPage(appState: AppState) {
 private fun ReaderStatusTile(appState: AppState) {
     val config = appState.cloudConfiguration
     val (text, tone) = when {
+        config.provider.pairs -> when {
+            !config.hasCredential -> "Not paired yet" to TileTone.TILE1
+            appState.claudeInState == ClaudeInLinkState.NOT_AVAILABLE -> "PC not available" to TileTone.ALERT
+            appState.claudeInState == ClaudeInLinkState.WRONG_APP -> "Paired for another app" to TileTone.ALERT
+            config.model.isBlank() -> "No AI chosen" to TileTone.TILE1
+            else -> "Ready to read" to TileTone.HIGHLIGHT
+        }
         appState.credentialVerified == false -> "The key was rejected" to TileTone.ALERT
         !config.hasCredential -> "No key yet" to TileTone.TILE1
         config.model.isBlank() -> "No AI chosen" to TileTone.TILE1
@@ -1120,7 +1134,7 @@ private fun ReaderStatusTile(appState: AppState) {
             }
             // A saved key that has never been tried: the tile says so, and this tries it. Saving
             // with nothing typed keeps the stored key and sends the one free request that checks it.
-            if (config.hasCredential && config.model.isNotBlank() && appState.credentialVerified == null) {
+            if (!config.provider.pairs && config.hasCredential && config.model.isNotBlank() && appState.credentialVerified == null) {
                 KitButton(
                     "Check key",
                     onClick = { appState.startAction { appState.saveSettings("") } },

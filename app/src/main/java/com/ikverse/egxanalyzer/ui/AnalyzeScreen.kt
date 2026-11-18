@@ -221,6 +221,8 @@ internal fun AnalyzeScreen(appState: AppState) {
                 CallsForTile(appState, onPick = { pickingDate = true }, locked = locked, modifier = Modifier.weight(1f).popIn(4))
             }
             ModelTile(appState, blocker, attempted, locked, Modifier.popIn(5))
+            // How full the Claude plan is, before a run spends it, and what the PC says during one.
+            if (appState.cloudConfiguration.provider.pairs) ClaudeInPlanTile(appState, Modifier.popIn(6))
         }
         val notifications: @Composable () -> Unit = {
             if (!running && !notificationsAllowed) NotificationsOffTile(appState)
@@ -526,6 +528,7 @@ internal enum class AnalyzeBlocker(
     val belongsToModelCard: Boolean = false,
 ) {
     NO_CREDENTIAL("Save the provider API key in Settings first.", belongsToModelCard = true),
+    NOT_PAIRED("Pair this phone with ClaudeIn in Settings, Analysis first.", belongsToModelCard = true),
     NO_MODEL("Choose the model this run will be sent to.", belongsToModelCard = true),
     NO_CONTENT_TYPE("Choose at least one thing to read."),
     NO_SOURCES("No posts are loaded. Choose chats, then load their posts."),
@@ -653,12 +656,21 @@ internal fun setupSteps(appState: AppState): List<SetupStep> = listOf(
         title = "Choose the chats to read",
         detail = "Tick the channels whose recommendations should be scored.",
     ),
-    SetupStep(
-        done = appState.cloudConfiguration.hasCredential,
-        title = "Add a provider API key",
-        detail = "Settings, Cloud provider. A run is sent to that provider and billed by them.",
-        settings = true,
-    ),
+    if (appState.cloudConfiguration.provider.pairs) {
+        SetupStep(
+            done = appState.cloudConfiguration.hasCredential,
+            title = "Pair with ClaudeIn on your PC",
+            detail = "Settings, Analysis. Scan the code ClaudeIn shows, or type it in.",
+            settings = true,
+        )
+    } else {
+        SetupStep(
+            done = appState.cloudConfiguration.hasCredential,
+            title = "Add a provider API key",
+            detail = "Settings, Cloud provider. A run is sent to that provider and billed by them.",
+            settings = true,
+        )
+    },
     SetupStep(
         done = appState.cloudConfiguration.model.isNotBlank(),
         title = "Choose the model",
@@ -674,6 +686,7 @@ internal fun setupSteps(appState: AppState): List<SetupStep> = listOf(
  * without one of them re-deriving it.
  */
 private fun analyzeBlocker(appState: AppState): AnalyzeBlocker? = when {
+    !appState.cloudConfiguration.hasCredential && appState.cloudConfiguration.provider.pairs -> AnalyzeBlocker.NOT_PAIRED
     !appState.cloudConfiguration.hasCredential -> AnalyzeBlocker.NO_CREDENTIAL
     appState.cloudConfiguration.model.isBlank() -> AnalyzeBlocker.NO_MODEL
     appState.selectedContentTypes.isEmpty() -> AnalyzeBlocker.NO_CONTENT_TYPE

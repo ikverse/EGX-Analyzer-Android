@@ -61,6 +61,12 @@ class SettingsRepository(
 
     fun removeCredential(provider: CloudProvider) = credentialStore.remove(provider)
 
+    /** The stored credential itself; the caller zeroes it. For ClaudeIn it is the pairing. */
+    fun readCredential(provider: CloudProvider): CharArray? = credentialStore.read(provider)
+
+    /** Stores [credential] without touching the configuration. Zeroes it. */
+    fun saveCredential(provider: CloudProvider, credential: CharArray) = credentialStore.save(provider, credential)
+
     fun resetProviderConfiguration(provider: CloudProvider) {
         preferences.edit()
             .remove(provider.endpointKey())
@@ -169,7 +175,8 @@ class SettingsRepository(
      */
     fun opinionModel(provider: CloudProvider): String =
         preferences.getString(provider.opinionModelKey(), null)?.takeIf(String::isNotBlank)
-            ?: OPINION_MODEL_DEFAULT
+            // A Qwen name means nothing to Claude: the paired PC starts Ask AI on a Claude model.
+            ?: if (provider.pairs) com.ikverse.egxanalyzer.model.ClaudeInModels.DEFAULT else OPINION_MODEL_DEFAULT
 
     fun saveOpinionModel(provider: CloudProvider, model: String) {
         preferences.edit().putString(provider.opinionModelKey(), model.trim()).apply()

@@ -122,7 +122,7 @@ interface AppUpdates {
  * calling something below rather than by assigning to it. The two exceptions are marked where
  * they are declared.
  */
-interface AppState : AppUpdates, HomeFeed, DriveBackups {
+interface AppState : AppUpdates, HomeFeed, DriveBackups, ClaudeInLink {
 
     val destination: AppDestination
     val pages: PageState

@@ -92,6 +92,10 @@ class EgxApplication : Application() {
         // One tally for both callers: the repository writes every request into it, and AppState
         // reads it for the picker and for Settings.
         val modelUsageStore = ModelUsageStore(this)
+        // One connection to ClaudeIn and one set of its signals, shared by the repository (which
+        // runs questions through it) and AppState (which pairs with it and shows what it says).
+        val claudeInClient = com.ikverse.egxanalyzer.data.HttpClaudeIn()
+        val claudeInSignals = com.ikverse.egxanalyzer.state.ClaudeInSignals()
         val analysisRepository = CloudAnalysisRepository(
             contentResolver = contentResolver,
             credentialStore = credentialStore,
@@ -100,6 +104,9 @@ class EgxApplication : Application() {
             preferences = { state.appPreferences },
             traceFor = { requestId -> RequestTrace(this, requestId) },
             usageStore = modelUsageStore,
+            claudeIn = claudeInClient,
+            onClaudeInWorking = { claudeInSignals.working = it },
+            onClaudeInPlan = { claudeInSignals.plan = it },
         )
         RequestTrace.prune(this)
         val localDataStore = LocalDataStore(this)
@@ -209,6 +216,8 @@ class EgxApplication : Application() {
             modelUsageStore = modelUsageStore,
             chartLayoutStore = ChartLayoutStore(this),
             headless = startedForSchedule,
+            claudeInSignals = claudeInSignals,
+            claudeInClient = claudeInClient,
         ).also { state = it }
         // Booked on every launch rather than only when the switch is touched, so an install that
         // has never opened Settings still gets the check, and one whose work was dropped by the

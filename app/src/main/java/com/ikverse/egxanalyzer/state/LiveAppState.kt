@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.PowerManager
 import android.provider.Settings
 import com.ikverse.egxanalyzer.data.AnalysisNotifier
+import com.ikverse.egxanalyzer.data.HttpClaudeIn
+import com.ikverse.egxanalyzer.ui.ClaudeInLink
 import com.ikverse.egxanalyzer.data.JobScheduler
 import com.ikverse.egxanalyzer.data.RequestTrace
 import com.ikverse.egxanalyzer.data.saveToDownloads
@@ -395,7 +397,14 @@ class LiveAppState(
      * [home]'s.
      */
     private val drive: LiveDriveBackup = LiveDriveBackup(context, settingsRepository, status),
-) : AppState, AppUpdates by updates, HomeFeed by home, DriveBackups by drive {
+    /**
+     * Pairing with ClaudeIn, outside this class by the same pattern - see [LiveClaudeIn]. The
+     * signals are shared with the analysis repository, which writes them during a run.
+     */
+    private val claudeInSignals: ClaudeInSignals = ClaudeInSignals(),
+    private val claudeInClient: HttpClaudeIn = HttpClaudeIn(),
+    private val claudeIn: LiveClaudeIn = LiveClaudeIn(settingsRepository, status, claudeInSignals, claudeInClient),
+) : AppState, AppUpdates by updates, HomeFeed by home, DriveBackups by drive, ClaudeInLink by claudeIn {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /**
@@ -468,6 +477,18 @@ class LiveAppState(
                 restoreFrom(withContext(Dispatchers.IO) { readBackup(context, source) })
             },
         )
+        // A pairing saved or forgotten changes whether the ClaudeIn provider has a "credential".
+        claudeIn.bind {
+            cloudConfiguration = settingsRepository.configurationFor(cloudConfiguration.provider)
+            if (cloudConfiguration.provider.pairs) {
+                if (cloudConfiguration.hasCredential) {
+                    appScope.launch { verifyCredential() }
+                } else {
+                    credentialVerified = null
+                    availableModels = emptyList()
+                }
+            }
+        }
     }
 
     /**
@@ -2848,7 +2869,7 @@ class LiveAppState(
      * The model list is the cheapest call the providers offer, so this costs nothing meaningful.
      */
     override suspend fun verifyCredential() {
-        busyLabel = "Verifying API key"
+        busyLabel = if (cloudConfiguration.provider.pairs) "Checking the PC" else "Verifying API key"
         try {
             val models = analysisRepository.listModels()
             credentialVerified = true
@@ -2859,8 +2880,13 @@ class LiveAppState(
             publishSettings()
             // The card keeps the sentence and the toast gets the short form of it: this only ever
             // runs from Settings, so the fuller wording is already on screen behind the toast.
-            settingsMessage = "API key verified. ${models.size} models available."
-            statusMessage = StatusMessage("Key verified, ${models.size} models", succeeded = true)
+            if (cloudConfiguration.provider.pairs) {
+                settingsMessage = "ClaudeIn answered. ${models.size} Claude models available."
+                statusMessage = StatusMessage("ClaudeIn answered", succeeded = true)
+            } else {
+                settingsMessage = "API key verified. ${models.size} models available."
+                statusMessage = StatusMessage("Key verified, ${models.size} models", succeeded = true)
+            }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -2869,7 +2895,12 @@ class LiveAppState(
             // for "no credit" or "wrong key" to be read and acted on.
             settingsMessage = error.message?.takeIf(String::isNotBlank)
                 ?: "The provider rejected this API key."
-            statusMessage = StatusMessage("API key rejected", succeeded = false)
+            statusMessage = if (cloudConfiguration.provider.pairs) {
+                claudeIn.noteRunFailure(error.message)
+                StatusMessage(error.message ?: "ClaudeIn didn't answer", succeeded = false)
+            } else {
+                StatusMessage("API key rejected", succeeded = false)
+            }
         } finally {
             busyLabel = null
         }
@@ -4593,6 +4624,8 @@ class LiveAppState(
             excludedSources = filtered.excluded,
             rules = rules,
             prompt = activePrompt,
+            // A run nobody is watching waits behind the questions somebody is asking (ClaudeIn).
+            background = !onScreen,
             priorReads = priorReads,
             sourceTraces = selectedInputs.map { input ->
                 sources.traces[input.sourceId] ?: run {
@@ -4674,6 +4707,8 @@ class LiveAppState(
                 analysisStatus = AnalysisStatus.FAILED
                 analysisMessage = error.message ?: "Analysis failed."
                 analysisStopped(analysisMessage)
+                // The pairing card says the same as the run: PC not available, or the wrong app.
+                if (cloudConfiguration.provider.pairs) claudeIn.noteRunFailure(error.message)
             }
             return RunOutcome.Failed(error.message ?: "Analysis failed.")
         } finally {

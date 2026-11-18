@@ -215,6 +215,12 @@ dependencies {
     implementation(libs.tdl.coroutines.android)
     // Encodes the tg://login link TDLib hands back; scanning it beats typing a phone and a code.
     implementation(libs.zxing.core)
+    // Pairing with ClaudeIn by its QR code: CameraX for the picture, ML Kit's bundled barcode model
+    // for the reading. Bundled rather than Play services' scanner, which the Huawei tablet lacks.
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.mlkit.barcode.scanning)
     // Google sign-in for the Drive backup: the Identity AuthorizationClient, asking for drive.file
     // alone. Drive itself is spoken to over HttpURLConnection - see data/DriveBackup.kt - rather
     // than through Google's Drive client, which is several megabytes for five requests.

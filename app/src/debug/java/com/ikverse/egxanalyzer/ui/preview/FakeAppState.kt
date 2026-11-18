@@ -118,7 +118,35 @@ class FakeAppState(
     /** Called on every [backUpToDrive]. */
     private val onDriveBackup: () -> Unit = {},
     override val chatsRefreshing: Boolean = false,
+    override val claudeInState: com.ikverse.egxanalyzer.ui.ClaudeInLinkState = com.ikverse.egxanalyzer.ui.ClaudeInLinkState.NOT_PAIRED,
+    override val claudeInPaired: com.ikverse.egxanalyzer.ui.ClaudeInPaired? = null,
+    override val claudeInMessage: String? = null,
+    override val claudeInPlan: com.ikverse.egxanalyzer.model.ClaudeInPlan? = null,
+    override val claudeInWorking: String? = null,
+    override val claudeInConfirm: com.ikverse.egxanalyzer.ui.ClaudeInConfirm? = null,
+    /** Called on [pairClaudeInFromQr], so a test can see the text the scanner handed on. */
+    private val onClaudeInQr: (String) -> Unit = {},
+    /** Called on [pairClaudeInTyped] with the address and the code. */
+    private val onClaudeInTyped: (String, String) -> Unit = { _, _ -> },
+    /** Called on [confirmClaudeIn]. */
+    private val onClaudeInConfirm: () -> Unit = {},
+    /** Called on [cancelClaudeInConfirm]. */
+    private val onClaudeInCancel: () -> Unit = {},
+    /** Called on [forgetClaudeIn]. */
+    private val onClaudeInForget: () -> Unit = {},
 ) : AppState {
+
+    override fun pairClaudeInFromQr(text: String) = onClaudeInQr(text)
+
+    override fun pairClaudeInTyped(address: String, code: String) = onClaudeInTyped(address, code)
+
+    override fun confirmClaudeIn() = onClaudeInConfirm()
+
+    override fun cancelClaudeInConfirm() = onClaudeInCancel()
+
+    override fun forgetClaudeIn() = onClaudeInForget()
+
+    override fun checkClaudeIn() = Unit
 
     override fun notificationsPermitted(): Boolean = false
 

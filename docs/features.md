@@ -1121,3 +1121,62 @@ income over twelve months, total debt, debt to equity) when its sheet opens and 
 over a week old, and keeps the answer in `company_facts.json` beside `dividends.json`, outside every
 backup and sync. A page that does not answer keeps the old copy. Parser ported from Signal Lab's
 `StockAnalysisParser`; it reads table rows only, because the page's prose repeats the labels.
+
+## Claude through ClaudeIn
+
+ClaudeIn (`..\ClaudeIn`, its own project) is a tray program on the owner's PC that runs Claude Code
+on the owner's Claude plan and lets their apps ask it questions. `CloudProvider.CLAUDEIN` is this
+app's route to it, beside the four paid providers. Its protocol is `ClaudeIn/docs/protocol.md`
+(version 2); this app needs the `images` and `output_schema` features and uses `detach` and
+`priority` where they are offered.
+
+- **No API key and no fallback.** The provider has no endpoint and no key. When the PC cannot be
+  reached the app says "PC not available" and runs nothing; it never tries another provider. That
+  is ClaudeIn's own rule for every app connected to it.
+- **The pairing is the credential.** `ClaudeInPairing` - the addresses, the port, the code and the
+  certificate's SHA-256 - is stored as JSON in the encrypted credential slot for `CLAUDEIN`, so the
+  repository reads it exactly where it reads an API key, and like a key it is device-local: never
+  synced, never in a backup or a diagnostics copy. The provider choice itself syncs like any other;
+  a second device that receives it shows "Not paired yet" until it is paired on its own.
+- **Two ways to pair, one card** (`ui/ClaudeInSection.kt`). Scan reads ClaudeIn's existing QR code
+  exactly as `qr_payload` in ClaudeIn's `windows.py` writes it; the code carries the full
+  fingerprint, so the phone checks the certificate itself and the owner compares nothing. Type it
+  instead takes the address and the code, reads the certificate on first contact, and shows its last
+  six characters in a `KitDialog` for the owner to compare with ClaudeIn's window. Either way the
+  phone then trusts that certificate alone, at any address (`HttpClaudeIn`'s `PinnedTrust`).
+- **ClaudeIn's QR names no app**, so the owner picks EGX Analyzer in ClaudeIn's pairing window. A
+  pairing made for another app is refused by ClaudeIn on the first request (403), and the card says
+  "This pairing is for another app" in coral.
+- **The camera is behind `AppState`.** `ClaudeInLink.ClaudeInScanner` is a composable member drawn
+  by `LiveClaudeIn` with `data/ClaudeInQrScanner.kt` - CameraX and ML Kit's *bundled* barcode
+  model, because the Huawei tablet has no Play services for Google's ready-made scanner. The
+  permission is asked when Scan is pressed and never at launch. `FakeAppState` draws an empty box.
+- **The requests are translated at one edge.** Every request in `AnalysisRepository` is a
+  chat-completions body read back from `choices[0].message.content`, so `executeCompletion` hands a
+  ClaudeIn request to `ClaudeInRequests`: the system message becomes `system`, the user message's
+  text becomes `prompt` in order, and each image is lifted into `images` with "(This is attached
+  picture n.)" where it stood - ClaudeIn shows the pictures before the prompt, so `IMAGE_REF n`
+  still names the right one. The `done` event goes back as the same answer shape, with ClaudeIn's
+  token counts as a `usage` block so `ModelUsageStore` adds them up unchanged. Nothing in the
+  extraction, the retries or the consolidation knows ClaudeIn exists.
+- **Every request asks for its shape** (`AnswerShape`): extraction, consolidation, Ask AI and the
+  brief. The schemas name the top-level keys and their types only; the parsers after them already
+  judge each row, and a schema stricter than the prompt would be a run failing on a field the prompt
+  allowed. A shaped answer that does not fit ends the run with "Claude didn't answer in the
+  requested shape."
+- **An analysis is detached**, so a dropped connection - the screen going off, a walk out of Wi-Fi -
+  does not stop it on the PC. `HttpClaudeIn.run` follows the events by their `seq` and, if the
+  stream breaks, picks it up from `/runs/<id>/events?after=<seq>` for up to ten minutes, then frees
+  the kept answer with `/stop`. A scheduled run (`AnalysisRequest.background`) is sent with
+  `priority: background`. Ask AI and the brief are neither.
+- **Refusals in words** (`ClaudeInOutcome`): plan limit with its reset time, today's cap, paused,
+  model not allowed, wrong shape, PC not available. None of them is retried: the batch loop retries
+  a timeout alone, and these are not one.
+- **The plan's fill** comes off every `done` event's `limits` (and `/check`'s, once ClaudeIn sends
+  it) into `ClaudeInSignals`, and `ClaudeInPlanTile` on Analyze draws the 5-hour and 7-day windows.
+  `/models` is used once ClaudeIn lists it; until then the picker offers the three Claude models.
+- **Search** follows the request's own flag: Ask AI asks for ClaudeIn's `WebSearch` and `WebFetch`
+  when its search setting is on; the brief sends none, because the headlines it is given are the news.
+- **Tests**: `ClaudeInPairingTest`, `ClaudeInRequestsTest`, `HttpClaudeInTest` (a fake ClaudeIn on
+  plain HTTP, including a broken stream picked up again), `ClaudeInRepositoryTest` and
+  `ClaudeInCardTest`. **Not seen on a device or against a real ClaudeIn**: built and unit-tested only.

@@ -97,6 +97,11 @@ data class AnalysisRequest(
      */
     val prompt: ComposedPrompt? = null,
     /**
+     * Started by a schedule rather than by somebody waiting for it. ClaudeIn queues such a run
+     * behind the questions people are asking at the time; other providers ignore it.
+     */
+    val background: Boolean = false,
+    /**
      * What an earlier run already read out of these same messages, keyed by source id.
      *
      * The window a run covers starts at yesterday's opening hour, so a second schedule re-sends

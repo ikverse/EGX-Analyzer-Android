@@ -4,6 +4,16 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [Unreleased]
+
+- **Claude through ClaudeIn.** Settings → Analysis has a fifth provider, ClaudeIn. It runs analyses, Ask AI and the Home brief on Claude through ClaudeIn on your PC, on your own Claude plan, with no API key. When the PC isn't there the app says PC not available and runs nothing; it never falls back to another provider.
+- **Pairing.** Scan the QR code ClaudeIn shows under Pair a device, or type its address and code and check that six characters of the fingerprint match. Pick EGX Analyzer as the app name in ClaudeIn. The camera is asked for only when you press Scan.
+- **Your Claude plan** on Analyze shows how full the 5-hour and 7-day windows were the last time ClaudeIn said, and what the PC is doing while a run waits or searches.
+- An analysis on ClaudeIn carries on if the phone's connection drops mid-run, and picks the answer up when it comes back. A scheduled run waits behind questions you're asking at the time.
+- Needs ClaudeIn with protocol 2 (pictures and set-shape answers) on the PC.
+
+---
+
 ## [5.8.1] — 2026-11-18
 
 - **Fixed: 5.8.0 closed straight away on opening.** The app read the new Sync through setting before it had been loaded, so it stopped on every launch. Nothing on the phone was lost; updating brings everything back as it was.

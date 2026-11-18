@@ -21,6 +21,17 @@ Release history from 3.6 onwards is in [`CHANGELOG.md`](CHANGELOG.md). Update it
   the session. When one would help, say what it would show and which device or width, then wait
   for the literal word "approve". Not for confirming an install.
 
+## Claude access (ClaudeIn)
+
+This project can use Claude through ClaudeIn (a tray app on the owner's PC, `..\ClaudeIn`). Before
+writing code that talks to Claude through it, read `..\ClaudeIn\docs\connecting-an-app.md`.
+- Phones: ClaudeIn's HTTPS protocol on port 8790, paired with the tray's "Pair a device…" (scan its
+  QR code, or type the address and code). The app name is `EGX Analyzer`.
+- No API keys and no fallback. If ClaudeIn isn't reachable, show "PC not available".
+- Handle every `error_kind` (rate_limited, service, limit, paused, cap, not_allowed, format, unavailable).
+- Tests use a fake `ClaudeInConnection` or the fake server in `HttpClaudeInTest`, never the real ClaudeIn.
+- Changes to ClaudeIn itself are made in its own project, with its own approval.
+
 ## Commands
 
 ```bash
@@ -127,6 +138,11 @@ enough that taps land seconds late. Cold-boot with `-no-snapshot-load` rather th
 ## Where things live
 
 - `data/AnalysisRepository.kt` — builds the cloud request, chunks sources, harvests the answer.
+- `data/ClaudeInClient.kt` + `data/ClaudeInRequests.kt` + `model/ClaudeIn.kt` +
+  `state/LiveClaudeIn.kt` + `ui/ClaudeInSection.kt` + `data/ClaudeInQrScanner.kt` — Claude through
+  ClaudeIn on the owner's PC: the pinned HTTPS stream, the translation at `executeCompletion`, the
+  pairing (QR or typed), and the card. The fourth region outside `LiveAppState` (`ClaudeInLink by
+  claudeIn`). See **Claude through ClaudeIn** in `docs/features.md`.
 - `data/SourceReadings.kt` — what one run read out of one message, in a shape the next run can use,
   so a second schedule in a day does not pay to read the same cards again. See **What a run sends,
   and what it does not send twice** below.
