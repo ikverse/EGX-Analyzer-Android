@@ -1030,6 +1030,12 @@ and compare.
   3.6.15 build, and reading it before tagging would have caught this. `grep` it for `<init>()` under
   any `_Impl` class after a dependency bump. WorkManager's own workers were never at risk:
   work-runtime 2.10.5 names the members its rule keeps.
+- **5.9.0 did the same with ML Kit.** The ClaudeIn QR scanner closed the app the moment Scan was
+  pressed: ML Kit creates `CommonComponentRegistrar`, `BarcodeRegistrar` and `VisionCommonRegistrar`
+  by reflection from names in its manifest metadata, and its consumer rules keep none of them, so
+  R8 deleted their `<init>()`. One line in `proguard-rules.pro` keeps every `com.google.mlkit`
+  registrar's constructor. Fixed in 5.9.1. Debug builds and every test passed, because neither
+  shrinks - the `usage.txt` check below is the only thing that would have caught it.
 - **The crash log could not report this one.** `InitializationProvider` is a ContentProvider, and
   those are installed ahead of `Application.onCreate` — so `CrashLog.install` had not run and the
   file it writes was empty. `adb logcat -b crash -d` is what reads a crash from before the app

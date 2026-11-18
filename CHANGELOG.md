@@ -4,6 +4,12 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.9.1] — 2026-11-18
+
+- **Fixed: the app closed when Scan QR code was pressed** while pairing with ClaudeIn. Nothing on the phone was lost; after updating, Scan opens the camera.
+
+---
+
 ## [5.9.0] — 2026-11-18
 
 - **Claude through ClaudeIn.** Settings → Analysis has a fifth provider, ClaudeIn. It runs analyses, Ask AI and the Home brief on Claude through ClaudeIn on your PC, on your own Claude plan, with no API key. When the PC isn't there the app says PC not available and runs nothing; it never falls back to another provider.

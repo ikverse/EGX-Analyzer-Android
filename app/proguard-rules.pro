@@ -64,3 +64,9 @@
 # So: a new dependency is a reason to read its `proguard.txt` rather than to assume it has one that
 # works, and the check is `usage.txt` in `app/build/outputs/mapping/release/` - it lists every
 # member R8 removed, by name.
+
+# ML Kit (the ClaudeIn QR scanner) creates its component registrars by reflection, from names in
+# its manifest metadata, so nothing references their constructors and R8 removed them: 5.9.0 closed
+# the moment Scan QR code was pressed. ML Kit's own consumer rules do not keep them. Same trap as
+# Room's WorkDatabase_Impl in 3.6.15 - see "R8" in CLAUDE.md.
+-keep class com.google.mlkit.**.*Registrar { <init>(); }
