@@ -2,7 +2,7 @@
 
 Part of [the 5.1.0 plan](../redesign-5.1-plan.md). Written 2026-11-11 from a full read of the files
 named below. Paths are under `app/src/main/java/com/ikverse/egxanalyzer/`. Line numbers are as of
-commit `0d0ebd6` plus the uncommitted 5.0.0 tree; re-check them before editing. Assumes Stage 1 is
+commit `70ec5d7` plus the uncommitted 5.0.0 tree; re-check them before editing. Assumes Stage 1 is
 built (`StatusWords.kt`, `tileSignals`, `HoldMenu`, `Timeline`, `MoreRow`, compact `PriceLadder`).
 
 ## 1. Per file

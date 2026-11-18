@@ -962,7 +962,9 @@ floating bar, this section is what is true now.
   agree. The channel name is a plain `const` in `TelegramRepository`, because there is one app
   looking for one channel. **Nothing guards the sync channel from a second build any more**, which
   is the one thing this removal gave up: if a side-by-side app is ever wanted again, the read-only
-  mode is in the history at `01e4d57` and the seven mutating paths it covered are `sendMessage`,
+  mode is in the history from before 30 September 2026, which was cut from GitHub — it survives
+  as `01e4d57` (Release 3.6.13) only in the local backup taken before the cut, whose path is in
+  `CLAUDE.local.md` — and the seven mutating paths it covered are `sendMessage`,
   `deleteMessages` and `createNewSupergroupChat`, wherever they are called from.
 - **`-PabiSplits` is passed by CI and nowhere else.** The ABI split is off by default on purpose:
   enabled everywhere, an ordinary `assembleDebug` would stop producing `app-debug.apk` and start
