@@ -545,6 +545,8 @@ class FakeAppState(
 
     override fun updateRecommendationTargetDate(date: LocalDate) = Unit
 
+    override fun refreshTargetDate() = Unit
+
     override suspend fun syncTelegramSources() = TelegramSourceLoad("", succeeded = true)
 
     override fun toggleChannel(channel: ChannelSelection) = Unit

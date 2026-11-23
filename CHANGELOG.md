@@ -4,6 +4,13 @@ All notable changes from 3.6 onwards. Earlier history is in `git log`.
 
 ---
 
+## [5.9.2] — 2026-11-23
+
+- **Fixed: pressing Analyze again didn't pick up new messages.** If the app had been left open since an earlier run, it sent the same messages again. It now reads your selected chats every time you press Analyze. Cards an earlier run already read still aren't paid for twice, and anything you added by hand stays.
+- **Fixed: "Calls for which day" stayed on today after the close.** After 14:30 it now moves to the next trading day on its own. The calendar offers that day too, and picking it goes back to "Next trading day".
+
+---
+
 ## [5.9.1] — 2026-11-18
 
 - **Fixed: the app closed when Scan QR code was pressed** while pairing with ClaudeIn. Nothing on the phone was lost; after updating, Scan opens the camera.

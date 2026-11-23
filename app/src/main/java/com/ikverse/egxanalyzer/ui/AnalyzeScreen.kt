@@ -104,6 +104,9 @@ import com.ikverse.egxanalyzer.model.AnalysisProgress
 import com.ikverse.egxanalyzer.model.ChannelSelection
 import com.ikverse.egxanalyzer.model.SourceTrace
 import com.ikverse.egxanalyzer.model.egxTargetSession
+import com.ikverse.egxanalyzer.model.latestPickableTarget
+import com.ikverse.egxanalyzer.model.targetDatePickable
+import java.time.ZonedDateTime
 import com.ikverse.egxanalyzer.model.TelegramAuthStep
 import com.ikverse.egxanalyzer.ui.theme.extraColors
 import com.ikverse.egxanalyzer.ui.theme.pageAccent
@@ -126,10 +129,20 @@ internal fun AnalyzeScreen(appState: AppState) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 notificationsAllowed = appState.notificationsPermitted()
+                // The process outlives a trip to the launcher, so a target set this morning is
+                // still stored when the reader comes back after the close.
+                appState.refreshTargetDate()
             }
         }
         lifecycle.lifecycle.addObserver(observer)
         onDispose { lifecycle.lifecycle.removeObserver(observer) }
+    }
+    // And while the page stays open across the close.
+    LaunchedEffect(appState) {
+        while (true) {
+            appState.refreshTargetDate()
+            delay(60_000)
+        }
     }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -183,16 +196,16 @@ internal fun AnalyzeScreen(appState: AppState) {
         refreshing = appState.chatsRefreshing,
         pullWords = PullWords.Chats,
     ) {
-        // The day the calls are for, picked on the kit's calendar. Never later than today: the
-        // target runs ahead of today on a Friday, a Saturday or after the close, and a historical
-        // run refuses a future date anyway. Picking the day the app would resolve on its own is how
-        // the reader goes back to live mode.
+        // The day the calls are for, picked on the kit's calendar. Today and earlier, plus the next
+        // trading day: the target runs ahead of today on a Friday, a Saturday or after the close,
+        // and a historical run refuses any other future date. Picking the day the app would
+        // resolve on its own is how the reader goes back to live mode.
         var pickingDate by appState.pages.analyzePickingDate
         if (pickingDate) {
-            val today = LocalDate.now(ScheduleClock.ZONE)
+            val now = ZonedDateTime.now(ScheduleClock.ZONE)
             com.ikverse.egxanalyzer.ui.kit.KitCalendarSheet(
                 title = "Calls for which day",
-                selected = minOf(appState.recommendationTargetDate, today),
+                selected = minOf(appState.recommendationTargetDate, latestPickableTarget(now)),
                 onPick = { picked ->
                     if (picked == egxTargetSession()) {
                         appState.selectAnalysisMode(AnalysisMode.NEXT_DAY)
@@ -203,8 +216,8 @@ internal fun AnalyzeScreen(appState: AppState) {
                 },
                 onDismiss = { pickingDate = false },
                 posture = posture,
-                allowed = { it <= today },
-                latest = today,
+                allowed = { targetDatePickable(it, now) },
+                latest = latestPickableTarget(now),
             )
         }
         val hero: @Composable (Boolean) -> Unit = { withButton ->

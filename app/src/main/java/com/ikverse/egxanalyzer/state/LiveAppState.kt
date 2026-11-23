@@ -4367,6 +4367,12 @@ class LiveAppState(
         dropLoadedTelegramSources()
     }
 
+    override fun refreshTargetDate() {
+        if (analysisMode != AnalysisMode.NEXT_DAY) return
+        val current = egxTargetSession()
+        if (current != recommendationTargetDate) recommendationTargetDate = current
+    }
+
     override fun updateRecommendationTargetDate(date: LocalDate) {
         analysisMode = AnalysisMode.SPECIFIC_DATE
         recommendationTargetDate = date
@@ -4390,9 +4396,14 @@ class LiveAppState(
                 endExclusive = window.endExclusive,
                 contentTypes = selectedContentTypes,
             )
-            inputs = batch.inputs
+            // What the reader added by hand stays; only what an earlier load fetched is replaced.
+            val fetchedBefore = telegramTraces.keys
+            val handAdded = inputs.filterNot { it.sourceId in fetchedBefore }
+            val handAddedIds = handAdded.map(AnalysisInput::sourceId).toSet()
+            inputs = handAdded + batch.inputs
             telegramTraces = batch.traces.associateBy(SourceTrace::sourceId)
-            sourceChannelIds = batch.traces.associate { it.sourceId to it.channelId }
+            sourceChannelIds = sourceChannelIds.filterKeys { it in handAddedIds } +
+                batch.traces.associate { it.sourceId to it.channelId }
             // A bare zero reads as a failure. Saying how many messages were read, and over what
             // window, separates "nothing posted in this window" from "nothing came back".
             telegramSyncMessage = when {
@@ -4523,8 +4534,12 @@ class LiveAppState(
             analysisMessage = "Save a provider credential and model first."
             return
         }
-        if (inputs.isEmpty() &&
-            telegramAuthState.step == TelegramAuthStep.READY &&
+        // Read the chats again on every press, not only when nothing is loaded. The loaded messages
+        // outlive the screen - the process survives a trip to the launcher - so "something is
+        // loaded" used to mean the run sent the morning's messages again and never saw anything
+        // posted since. Reading Telegram is free, and `priorReads` keeps the cards an earlier run
+        // already read from being paid for twice.
+        if (telegramAuthState.step == TelegramAuthStep.READY &&
             channels.any(ChannelSelection::selected)
         ) {
             syncTelegramSources()

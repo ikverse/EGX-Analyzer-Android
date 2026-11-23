@@ -736,6 +736,13 @@ interface AppState : AppUpdates, HomeFeed, DriveBackups, ClaudeInLink {
     fun updateRecommendationTargetDate(date: LocalDate)
 
     /**
+     * Works the next trading day out again from the clock, in "Next trading day" mode only. The
+     * date is stored when it is set, so without this the close at 14:30 passes and the screen
+     * goes on naming the session that has just ended.
+     */
+    fun refreshTargetDate()
+
+    /**
      * Loads the messages a run would send from the selected chats.
      *
      * Never throws: `analyze()` calls this on its way to a run and a Telegram error must not take

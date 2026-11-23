@@ -37,6 +37,23 @@ fun egxTargetSession(now: ZonedDateTime = ZonedDateTime.now(cairoZone)): LocalDa
     }
 }
 
+/**
+ * Which days the "Calls for which day" calendar offers: today and earlier, plus the next trading
+ * day - which runs ahead of today after the close and on a weekend. Picking that one is how the
+ * reader goes back to "Next trading day"; with the calendar stopped at today it could never be
+ * picked once the session had closed.
+ */
+fun targetDatePickable(date: LocalDate, now: ZonedDateTime = ZonedDateTime.now(cairoZone)): Boolean {
+    val cairoNow = now.withZoneSameInstant(cairoZone)
+    return !date.isAfter(cairoNow.toLocalDate()) || date == egxTargetSession(cairoNow)
+}
+
+/** The last day [targetDatePickable] offers. */
+fun latestPickableTarget(now: ZonedDateTime = ZonedDateTime.now(cairoZone)): LocalDate {
+    val cairoNow = now.withZoneSameInstant(cairoZone)
+    return maxOf(cairoNow.toLocalDate(), egxTargetSession(cairoNow))
+}
+
 fun resolveAnalysisWindow(
     mode: AnalysisMode,
     selectedDate: LocalDate?,
